@@ -179,7 +179,6 @@ run_odin_check :: proc(
 		"check",
 		package_path,
 		"-no-entry-point",
-		"-ignore-unknown-attributes",
 	}
 
 	stderr_buf: [dynamic]u8

@@ -5,9 +5,13 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sync"
 import "core:time"
 
 SHARED_LIB_EXT :: ".dylib" when ODIN_OS == .Darwin else ".dll" when ODIN_OS == .Windows else ".so"
+
+@(private)
+run_process_counter: u64
 
 Hot_Module :: struct {
 	path:       string,
@@ -286,11 +290,11 @@ run_process :: proc(
 	stdout_buf: ^[dynamic]u8,
 	stderr_buf: ^[dynamic]u8,
 ) -> (os.Process_State, os.Error) {
-	pid := os.get_pid()
+	uid := sync.atomic_add(&run_process_counter, 1)
 	tmp_dir, tmp_err := os.temp_directory(context.temp_allocator)
 	if tmp_err != nil do return {}, tmp_err
-	stdout_path, _ := filepath.join({tmp_dir, fmt.tprintf("actod_proc_%d_out", pid)}, context.temp_allocator)
-	stderr_path, _ := filepath.join({tmp_dir, fmt.tprintf("actod_proc_%d_err", pid)}, context.temp_allocator)
+	stdout_path, _ := filepath.join({tmp_dir, fmt.tprintf("actod_proc_%d_%d_out", os.get_pid(), uid)}, context.temp_allocator)
+	stderr_path, _ := filepath.join({tmp_dir, fmt.tprintf("actod_proc_%d_%d_err", os.get_pid(), uid)}, context.temp_allocator)
 	defer os.remove(stdout_path)
 	defer os.remove(stderr_path)
 

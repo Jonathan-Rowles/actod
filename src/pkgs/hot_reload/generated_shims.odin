@@ -11,6 +11,8 @@ import "core:net"
 import "core:sync"
 import "core:nbio"
 
+ACTOR_TYPE_UNTYPED :: Actor_Type(0)
+
 Actor_Behaviour :: struct($T: typeid) {
 	handle_message:           proc(data: ^T, from: PID, content: any),
 	init:                     proc(data: ^T),
@@ -28,25 +30,84 @@ Actor_Behaviour :: struct($T: typeid) {
 	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID),
 }
 
-System_Config :: struct {
-	actor_registry_size:   int,
-	allow_registry_growth: bool,
-	messages_to_register:  []typeid,
-	enable_observer:       bool,
-	observer_interval:     time.Duration,
-	network:               Network_Config,
-	actor_config:          Actor_Config,
-	blocking_child:        SPAWN,
-	worker_count:          int,
-	hot_reload_dev:        bool,
-	hot_reload_watch_path: string,
+Actor_Config :: struct {
+	children:                       [dynamic]SPAWN,
+	spin_strategy:                  SPIN_STRATEGY,
+	message_batch:                  int,
+	logging:                        Log_Config,
+	page_size:                      int,
+	supervision_strategy:           Supervision_Strategy,
+	restart_policy:                 Restart_Policy,
+	max_restarts:                   int,
+	restart_window:                 time.Duration,
+	home_worker:                    int,
+	affinity:                       Actor_Ref,
+	coro_stack_size:                int,
+	use_dedicated_os_thread:        bool,
+	blocking:                       bool,
+	stack_size_dedicated_os_thread: int,
 }
 
-Handle :: struct {
-	idx:        u32,
-	gen:        u16,
-	actor_type: Actor_Type,
-	_pad:       u8,
+Actor_Ref :: union {
+	PID,
+	string,
+}
+
+Actor_State :: enum {
+	ZERO,
+	INIT,
+	IDLE,
+	RUNNING,
+	STOPPING,
+	THREAD_STOPPED,
+	TERMINATED,
+}
+
+Actor_Stats :: struct {
+	pid:                 PID,
+	name:                string,
+	parent_pid:          PID,
+	messages_received:   u64,
+	messages_sent:       u64,
+	received_from:       map[PID]u64,
+	sent_to:             map[PID]u64,
+	mailbox_sizes:       [3]int,
+	system_mailbox_size: int,
+	state:               Actor_State,
+	start_time:          time.Time,
+	uptime:              time.Duration,
+	last_update:         time.Time,
+	max_mailbox_size:    int,
+	terminated:          bool,
+	termination_time:    time.Time,
+	termination_reason:  Termination_Reason,
+}
+
+Actor_Stats_Entry :: struct {
+	pid:               PID,
+	name:              [MAX_ACTOR_NAME_LEN]byte,
+	name_len:          u8,
+	messages_received: u64,
+	messages_sent:     u64,
+	state:             Actor_State,
+	terminated:        bool,
+	parent_pid:        PID,
+}
+
+Actor_Type :: distinct u8
+
+CACHE_LINE_SIZE :: 64
+
+Connection_Pool :: struct {
+	rings:                [MAX_POOL_RINGS]^Connection_Ring,
+	ring_count:           u32,
+	next_ring:            u32,
+	contention_count:     u32,
+	scale_up_requested:   u32,
+	node_id:              Node_ID,
+	conn_pid:             PID,
+	max_rings:            u32,
+	contention_threshold: u32,
 }
 
 Connection_Ring :: struct {
@@ -92,47 +153,20 @@ Connection_Ring_Config :: struct {
 	scale_down_idle_seconds:       u32,
 }
 
-Log_Flush :: proc()
-
-SPIN_STRATEGY :: enum {
-	CPU_RELAX,
-	WAKE_SEMA,
+Connection_Ring_State :: enum {
+	Not_Initialized,
+	Ready,
+	Draining,
 }
 
-SPAWN :: proc(name: string, parent_pid: PID) -> (PID, bool)
-
-Supervision_Strategy :: enum {
-	ONE_FOR_ONE,
-	ONE_FOR_ALL,
-	REST_FOR_ONE,
+Handle :: struct {
+	idx:        u32,
+	gen:        u16,
+	actor_type: Actor_Type,
+	_pad:       u8,
 }
 
-MAX_POOL_RINGS :: 16
-
-Actor_Config :: struct {
-	children:                       [dynamic]SPAWN,
-	spin_strategy:                  SPIN_STRATEGY,
-	message_batch:                  int,
-	logging:                        Log_Config,
-	page_size:                      int,
-	supervision_strategy:           Supervision_Strategy,
-	restart_policy:                 Restart_Policy,
-	max_restarts:                   int,
-	restart_window:                 time.Duration,
-	home_worker:                    int,
-	affinity:                       Actor_Ref,
-	coro_stack_size:                int,
-	use_dedicated_os_thread:        bool,
-	blocking:                       bool,
-	stack_size_dedicated_os_thread: int,
-}
-
-Node_Info :: struct {
-	node_name:       string,
-	address:         net.Endpoint,
-	transport:       Transport_Strategy,
-	connection_pool: ^Connection_Pool,
-}
+Log_Callback :: proc(level: log.Level, text: string, location: runtime.Source_Code_Location)
 
 Log_Config :: struct {
 	level:         log.Level,
@@ -145,84 +179,74 @@ Log_Config :: struct {
 	custom_flush:  Log_Flush,
 }
 
-Actor_Ref :: union {
-	PID,
-	string,
-}
-
-MAX_TOPIC_SUBSCRIBERS :: 64
-
-Actor_Type :: distinct u8
-
-Topic :: struct {
-	subscribers: [MAX_TOPIC_SUBSCRIBERS]PID,
-	count:       u32,
-}
-
-Actor_Stats_Entry :: struct {
-	pid:               PID,
-	name:              [MAX_ACTOR_NAME_LEN]byte,
-	name_len:          u8,
-	messages_received: u64,
-	messages_sent:     u64,
-	state:             Actor_State,
-	terminated:        bool,
-	parent_pid:        PID,
-}
-
-Connection_Pool :: struct {
-	rings:                [MAX_POOL_RINGS]^Connection_Ring,
-	ring_count:           u32,
-	next_ring:            u32,
-	contention_count:     u32,
-	scale_up_requested:   u32,
-	node_id:              Node_ID,
-	conn_pid:             PID,
-	max_rings:            u32,
-	contention_threshold: u32,
-}
+Log_Flush :: proc()
 
 MAX_ACTOR_NAME_LEN :: 32
 
-Actor_State :: enum {
-	ZERO,
-	INIT,
-	IDLE,
-	RUNNING,
-	STOPPING,
-	THREAD_STOPPED,
-	TERMINATED,
-}
-
-Topic_Subscription :: struct {
-	topic: ^Topic,
-	pid:   PID,
-}
-
-Termination_Reason :: enum {
-	NORMAL,
-	ABNORMAL,
-	SHUTDOWN,
-	MAX_RESTARTS,
-	INTERNAL_ERROR,
-	KILLED,
-}
-
-Send_Slot_State :: enum u32 {
-	FREE    = 0,
-	WRITING = 1,
-	SEALED  = 2,
-	READY   = 3,
-}
-
-Stats_Snapshot :: struct {
-	actors:      [MAX_SNAPSHOT_ACTORS]Actor_Stats_Entry,
-	actor_count: u16,
-	flows:       [MAX_SNAPSHOT_FLOWS]Message_Flow_Entry,
-	flow_count:  u16,
-}
+MAX_POOL_RINGS :: 16
 
 MAX_SNAPSHOT_ACTORS :: 64
+
+MAX_SNAPSHOT_FLOWS :: 256
+
+MAX_TOPIC_SUBSCRIBERS :: 64
+
+Message_Flow_Entry :: struct {
+	from_pid: PID,
+	to_pid:   PID,
+	count:    u64,
+}
+
+Message_Priority :: enum u8 {
+	HIGH   = 0,
+	NORMAL = 1,
+	LOW    = 2,
+}
+
+Network_Config :: struct {
+	auth_password:           string,
+	port:                    int,
+	heartbeat_interval:      time.Duration,
+	heartbeat_timeout:       time.Duration,
+	reconnect_initial_delay: time.Duration,
+	reconnect_retry_delay:   time.Duration,
+	connection_ring:         Connection_Ring_Config,
+}
+
+Node_ID :: distinct u16
+
+Node_Info :: struct {
+	node_name:       string,
+	address:         net.Endpoint,
+	transport:       Transport_Strategy,
+	connection_pool: ^Connection_Pool,
+}
+
+PID :: distinct u64
+
+Raw_Spawn_Behaviour :: struct {
+	handle_message:           rawptr,
+	init_proc:                rawptr,
+	terminate_proc:           rawptr,
+	actor_type:               Actor_Type,
+	on_child_started:         rawptr,
+	on_child_terminated:      rawptr,
+	on_child_restarted:       rawptr,
+	on_max_restarts_exceeded: rawptr,
+}
+
+Restart_Policy :: enum {
+	PERMANENT,
+	TRANSIENT,
+	TEMPORARY,
+}
+
+SPAWN :: proc(name: string, parent_pid: PID) -> (PID, bool)
+
+SPIN_STRATEGY :: enum {
+	CPU_RELAX,
+	WAKE_SEMA,
+}
 
 Send_Error :: enum {
 	OK = 0,
@@ -236,105 +260,81 @@ Send_Error :: enum {
 	NODE_DISCONNECTED,
 }
 
-Network_Config :: struct {
-	auth_password:           string,
-	port:                    int,
-	heartbeat_interval:      time.Duration,
-	heartbeat_timeout:       time.Duration,
-	reconnect_initial_delay: time.Duration,
-	reconnect_retry_delay:   time.Duration,
-	connection_ring:         Connection_Ring_Config,
-}
-
 Send_Slot :: struct #align (CACHE_LINE_SIZE) {
 	state:          Send_Slot_State,
 	length:         u32,
 	active_writers: i32,
 }
 
-Transport_Strategy :: enum {
-	Same_Process,
-	TCP_Custom_Protocol,
-}
-
-Connection_Ring_State :: enum {
-	Not_Initialized,
-	Ready,
-	Draining,
-}
-
-Message_Priority :: enum u8 {
-	HIGH   = 0,
-	NORMAL = 1,
-	LOW    = 2,
-}
-
-Raw_Spawn_Behaviour :: struct {
-	handle_message:           rawptr,
-	init_proc:                rawptr,
-	terminate_proc:           rawptr,
-	actor_type:               Actor_Type,
-	on_child_started:         rawptr,
-	on_child_terminated:      rawptr,
-	on_child_restarted:       rawptr,
-	on_max_restarts_exceeded: rawptr,
-}
-
-Node_ID :: distinct u16
-
-MAX_SNAPSHOT_FLOWS :: 256
-
-ACTOR_TYPE_UNTYPED :: Actor_Type(0)
-
-Subscription :: struct {
-	actor_type: Actor_Type,
-	pid:        PID,
+Send_Slot_State :: enum u32 {
+	FREE    = 0,
+	WRITING = 1,
+	SEALED  = 2,
+	READY   = 3,
 }
 
 Stats_Response :: struct {
 	stats: Actor_Stats,
 }
 
-Message_Flow_Entry :: struct {
-	from_pid: PID,
-	to_pid:   PID,
-	count:    u64,
+Stats_Snapshot :: struct {
+	actors:      [MAX_SNAPSHOT_ACTORS]Actor_Stats_Entry,
+	actor_count: u16,
+	flows:       [MAX_SNAPSHOT_FLOWS]Message_Flow_Entry,
+	flow_count:  u16,
 }
 
-PID :: distinct u64
+Subscription :: struct {
+	actor_type: Actor_Type,
+	pid:        PID,
+}
+
+Supervision_Strategy :: enum {
+	ONE_FOR_ONE,
+	ONE_FOR_ALL,
+	REST_FOR_ONE,
+}
+
+System_Config :: struct {
+	actor_registry_size:   int,
+	allow_registry_growth: bool,
+	messages_to_register:  []typeid,
+	enable_observer:       bool,
+	observer_interval:     time.Duration,
+	network:               Network_Config,
+	actor_config:          Actor_Config,
+	blocking_child:        SPAWN,
+	worker_count:          int,
+	hot_reload_dev:        bool,
+	hot_reload_watch_path: string,
+}
+
+Termination_Reason :: enum {
+	NORMAL,
+	ABNORMAL,
+	SHUTDOWN,
+	MAX_RESTARTS,
+	INTERNAL_ERROR,
+	KILLED,
+}
 
 Timer_Tick :: struct {
 	id: u32,
 }
 
-Actor_Stats :: struct {
-	pid:                 PID,
-	name:                string,
-	parent_pid:          PID,
-	messages_received:   u64,
-	messages_sent:       u64,
-	received_from:       map[PID]u64,
-	sent_to:             map[PID]u64,
-	mailbox_sizes:       [3]int,
-	system_mailbox_size: int,
-	state:               Actor_State,
-	start_time:          time.Time,
-	uptime:              time.Duration,
-	last_update:         time.Time,
-	max_mailbox_size:    int,
-	terminated:          bool,
-	termination_time:    time.Time,
-	termination_reason:  Termination_Reason,
+Topic :: struct {
+	subscribers: [MAX_TOPIC_SUBSCRIBERS]PID,
+	count:       u32,
 }
 
-CACHE_LINE_SIZE :: 64
+Topic_Subscription :: struct {
+	topic: ^Topic,
+	pid:   PID,
+}
 
-Log_Callback :: proc(level: log.Level, text: string, location: runtime.Source_Code_Location)
-
-Restart_Policy :: enum {
-	PERMANENT,
-	TRANSIENT,
-	TEMPORARY,
+Transport_Strategy :: enum {
+	Same_Process,
+	TCP_Custom_Protocol,
 }
 
 `

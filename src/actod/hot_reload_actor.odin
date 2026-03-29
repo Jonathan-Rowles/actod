@@ -721,9 +721,13 @@ handle_register :: proc(data: ^Hot_Reload_Actor_Data, reg: Register_Hot_Actor) {
 			log.infof("hot reload: watching '%s' for actor '%s'", pkg_path, actor_name)
 		} else {
 			log.warnf(
-				"hot reload: no package directory '%s' found under '%s' for actor '%s'",
+				"hot reload: no package directory '%s' found under '%s' for actor '%s'. " +
+				"Hot reload requires each actor to be in its own package directory (e.g. '%s/%s/%s.odin')",
 				pkg_name,
 				data.watch_path,
+				actor_name,
+				data.watch_path,
+				pkg_name,
 				actor_name,
 			)
 		}

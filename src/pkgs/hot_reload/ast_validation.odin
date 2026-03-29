@@ -74,6 +74,7 @@ validate_package :: proc(
 	arena_allocator := vmem.arena_allocator(&arena)
 
 	context.allocator = arena_allocator
+	defer context.allocator = caller_alloc
 
 	p := parser.default_parser()
 	pkg, parse_ok := parser.parse_package_from_path(package_path, &p)
@@ -490,6 +491,7 @@ discover_package_procs :: proc(package_path: string, allocator := context.alloca
 	arena_allocator := vmem.arena_allocator(&arena)
 
 	context.allocator = arena_allocator
+	defer context.allocator = allocator
 
 	p := parser.default_parser()
 	pkg, parse_ok := parser.parse_package_from_path(package_path, &p)
@@ -529,6 +531,7 @@ discover_proc_names :: proc(
 	arena_allocator := vmem.arena_allocator(&arena)
 
 	context.allocator = arena_allocator
+	defer context.allocator = allocator
 
 	p := parser.default_parser()
 	pkg, parse_ok := parser.parse_package_from_path(package_path, &p)

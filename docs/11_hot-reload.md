@@ -88,7 +88,7 @@ There's a working example in `docs/hot_reload_example/`. Run it with:
 
 ```sh
 cd docs/hot_reload_example
-odin run . -ignore-unknown-attributes
+odin run .
 ```
 
 While it's running, edit the `// <- change this` lines in the actor files under `hot_reload_actors/` and save. The runtime will detect the change, recompile, and swap the behaviour — you'll see the new log messages appear without restarting.

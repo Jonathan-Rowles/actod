@@ -5,7 +5,7 @@ Actod provides two testing tools: a **unit test harness** for isolated single-ac
 ## Running Tests
 
 ```bash
-odin test . -ignore-unknown-attributes
+odin test .
 ```
 
 The test harness doesn't start a real node or worker pool. Actors run synchronously — `send` captures messages, `step` processes one at a time. No threads, no timing, fully deterministic.

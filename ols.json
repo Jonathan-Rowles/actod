@@ -12,5 +12,5 @@
     "enable_references": true,
     "enable_semantic_tokens": true,
     "enable_snippets": true,
-    "checker_args": "-vet -debug -vet-cast -vet-style -vet-using-param -strict-style -warnings-as-errors -ignore-unknown-attributes"
+    "checker_args": "-vet -debug -vet-cast -vet-style -vet-using-param -strict-style -warnings-as-errors"
 }

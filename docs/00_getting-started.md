@@ -6,7 +6,7 @@ A complete example: two actors playing ping-pong with increasingly absurd jokes.
 
 ```bash
 cd docs
-odin run . -ignore-unknown-attributes
+odin run .
 ```
 
 ## What The Example Shows

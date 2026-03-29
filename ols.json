@@ -1,16 +1,25 @@
 {
-    "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
-    "enable_checker_only_saved": true,
-    "enable_document_symbols": true,
-    "enable_fake_methods": true,
-    "enable_format": true,
-    "enable_hover": true,
-    "enable_inlay_hints": false,
-    "enable_inlay_hints_default_params": true,
-    "enable_procedure_context": true,
-    "enable_procedure_snippet": true,
-    "enable_references": true,
-    "enable_semantic_tokens": true,
-    "enable_snippets": true,
-    "checker_args": "-vet -debug -vet-cast -vet-style -vet-using-param -strict-style -warnings-as-errors"
+  "$schema": "https://raw.githubusercontent.com/DanielGavin/ols/master/misc/ols.schema.json",
+  "enable_checker_only_saved": true,
+  "enable_document_symbols": true,
+  "enable_fake_methods": true,
+  "enable_format": true,
+  "enable_hover": true,
+  "enable_inlay_hints": false,
+  "enable_inlay_hints_default_params": true,
+  "enable_procedure_context": true,
+  "enable_procedure_snippet": true,
+  "enable_references": true,
+  "enable_snippets": true,
+  "checker_args": "-vet -debug -vet-cast -vet-style -vet-using-param -strict-style -warnings-as-errors",
+  "collections": [
+    {
+      "name": "src",
+      "path": "src"
+    },
+    {
+      "name": "test_harness",
+      "path": "test_harness"
+    }
+  ]
 }

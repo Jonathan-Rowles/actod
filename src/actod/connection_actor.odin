@@ -383,11 +383,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 		}
 
 		cleanup_ring_io_state(data, m.ring_idx, last_idx, join_thread = false)
-
-		if ring.tcp_socket != 0 {
-			net.close(ring.tcp_socket)
-		}
-		destroy_connection_ring(ring)
+		pool_submit_drain_and_wait(data.pool, ring)
 
 		log.infof(
 			"Pool ring %d closed for node %s (id=%d): %d rings remaining",
@@ -1052,6 +1048,50 @@ cleanup_ring_io_state :: proc(
 	}
 }
 
+DRAIN_SPIN_LIMIT :: 1_000_000
+
+@(private)
+pool_submit_drain_and_wait :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) {
+	drain_idx := sync.atomic_load(&pool.drain_count)
+	pool.draining_rings[drain_idx] = ring
+	sync.atomic_store(&pool.drain_count, drain_idx + 1)
+
+	for spin := 0; spin < DRAIN_SPIN_LIMIT; spin += 1 {
+		if sync.atomic_load(&pool.drained_count) > 0 {
+			break
+		}
+		intrinsics.cpu_relax()
+	}
+
+	drained_count := sync.atomic_load(&pool.drained_count)
+	if drained_count > 0 {
+		for i in 0 ..< drained_count {
+			dr := pool.drained_rings[i]
+			if dr != nil {
+				if dr.tcp_socket != 0 {
+					net.close(dr.tcp_socket)
+				}
+				destroy_connection_ring(dr)
+				pool.drained_rings[i] = nil
+			}
+		}
+		sync.atomic_store(&pool.drained_count, 0)
+	} else {
+		dc := sync.atomic_load(&pool.drain_count)
+		for i in 0 ..< dc {
+			dr := pool.draining_rings[i]
+			if dr != nil {
+				if dr.tcp_socket != 0 {
+					net.close(dr.tcp_socket)
+				}
+				destroy_connection_ring(dr)
+				pool.draining_rings[i] = nil
+			}
+		}
+		sync.atomic_store(&pool.drain_count, 0)
+	}
+}
+
 pool_scale_down :: proc(data: ^Connection_Actor_Data, ring_idx: u32) {
 	pool := data.pool
 	if ring_idx == 0 do return
@@ -1062,13 +1102,8 @@ pool_scale_down :: proc(data: ^Connection_Actor_Data, ring_idx: u32) {
 	ring := pool_remove_ring(pool, ring_idx)
 	if ring == nil do return
 
-	ring.state = .Draining
-	cleanup_ring_io_state(data, ring_idx, last_idx, join_thread = true)
-
-	if ring.tcp_socket != 0 {
-		net.close(ring.tcp_socket)
-	}
-	destroy_connection_ring(ring)
+	cleanup_ring_io_state(data, ring_idx, last_idx, join_thread = false)
+	pool_submit_drain_and_wait(pool, ring)
 
 	log.infof(
 		"Pool scaled down for node %d: %d rings",

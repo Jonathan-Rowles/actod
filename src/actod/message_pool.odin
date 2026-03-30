@@ -186,11 +186,9 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr) {
 				sync.atomic_store_explicit(&entry.sequence, pos + 1, .Release)
 				return
 			}
-		} else if diff < 0 {
-			intrinsics.cpu_relax()
-		} else {
-			intrinsics.cpu_relax()
 		}
+
+		intrinsics.cpu_relax()
 	}
 }
 

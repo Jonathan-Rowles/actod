@@ -197,10 +197,6 @@ sender, _   := act.spawn("sender", Sender{}, sender_behaviour,
 ---
 
 ## TODO
-
-- FIX: network benchmark on mac. (recv buffer zero'd on scaling connection with larger messages) flaky
-- FIX: network benchmark on windows. w w windows.
-
 - TLS encryption for node-to-node communication
 - Cross-node topics
 - UDP Support

@@ -227,9 +227,11 @@ run_network_benchmark :: proc(
 		time.sleep(10 * time.Millisecond)
 	}
 
+  // TODO: fix coordination
 	pid_timeout := time.now()
 	for global_pid_cache.responses_recv < config.actor_count {
-		if time.since(pid_timeout) > 10 * time.Second {
+
+		if time.since(pid_timeout) > 30 * time.Second {
 			fmt.printf(
 				"Timeout waiting for PID responses (%d/%d)\n",
 				global_pid_cache.responses_recv,

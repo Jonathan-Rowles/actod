@@ -10,9 +10,9 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-TICK_ACTIVE_TIMEOUT :: 10 * time.Microsecond
-TICK_IDLE_TIMEOUT :: 1 * time.Millisecond
-TICK_IDLE_THRESHOLD :: 100
+TICK_ACTIVE_TIMEOUT :: 50 * time.Microsecond
+TICK_IDLE_TIMEOUT :: 2 * time.Millisecond
+TICK_IDLE_THRESHOLD :: 50
 
 Send_Slot_State :: enum u32 {
 	FREE    = 0,
@@ -52,7 +52,7 @@ Connection_Ring_Config :: struct {
 DEFAULT_CONNECTION_RING_CONFIG :: Connection_Ring_Config {
 	send_slot_count               = 64,
 	send_slot_size                = 64 * 1024,
-	recv_buffer_size              = 512 * 1024,
+	recv_buffer_size              = 2 * 1024 * 1024,
 	tcp_nodelay                   = true,
 	max_pool_rings                = 8,
 	scale_up_contention_threshold = 100,
@@ -106,6 +106,10 @@ Connection_Pool :: struct {
 	conn_pid:             PID,
 	max_rings:            u32,
 	contention_threshold: u32,
+	draining_rings:       [MAX_POOL_RINGS]^Connection_Ring, // actor writes, IO reads
+	drain_count:          u32, // atomic
+	drained_rings:        [MAX_POOL_RINGS]^Connection_Ring, // IO writes, actor reads
+	drained_count:        u32, // atomic
 }
 
 IO_Context :: struct {
@@ -359,11 +363,7 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 }
 
 @(private)
-validate_batch_messages :: proc(
-	data: []byte,
-	slot_idx: i32,
-	write_pos: u32,
-) -> bool {
+validate_batch_messages :: proc(data: []byte, slot_idx: i32, write_pos: u32) -> bool {
 	offset: u32 = 0
 
 	for offset + 4 <= write_pos {
@@ -400,14 +400,18 @@ validate_batch_messages :: proc(
 	return true
 }
 
+FLUSH_SPIN_ATTEMPTS :: 8
+
 batch_flush :: proc(ring: ^Connection_Ring) {
-	if !sync.mutex_try_lock(&ring.batch_mutex) {
-		// Writer active — re-signal so we try next tick.
-		sync.atomic_store(&ring.batch_pending, 1)
-		return
+	for _ in 0 ..< FLUSH_SPIN_ATTEMPTS {
+		if sync.mutex_try_lock(&ring.batch_mutex) {
+			batch_seal_locked(ring)
+			sync.mutex_unlock(&ring.batch_mutex)
+			return
+		}
+		intrinsics.cpu_relax()
 	}
-	batch_seal_locked(ring)
-	sync.mutex_unlock(&ring.batch_mutex)
+	sync.atomic_store(&ring.batch_pending, 1)
 }
 
 batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
@@ -443,7 +447,11 @@ batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 batch_reserve :: proc(
 	ring: ^Connection_Ring,
 	exact_size: u32,
-) -> (dst: []byte, slot_idx: u32, ok: bool) {
+) -> (
+	dst: []byte,
+	slot_idx: u32,
+	ok: bool,
+) {
 	if exact_size == 0 || exact_size > ring.send_slot_size {
 		return nil, 0, false
 	}
@@ -525,10 +533,7 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 			}
 			sync.atomic_store(&slot.state, .READY)
 			sync.atomic_store(&ring.batch_pending, 1)
-			sync.atomic_store(
-				&ring.last_send_time,
-				time.to_unix_nanoseconds(time.now()),
-			)
+			sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(time.now()))
 		}
 	}
 }
@@ -617,6 +622,13 @@ submit_nbio_recv :: proc(ring: ^Connection_Ring) {
 	write_pos := ring.recv_write_pos
 	available := ring.recv_buffer_size - write_pos
 	if available < 1024 {
+		if write_pos > 0 {
+			log.warnf(
+				"recv buffer near-full: write_pos=%d/%d, no recv posted",
+				write_pos,
+				ring.recv_buffer_size,
+			)
+		}
 		return
 	}
 
@@ -652,6 +664,32 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	if ring.state == .Ready {
 		submit_nbio_recv(ring)
 	}
+}
+
+@(private)
+io_process_drain_requests :: proc(pool: ^Connection_Pool) {
+	drain_count := sync.atomic_load(&pool.drain_count)
+	if drain_count == 0 do return
+
+	drained_idx := sync.atomic_load(&pool.drained_count)
+
+	for i in 0 ..< drain_count {
+		ring := pool.draining_rings[i]
+		if ring == nil do continue
+
+		if ring.pending_recv != nil {
+			nbio.remove(ring.pending_recv)
+			ring.pending_recv = nil
+		}
+		ring.state = .Draining
+
+		pool.drained_rings[drained_idx] = ring
+		drained_idx += 1
+		pool.draining_rings[i] = nil
+	}
+
+	sync.atomic_store(&pool.drain_count, 0)
+	sync.atomic_store(&pool.drained_count, drained_idx)
 }
 
 nbio_io_loop :: proc(t: ^thread.Thread) {
@@ -691,11 +729,12 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 		submit_nbio_sends(ring)
 
 		if pool != nil {
+			io_process_drain_requests(pool)
 			current_count := sync.atomic_load(&pool.ring_count)
 
 			adopted_up_to := last_known_ring_count
 			for i in last_known_ring_count ..< current_count {
-				pr := pool.rings[i]
+				pr := atomic_load_ring_ptr(&pool.rings[i])
 				if pr != nil && pr.state == .Not_Initialized {
 					if int(pr.tcp_socket) <= 2 {
 						break
@@ -712,7 +751,7 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 			last_known_ring_count = adopted_up_to
 
 			for i: u32 = 1; i < current_count; i += 1 {
-				pr := pool.rings[i]
+				pr := atomic_load_ring_ptr(&pool.rings[i])
 				if pr != nil && pr.state == .Ready {
 					if sync.atomic_exchange(&pr.batch_pending, 0) != 0 {
 						batch_flush(pr)
@@ -726,7 +765,7 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 		if pool != nil {
 			count := sync.atomic_load(&pool.ring_count)
 			for i: u32 = 1; i < count; i += 1 {
-				pr := pool.rings[i]
+				pr := atomic_load_ring_ptr(&pool.rings[i])
 				if pr != nil && pr.send_in_flight {
 					any_active = true
 					break
@@ -757,9 +796,10 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 		ring.pending_recv = nil
 	}
 	if pool != nil {
+		io_process_drain_requests(pool)
 		count := sync.atomic_load(&pool.ring_count)
 		for i: u32 = 1; i < count; i += 1 {
-			pr := pool.rings[i]
+			pr := atomic_load_ring_ptr(&pool.rings[i])
 			if pr != nil && pr.pending_recv != nil {
 				nbio.remove(pr.pending_recv)
 				pr.pending_recv = nil
@@ -872,14 +912,7 @@ send_to_connection_ring :: proc(
 		return .NETWORK_RING_FULL
 	}
 
-	msg_len := build_wire_format_into_buffer(
-		dst,
-		content,
-		to_handle,
-		from_handle,
-		base_flags,
-		"",
-	)
+	msg_len := build_wire_format_into_buffer(dst, content, to_handle, from_handle, base_flags, "")
 	if msg_len == 0 {
 		batch_abort(ring, sid, dst)
 		return .NETWORK_ERROR
@@ -957,13 +990,27 @@ create_connection_pool :: proc(
 	return pool
 }
 
+@(private)
+atomic_load_ring_ptr :: #force_inline proc(slot: ^^Connection_Ring) -> ^Connection_Ring {
+	return(
+		cast(^Connection_Ring)rawptr(
+			uintptr(sync.atomic_load_explicit(cast(^u64)slot, .Acquire)),
+		) \
+	)
+}
+
+@(private)
+atomic_store_ring_ptr :: #force_inline proc(slot: ^^Connection_Ring, ring: ^Connection_Ring) {
+	sync.atomic_store_explicit(cast(^u64)slot, u64(uintptr(ring)), .Release)
+}
+
 pool_add_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> bool {
 	if pool == nil || ring == nil do return false
 	count := sync.atomic_load(&pool.ring_count)
 	if count >= pool.max_rings do return false
 	ring.pool = pool
 	ring.ring_idx = count
-	pool.rings[count] = ring
+	atomic_store_ring_ptr(&pool.rings[count], ring)
 	sync.atomic_store(&pool.ring_count, count + 1)
 	return true
 }
@@ -976,10 +1023,11 @@ pool_remove_ring :: proc(pool: ^Connection_Pool, idx: u32) -> ^Connection_Ring {
 	ring := pool.rings[idx]
 	last := count - 1
 	if idx != last {
-		pool.rings[idx] = pool.rings[last]
-		pool.rings[idx].ring_idx = idx
+		moved_ring := pool.rings[last]
+		moved_ring.ring_idx = idx
+		atomic_store_ring_ptr(&pool.rings[idx], moved_ring)
 	}
-	pool.rings[last] = nil
+	atomic_store_ring_ptr(&pool.rings[last], nil)
 	sync.atomic_store(&pool.ring_count, last)
 	ring.pool = nil
 	return ring
@@ -992,17 +1040,17 @@ destroy_connection_pool :: proc(pool: ^Connection_Pool, allocator := context.all
 
 get_pool_ring_ready :: #force_inline proc(pool: ^Connection_Pool) -> ^Connection_Ring {
 	if pool == nil do return nil
-	r := pool.rings[0]
+	r := atomic_load_ring_ptr(&pool.rings[0])
 	if r == nil do return nil
 	if r.state == .Ready {
-		if pool.rings[1] == nil do return r
+		if atomic_load_ring_ptr(&pool.rings[1]) == nil do return r
 	}
 
 	count := sync.atomic_load(&pool.ring_count)
 	start := sync.atomic_add(&pool.next_ring, 1)
 	for i in 0 ..< count {
 		idx := (start + i) % count
-		mr := pool.rings[idx]
+		mr := atomic_load_ring_ptr(&pool.rings[idx])
 		if mr != nil && mr.state == .Ready do return mr
 	}
 	return nil

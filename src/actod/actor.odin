@@ -316,7 +316,8 @@ spawn :: proc(
 				)
 			}
 			idx = actor.opts.home_worker
-		} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity); affinity_ok {
+		} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity);
+		   affinity_ok {
 			affinity_actor := get(&global_registry, affinity_pid)
 			if affinity_actor != nil {
 				affinity_handle := (cast(^Actor(int))affinity_actor).pool_handle
@@ -981,7 +982,6 @@ notify_node_of_termination :: proc(actor: ^Actor($T)) {
 
 	for _ in 0 ..< 100 {
 		if send_node_msg(msg) do return
-		if sync.atomic_load(&NODE.shutting_down) do return
 
 		co := coro.running()
 		if co != nil {
@@ -1330,15 +1330,15 @@ push_to_mailbox :: #force_inline proc(
 	co := coro.running()
 	retries := MAX_SEND_RETRIES
 	for attempt := 0; attempt < retries; attempt += 1 {
-		if sync.atomic_load(&NODE.shutting_down) {
-			return .SYSTEM_SHUTTING_DOWN
-		}
 		for _, i in actor.mailbox {
 			if mpsc_try_push(&actor.mailbox[i], msg) {
 				wake_actor(actor)
 				handle_set_message_stats(msg, to)
 				return .OK
 			}
+		}
+		if sync.atomic_load(&NODE.shutting_down) {
+			return .SYSTEM_SHUTTING_DOWN
 		}
 		if co != nil {
 			if attempt >= retries - 1 {

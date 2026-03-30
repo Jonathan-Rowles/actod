@@ -365,6 +365,14 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 	remove(&global_registry, pid)
 
+	if sync.atomic_load(&NODE.shutting_down) {
+		append(&shutdown_deferred_frees, actor_ptr)
+		if pid == NODE.pid {
+			NODE.pid = 0
+		}
+		return
+	}
+
 	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
 	current := sync.atomic_load(state_ptr)
 
@@ -435,12 +443,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		}
 	}
 
-	if sync.atomic_load(&NODE.shutting_down) {
-		append(&shutdown_deferred_frees, actor_ptr)
-	} else {
-		cleanup_actor_arena(actor_ptr)
-		free(actor_ptr, actor_system_allocator)
-	}
+	cleanup_actor_arena(actor_ptr)
+	free(actor_ptr, actor_system_allocator)
 
 	if pid == NODE.pid {
 		NODE.pid = 0
@@ -452,6 +456,12 @@ SHUTDOWN_NODE :: proc() {
 	if !NODE.started || NODE.pid == 0 {
 		cleanup_logger_and_context()
 		reset_node_state()
+		return
+	}
+
+	if coro.running() != nil {
+		sync.atomic_store(&NODE.shutting_down, true)
+		sync.atomic_sema_post(&signal_wake)
 		return
 	}
 

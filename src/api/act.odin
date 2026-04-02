@@ -616,3 +616,8 @@ Transport_Strategy :: actod.Transport_Strategy
 Actor_Stats :: actod.Actor_Stats
 Stats_Snapshot :: actod.Stats_Snapshot
 Stats_Response :: actod.Stats_Response
+
+@(hot = "skip")
+get_node_log_ctx :: proc() -> log.Logger {
+	return actod.systemLogger
+}

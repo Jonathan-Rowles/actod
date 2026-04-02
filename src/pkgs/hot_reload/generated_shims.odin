@@ -108,6 +108,10 @@ Connection_Pool :: struct {
 	conn_pid:             PID,
 	max_rings:            u32,
 	contention_threshold: u32,
+	draining_rings:       [MAX_POOL_RINGS]^Connection_Ring,
+	drain_count:          u32,
+	drained_rings:        [MAX_POOL_RINGS]^Connection_Ring,
+	drained_count:        u32,
 }
 
 Connection_Ring :: struct {
@@ -458,6 +462,7 @@ Hot_API :: struct {
 		custom_logger: Log_Callback,
 		custom_flush: Log_Flush,
 	) -> Log_Config,
+	get_node_log_ctx:          proc() -> log.Logger,
 	spawn_raw:                proc(
 		name: string,
 		data_ptr: rawptr,
@@ -798,6 +803,10 @@ make_network_config :: proc(auth_password: string = "", port: int = 0, heartbeat
 
 make_log_config :: proc(level: log.Level = {}, console_opts: log.Options = {}, file_opts: log.Options = {}, ident: string = "", enable_file: bool = false, log_path: string = "", custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {
 	return hot_api.make_log_config(level, console_opts, file_opts, ident, enable_file, log_path, custom_logger, custom_flush)
+}
+
+get_node_log_ctx :: proc() -> log.Logger {
+	return hot_api.get_node_log_ctx()
 }
 
 `

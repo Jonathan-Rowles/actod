@@ -189,6 +189,10 @@ get_local_node_pid :: proc() -> PID {
 
 systemLogger := runtime.Logger{}
 
+get_node_log_ctx :: proc() -> log.Logger {
+	return systemLogger
+}
+
 NODE_INIT :: proc(name: string, opts := SYSTEM_CONFIG) {
 	NODE.name = name
 

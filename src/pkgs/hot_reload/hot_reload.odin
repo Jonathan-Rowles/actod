@@ -1,6 +1,7 @@
 package hot_reload
 
 import "core:dynlib"
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -289,12 +290,21 @@ run_process :: proc(
 	args: []string,
 	stdout_buf: ^[dynamic]u8,
 	stderr_buf: ^[dynamic]u8,
-) -> (os.Process_State, os.Error) {
+) -> (
+	os.Process_State,
+	os.Error,
+) {
 	uid := sync.atomic_add(&run_process_counter, 1)
 	tmp_dir, tmp_err := os.temp_directory(context.temp_allocator)
 	if tmp_err != nil do return {}, tmp_err
-	stdout_path, _ := filepath.join({tmp_dir, fmt.tprintf("actod_proc_%d_%d_out", os.get_pid(), uid)}, context.temp_allocator)
-	stderr_path, _ := filepath.join({tmp_dir, fmt.tprintf("actod_proc_%d_%d_err", os.get_pid(), uid)}, context.temp_allocator)
+	stdout_path, _ := filepath.join(
+		{tmp_dir, fmt.tprintf("actod_proc_%d_%d_out", os.get_pid(), uid)},
+		context.temp_allocator,
+	)
+	stderr_path, _ := filepath.join(
+		{tmp_dir, fmt.tprintf("actod_proc_%d_%d_err", os.get_pid(), uid)},
+		context.temp_allocator,
+	)
 	defer os.remove(stdout_path)
 	defer os.remove(stderr_path)
 
@@ -310,7 +320,9 @@ run_process :: proc(
 	{
 		defer os.close(stdout_f)
 		defer os.close(stderr_f)
-		p, err := os.process_start(os.Process_Desc{command = args, stdout = stdout_f, stderr = stderr_f})
+		p, err := os.process_start(
+			os.Process_Desc{command = args, stdout = stdout_f, stderr = stderr_f},
+		)
 		if err != nil do return {}, err
 		process = p
 	}
@@ -353,4 +365,97 @@ discover_actors_dir :: proc(start_path: string) -> (string, bool) {
 		}
 		current = parent
 	}
+}
+
+Collection :: struct {
+	name:     string,
+	abs_path: string,
+}
+
+discover_collections :: proc(start_path: string, allocator := context.allocator) -> []Collection {
+	join :: proc(elems: []string) -> string {
+		result, _ := filepath.join(elems, context.temp_allocator)
+		return result
+	}
+
+	ols_dir: string
+	current := start_path
+	for {
+		candidate := join({current, "ols.json"})
+		if os.exists(candidate) {
+			ols_dir = current
+			break
+		}
+		parent := filepath.dir(current, context.temp_allocator)
+		if parent == current || parent == "" || parent == "." {
+			return nil
+		}
+		current = parent
+	}
+
+	ols_path := join({ols_dir, "ols.json"})
+	data, read_err := os.read_entire_file(ols_path, context.temp_allocator)
+	if read_err != nil do return nil
+
+	val, parse_err := json.parse(data, allocator = context.temp_allocator)
+	if parse_err != .None do return nil
+	defer json.destroy_value(val, context.temp_allocator)
+
+	root, is_obj := val.(json.Object)
+	if !is_obj do return nil
+
+	collections_val, has_collections := root["collections"]
+	if !has_collections do return nil
+
+	collections_arr, is_arr := collections_val.(json.Array)
+	if !is_arr do return nil
+
+	result: [dynamic]Collection
+	result.allocator = allocator
+
+	for item in collections_arr {
+		obj, is_item_obj := item.(json.Object)
+		if !is_item_obj do continue
+
+		name_val, has_name := obj["name"]
+		path_val, has_path := obj["path"]
+		if !has_name || !has_path do continue
+
+		name_str, is_name := name_val.(json.String)
+		path_str, is_path := path_val.(json.String)
+		if !is_name || !is_path do continue
+		if name_str == "" do continue
+
+		joined := join({ols_dir, path_str})
+		abs_path, abs_err := filepath.abs(joined, context.temp_allocator)
+		resolved := abs_path if abs_err == nil else joined
+
+		append(
+			&result,
+			Collection {
+				name = strings.clone(name_str, allocator),
+				abs_path = strings.clone(resolved, allocator),
+			},
+		)
+	}
+
+	return result[:]
+}
+
+resolve_collection_import :: proc(import_path: string, collections: []Collection) -> string {
+	colon := strings.index_byte(import_path, ':')
+	if colon <= 0 do return ""
+
+	col_name := import_path[:colon]
+	sub_path := import_path[colon + 1:]
+
+	for c in collections {
+		if c.name == col_name {
+			if sub_path == "" do return c.abs_path
+			result, _ := filepath.join({c.abs_path, sub_path}, context.temp_allocator)
+			return result
+		}
+	}
+
+	return ""
 }

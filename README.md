@@ -6,43 +6,30 @@ Actors run as coroutines on a fixed worker pool — no thread-per-actor overhead
 
 See [docs](docs/00_getting-started.md) for the full reference.
 
-## Performance (10 cores)
+## Performance
 
-| Test | Category | Throughput |
-|------|----------|-----------|
-| 1:1 Empty | Base | 92M msgs/sec |
-| 1:1 32B | Base | 84M msgs/sec |
-| 1:1 1KB | Base | 20M msgs/sec |
-| 4x Empty parallel | Parallel | 304M msgs/sec |
-| 4x 32B parallel | Parallel | 236M msgs/sec |
-| 4x 1KB parallel | Parallel | 63M msgs/sec |
-| 4:1 32KB fan-in | Fan-in | 2.3M msgs/sec (70 GB/s) |
-| 2:2 Ping-Pong | Contention | 42M msgs/sec | 24ns |
-| 10:4 32KB stress | Stress | 8.8M msgs/sec (34 GB/s) |
-| Mesh 10:5 | Stress | 13M msgs/sec | 77ns |
-| 20:1 Empty contention | Contention | 37M msgs/sec |
+| Test | Category | Apple M4 Air (10c) | Linux x86 (16c) |
+|------|----------|---------------|-----------------|
+| 1:1 32B | Base | 84M msgs/sec | 61M msgs/sec |
+| 1:1 1KB | Base | 20M msgs/sec | 20M msgs/sec |
+| 4x 32B parallel | Parallel | 236M msgs/sec | 234M msgs/sec |
+| 4:1 32KB fan-in | Fan-in | 2.3M msgs/sec (70 GB/s) | 2.9M msgs/sec (89 GB/s) |
+| 2:2 Ping-Pong | Contention | 42M msgs/sec | 46M msgs/sec |
 
 ### Ping-Pong Latency
 
-| Size | p50 | p99 | p99.9 |
-|------|-----|-----|-------|
-| 32B | 83ns | 146ns | 146ns |
-| 256B | 146ns | 291ns | 333ns |
-| 1KB | 187ns | 312ns | 333ns |
-| 4KB | 271ns | 437ns | 479ns |
+| Size | p50 (M4 / x86) | p99 (M4 / x86) |
+|------|-----------------|-----------------|
+| 32B | 83ns / 150ns | 146ns / 232ns |
+| 4KB | 271ns / 210ns | 437ns / 280ns |
 
 ### Network (TCP loopback)
 
-| Test | Throughput|
-|------|-----------|
-| 1:1 Empty | 18.25M msgs/sec |
-| 1:1 32B | 18.87M msgs/sec |
-| 1:1 256B | 12.35M msgs/sec |
-| 1:1 1KB | 4.81M msgs/sec |
-| 4x Empty parallel | 7.6M msgs/sec |
-| 4x 32 parallel | 6.0M msgs/sec |
-| 4x 256B parallel | 4.1M msgs/sec |
-| 4x 1KB parallel | 1.8M msgs/sec |
+| Test | Apple M4 Air (10c) | Linux x86 (16c) |
+|------|---------------|-----------------|
+| 1:1 32B | 18.87M msgs/sec | 5.16M msgs/sec |
+| 1:1 256B | 12.35M msgs/sec | 4.83M msgs/sec |
+| 1:1 1KB | 4.81M msgs/sec | 2.14M msgs/sec |
 
 ## Usage
 

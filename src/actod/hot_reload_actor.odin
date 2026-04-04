@@ -449,13 +449,16 @@ Actor_Type_Meta :: struct {
 }
 
 Hot_Reload_Actor_Data :: struct {
-	modules:        map[string]^hot_reload.Hot_Module, // actor_name -> current module
-	prev_modules:   map[string][dynamic]^hot_reload.Hot_Module, // actor_name -> recent modules kept alive
-	actor_meta:     map[string]Actor_Type_Meta, // actor_name -> meta
-	package_actors: map[string][dynamic]string, // package_path -> actor_names sharing this package
-	watch_path:     string,
-	watcher:        ^hot_reload.File_Watcher,
-	generation:     u32,
+	modules:            map[string]^hot_reload.Hot_Module, // actor_name -> current module
+	prev_modules:       map[string][dynamic]^hot_reload.Hot_Module, // actor_name -> recent modules kept alive
+	actor_meta:         map[string]Actor_Type_Meta, // actor_name -> meta
+	package_actors:     map[string][dynamic]string, // package_path -> actor_names sharing this package
+	watch_path:         string,
+	watcher:            ^hot_reload.File_Watcher,
+	generation:         u32,
+	collections:        []hot_reload.Collection, // from ols.json
+	collection_flags:   []string, // ["-collection:src=/abs/src", ...]
+	collection_dep_map: map[string][dynamic]string, // collection_dep_path -> [actor_pkg_paths]
 }
 
 HOT_RELOAD_PID: PID
@@ -522,6 +525,16 @@ hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 	}
 	data.watch_path = watch_path
 	log.infof("hot reload: watching '%s' for changes", watch_path)
+
+	data.collections = hot_reload.discover_collections(watch_path)
+	if len(data.collections) > 0 {
+		flags: [dynamic]string
+		for c in data.collections {
+			append(&flags, fmt.aprintf("-collection:%s=%s", c.name, c.abs_path))
+			log.infof("hot reload: collection '%s' -> '%s'", c.name, c.abs_path)
+		}
+		data.collection_flags = flags[:]
+	}
 
 	watcher_callback :: proc(event: hot_reload.Watch_Event, user_data: rawptr) {
 		path_buf: [128]u8
@@ -719,6 +732,38 @@ handle_register :: proc(data: ^Hot_Reload_Actor_Data, reg: Register_Hot_Actor) {
 			append(&data.package_actors[pkg_path], strings.clone(actor_name))
 
 			log.infof("hot reload: watching '%s' for actor '%s'", pkg_path, actor_name)
+
+			col_imports := scan_collection_imports(pkg_path)
+			if len(col_imports) > 0 && len(data.collections) == 0 {
+				log.errorf(
+					"hot reload: actor '%s' uses collection imports (e.g. '%s') but no ols.json was found. " +
+					"Hot reload compilation will fail. Add an ols.json with collection definitions next to your project.",
+					actor_name,
+					col_imports[0],
+				)
+			}
+			for import_path in col_imports {
+				resolved := hot_reload.resolve_collection_import(import_path, data.collections)
+				if resolved == "" || !os.is_dir(resolved) do continue
+
+				if resolved not_in data.collection_dep_map {
+					data.collection_dep_map[strings.clone(resolved)] = {}
+					if data.watcher != nil {
+						if !hot_reload.add_watch(data.watcher, resolved, resolved) {
+							log.warnf(
+								"hot reload: failed to add watch for collection dep '%s'",
+								resolved,
+							)
+						}
+					}
+					log.infof(
+						"hot reload: watching collection dep '%s' for actor '%s'",
+						import_path,
+						actor_name,
+					)
+				}
+				append(&data.collection_dep_map[resolved], strings.clone(pkg_path))
+			}
 		} else {
 			log.warnf(
 				"hot reload: no package directory '%s' found under '%s' for actor '%s'. " +
@@ -805,11 +850,7 @@ regenerate_exports :: proc(
 
 	dir := output_dir if output_dir != "" else pkg_path
 	exports_path := join_path({dir, "hot_exports.odin"})
-	log.debugf(
-		"hot reload: writing exports to '%s' (%d actors)",
-		exports_path,
-		len(exports),
-	)
+	log.debugf("hot reload: writing exports to '%s' (%d actors)", exports_path, len(exports))
 	hot_reload.generate_exports_file(exports_path, pkg_name, exports[:])
 }
 
@@ -982,6 +1023,58 @@ scan_relative_imports :: proc(dir_path: string) -> []string {
 			if import_path == "" do continue
 			if is_core_or_base_import(import_path) do continue
 			if is_actod_import_path(import_path) do continue
+			if is_collection_import(import_path) do continue
+
+			already := false
+			for existing in result {
+				if existing == import_path {
+					already = true
+					break
+				}
+			}
+			if !already do append(&result, import_path)
+		}
+	}
+
+	return result[:]
+}
+
+@(private)
+scan_collection_imports :: proc(dir_path: string) -> []string {
+	result: [dynamic]string
+	result.allocator = context.temp_allocator
+
+	fd, err := os.open(dir_path)
+	if err != nil do return nil
+	entries, read_err := os.read_dir(fd, -1, context.temp_allocator)
+	os.close(fd)
+	if read_err != nil do return nil
+
+	for entry in entries {
+		if entry.type == .Directory do continue
+		if !strings.has_suffix(entry.name, ".odin") do continue
+
+		src_path := join_path({dir_path, entry.name})
+		data, file_err := os.read_entire_file(src_path, context.temp_allocator)
+		if file_err != nil do continue
+
+		source := string(data)
+		rest := source
+		for len(rest) > 0 {
+			nl := strings.index_byte(rest, '\n')
+			line: string
+			if nl >= 0 {
+				line = rest[:nl]
+				rest = rest[nl + 1:]
+			} else {
+				line = rest
+				rest = ""
+			}
+
+			import_path := extract_import_path(line)
+			if import_path == "" do continue
+			if is_core_or_base_import(import_path) do continue
+			if !is_collection_import(import_path) do continue
 
 			already := false
 			for existing in result {
@@ -1076,6 +1169,8 @@ rewrite_import_line :: proc(
 	new_path: string
 	if is_actod_import_path(import_path) {
 		new_path = "../_hot_actod"
+	} else if is_collection_import(import_path) {
+		return line
 	} else {
 		resolved := clean_path(join_path({original_dir, import_path}))
 		build_name, found := dep_map[resolved]
@@ -1113,6 +1208,14 @@ has_explicit_alias :: proc(prefix: string) -> bool {
 @(private)
 is_core_or_base_import :: proc(path: string) -> bool {
 	return strings.has_prefix(path, "core:") || strings.has_prefix(path, "base:")
+}
+
+@(private)
+is_collection_import :: proc(path: string) -> bool {
+	if strings.index_byte(path, ':') <= 0 do return false
+	if is_core_or_base_import(path) do return false
+	if is_actod_import_path(path) do return false
+	return true
 }
 
 @(private)
@@ -1192,6 +1295,22 @@ clean_path :: proc(path: string) -> string {
 
 @(private)
 handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
+	if dep_actors, is_dep := data.collection_dep_map[pkg_path]; is_dep {
+		seen: map[string]bool
+		defer delete(seen)
+		for actor_pkg_path in dep_actors {
+			if actor_pkg_path in seen do continue
+			seen[actor_pkg_path] = true
+			log.infof(
+				"hot reload: collection dep '%s' changed, reloading '%s'",
+				pkg_path,
+				actor_pkg_path,
+			)
+			handle_file_changed(data, actor_pkg_path)
+		}
+		return
+	}
+
 	actor_names, pkg_exists := data.package_actors[pkg_path]
 	if !pkg_exists || len(actor_names) == 0 {
 		log.warnf("hot reload: file changed in unregistered package '%s'", pkg_path)
@@ -1226,10 +1345,30 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 			)
 		}
 
-		validation := hot_reload.validate_package(pkg_path, state_exp, proc_exps[:])
+		validation := hot_reload.validate_package(
+			pkg_path,
+			state_exp,
+			proc_exps[:],
+			extra_flags = data.collection_flags,
+		)
 		if !validation.ok {
+			is_collection_error := false
 			for err in validation.errors {
-				log.errorf("%s", hot_reload.format_validation_error(err, name))
+				if strings.contains(err.message, "Unknown library collection") {
+					is_collection_error = true
+					break
+				}
+			}
+			if is_collection_error {
+				log.errorf(
+					"HOT RELOAD BLOCKED [%s]: uses collection imports not defined in any ols.json. " +
+					"Add an ols.json next to your actor packages with all required collections.",
+					name,
+				)
+			} else {
+				for err in validation.errors {
+					log.errorf("%s", hot_reload.format_validation_error(err, name))
+				}
 			}
 			hot_reload.destroy_validation_result(validation)
 			return
@@ -1252,7 +1391,7 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 		{pkg_path, "tmp", fmt.tprintf("%s_gen%d%s", pkg_name, gen, hot_reload.SHARED_LIB_EXT)},
 	)
 	log.debugf("hot reload: compiling '%s' -> '%s'", build_pkg_path, so_path)
-	compile_result := hot_reload.compile_module(build_pkg_path, so_path)
+	compile_result := hot_reload.compile_module(build_pkg_path, so_path, data.collection_flags)
 	if !compile_result.ok {
 		log.errorf("hot reload: compile failed for '%s': %s", pkg_path, compile_result.error_msg)
 		return

@@ -47,6 +47,7 @@ validate_package :: proc(
 	expected_state: State_Expectation,
 	expected_procs: []Proc_Expectation,
 	allocator := context.allocator,
+	extra_flags: []string = nil,
 ) -> Validation_Result {
 	caller_alloc := allocator
 
@@ -54,7 +55,7 @@ validate_package :: proc(
 	errors.allocator = caller_alloc
 	ok := true
 
-	if !run_odin_check(package_path, &errors, caller_alloc) {
+	if !run_odin_check(package_path, &errors, caller_alloc, extra_flags) {
 		return Validation_Result{ok = false, errors = errors[:]}
 	}
 
@@ -174,12 +175,13 @@ run_odin_check :: proc(
 	package_path: string,
 	errors: ^[dynamic]Validation_Error,
 	allocator: mem.Allocator,
+	extra_flags: []string = nil,
 ) -> bool {
-	args := [?]string {
-		"odin",
-		"check",
-		package_path,
-		"-no-entry-point",
+	args: [dynamic]string
+	args.allocator = context.temp_allocator
+	append(&args, "odin", "check", package_path, "-no-entry-point")
+	for flag in extra_flags {
+		append(&args, flag)
 	}
 
 	stderr_buf: [dynamic]u8
@@ -191,7 +193,10 @@ run_odin_check :: proc(
 	}
 
 	if state.exit_code != 0 {
-		msg := strings.clone(string(stderr_buf[:]) if len(stderr_buf) > 0 else "odin check failed", allocator)
+		msg := strings.clone(
+			string(stderr_buf[:]) if len(stderr_buf) > 0 else "odin check failed",
+			allocator,
+		)
 		append(errors, Validation_Error{kind = .Parse_Error, message = msg})
 		return false
 	}
@@ -395,13 +400,17 @@ ident_name :: proc(expr: ^ast.Expr) -> string {
 normalize_builtin_type :: proc(name: string) -> string {
 	when size_of(int) == 8 {
 		switch name {
-		case "int":  return "i64"
-		case "uint": return "u64"
+		case "int":
+			return "i64"
+		case "uint":
+			return "u64"
 		}
 	} else {
 		switch name {
-		case "int":  return "i32"
-		case "uint": return "u32"
+		case "int":
+			return "i32"
+		case "uint":
+			return "u32"
 		}
 	}
 	when size_of(uintptr) == 8 {
@@ -410,8 +419,10 @@ normalize_builtin_type :: proc(name: string) -> string {
 		if name == "uintptr" do return "u32"
 	}
 	switch name {
-	case "byte": return "u8"
-	case "rune": return "i32"
+	case "byte":
+		return "u8"
+	case "rune":
+		return "i32"
 	}
 	return name
 }

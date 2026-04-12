@@ -1530,6 +1530,135 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 	)
 }
 
+Union_Ping :: struct {
+	seq: u32,
+}
+
+Union_Chat :: struct {
+	name:    string,
+	content: string,
+}
+
+Union_Test_Message :: union {
+	Union_Ping,
+	Union_Chat,
+}
+
+Union_Ack :: struct {
+	variant_name: [32]u8,
+	name_len:     int,
+	seq:          u32,
+}
+
+Union_Actor_Data :: struct {
+	ping_count: int,
+	chat_count: int,
+	last_seq:   u32,
+	last_name:  [64]u8,
+	name_len:   int,
+}
+
+Union_Actor_Behaviour := actod.Actor_Behaviour(Union_Actor_Data) {
+	handle_message = union_actor_handle_message,
+}
+
+union_actor_handle_message :: proc(data: ^Union_Actor_Data, from: actod.PID, msg: any) {
+	switch m in msg {
+	case Union_Test_Message:
+		switch v in m {
+		case Union_Ping:
+			data.ping_count += 1
+			data.last_seq = v.seq
+		case Union_Chat:
+			data.chat_count += 1
+			data.last_seq = 0
+			name_bytes := transmute([]u8)v.name
+			data.name_len = min(len(name_bytes), len(data.last_name))
+			copy(data.last_name[:data.name_len], name_bytes[:data.name_len])
+		}
+		sync.atomic_add(&global_test_state.messages_received, 1)
+
+		ack := Union_Ack {
+			seq = data.last_seq,
+		}
+		actod.send_message(from, ack)
+	}
+}
+
+test_union_message_handling :: proc(t: ^testing.T) {
+	reset_test_state()
+
+	Collector_Data :: struct {
+		ack_count: int,
+		done:      ^sync.Sema,
+		expected:  int,
+	}
+
+	Collector_Behaviour :: actod.Actor_Behaviour(Collector_Data) {
+		handle_message = proc(data: ^Collector_Data, from: actod.PID, msg: any) {
+			switch _ in msg {
+			case Union_Ack:
+				data.ack_count += 1
+				if data.ack_count >= data.expected {
+					sync.sema_post(data.done)
+				}
+			}
+		},
+	}
+
+	done := sync.Sema{}
+	expected_messages := 6
+
+	union_actor, ok := actod.spawn("union-test-actor", Union_Actor_Data{}, Union_Actor_Behaviour)
+	testing.expect(t, ok, "Failed to spawn union test actor")
+
+	collector_data := Collector_Data {
+		done     = &done,
+		expected = expected_messages,
+	}
+	collector, col_ok := actod.spawn("union-collector", collector_data, Collector_Behaviour)
+	testing.expect(t, col_ok, "Failed to spawn collector")
+
+	actod.send_message(union_actor, Union_Test_Message(Union_Ping{seq = 1}))
+	actod.send_message(union_actor, Union_Test_Message(Union_Ping{seq = 42}))
+
+	actod.send_message(union_actor, Union_Test_Message(Union_Chat{name = "alice", content = "hi"}))
+	actod.send_message(
+		union_actor,
+		Union_Test_Message(
+			Union_Chat {
+				name = "bob",
+				content = "This is a longer message that should exceed the inline message size and force pool allocation for proper deep-copy testing",
+			},
+		),
+	)
+	actod.send_message(union_actor, Union_Test_Message(Union_Chat{name = "", content = ""}))
+	actod.send_message(
+		union_actor,
+		Union_Test_Message(Union_Chat{name = "unicode 你好", content = "🎭 ñ ü"}),
+	)
+
+	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
+	testing.expect(t, success, "Timed out waiting for union messages")
+
+	received := sync.atomic_load(&global_test_state.messages_received)
+	testing.expect(
+		t,
+		received >= u64(expected_messages),
+		fmt.tprintf("Not all union messages received: %d < %d", received, expected_messages),
+	)
+
+	actod.terminate_actor(union_actor)
+	actod.terminate_actor(collector)
+
+	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+		if !actod.valid(&actod.global_registry, union_actor) {
+			break
+		}
+		thread.yield()
+	}
+}
+
 CONTENTION_ACTOR_COUNT :: 128
 CONTENTION_WORKER_COUNT :: 2
 CONTENTION_SEED_PINGS :: 4

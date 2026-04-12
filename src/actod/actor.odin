@@ -1631,6 +1631,21 @@ calculate_variable_data_size :: #force_inline proc(
 		}
 	}
 
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(value_ptr, uf)
+			if !ok do continue
+			for field in variant.string_fields {
+				str_ptr := cast(^string)(uintptr(value_ptr) + field.offset)
+				total += len(str_ptr^)
+			}
+			for field in variant.byte_slice_fields {
+				slice_ptr := cast(^[]byte)(uintptr(value_ptr) + field.offset)
+				total += len(slice_ptr^)
+			}
+		}
+	}
+
 	return total
 }
 
@@ -1672,6 +1687,43 @@ copy_variable_data :: #force_inline proc(
 				offset += len(src_slice^)
 			} else {
 				dst_slice^ = nil
+			}
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(src_value_ptr, uf)
+			if !ok do continue
+			for field in variant.string_fields {
+				src_str := cast(^string)(uintptr(src_value_ptr) + field.offset)
+				dst_str := cast(^string)(uintptr(struct_ptr) + field.offset)
+
+				if len(src_str^) > 0 {
+					dest := rawptr(uintptr(dest_base) + uintptr(offset))
+					intrinsics.mem_copy_non_overlapping(dest, raw_data(src_str^), len(src_str^))
+					dst_str^ = transmute(string)mem.Raw_Slice{data = dest, len = len(src_str^)}
+					offset += len(src_str^)
+				} else {
+					dst_str^ = ""
+				}
+			}
+			for field in variant.byte_slice_fields {
+				src_slice := cast(^[]byte)(uintptr(src_value_ptr) + field.offset)
+				dst_slice := cast(^[]byte)(uintptr(struct_ptr) + field.offset)
+
+				if len(src_slice^) > 0 {
+					dest := rawptr(uintptr(dest_base) + uintptr(offset))
+					intrinsics.mem_copy_non_overlapping(
+						dest,
+						raw_data(src_slice^),
+						len(src_slice^),
+					)
+					dst_slice^ = transmute([]byte)mem.Raw_Slice{data = dest, len = len(src_slice^)}
+					offset += len(src_slice^)
+				} else {
+					dst_slice^ = nil
+				}
 			}
 		}
 	}
@@ -1883,6 +1935,49 @@ copy_variable_data_from_payload :: #force_inline proc(
 				payload_offset += slice_len
 			} else {
 				dst_slice^ = nil
+			}
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(struct_ptr, uf)
+			if !ok do continue
+			for field in variant.string_fields {
+				dst_str := cast(^string)(uintptr(struct_ptr) + field.offset)
+				str_len := len(dst_str^)
+
+				if str_len > 0 {
+					dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
+					intrinsics.mem_copy_non_overlapping(
+						dest,
+						raw_data(payload[payload_offset:]),
+						str_len,
+					)
+					dst_str^ = transmute(string)mem.Raw_Slice{data = dest, len = str_len}
+					dest_offset += str_len
+					payload_offset += str_len
+				} else {
+					dst_str^ = ""
+				}
+			}
+			for field in variant.byte_slice_fields {
+				dst_slice := cast(^[]byte)(uintptr(struct_ptr) + field.offset)
+				slice_len := len(dst_slice^)
+
+				if slice_len > 0 {
+					dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
+					intrinsics.mem_copy_non_overlapping(
+						dest,
+						raw_data(payload[payload_offset:]),
+						slice_len,
+					)
+					dst_slice^ = transmute([]byte)mem.Raw_Slice{data = dest, len = slice_len}
+					dest_offset += slice_len
+					payload_offset += slice_len
+				} else {
+					dst_slice^ = nil
+				}
 			}
 		}
 	}

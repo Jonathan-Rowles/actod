@@ -21,6 +21,9 @@ register_test_types :: proc() {
 	register_message_type(Test_Simple_Message)
 	register_message_type(Test_String_Message)
 	register_message_type(Test_Complex_Message)
+	register_message_type(Test_Mixed_Union)
+	register_message_type(Test_Mixed_Bytes_Union)
+	register_message_type(Test_Outer_With_Union)
 
 	test_types_registered = true
 }
@@ -271,6 +274,40 @@ test_type_name_extraction :: proc(t: ^testing.T) {
 	}
 }
 
+Test_Ping :: struct {
+	seq: u32,
+}
+
+Test_Chat :: struct {
+	name:    string,
+	content: string,
+}
+
+Test_Mixed_Union :: union {
+	Test_Ping,
+	Test_Chat,
+}
+
+Test_Pod_Only_Variant :: struct {
+	x: int,
+	y: int,
+}
+
+Test_Bytes_Variant :: struct {
+	data: []byte,
+	tag:  u32,
+}
+
+Test_Mixed_Bytes_Union :: union {
+	Test_Pod_Only_Variant,
+	Test_Bytes_Variant,
+}
+
+Test_Outer_With_Union :: struct {
+	id:  u32,
+	msg: Test_Mixed_Union,
+}
+
 Test_Empty_Struct_A :: struct {}
 Test_Empty_Struct_B :: struct {}
 
@@ -310,5 +347,199 @@ test_type_name_uniqueness :: proc(t: ^testing.T) {
 			name_a != name_b,
 			"Structs with same shape but different names should have different identifiers",
 		)
+	}
+}
+
+@(test)
+test_union_registration_flags :: proc(t: ^testing.T) {
+	register_test_types()
+
+	{
+		info, ok := get_type_info(typeid_of(Test_Mixed_Union))
+		testing.expect(t, ok, "Test_Mixed_Union should be registered")
+		testing.expect(t, .Has_Unions in info.flags, "Mixed union should have Has_Unions flag")
+		testing.expect(
+			t,
+			.Has_Strings not_in info.flags,
+			"Union strings should not set top-level Has_Strings",
+		)
+		testing.expect(
+			t,
+			len(info.string_fields) == 0,
+			"Union should have no top-level string fields",
+		)
+		testing.expect(t, len(info.union_fields) == 1, "Should have exactly 1 union field entry")
+		testing.expect(t, len(info.union_fields[0].variants) == 2, "Should track 2 variants")
+
+		testing.expect(
+			t,
+			len(info.union_fields[0].variants[0].string_fields) == 0,
+			"Ping variant should have no string fields",
+		)
+
+		testing.expect(
+			t,
+			len(info.union_fields[0].variants[1].string_fields) == 2,
+			"Chat variant should have 2 string fields",
+		)
+	}
+
+	{
+		info, ok := get_type_info(typeid_of(Test_Mixed_Bytes_Union))
+		testing.expect(t, ok, "Test_Mixed_Bytes_Union should be registered")
+		testing.expect(
+			t,
+			.Has_Unions in info.flags,
+			"Mixed bytes union should have Has_Unions flag",
+		)
+		testing.expect(t, len(info.union_fields) == 1, "Should have exactly 1 union field entry")
+
+		testing.expect(
+			t,
+			len(info.union_fields[0].variants[0].byte_slice_fields) == 0,
+			"Pod variant should have no byte slice fields",
+		)
+
+		testing.expect(
+			t,
+			len(info.union_fields[0].variants[1].byte_slice_fields) == 1,
+			"Bytes variant should have 1 byte slice field",
+		)
+	}
+}
+
+@(test)
+test_union_struct_with_union_field :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, ok := get_type_info(typeid_of(Test_Outer_With_Union))
+	testing.expect(t, ok, "Test_Outer_With_Union should be registered")
+	testing.expect(
+		t,
+		.Has_Unions in info.flags,
+		"Struct with union field should have Has_Unions flag",
+	)
+	testing.expect(t, .Has_Strings not_in info.flags, "Should not have top-level Has_Strings")
+	testing.expect(t, len(info.union_fields) == 1, "Should have 1 union field entry")
+}
+
+@(test)
+test_union_variable_data_size_pod_variant :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	value := Test_Mixed_Union(Test_Ping{seq = 42})
+	size := calculate_variable_data_size(&value, info)
+	testing.expect_value(t, size, 0)
+}
+
+@(test)
+test_union_variable_data_size_string_variant :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	value := Test_Mixed_Union(Test_Chat{name = "alice", content = "hello"})
+	size := calculate_variable_data_size(&value, info)
+	testing.expect_value(t, size, 10)
+}
+
+@(test)
+test_union_variable_data_size_nil :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	value: Test_Mixed_Union
+	size := calculate_variable_data_size(&value, info)
+	testing.expect_value(t, size, 0)
+}
+
+@(test)
+test_union_active_variant_lookup :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	uf := info.union_fields[0]
+
+	{
+		value: Test_Mixed_Union
+		_, ok := get_active_union_variant(&value, uf)
+		testing.expect(t, !ok, "Nil union should return false")
+	}
+
+	{
+		value := Test_Mixed_Union(Test_Ping{seq = 1})
+		variant, ok := get_active_union_variant(&value, uf)
+		testing.expect(t, ok, "Should find active variant for Ping")
+		testing.expect_value(t, len(variant.string_fields), 0)
+	}
+
+	{
+		value := Test_Mixed_Union(Test_Chat{name = "x", content = "y"})
+		variant, ok := get_active_union_variant(&value, uf)
+		testing.expect(t, ok, "Should find active variant for Chat")
+		testing.expect_value(t, len(variant.string_fields), 2)
+	}
+}
+
+@(test)
+test_union_copy_variable_data_string_variant :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	src := Test_Mixed_Union(Test_Chat{name = "alice", content = "hello"})
+	variable_size := calculate_variable_data_size(&src, info)
+	testing.expect_value(t, variable_size, 10)
+
+	buf: [256]byte
+	dst := src
+	copy_variable_data(&buf, &dst, &src, info, 0)
+
+	chat := dst.(Test_Chat)
+	testing.expect(t, chat.name == "alice", "Name should be deep-copied")
+	testing.expect(t, chat.content == "hello", "Content should be deep-copied")
+
+	name_data := raw_data(chat.name)
+	testing.expect(
+		t,
+		uintptr(name_data) >= uintptr(&buf[0]) &&
+		uintptr(name_data) < uintptr(&buf[0]) + size_of(buf),
+		"Copied name should point into destination buffer",
+	)
+}
+
+@(test)
+test_union_copy_variable_data_pod_variant :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	src := Test_Mixed_Union(Test_Ping{seq = 99})
+	variable_size := calculate_variable_data_size(&src, info)
+	testing.expect_value(t, variable_size, 0)
+
+	buf: [256]byte
+	dst := src
+	copy_variable_data(&buf, &dst, &src, info, 0)
+
+	ping := dst.(Test_Ping)
+	testing.expect_value(t, ping.seq, 99)
+}
+
+@(test)
+test_union_bytes_variant_size :: proc(t: ^testing.T) {
+	register_test_types()
+
+	data := []byte{1, 2, 3, 4, 5}
+	info, _ := get_type_info(typeid_of(Test_Mixed_Bytes_Union))
+
+	{
+		value := Test_Mixed_Bytes_Union(Test_Bytes_Variant{data = data, tag = 7})
+		size := calculate_variable_data_size(&value, info)
+		testing.expect_value(t, size, 5)
+	}
+
+	{
+		value := Test_Mixed_Bytes_Union(Test_Pod_Only_Variant{x = 1, y = 2})
+		size := calculate_variable_data_size(&value, info)
+		testing.expect_value(t, size, 0)
 	}
 }

@@ -40,6 +40,8 @@ run_node_role :: proc(command: string) {
 		run_mesh_leaf()
 	case "pubsub_subscriber":
 		run_pubsub_subscriber()
+	case "union_sender":
+		run_union_sender()
 	case:
 		fmt.eprintf("Unknown node role: %s\n", command)
 		os.exit(1)
@@ -986,4 +988,68 @@ run_pubsub_subscriber :: proc() {
 	for {
 		time.sleep(100 * time.Millisecond)
 	}
+}
+
+run_union_sender :: proc() {
+	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
+	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "union_receiver"
+	auth_password :=
+		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+
+	target_port := 16001
+	if port_val, ok := strconv.parse_int(target_port_str); ok {
+		target_port = port_val
+	}
+
+	actod.NODE_INIT(
+		name = "UnionSenderNode",
+		opts = actod.make_node_config(
+			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			actor_config = actod.make_actor_config(
+				logging = actod.make_log_config(level = log_level),
+			),
+		),
+	)
+
+	target_addr := net.Endpoint {
+		address = net.IP4_Loopback,
+		port    = target_port,
+	}
+
+	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	if !ok {
+		fmt.println("Failed to register target node")
+		os.exit(1)
+	}
+
+	time.sleep(250 * time.Millisecond)
+
+	ping_msg := shared.Network_Union_Message(shared.Network_Union_Ping{seq = 42})
+	err := actod.send_to(target_actor, target_node, ping_msg)
+	if err != .OK {
+		fmt.printf("Failed to send ping union message: %v\n", err)
+		os.exit(1)
+	}
+
+	chat_msg := shared.Network_Union_Message(
+		shared.Network_Union_Chat{name = "alice", content = "hello from remote"},
+	)
+	err2 := actod.send_to(target_actor, target_node, chat_msg)
+	if err2 != .OK {
+		fmt.printf("Failed to send chat union message: %v\n", err2)
+		os.exit(1)
+	}
+
+	ping_msg2 := shared.Network_Union_Message(shared.Network_Union_Ping{seq = 99})
+	err3 := actod.send_to(target_actor, target_node, ping_msg2)
+	if err3 != .OK {
+		fmt.printf("Failed to send second ping union message: %v\n", err3)
+		os.exit(1)
+	}
+
+	time.sleep(500 * time.Millisecond)
+
+	actod.SHUTDOWN_NODE()
+	os.exit(0)
 }

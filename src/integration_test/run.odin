@@ -52,6 +52,7 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_rest_for_one_strategy", test_proc = test_rest_for_one_strategy},
 	{name = "test_string_handling", test_proc = test_string_handling},
 	{name = "test_byte_slice_handling", test_proc = test_byte_slice_handling},
+	{name = "test_union_message_handling", test_proc = test_union_message_handling},
 
 	// Behaviour registry tests
 	{name = "test_spawn_by_name", test_proc = test_spawn_by_name},
@@ -204,6 +205,13 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_distributed_pubsub_broadcast",
 		test_proc = test_distributed_pubsub_broadcast,
 		port = 17160,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_distributed_union_messages",
+		test_proc = test_distributed_union_messages,
+		port = 17170,
 		node_name = "TestNode1",
 		is_networked = true,
 	},
@@ -459,6 +467,8 @@ register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Byte_Slice_Test_Message)
 	actod.register_message_type(Complex_Byte_Slice_Message)
 	actod.register_message_type(Mixed_Byte_Slice_Message)
+	actod.register_message_type(Union_Test_Message)
+	actod.register_message_type(Union_Ack)
 	actod.register_message_type(shared.Network_Test_Request)
 	actod.register_message_type(shared.Network_Test_Response)
 	actod.register_message_type(Pubsub_Price_Update)

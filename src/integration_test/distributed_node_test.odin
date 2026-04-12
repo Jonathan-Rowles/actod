@@ -1523,3 +1523,85 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 	actod.terminate_actor(pub_pid)
 	time.sleep(100 * time.Millisecond)
 }
+
+test_distributed_union_messages :: proc(t: ^testing.T) {
+	ack_count: i32 = 0
+	done := sync.Sema{}
+	expected_acks: i32 = 3
+
+	Union_Receiver_Data :: struct {
+		ack_count: ^i32,
+		done:      ^sync.Sema,
+		expected:  i32,
+		ping_ok:   bool,
+		chat_ok:   bool,
+	}
+
+	Union_Receiver_Behaviour :: actod.Actor_Behaviour(Union_Receiver_Data) {
+		handle_message = proc(data: ^Union_Receiver_Data, from: actod.PID, msg: any) {
+			switch m in msg {
+			case shared.Network_Union_Message:
+				switch v in m {
+				case shared.Network_Union_Ping:
+					data.ping_ok = v.seq == 42
+				case shared.Network_Union_Chat:
+					data.chat_ok = v.name == "alice" && v.content == "hello from remote"
+				}
+
+				ack := shared.Network_Union_Ack{}
+				switch v in m {
+				case shared.Network_Union_Ping:
+					ack.variant_id = 1
+					ack.seq = v.seq
+				case shared.Network_Union_Chat:
+					ack.variant_id = 2
+				}
+				actod.send_message(from, ack)
+
+				count := sync.atomic_add(data.ack_count, 1)
+				if count + 1 >= data.expected {
+					sync.sema_post(data.done)
+				}
+			}
+		},
+	}
+
+	receiver_data := Union_Receiver_Data {
+		ack_count = &ack_count,
+		done      = &done,
+		expected  = expected_acks,
+	}
+	_, ok := actod.spawn("union_receiver", receiver_data, Union_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn union receiver actor")
+
+	node2_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=union_sender",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=union_receiver",
+				"AUTH_PASSWORD=test_dist_password",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(node2_desc)
+	if remote_err != nil {
+		panic("failed to start union_sender node")
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
+	testing.expectf(
+		t,
+		success,
+		"Timed out waiting for distributed union messages, got %d/%d",
+		sync.atomic_load(&ack_count),
+		expected_acks,
+	)
+}

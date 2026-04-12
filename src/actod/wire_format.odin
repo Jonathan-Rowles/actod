@@ -79,15 +79,32 @@ wire_format_exact_size :: proc(content: $T, name_len: int) -> u32 {
 		return u32(base)
 	}
 
-	total_string_size := 0
+	content_ref := content
+	total_variable_size := 0
+
 	if .Has_Strings in info.flags {
-		content_ref := content
 		for field in info.string_fields {
 			str_ptr := cast(^string)(uintptr(&content_ref) + field.offset)
-			total_string_size += len(str_ptr^)
+			total_variable_size += len(str_ptr^)
 		}
 	}
-	return u32(base + total_string_size)
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(&content_ref, uf)
+			if !ok do continue
+			for field in variant.string_fields {
+				str_ptr := cast(^string)(uintptr(&content_ref) + field.offset)
+				total_variable_size += len(str_ptr^)
+			}
+			for field in variant.byte_slice_fields {
+				slice_ptr := cast(^[]byte)(uintptr(&content_ref) + field.offset)
+				total_variable_size += len(slice_ptr^)
+			}
+		}
+	}
+
+	return u32(base + total_variable_size)
 }
 
 build_wire_format_into_buffer :: proc(
@@ -137,15 +154,30 @@ build_wire_format_into_buffer :: proc(
 	}
 
 	content_copy := content
-	total_string_size := 0
+	total_variable_size := 0
 	if .Has_Strings in info.flags {
 		for field in info.string_fields {
 			str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-			total_string_size += len(str_ptr^)
+			total_variable_size += len(str_ptr^)
 		}
 	}
 
-	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + size_of(T) + total_string_size
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(&content_copy, uf)
+			if !ok do continue
+			for field in variant.string_fields {
+				str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
+				total_variable_size += len(str_ptr^)
+			}
+			for field in variant.byte_slice_fields {
+				slice_ptr := cast(^[]byte)(uintptr(&content_copy) + field.offset)
+				total_variable_size += len(slice_ptr^)
+			}
+		}
+	}
+
+	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + size_of(T) + total_variable_size
 	total_buffer_size := 4 + message_size
 	if total_buffer_size > len(buffer) {
 		return 0
@@ -175,6 +207,35 @@ build_wire_format_into_buffer :: proc(
 					len(str_ptr^),
 				)
 				offset += len(str_ptr^)
+			}
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(&content_copy, uf)
+			if !ok do continue
+			for field in variant.string_fields {
+				str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
+				if len(str_ptr^) > 0 {
+					intrinsics.mem_copy_non_overlapping(
+						rawptr(&buffer[offset]),
+						raw_data(str_ptr^),
+						len(str_ptr^),
+					)
+					offset += len(str_ptr^)
+				}
+			}
+			for field in variant.byte_slice_fields {
+				slice_ptr := cast(^[]byte)(uintptr(&content_copy) + field.offset)
+				if len(slice_ptr^) > 0 {
+					intrinsics.mem_copy_non_overlapping(
+						rawptr(&buffer[offset]),
+						raw_data(slice_ptr^),
+						len(slice_ptr^),
+					)
+					offset += len(slice_ptr^)
+				}
 			}
 		}
 	}

@@ -25,6 +25,8 @@ register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Supervision_Pong)
 	actod.register_message_type(Pubsub_Broadcast_Msg)
 	actod.register_message_type(Pubsub_Broadcast_Ack)
+	actod.register_message_type(Network_Union_Message)
+	actod.register_message_type(Network_Union_Ack)
 }
 
 Two_Node_Message :: struct {
@@ -141,6 +143,25 @@ Pubsub_Broadcast_Msg :: struct {
 Pubsub_Broadcast_Ack :: struct {
 	subscriber_id: int,
 	value:         u64,
+}
+
+Network_Union_Ping :: struct {
+	seq: u32,
+}
+
+Network_Union_Chat :: struct {
+	name:    string,
+	content: string,
+}
+
+Network_Union_Message :: union {
+	Network_Union_Ping,
+	Network_Union_Chat,
+}
+
+Network_Union_Ack :: struct {
+	seq:        u32,
+	variant_id: u8, // 1 = ping, 2 = chat
 }
 
 check_port_available :: proc(port: int) {

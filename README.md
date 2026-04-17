@@ -1,4 +1,4 @@
-# Actod <sub><sup>(WIP)</sup></sub>
+# Actod
 
 **High-performance actor runtime for the [Odin programming language](https://odin-lang.org/).**
 
@@ -187,16 +187,4 @@ sender, _   := act.spawn("sender", Sender{}, sender_behaviour,
 - TLS encryption for node-to-node communication
 - Cross-node topics
 - UDP Support
-- Cross-node log config via system messages?
-
-### Open Questions
-
-- Do we need priority mailboxes??
-- Ensure-once delivery ??
-- Process memory sharing / actor spawn process?
-- MPMC queue as actor config option?
-- State snapshotting — provide call backs, or leave to user code?
-- Actor registry max size appropriate for global mesh?
-- Network discovery
-- Dead letter queue with retry semantics
-- Crash recovery (per-node, network-aware)??
+- Cross-node config changes (system msgs)

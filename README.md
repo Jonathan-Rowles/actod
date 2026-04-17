@@ -1,10 +1,14 @@
 # Actod
 
+[![CI](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml/badge.svg)](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml)
+
 **High-performance actor runtime for the [Odin programming language](https://odin-lang.org/).**
 
 Actors run as coroutines on a fixed worker pool — no thread-per-actor overhead. Messages are copied into the receiver's memory buffer via lock-free MPSC queues. The receiver owns the message.
 
 See [docs](docs/00_getting-started.md) for the full reference.
+
+> **v0.1** — API may change before v1. Tested on Linux x86_64, macOS Apple Silicon, and Windows x86_64.
 
 ## Performance
 
@@ -35,9 +39,24 @@ See [docs](docs/00_getting-started.md) for the full reference.
 
 ### Installation
 
+Vendor actod into your project, pinned to a release tag. Submodule recommended:
+
 ```bash
-# Add as a submodule or copy to your project
-git clone https://github.com/jonathan-rowles/actod.git
+git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod
+cd vendor/actod && git checkout v0.1.0 && cd -
+git commit -am "Vendor actod v0.1.0"
+```
+
+Build with a collection flag pointing at the vendored repo:
+
+```bash
+odin build . -collection:actod=vendor/actod
+```
+
+Then import the public interface (`act.odin`) from anywhere in your project:
+
+```odin
+import act "actod"
 ```
 
 ### Minimal Application

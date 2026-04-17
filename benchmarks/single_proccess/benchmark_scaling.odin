@@ -282,12 +282,16 @@ run_scaling_benchmark :: proc() {
 		bandwidth := (result.throughput * f64(bytes)) / (1024 * 1024)
 
 		error_str: string
-		if result.err_pool_full > 0 && result.err_mailbox_full > 0 {
-			error_str = fmt.tprintf("P:%d M:%d", result.err_pool_full, result.err_mailbox_full)
-		} else if result.err_pool_full > 0 {
-			error_str = fmt.tprintf("Pool:%d", result.err_pool_full)
-		} else if result.err_mailbox_full > 0 {
-			error_str = fmt.tprintf("Mbox:%d", result.err_mailbox_full)
+		if result.err_receiver_backlogged > 0 && result.err_message_too_large > 0 {
+			error_str = fmt.tprintf(
+				"Backlog:%d TooLarge:%d",
+				result.err_receiver_backlogged,
+				result.err_message_too_large,
+			)
+		} else if result.err_receiver_backlogged > 0 {
+			error_str = fmt.tprintf("Backlog:%d", result.err_receiver_backlogged)
+		} else if result.err_message_too_large > 0 {
+			error_str = fmt.tprintf("TooLarge:%d", result.err_message_too_large)
 		} else {
 			error_str = "-"
 		}

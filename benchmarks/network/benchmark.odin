@@ -227,7 +227,7 @@ run_network_benchmark :: proc(
 		time.sleep(10 * time.Millisecond)
 	}
 
-  // TODO: fix coordination
+	// TODO: fix coordination
 	pid_timeout := time.now()
 	for global_pid_cache.responses_recv < config.actor_count {
 
@@ -324,8 +324,8 @@ run_network_benchmark :: proc(
 		send_failures = sync.atomic_load(&global_send_state.send_failures),
 		retry_count = sync.atomic_load(&global_send_state.retry_count),
 		err_actor_not_found = stats.err_actor_not_found,
-		err_mailbox_full = stats.err_mailbox_full,
-		err_pool_full = stats.err_pool_full,
+		err_receiver_backlogged = stats.err_receiver_backlogged,
+		err_message_too_large = stats.err_message_too_large,
 		err_system_shutting_down = stats.err_system_shutting_down,
 		err_network = stats.err_network,
 		err_other = stats.err_other,

@@ -136,8 +136,12 @@ create_stats_collector_behaviour :: proc() -> actod.Actor_Behaviour(Stats_Collec
 						messages_received        = data.received_messages,
 						start_time_ns            = time.to_unix_nanoseconds(data.start_time),
 						end_time_ns              = time.to_unix_nanoseconds(data.end_time),
-						err_pool_full            = sync.atomic_load(&data.errors.err_pool_full),
-						err_mailbox_full         = sync.atomic_load(&data.errors.err_mailbox_full),
+						err_receiver_backlogged  = sync.atomic_load(
+							&data.errors.err_receiver_backlogged,
+						),
+						err_message_too_large    = sync.atomic_load(
+							&data.errors.err_message_too_large,
+						),
 						err_actor_not_found      = sync.atomic_load(
 							&data.errors.err_actor_not_found,
 						),

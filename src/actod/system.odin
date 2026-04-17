@@ -296,7 +296,8 @@ send_to_node_mailbox :: #force_inline proc(actor: ^Actor(int), content: $T) -> b
 	msg.from = get_self_pid()
 	info := get_validated_message_info(T)
 
-	if !create_message(&msg, &actor.pool, content, info) {
+	alloc_err, _ := create_message(&msg, &actor.pool, content, info)
+	if alloc_err != .OK {
 		return false
 	}
 

@@ -7,8 +7,8 @@ import "core:time"
 Send_Error :: enum {
 	OK = 0,
 	ACTOR_NOT_FOUND,
-	MAILBOX_FULL,
-	POOL_FULL,
+	RECEIVER_BACKLOGGED,
+	MESSAGE_TOO_LARGE,
 	SYSTEM_SHUTTING_DOWN,
 	NETWORK_ERROR,
 	NETWORK_RING_FULL, // Ring buffer backpressure

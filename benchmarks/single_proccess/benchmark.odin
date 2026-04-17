@@ -112,8 +112,8 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	sync.atomic_store(&global_benchmark_state.send_failures, 0)
 	sync.atomic_store(&global_benchmark_state.retry_count, 0)
 	sync.atomic_store(&global_benchmark_state.err_actor_not_found, 0)
-	sync.atomic_store(&global_benchmark_state.err_mailbox_full, 0)
-	sync.atomic_store(&global_benchmark_state.err_pool_full, 0)
+	sync.atomic_store(&global_benchmark_state.err_receiver_backlogged, 0)
+	sync.atomic_store(&global_benchmark_state.err_message_too_large, 0)
 	sync.atomic_store(&global_benchmark_state.err_system_shutting_down, 0)
 	sync.atomic_store(&global_benchmark_state.err_network, 0)
 	sync.atomic_store(&global_benchmark_state.err_other, 0)
@@ -146,7 +146,9 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 			home_worker = hw,
 		)
 		name := fmt.tprintf("recv-%d", i)
-		data := shared.Benchmark_Actor_Data{id = i}
+		data := shared.Benchmark_Actor_Data {
+			id = i,
+		}
 		pid, ok := actod.spawn(name, data, receiver_behaviour, actor_config)
 		if !ok do panic("Failed to spawn receiver")
 		actors[i] = pid
@@ -235,19 +237,23 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	latency_ns := (duration_sec * 1e9) / f64(final_received)
 
 	return shared.Benchmark_Result {
-		config              = config,
-		duration            = elapsed,
-		messages_sent       = final_sent,
-		messages_received   = final_received,
-		throughput          = throughput,
-		bandwidth           = bandwidth,
-		latency_ns          = latency_ns,
+		config = config,
+		duration = elapsed,
+		messages_sent = final_sent,
+		messages_received = final_received,
+		throughput = throughput,
+		bandwidth = bandwidth,
+		latency_ns = latency_ns,
 		err_actor_not_found = sync.atomic_load(&global_benchmark_state.err_actor_not_found),
-		err_mailbox_full    = sync.atomic_load(&global_benchmark_state.err_mailbox_full),
-		err_pool_full       = sync.atomic_load(&global_benchmark_state.err_pool_full),
-		err_system_shutting_down = sync.atomic_load(&global_benchmark_state.err_system_shutting_down),
-		err_network         = sync.atomic_load(&global_benchmark_state.err_network),
-		err_other           = sync.atomic_load(&global_benchmark_state.err_other),
+		err_receiver_backlogged = sync.atomic_load(
+			&global_benchmark_state.err_receiver_backlogged,
+		),
+		err_message_too_large = sync.atomic_load(&global_benchmark_state.err_message_too_large),
+		err_system_shutting_down = sync.atomic_load(
+			&global_benchmark_state.err_system_shutting_down,
+		),
+		err_network = sync.atomic_load(&global_benchmark_state.err_network),
+		err_other = sync.atomic_load(&global_benchmark_state.err_other),
 	}
 }
 

@@ -40,7 +40,8 @@ test_basic_alloc_free :: proc(t: ^testing.T) {
 	defer cleanup_pool(&pool)
 
 	size := 256
-	ptr := message_alloc(&pool, size)
+	ptr, err := message_alloc(&pool, size)
+	testing.expect(t, err == .OK, "Allocation should succeed")
 	testing.expect(t, ptr != nil, "Pointer should not be nil")
 
 	data := cast([^]byte)ptr
@@ -66,7 +67,8 @@ test_multiple_allocations :: proc(t: ^testing.T) {
 	defer delete(ptrs)
 
 	for i in 0 ..< len(sizes) {
-		ptr := message_alloc(&pool, sizes[i])
+		ptr, err := message_alloc(&pool, sizes[i])
+		testing.expect(t, err == .OK, "Allocation should succeed")
 		testing.expect(t, ptr != nil, "Pointer should not be nil")
 		ptrs[i] = ptr
 	}
@@ -83,15 +85,13 @@ test_large_allocation :: proc(t: ^testing.T) {
 	defer cleanup_pool(&pool)
 
 	size := pool.page_size - size_of([2]int)
-	ptr := message_alloc(&pool, size)
+	ptr, err := message_alloc(&pool, size)
+	testing.expect(t, err == .OK, "Allocation at max size should succeed")
 	testing.expect(t, ptr != nil, "Pointer should not be nil")
 
-	old_logger := context.logger
-	context.logger = {}
-	defer {context.logger = old_logger}
-
 	size = pool.page_size + 1
-	ptr = message_alloc(&pool, size)
+	ptr, err = message_alloc(&pool, size)
+	testing.expect(t, err == .SIZE_EXCEEDS_PAGE, "Oversized alloc should return SIZE_EXCEEDS_PAGE")
 	testing.expect(t, ptr == nil, "Pointer should be nil for failed allocation")
 }
 
@@ -122,7 +122,7 @@ test_concurrent_allocations :: proc(t: ^testing.T) {
 		defer delete(ptrs)
 
 		for i in 0 ..< allocations_per_thread {
-			ptr := message_alloc(work_data.pool, allocation_size)
+			ptr, _ := message_alloc(work_data.pool, allocation_size)
 			if ptr != nil {
 				ptrs[i] = ptr
 				data := cast([^]byte)ptr
@@ -176,7 +176,7 @@ test_batch_free :: proc(t: ^testing.T) {
 
 	size := 512
 	for i in 0 ..< FREE_BATCH_SIZE - 1 {
-		ptr := message_alloc(&pool, size)
+		ptr, _ := message_alloc(&pool, size)
 		testing.expect(t, ptr != nil, fmt.tprintf("Allocation %d should succeed", i))
 		if ptr != nil {
 			message_free_deferred(&buffer, ptr, size)
@@ -185,7 +185,7 @@ test_batch_free :: proc(t: ^testing.T) {
 
 	testing.expect(t, buffer.count == FREE_BATCH_SIZE - 1, "Buffer should not be flushed yet")
 
-	ptr := message_alloc(&pool, size)
+	ptr, _ := message_alloc(&pool, size)
 	testing.expect(t, ptr != nil, "Final allocation should succeed")
 	if ptr != nil {
 		message_free_deferred(&buffer, ptr, size)
@@ -207,11 +207,16 @@ test_pool_exhaustion :: proc(t: ^testing.T) {
 	successful_allocs := 0
 
 	for i in 0 ..< len(ptrs) {
-		ptr := message_alloc(&pool, size)
+		ptr, err := message_alloc(&pool, size)
 		if ptr != nil {
 			ptrs[i] = ptr
 			successful_allocs += 1
 		} else {
+			testing.expect(
+				t,
+				err == .POOL_EXHAUSTED,
+				"Exhausted pool should return POOL_EXHAUSTED",
+			)
 			testing.expect(
 				t,
 				successful_allocs == pool.max_pages,
@@ -232,7 +237,7 @@ test_pool_exhaustion :: proc(t: ^testing.T) {
 		}
 	}
 
-	ptr := message_alloc(&pool, size)
+	ptr, _ := message_alloc(&pool, size)
 	testing.expect(t, ptr != nil, "Should be able to allocate after freeing")
 
 	for p in ptrs {
@@ -255,7 +260,7 @@ test_message_reuse :: proc(t: ^testing.T) {
 	defer delete(seen_ptrs)
 
 	for i in 0 ..< iterations {
-		ptr := message_alloc(&pool, size)
+		ptr, _ := message_alloc(&pool, size)
 		testing.expect(t, ptr != nil, fmt.tprintf("Allocation %d should succeed", i))
 
 		if ptr != nil {

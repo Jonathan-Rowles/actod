@@ -3,20 +3,19 @@ package shared
 import "../../src/actod"
 
 Message_Size :: enum {
-	Empty  = 0,      // 0 bytes
-	INLINE = 32,     // 32 bytes - exactly inline size
-	STRING = 28,     // 28 bytes - fits in inline
-	MEDIUM = 256,    // 256 bytes
-	LARGE  = 1024,   // 1 KB
-	XLARGE = 4096,   // 4 KB
-	HUGE   = 32768,  // 32 KB
-	MEGA   = 65536,  // 64 KB
+	Empty  = 0, // 0 bytes
+	INLINE = 32, // 32 bytes - exactly inline size
+	STRING = 28, // 28 bytes - fits in inline
+	MEDIUM = 256, // 256 bytes
+	LARGE  = 1024, // 1 KB
+	XLARGE = 4096, // 4 KB
+	HUGE   = 32768, // 32 KB
+	MEGA   = 65536, // 64 KB
 	MEGA2  = 131072, // 128 KB
 	MEGA4  = 262144, // 256 KB
 }
 
-Empty_Message :: struct {
-}
+Empty_Message :: struct {}
 
 Inline_Message :: struct {
 	data: [32]byte,
@@ -55,14 +54,14 @@ Mega4_Message :: struct {
 }
 
 Start_Test_Message :: struct {
-	test_id:        int,
-	message_size:   Message_Size,
-	message_count:  int,
-	actor_count:    int,
-	sender_count:   int,
-	warmup_count:   int,
-	test_category:  Test_Category,
-	dedicated:      bool,
+	test_id:       int,
+	message_size:  Message_Size,
+	message_count: int,
+	actor_count:   int,
+	sender_count:  int,
+	warmup_count:  int,
+	test_category: Test_Category,
+	dedicated:     bool,
 }
 
 Ready_Message :: struct {
@@ -80,22 +79,22 @@ Get_PID_Response :: struct {
 }
 
 Test_Complete_Message :: struct {
-	test_id:      int,
-	sender_id:    int,
+	test_id:       int,
+	sender_id:     int,
 	messages_sent: u64,
 }
 
 Stats_Report_Message :: struct {
 	test_id:                  int,
 	messages_received:        u64,
-	start_time_ns:           i64,
-	end_time_ns:             i64,
-	err_pool_full:           u64,
-	err_mailbox_full:        u64,
-	err_actor_not_found:     u64,
+	start_time_ns:            i64,
+	end_time_ns:              i64,
+	err_receiver_backlogged:  u64,
+	err_message_too_large:    u64,
+	err_actor_not_found:      u64,
 	err_system_shutting_down: u64,
-	err_network:             u64,
-	err_other:               u64,
+	err_network:              u64,
+	err_other:                u64,
 }
 
 Test_Category :: enum {

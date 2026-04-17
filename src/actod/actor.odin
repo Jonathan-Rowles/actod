@@ -37,8 +37,8 @@ Actor_State_Set :: bit_set[Actor_State]
 Send_Error :: enum {
 	OK = 0,
 	ACTOR_NOT_FOUND,
-	MAILBOX_FULL,
-	POOL_FULL,
+	RECEIVER_BACKLOGGED, // Mailbox full or message pool exhausted — receiver not draining
+	MESSAGE_TOO_LARGE, // Message exceeds actor's configured page_size
 	SYSTEM_SHUTTING_DOWN,
 	NETWORK_ERROR,
 	NETWORK_RING_FULL, // Ring buffer backpressure
@@ -1352,8 +1352,42 @@ push_to_mailbox :: #force_inline proc(
 		}
 	}
 
-	log.errorf("mailbox full - failed to send message to %s", get_actor_name(to))
-	return .MAILBOX_FULL
+	log.errorf(
+		"send to %s failed: all %d priority mailboxes full after %d retries — receiver is backlogged",
+		get_actor_name(to),
+		MAILBOX_PRIORITY_COUNT,
+		MAX_SEND_RETRIES,
+	)
+	return .RECEIVER_BACKLOGGED
+}
+
+@(private)
+report_alloc_error :: #force_inline proc(
+	err: Alloc_Error,
+	attempted_size: int,
+	pool: ^Pool,
+	to: PID,
+) -> Send_Error {
+	switch err {
+	case .OK:
+		return .OK
+	case .SIZE_EXCEEDS_PAGE:
+		log.errorf(
+			"send to %s failed: message size %d B exceeds actor page size %d B — increase actor_config.page_size",
+			get_actor_name(to),
+			attempted_size,
+			pool.page_size,
+		)
+		return .MESSAGE_TOO_LARGE
+	case .POOL_EXHAUSTED:
+		log.errorf(
+			"send to %s failed: message pool exhausted (max %d pages in use) — receiver is backlogged",
+			get_actor_name(to),
+			pool.max_pages,
+		)
+		return .RECEIVER_BACKLOGGED
+	}
+	return .RECEIVER_BACKLOGGED
 }
 
 @(private)
@@ -1384,16 +1418,17 @@ send :: #force_inline proc(to: PID, content: $T, actor: ^Actor(int)) -> Send_Err
 
 	if current_state == .STOPPING {
 		when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-			if create_message(&msg, &actor.pool, content, info) {
+			alloc_err, _ := create_message(&msg, &actor.pool, content, info)
+			if alloc_err == .OK {
 				return .OK
 			}
 		}
 		return .ACTOR_NOT_FOUND
 	}
 
-	if !create_message(&msg, &actor.pool, content, info) {
-		log.errorf("pool full - failed to allocate message for %s", get_actor_name(to))
-		return .POOL_FULL
+	alloc_err, attempted_size := create_message(&msg, &actor.pool, content, info)
+	if alloc_err != .OK {
+		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
 	}
 
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
@@ -1735,7 +1770,10 @@ create_message :: #force_inline proc(
 	pool: ^Pool,
 	value: $T,
 	info: Message_Type_Info,
-) -> bool {
+) -> (
+	Alloc_Error,
+	int,
+) {
 	if info.flags == {} {
 		when size_of(T) <= INLINE_MESSAGE_SIZE {
 			msg.inline_type = T
@@ -1744,9 +1782,9 @@ create_message :: #force_inline proc(
 		} else {
 			aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size_of(T), CACHE_LINE_SIZE)
 
-			buffer := message_alloc(pool, aligned_size)
-			if buffer == nil {
-				return false
+			buffer, alloc_err := message_alloc(pool, aligned_size)
+			if alloc_err != .OK {
+				return alloc_err, aligned_size
 			}
 
 			header := cast(^Type_Header)buffer
@@ -1764,7 +1802,7 @@ create_message :: #force_inline proc(
 			msg.content = buffer
 			msg.inline_type = nil
 		}
-		return true
+		return .OK, 0
 	}
 
 	val := value
@@ -1782,9 +1820,9 @@ create_message :: #force_inline proc(
 			CACHE_LINE_SIZE,
 		)
 
-		buffer := message_alloc(pool, aligned_size)
-		if buffer == nil {
-			return false
+		buffer, alloc_err := message_alloc(pool, aligned_size)
+		if alloc_err != .OK {
+			return alloc_err, aligned_size
 		}
 
 		header := cast(^Type_Header)buffer
@@ -1799,7 +1837,7 @@ create_message :: #force_inline proc(
 		msg.inline_type = nil
 	}
 
-	return true
+	return .OK, 0
 }
 
 @(private)
@@ -1808,7 +1846,10 @@ create_message_from_payload :: #force_inline proc(
 	pool: ^Pool,
 	payload: []byte,
 	info: Message_Type_Info,
-) -> bool {
+) -> (
+	Alloc_Error,
+	int,
+) {
 	struct_size := info.size
 
 	if info.flags == {} {
@@ -1820,13 +1861,13 @@ create_message_from_payload :: #force_inline proc(
 				raw_data(payload),
 				struct_size,
 			)
-			return true
+			return .OK, 0
 		}
 
 		aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + struct_size, CACHE_LINE_SIZE)
-		buffer := message_alloc(pool, aligned_size)
-		if buffer == nil {
-			return false
+		buffer, alloc_err := message_alloc(pool, aligned_size)
+		if alloc_err != .OK {
+			return alloc_err, aligned_size
 		}
 
 		header := cast(^Type_Header)buffer
@@ -1840,7 +1881,7 @@ create_message_from_payload :: #force_inline proc(
 
 		msg.content = buffer
 		msg.inline_type = nil
-		return true
+		return .OK, 0
 	}
 
 	// SLOW PATH
@@ -1858,13 +1899,13 @@ create_message_from_payload :: #force_inline proc(
 			info,
 			struct_size,
 		)
-		return true
+		return .OK, 0
 	}
 
 	aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + total_message_size, CACHE_LINE_SIZE)
-	buffer := message_alloc(pool, aligned_size)
-	if buffer == nil {
-		return false
+	buffer, alloc_err := message_alloc(pool, aligned_size)
+	if alloc_err != .OK {
+		return alloc_err, aligned_size
 	}
 
 	header := cast(^Type_Header)buffer
@@ -1883,7 +1924,7 @@ create_message_from_payload :: #force_inline proc(
 
 	msg.content = buffer
 	msg.inline_type = nil
-	return true
+	return .OK, 0
 }
 
 @(private)
@@ -2005,9 +2046,9 @@ send_from_payload :: #force_inline proc(
 	msg: Message
 	msg.from = from_pid
 
-	if !create_message_from_payload(&msg, &actor.pool, payload, info) {
-		log.errorf("pool full - failed to allocate message for %s", get_actor_name(to_pid))
-		return .POOL_FULL
+	alloc_err, attempted_size := create_message_from_payload(&msg, &actor.pool, payload, info)
+	if alloc_err != .OK {
+		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
 	}
 
 	result := push_to_mailbox(actor, msg, to_pid, priority)

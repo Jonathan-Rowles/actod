@@ -33,8 +33,8 @@ Benchmark_Result :: struct {
 	send_failures:            u64,
 	retry_count:              u64,
 	err_actor_not_found:      u64,
-	err_mailbox_full:         u64,
-	err_pool_full:            u64,
+	err_receiver_backlogged:  u64,
+	err_message_too_large:    u64,
 	err_system_shutting_down: u64,
 	err_network:              u64,
 	err_other:                u64,
@@ -49,10 +49,10 @@ Size_Baseline :: struct {
 }
 
 Network_Config :: struct {
-	receiver_port:    int,
-	sender_port:      int,
-	receiver_host:    string,
-	auth_password:    string,
+	receiver_port: int,
+	sender_port:   int,
+	receiver_host: string,
+	auth_password: string,
 }
 
 DEFAULT_RECEIVER_PORT :: 41337

@@ -5,6 +5,10 @@ import "core:math/rand"
 import "core:sync"
 import "core:testing"
 import "core:thread"
+import "core:time"
+
+@(private = "file")
+global_registry_swap_mutex: sync.Mutex
 
 CONCURRENT_THREADS :: 20
 OPS_PER_THREAD :: 10000
@@ -426,6 +430,7 @@ stress_test :: proc(t: ^testing.T) {
 		threads[i] = thread.create_and_start_with_data(&contexts[i], worker)
 	}
 
+	time.sleep(50 * time.Millisecond)
 	sync.atomic_store(&stop_flag, true)
 
 	for i in 0 ..< STRESS_THREADS {
@@ -725,6 +730,9 @@ get_node_id_consistency_test :: proc(t: ^testing.T) {
 
 @(test)
 handle_node_disconnect_removes_remote_actors_test :: proc(t: ^testing.T) {
+	sync.lock(&global_registry_swap_mutex)
+	defer sync.unlock(&global_registry_swap_mutex)
+
 	test_registry := make_test_registry()
 	defer free(test_registry)
 	clear(test_registry)
@@ -786,6 +794,9 @@ handle_node_disconnect_ignores_local_node_test :: proc(t: ^testing.T) {
 
 @(test)
 handle_node_disconnect_empty_registry_test :: proc(t: ^testing.T) {
+	sync.lock(&global_registry_swap_mutex)
+	defer sync.unlock(&global_registry_swap_mutex)
+
 	test_registry := make_test_registry()
 	defer free(test_registry)
 	clear(test_registry)

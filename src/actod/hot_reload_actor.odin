@@ -16,7 +16,7 @@ import "core:strings"
 import "core:sync"
 
 @(private)
-create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> bool {
+create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> (Alloc_Error, int) {
 	info, has_info := get_type_info(content.id)
 	size := type_info_of(content.id).size
 
@@ -27,9 +27,9 @@ create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> bool {
 			intrinsics.mem_copy_non_overlapping(&msg.inline_data, content.data, size)
 		} else {
 			aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size, CACHE_LINE_SIZE)
-			buffer := message_alloc(pool, aligned_size)
-			if buffer == nil {
-				return false
+			buffer, alloc_err := message_alloc(pool, aligned_size)
+			if alloc_err != .OK {
+				return alloc_err, aligned_size
 			}
 			header := cast(^Type_Header)buffer
 			header.type_id = content.id
@@ -39,7 +39,7 @@ create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> bool {
 			msg.content = buffer
 			msg.inline_type = nil
 		}
-		return true
+		return .OK, 0
 	}
 
 	variable_size := calculate_variable_data_size(content.data, info)
@@ -55,9 +55,9 @@ create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> bool {
 			TYPE_HEADER_SIZE + size + variable_size,
 			CACHE_LINE_SIZE,
 		)
-		buffer := message_alloc(pool, aligned_size)
-		if buffer == nil {
-			return false
+		buffer, alloc_err := message_alloc(pool, aligned_size)
+		if alloc_err != .OK {
+			return alloc_err, aligned_size
 		}
 		header := cast(^Type_Header)buffer
 		header.type_id = content.id
@@ -68,7 +68,7 @@ create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> bool {
 		msg.content = buffer
 		msg.inline_type = nil
 	}
-	return true
+	return .OK, 0
 }
 
 @(private)
@@ -89,9 +89,9 @@ send_any :: proc(to: PID, content: any, actor: ^Actor(int)) -> Send_Error {
 		return .ACTOR_NOT_FOUND
 	}
 
-	if !create_message_any(&msg, &actor.pool, content) {
-		log.errorf("pool full - failed to allocate message for %s", get_actor_name(to))
-		return .POOL_FULL
+	alloc_err, attempted_size := create_message_any(&msg, &actor.pool, content)
+	if alloc_err != .OK {
+		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
 	}
 
 	result := push_to_mailbox(actor, msg, to, get_send_priority())

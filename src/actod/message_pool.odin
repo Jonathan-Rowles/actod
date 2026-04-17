@@ -90,10 +90,16 @@ init_pool :: proc(
 }
 
 @(private)
-message_alloc :: proc(page_pool: ^Pool, size: int) -> rawptr {
+Alloc_Error :: enum {
+	OK = 0,
+	SIZE_EXCEEDS_PAGE,
+	POOL_EXHAUSTED,
+}
+
+@(private)
+message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 	if size > page_pool.page_size - size_of([2]int) {
-		log.error("page size too small")
-		return nil
+		return nil, .SIZE_EXCEEDS_PAGE
 	}
 
 	for attempt := 0; attempt < MAX_ALLOC_RETRIES; attempt += 1 {
@@ -119,12 +125,12 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> rawptr {
 					size_of([2]int))
 				metadata_ptr[0] = page_index
 				metadata_ptr[1] = size
-				return ptr
+				return ptr, .OK
 			}
 		} else if diff < 0 {
 			slot := sync.atomic_load_explicit(&page_pool.allocated_count, .Relaxed)
 			if slot >= page_pool.max_pages {
-				return nil
+				return nil, .POOL_EXHAUSTED
 			}
 
 			if _, ok := sync.atomic_compare_exchange_strong_explicit(
@@ -136,7 +142,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> rawptr {
 			); ok {
 				ptr, _ := mem.alloc(page_pool.page_size, 1, page_pool.allocator)
 				if ptr == nil {
-					return nil
+					return nil, .POOL_EXHAUSTED
 				}
 				page_pool.pages[slot] = ptr
 
@@ -145,14 +151,14 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> rawptr {
 					size_of([2]int))
 				metadata_ptr[0] = slot
 				metadata_ptr[1] = size
-				return ptr
+				return ptr, .OK
 			}
 		} else {
 			intrinsics.cpu_relax()
 		}
 	}
 
-	return nil
+	return nil, .POOL_EXHAUSTED
 }
 
 @(private)

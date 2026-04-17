@@ -36,11 +36,13 @@ spawn_benchmark_node :: proc(role: string, port: int) -> Benchmark_Process {
 
 	proc_desc := os.Process_Desc {
 		command = []string{exe_path},
-		env     = make_bench_env([]string {
-			fmt.tprintf("ACTOD_BENCH_NODE=%s", role),
-			fmt.tprintf("BENCH_PORT=%d", port),
-			"BENCH_AUTH=bench_password",
-		}),
+		env     = make_bench_env(
+			[]string {
+				fmt.tprintf("ACTOD_BENCH_NODE=%s", role),
+				fmt.tprintf("BENCH_PORT=%d", port),
+				"BENCH_AUTH=bench_password",
+			},
+		),
 		stdout  = os.stdout,
 		stderr  = os.stderr,
 	}
@@ -148,11 +150,13 @@ run_benchmark_tests :: proc() {
 		bandwidth := (result.throughput * f64(bytes)) / (1024 * 1024)
 
 		error_str: string
-		if result.err_pool_full > 0 || result.err_mailbox_full > 0 || result.err_network > 0 {
+		if result.err_receiver_backlogged > 0 ||
+		   result.err_message_too_large > 0 ||
+		   result.err_network > 0 {
 			error_str = fmt.tprintf(
-				"P:%d M:%d N:%d",
-				result.err_pool_full,
-				result.err_mailbox_full,
+				"Backlog:%d TooLarge:%d Net:%d",
+				result.err_receiver_backlogged,
+				result.err_message_too_large,
 				result.err_network,
 			)
 		} else {

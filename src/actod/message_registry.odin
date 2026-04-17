@@ -169,7 +169,7 @@ register_message_type :: proc "contextless" ($T: typeid) {
 		delete(temp_byte_slice_fields)
 		cleanup_temp_union_fields(temp_union_fields[:])
 		delete(temp_union_fields)
-		log.panicf(
+		fmt.panicf(
 			"\n\nACTOR SAFETY ERROR: Message type '%v' contains unsafe field!\n" +
 			"  Unsafe field: %s\n" +
 			"  Use fixed-size arrays [N]T instead of slices []T.\n" +

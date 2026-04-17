@@ -13,8 +13,8 @@ Benchmark_State :: struct {
 	send_failures:            u64,
 	retry_count:              u64,
 	err_actor_not_found:      u64,
-	err_mailbox_full:         u64,
-	err_pool_full:            u64,
+	err_receiver_backlogged:  u64,
+	err_message_too_large:    u64,
 	err_system_shutting_down: u64,
 	err_network:              u64,
 	err_ring_full:            u64,
@@ -42,10 +42,10 @@ track_send_error :: #force_inline proc(state: ^Benchmark_State, err: actod.Send_
 	// Shouldn't happen
 	case .ACTOR_NOT_FOUND:
 		sync.atomic_add(&state.err_actor_not_found, 1)
-	case .MAILBOX_FULL:
-		sync.atomic_add(&state.err_mailbox_full, 1)
-	case .POOL_FULL:
-		sync.atomic_add(&state.err_pool_full, 1)
+	case .RECEIVER_BACKLOGGED:
+		sync.atomic_add(&state.err_receiver_backlogged, 1)
+	case .MESSAGE_TOO_LARGE:
+		sync.atomic_add(&state.err_message_too_large, 1)
 	case .SYSTEM_SHUTTING_DOWN:
 		sync.atomic_add(&state.err_system_shutting_down, 1)
 	case .NETWORK_ERROR:

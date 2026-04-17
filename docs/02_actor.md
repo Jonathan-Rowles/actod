@@ -126,8 +126,8 @@ All send functions return `Send_Error`:
 Send_Error :: enum {
     OK,
     ACTOR_NOT_FOUND,
-    MAILBOX_FULL,
-    POOL_FULL,
+    RECEIVER_BACKLOGGED, // mailbox full or message pool exhausted
+    MESSAGE_TOO_LARGE,   // message exceeds actor's configured page_size
     SYSTEM_SHUTTING_DOWN,
     NETWORK_ERROR,
     NETWORK_RING_FULL,

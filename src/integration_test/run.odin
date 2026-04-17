@@ -1,6 +1,7 @@
 package integration
 
 import "../actod"
+import "../pkgs/threads_act"
 import "core:fmt"
 import "core:os"
 import "core:sync"
@@ -302,7 +303,7 @@ Test_Thread_Context :: struct {
 	result: ^Test_Result,
 }
 
-TEST_TIMEOUT_SECONDS :: 10 when ODIN_OS != .Windows else 20
+TEST_TIMEOUT_SECONDS :: 30
 
 Watchdog_Data :: struct {
 	process:   os.Process,
@@ -399,19 +400,24 @@ run_tests_parallel :: proc(t: ^testing.T) {
 		delete(threads)
 	}
 
-	fmt.printf("Running %d tests in parallel...\n", len(tests))
+	max_concurrent := max(2, threads_act.get_cpu_count() * 2)
+	fmt.printf("Running %d tests in parallel (max %d at a time)...\n", len(tests), max_concurrent)
 
-	for entry, i in tests {
-		contexts[i] = Test_Thread_Context {
-			entry  = entry,
-			result = &results[i],
+	for batch_start := 0; batch_start < len(tests); batch_start += max_concurrent {
+		batch_end := min(batch_start + max_concurrent, len(tests))
+
+		for i in batch_start ..< batch_end {
+			contexts[i] = Test_Thread_Context {
+				entry  = tests[i],
+				result = &results[i],
+			}
+			threads[i] = thread.create_and_start_with_data(&contexts[i], test_thread_proc)
 		}
-		threads[i] = thread.create_and_start_with_data(&contexts[i], test_thread_proc)
-	}
 
-	for th in threads {
-		if th != nil {
-			thread.join(th)
+		for i in batch_start ..< batch_end {
+			if threads[i] != nil {
+				thread.join(threads[i])
+			}
 		}
 	}
 

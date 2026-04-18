@@ -191,7 +191,7 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 	   .CONTROL in header.flags &&
 	   len(header.payload) >= 1 &&
 	   header.payload[0] == CTRL_MSG_POOL_RING {
-		defer delete(first_msg)
+		defer delete(first_msg, actor_system_allocator)
 
 		if len(header.payload) < 4 { 	// type(1) + name_len(2) + at least 1 byte name
 			log.warn("Pool ring control message too short")
@@ -252,7 +252,7 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 		parent_pid = NODE.pid,
 	)
 	if !ok {
-		delete(first_msg)
+		delete(first_msg, actor_system_allocator)
 		return false
 	}
 
@@ -272,9 +272,9 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket) -> []byte {
 		return nil
 	}
 
-	msg := make([]byte, msg_size)
+	msg := make([]byte, msg_size, actor_system_allocator)
 	if !tcp_recv_exactly(sock, msg) {
-		delete(msg)
+		delete(msg, actor_system_allocator)
 		return nil
 	}
 	return msg

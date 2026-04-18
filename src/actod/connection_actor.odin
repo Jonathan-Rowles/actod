@@ -198,7 +198,7 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 	delete(data.pending_messages)
 
 	if data.first_message != nil {
-		delete(data.first_message)
+		delete(data.first_message, actor_system_allocator)
 		data.first_message = nil
 	}
 }
@@ -229,7 +229,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 		if data.is_incoming && data.tcp_socket != 0 {
 			if data.first_message != nil {
 				handle_incoming_data(data, data.first_message)
-				delete(data.first_message)
+				delete(data.first_message, actor_system_allocator)
 				data.first_message = nil
 			}
 			start_io_thread(data)

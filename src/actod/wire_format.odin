@@ -1,6 +1,5 @@
 package actod
 
-import "base:intrinsics"
 import "base:runtime"
 import "core:encoding/endian"
 
@@ -71,43 +70,12 @@ parse_network_header :: proc(raw_data: []byte) -> (header: Parsed_Network_Header
 	return header, true
 }
 
-wire_format_exact_size :: proc(content: $T, name_len: int) -> u32 {
-	info := get_validated_message_info(T)
-	base := 4 + NETWORK_HEADER_SIZE + name_len + size_of(T)
-
-	if info.flags == {} {
-		return u32(base)
-	}
-
-	content_ref := content
-	total_variable_size := 0
-
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(&content_ref) + field.offset)
-			total_variable_size += len(str_ptr^)
-		}
-	}
-
-	if .Has_Unions in info.flags {
-		for uf in info.union_fields {
-			variant, ok := get_active_union_variant(&content_ref, uf)
-			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(&content_ref) + field.offset)
-				total_variable_size += len(str_ptr^)
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(&content_ref) + field.offset)
-				total_variable_size += len(slice_ptr^)
-			}
-		}
-	}
-
-	return u32(base + total_variable_size)
+wire_format_exact_size :: #force_inline proc(content: $T, name_len: int) -> u32 {
+	v := content
+	return wire_format_exact_size_impl(&v, get_validated_message_info_ptr(T), name_len)
 }
 
-build_wire_format_into_buffer :: proc(
+build_wire_format_into_buffer :: #force_inline proc(
 	buffer: []byte,
 	content: $T,
 	to_handle: Handle,
@@ -115,132 +83,16 @@ build_wire_format_into_buffer :: proc(
 	base_flags: Network_Message_Flags,
 	to_name: string,
 ) -> u32 {
-	info := get_validated_message_info(T)
-	flags := base_flags | {.POD_PAYLOAD}
-
-	to_name_bytes: []byte
-	to_name_len: u16 = 0
-	actual_to_handle := to_handle
-	if .BY_NAME in base_flags {
-		to_name_bytes = transmute([]byte)to_name
-		to_name_len = u16(len(to_name_bytes))
-		actual_to_handle = Handle {
-			idx = u32(to_name_len),
-			gen = 0,
-		}
-	}
-
-	if info.flags == {} {
-		message_size := NETWORK_HEADER_SIZE + int(to_name_len) + size_of(T)
-		total_buffer_size := 4 + message_size
-		if total_buffer_size > len(buffer) {
-			return 0
-		}
-
-		endian.put_u32(buffer[0:4], .Little, u32(message_size))
-		write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
-
-		offset := 4 + NETWORK_HEADER_SIZE
-		if .BY_NAME in base_flags {
-			copy(buffer[offset:], to_name_bytes)
-			offset += int(to_name_len)
-		}
-
-		when size_of(T) > 0 {
-			content_pod := content
-			intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), &content_pod, size_of(T))
-		}
-		return u32(total_buffer_size)
-	}
-
-	content_copy := content
-	total_variable_size := 0
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-			total_variable_size += len(str_ptr^)
-		}
-	}
-
-	if .Has_Unions in info.flags {
-		for uf in info.union_fields {
-			variant, ok := get_active_union_variant(&content_copy, uf)
-			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-				total_variable_size += len(str_ptr^)
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(&content_copy) + field.offset)
-				total_variable_size += len(slice_ptr^)
-			}
-		}
-	}
-
-	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + size_of(T) + total_variable_size
-	total_buffer_size := 4 + message_size
-	if total_buffer_size > len(buffer) {
-		return 0
-	}
-
-	endian.put_u32(buffer[0:4], .Little, u32(message_size))
-	write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
-
-	offset := 4 + NETWORK_HEADER_SIZE
-	if .BY_NAME in base_flags {
-		copy(buffer[offset:], to_name_bytes)
-		offset += int(to_name_len)
-	}
-
-	when size_of(T) > 0 {
-		intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), &content_copy, size_of(T))
-	}
-	offset += size_of(T)
-
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-			if len(str_ptr^) > 0 {
-				intrinsics.mem_copy_non_overlapping(
-					rawptr(&buffer[offset]),
-					raw_data(str_ptr^),
-					len(str_ptr^),
-				)
-				offset += len(str_ptr^)
-			}
-		}
-	}
-
-	if .Has_Unions in info.flags {
-		for uf in info.union_fields {
-			variant, ok := get_active_union_variant(&content_copy, uf)
-			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-				if len(str_ptr^) > 0 {
-					intrinsics.mem_copy_non_overlapping(
-						rawptr(&buffer[offset]),
-						raw_data(str_ptr^),
-						len(str_ptr^),
-					)
-					offset += len(str_ptr^)
-				}
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(&content_copy) + field.offset)
-				if len(slice_ptr^) > 0 {
-					intrinsics.mem_copy_non_overlapping(
-						rawptr(&buffer[offset]),
-						raw_data(slice_ptr^),
-						len(slice_ptr^),
-					)
-					offset += len(slice_ptr^)
-				}
-			}
-		}
-	}
-
-	return u32(total_buffer_size)
+	v := content
+	return build_wire_format_into_buffer_impl(
+		buffer,
+		&v,
+		get_validated_message_info_ptr(T),
+		to_handle,
+		from_handle,
+		base_flags,
+		to_name,
+	)
 }
 
 Recv_Frame_Error :: enum {

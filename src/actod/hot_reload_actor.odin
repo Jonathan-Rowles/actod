@@ -16,104 +16,12 @@ import "core:strings"
 import "core:sync"
 
 @(private)
-create_message_any :: proc(msg: ^Message, pool: ^Pool, content: any) -> (Alloc_Error, int) {
-	info, has_info := get_type_info(content.id)
-	size := type_info_of(content.id).size
-
-	if !has_info || info.flags == {} {
-		if size <= INLINE_MESSAGE_SIZE {
-			msg.inline_type = content.id
-			msg.content = nil
-			intrinsics.mem_copy_non_overlapping(&msg.inline_data, content.data, size)
-		} else {
-			aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size, CACHE_LINE_SIZE)
-			buffer, alloc_err := message_alloc(pool, aligned_size)
-			if alloc_err != .OK {
-				return alloc_err, aligned_size
-			}
-			header := cast(^Type_Header)buffer
-			header.type_id = content.id
-			header.size = aligned_size
-			data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
-			intrinsics.mem_copy_non_overlapping(data_ptr, content.data, size)
-			msg.content = buffer
-			msg.inline_type = nil
-		}
-		return .OK, 0
-	}
-
-	variable_size := calculate_variable_data_size(content.data, info)
-	total_message_size := size + variable_size
-
-	if total_message_size <= INLINE_MESSAGE_SIZE {
-		msg.inline_type = content.id
-		msg.content = INLINE_NEEDS_FIXUP
-		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], content.data, size)
-		copy_variable_data(&msg.inline_data[0], &msg.inline_data[0], content.data, info, size)
-	} else {
-		aligned_size := mem.align_forward_int(
-			TYPE_HEADER_SIZE + size + variable_size,
-			CACHE_LINE_SIZE,
-		)
-		buffer, alloc_err := message_alloc(pool, aligned_size)
-		if alloc_err != .OK {
-			return alloc_err, aligned_size
-		}
-		header := cast(^Type_Header)buffer
-		header.type_id = content.id
-		header.size = aligned_size
-		data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
-		intrinsics.mem_copy_non_overlapping(data_ptr, content.data, size)
-		copy_variable_data(buffer, data_ptr, content.data, info, TYPE_HEADER_SIZE + size)
-		msg.content = buffer
-		msg.inline_type = nil
-	}
-	return .OK, 0
-}
-
-@(private)
-send_any :: proc(to: PID, content: any, actor: ^Actor(int)) -> Send_Error {
-	if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
-		return .SYSTEM_SHUTTING_DOWN
-	}
-
-	current_state := sync.atomic_load(&actor.state)
-	if current_state != .RUNNING && current_state != .IDLE && current_state != .INIT {
-		return .ACTOR_NOT_FOUND
-	}
-
-	msg: Message
-	msg.from = get_self_pid()
-
-	if current_state == .STOPPING {
-		return .ACTOR_NOT_FOUND
-	}
-
-	alloc_err, attempted_size := create_message_any(&msg, &actor.pool, content)
-	if alloc_err != .OK {
-		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
-	}
-
-	result := push_to_mailbox(actor, msg, to, get_send_priority())
-	if result != .OK {
-		free_message(&actor.pool, msg.content)
-	}
-	return result
-}
-
-@(private)
 send_message_any :: proc(to: PID, content: any) -> Send_Error {
-	if to == 0 {
-		return .ACTOR_NOT_FOUND
-	}
-	if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
-		return .SYSTEM_SHUTTING_DOWN
-	}
-	actor_ptr := get_relaxed(&global_registry, to)
-	if actor_ptr == nil {
-		return .ACTOR_NOT_FOUND
-	}
-	return send_any(to, content, cast(^Actor(int))actor_ptr)
+	@(static) sentinel: Message_Type_Info
+	info, ok := get_type_info_ptr(content.id)
+	if !ok do info = &sentinel
+	size := type_info_of(content.id).size
+	return send_message_impl(to, content.data, size, content.id, info, .User)
 }
 
 @(private)

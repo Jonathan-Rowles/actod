@@ -386,38 +386,9 @@ deliver_broadcast_locally :: proc(
 	return true
 }
 
-send_remote :: #force_no_inline proc(to: PID, content: $T) -> Send_Error {
-	_, node_id := unpack_pid(to)
-
-	p_flags := priority_to_flags(
-		current_actor_context != nil ? current_actor_context.send_priority : .NORMAL,
-	)
-
-	ring := get_connection_ring(node_id)
-	if ring != nil && ring.state == .Ready {
-		for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-			result := send_to_connection_ring(ring, to, content, p_flags)
-			if result == .OK {
-				return .OK
-			}
-			if result != .NETWORK_RING_FULL {
-				return result
-			}
-			if retry < RING_SEND_SPIN_RETRIES {
-				intrinsics.cpu_relax()
-			} else {
-				time.sleep(1 * time.Microsecond)
-			}
-		}
-	}
-
-	conn_pid := get_or_create_connection(node_id)
-	if conn_pid == 0 {
-		return .NODE_DISCONNECTED
-	}
-
-	to_handle, _ := unpack_pid(to)
-	return build_and_send_network_command(conn_pid, content, p_flags, to_handle, "")
+send_remote :: #force_inline proc(to: PID, content: $T) -> Send_Error {
+	v := content
+	return send_remote_impl(to, &v, get_validated_message_info_ptr(T))
 }
 
 get_or_create_connection :: proc(node_id: Node_ID) -> PID {
@@ -638,51 +609,13 @@ get_node_name :: proc(node_id: Node_ID) -> (string, bool) {
 	return info.node_name, true
 }
 
-send_remote_by_name :: proc(node_name: string, actor_name: string, content: $T) -> Send_Error {
-	node_id, ok := get_node_by_name(node_name)
-	if !ok {
-		log.errorf("Unknown node: %s", node_name)
-		return .ACTOR_NOT_FOUND
-	}
-
-	p_flags := priority_to_flags(
-		current_actor_context != nil ? current_actor_context.send_priority : .NORMAL,
-	)
-
-	ring := get_connection_ring(node_id)
-	if ring != nil && ring.state == .Ready {
-		for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-			result := send_to_connection_ring_by_name(ring, actor_name, content, p_flags)
-			if result == .OK {
-				return .OK
-			}
-			if result != .NETWORK_RING_FULL {
-				return result
-			}
-			if retry < RING_SEND_SPIN_RETRIES {
-				intrinsics.cpu_relax()
-			} else {
-				time.sleep(1 * time.Microsecond)
-			}
-		}
-	}
-
-	conn_pid := get_or_create_connection(node_id)
-	if conn_pid == 0 {
-		return .NODE_DISCONNECTED
-	}
-
-	to_handle := Handle {
-		idx = u32(len(actor_name)),
-		gen = 0,
-	}
-	return build_and_send_network_command(
-		conn_pid,
-		content,
-		p_flags | {.BY_NAME},
-		to_handle,
-		actor_name,
-	)
+send_remote_by_name :: #force_inline proc(
+	node_name: string,
+	actor_name: string,
+	content: $T,
+) -> Send_Error {
+	v := content
+	return send_remote_by_name_impl(node_name, actor_name, &v, get_validated_message_info_ptr(T))
 }
 
 MAX_PENDING_SPAWNS :: 64

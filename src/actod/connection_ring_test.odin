@@ -702,15 +702,15 @@ test_build_wire_format_pod :: proc(t: ^testing.T) {
 
 @(test)
 test_build_wire_format_with_name :: proc(t: ^testing.T) {
-	Pod_Message :: struct {
+	Named_Pod_Message :: struct {
 		value: i32,
 	}
-	register_message_type(Pod_Message)
+	register_message_type(Named_Pod_Message)
 
 	buffer := make([]byte, 256)
 	defer delete(buffer)
 
-	msg := Pod_Message {
+	msg := Named_Pod_Message {
 		value = 999,
 	}
 	actor_name := "target_actor"

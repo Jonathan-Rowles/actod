@@ -49,7 +49,7 @@ Test_Complex_Message :: struct {
 test_message_registration :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, ok := get_type_info(typeid_of(Test_Simple_Message))
+	info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 	testing.expect(t, ok, "Test_Simple_Message should be registered")
 	testing.expect(t, info.type_id == typeid_of(Test_Simple_Message), "Type ID mismatch")
 	testing.expect(t, info.deliver != nil, "Deliver proc should be set")
@@ -65,7 +65,7 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 			value = 3.14159,
 		}
 
-		info, ok := get_type_info(typeid_of(Test_Simple_Message))
+		info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 		testing.expect(t, .Has_Strings not_in info.flags, "Simple message should not have strings")
@@ -93,7 +93,7 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 			flags    = 0b10101010,
 		}
 
-		info, ok := get_type_info(typeid_of(Test_Complex_Message))
+		info, ok := get_type_info_ptr(typeid_of(Test_Complex_Message))
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 		testing.expect(
@@ -125,7 +125,7 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 	}
 
 	{
-		info, ok := get_type_info(typeid_of(Test_String_Message))
+		info, ok := get_type_info_ptr(typeid_of(Test_String_Message))
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(t, .Has_Strings in info.flags, "Should detect strings in message type")
 		testing.expect(t, len(info.string_fields) == 2, "Should detect 2 string fields")
@@ -144,7 +144,7 @@ test_string_message_binary_format :: proc(t: ^testing.T) {
 		count       = 42,
 	}
 
-	info, _ := get_type_info(typeid_of(Test_String_Message))
+	info, _ := get_type_info_ptr(typeid_of(Test_String_Message))
 
 	total_string_size := len(original.content) + len(original.description)
 	total_size := size_of(Test_String_Message) + total_string_size
@@ -195,7 +195,7 @@ test_pod_payload_handling :: proc(t: ^testing.T) {
 			value = 2.71828,
 		}
 
-		info, ok := get_type_info(typeid_of(Test_Simple_Message))
+		info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(
 			t,
@@ -226,7 +226,7 @@ test_pod_payload_handling :: proc(t: ^testing.T) {
 			flags    = 0xFF,
 		}
 
-		info, ok := get_type_info(typeid_of(Test_Complex_Message))
+		info, ok := get_type_info_ptr(typeid_of(Test_Complex_Message))
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(
 			t,
@@ -355,7 +355,7 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 	register_test_types()
 
 	{
-		info, ok := get_type_info(typeid_of(Test_Mixed_Union))
+		info, ok := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 		testing.expect(t, ok, "Test_Mixed_Union should be registered")
 		testing.expect(t, .Has_Unions in info.flags, "Mixed union should have Has_Unions flag")
 		testing.expect(
@@ -385,7 +385,7 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 	}
 
 	{
-		info, ok := get_type_info(typeid_of(Test_Mixed_Bytes_Union))
+		info, ok := get_type_info_ptr(typeid_of(Test_Mixed_Bytes_Union))
 		testing.expect(t, ok, "Test_Mixed_Bytes_Union should be registered")
 		testing.expect(
 			t,
@@ -412,7 +412,7 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 test_union_struct_with_union_field :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, ok := get_type_info(typeid_of(Test_Outer_With_Union))
+	info, ok := get_type_info_ptr(typeid_of(Test_Outer_With_Union))
 	testing.expect(t, ok, "Test_Outer_With_Union should be registered")
 	testing.expect(
 		t,
@@ -427,7 +427,7 @@ test_union_struct_with_union_field :: proc(t: ^testing.T) {
 test_union_variable_data_size_pod_variant :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 	value := Test_Mixed_Union(Test_Ping{seq = 42})
 	size := calculate_variable_data_size(&value, info)
 	testing.expect_value(t, size, 0)
@@ -437,7 +437,7 @@ test_union_variable_data_size_pod_variant :: proc(t: ^testing.T) {
 test_union_variable_data_size_string_variant :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 	value := Test_Mixed_Union(Test_Chat{name = "alice", content = "hello"})
 	size := calculate_variable_data_size(&value, info)
 	testing.expect_value(t, size, 10)
@@ -447,7 +447,7 @@ test_union_variable_data_size_string_variant :: proc(t: ^testing.T) {
 test_union_variable_data_size_nil :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 	value: Test_Mixed_Union
 	size := calculate_variable_data_size(&value, info)
 	testing.expect_value(t, size, 0)
@@ -457,7 +457,7 @@ test_union_variable_data_size_nil :: proc(t: ^testing.T) {
 test_union_active_variant_lookup :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 	uf := info.union_fields[0]
 
 	{
@@ -485,7 +485,7 @@ test_union_active_variant_lookup :: proc(t: ^testing.T) {
 test_union_copy_variable_data_string_variant :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 	src := Test_Mixed_Union(Test_Chat{name = "alice", content = "hello"})
 	variable_size := calculate_variable_data_size(&src, info)
 	testing.expect_value(t, variable_size, 10)
@@ -511,7 +511,7 @@ test_union_copy_variable_data_string_variant :: proc(t: ^testing.T) {
 test_union_copy_variable_data_pod_variant :: proc(t: ^testing.T) {
 	register_test_types()
 
-	info, _ := get_type_info(typeid_of(Test_Mixed_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 	src := Test_Mixed_Union(Test_Ping{seq = 99})
 	variable_size := calculate_variable_data_size(&src, info)
 	testing.expect_value(t, variable_size, 0)
@@ -529,7 +529,7 @@ test_union_bytes_variant_size :: proc(t: ^testing.T) {
 	register_test_types()
 
 	data := []byte{1, 2, 3, 4, 5}
-	info, _ := get_type_info(typeid_of(Test_Mixed_Bytes_Union))
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Bytes_Union))
 
 	{
 		value := Test_Mixed_Bytes_Union(Test_Bytes_Variant{data = data, tag = 7})

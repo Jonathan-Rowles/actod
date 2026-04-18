@@ -1332,83 +1332,27 @@ process_blocking_recv_message :: proc(ctx: ^Blocking_Recv_Context, msg_data: []b
 }
 
 @(private)
-build_and_send_network_command :: proc(
+build_and_send_network_command :: #force_inline proc(
 	conn_pid: PID,
 	content: $T,
 	base_flags: Network_Message_Flags,
 	to_handle: Handle,
 	to_name: string,
 ) -> Send_Error {
-	info := get_validated_message_info(T)
-	from_handle, _ := unpack_pid(get_self_pid())
-
-	flags := base_flags | {.POD_PAYLOAD}
-
-	to_name_bytes: []byte
-	to_name_len: u16 = 0
-	actual_to_handle := to_handle
-	if .BY_NAME in base_flags {
-		to_name_bytes = transmute([]byte)to_name
-		to_name_len = u16(len(to_name_bytes))
-		actual_to_handle = Handle {
-			idx = u32(to_name_len),
-			gen = 0,
-		}
-	}
-
-	content_copy := content
-	total_string_size := 0
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-			total_string_size += len(str_ptr^)
-		}
-	}
-	payload_size := size_of(T) + total_string_size
-
-	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + payload_size
-	total_buffer_size := 4 + message_size
-
-	buffer := make([]byte, total_buffer_size)
-
-	endian.put_u32(buffer[0:4], .Little, u32(message_size))
-
-	write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
-
-	offset := 4 + NETWORK_HEADER_SIZE
-
-	if .BY_NAME in base_flags {
-		copy(buffer[offset:], to_name_bytes)
-		offset += int(to_name_len)
-	}
-
-	when size_of(T) > 0 {
-		intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), &content_copy, size_of(T))
-		offset += size_of(T)
-	}
-
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
-			if len(str_ptr^) > 0 {
-				intrinsics.mem_copy_non_overlapping(
-					rawptr(&buffer[offset]),
-					raw_data(str_ptr^),
-					len(str_ptr^),
-				)
-				offset += len(str_ptr^)
-			}
-		}
-	}
-
-	result := send_message(conn_pid, Raw_Network_Buffer{data = buffer})
-	delete(buffer)
-	return result
+	v := content
+	return build_and_send_network_command_impl(
+		conn_pid,
+		&v,
+		get_validated_message_info_ptr(T),
+		base_flags,
+		to_handle,
+		to_name,
+	)
 }
 
 handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) {
-	spawned_info := get_validated_message_info(Actor_Spawned_Broadcast)
-	terminated_info := get_validated_message_info(Actor_Terminated_Broadcast)
+	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
+	terminated_info := get_validated_message_info_ptr(Actor_Terminated_Broadcast)
 
 	if type_hash == spawned_info.type_hash {
 		if len(payload) < size_of(Actor_Spawned_Broadcast) {
@@ -1482,20 +1426,20 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 
 		handle_terminate_broadcast(msg, from_node)
 
-	} else if type_hash == get_validated_message_info(Remote_Spawn_Request).type_hash {
+	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Request).type_hash {
 		handle_remote_spawn_request(from_node, payload)
 
-	} else if type_hash == get_validated_message_info(Remote_Spawn_Response).type_hash {
+	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Response).type_hash {
 		handle_remote_spawn_response(payload)
 
-	} else if type_hash == get_validated_message_info(Subscribe_Remote).type_hash {
+	} else if type_hash == get_validated_message_info_ptr(Subscribe_Remote).type_hash {
 		if len(payload) >= size_of(Subscribe_Remote) {
 			msg: Subscribe_Remote
 			intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Subscribe_Remote))
 			handle_remote_subscribe(msg, from_node)
 		}
 
-	} else if type_hash == get_validated_message_info(Unsubscribe_Remote).type_hash {
+	} else if type_hash == get_validated_message_info_ptr(Unsubscribe_Remote).type_hash {
 		if len(payload) >= size_of(Unsubscribe_Remote) {
 			msg: Unsubscribe_Remote
 			intrinsics.mem_copy_non_overlapping(

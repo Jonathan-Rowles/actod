@@ -60,25 +60,20 @@ cleanup_message_registry :: proc "contextless" () {
 	registry_destroy(&g_message_registry)
 }
 
-get_type_info :: proc(id: typeid) -> (Message_Type_Info, bool) {
+get_type_info_ptr :: proc(id: typeid) -> (^Message_Type_Info, bool) {
 	registry_ensure_init(&g_message_registry)
 
 	for i in 0 ..< g_message_registry.count {
 		if g_message_registry.entries[i].value.type_id == id {
-			return g_message_registry.entries[i].value, true
+			return &g_message_registry.entries[i].value, true
 		}
 	}
 
-	log.infof("id not found %s", id)
-	return {}, false
+	return nil, false
 }
 
-get_type_info_by_hash :: #force_inline proc(type_hash: u64) -> (Message_Type_Info, bool) {
-	val, found := registry_get_by_hash(&g_message_registry, type_hash)
-	if found {
-		return val^, true
-	}
-	return {}, false
+get_type_info_by_hash :: #force_inline proc(type_hash: u64) -> (^Message_Type_Info, bool) {
+	return registry_get_by_hash(&g_message_registry, type_hash)
 }
 
 get_active_union_variant :: #force_inline proc(
@@ -252,7 +247,7 @@ register_message_type :: proc "contextless" ($T: typeid) {
 
 		value := (cast(^T)raw_data(payload))^
 
-		type_info := get_validated_message_info(T)
+		type_info := get_validated_message_info_ptr(T)
 		data_offset := size_of(T)
 		payload_len := len(payload)
 
@@ -376,21 +371,28 @@ cleanup_temp_union_fields :: proc(fields: []Temp_Union_Info) {
 	}
 }
 
-get_validated_message_info :: #force_inline proc($T: typeid) -> Message_Type_Info {
-	@(static) _validated := false
-	@(static) _cached_info: Message_Type_Info
+get_validated_message_info_ptr :: #force_inline proc($T: typeid) -> ^Message_Type_Info {
+	@(static) _cached: ^Message_Type_Info
+	@(static) _sentinel: Message_Type_Info
 
-	if !_validated {
-		info, ok := get_type_info(T)
+	if _cached == nil {
+		ptr, ok := get_type_info_ptr(T)
 		if !ok {
 			register_message_type(T)
-			info, _ = get_type_info(T)
-			log.warnf("use @(init) and register you types ahead of time: %s", info.name)
+			ptr, _ = get_type_info_ptr(T)
+			if ptr == nil {
+				log.warnf(
+					"message type not registered and registration failed (name collision?): %v",
+					typeid_of(T),
+				)
+				_cached = &_sentinel
+				return _cached
+			}
+			log.warnf("use @(init) and register you types ahead of time: %s", ptr.name)
 		}
-		_cached_info = info
-		_validated = true
+		_cached = ptr
 	}
-	return _cached_info
+	return _cached
 }
 
 get_type_name :: proc(ti: ^runtime.Type_Info, allocator := context.allocator) -> string {

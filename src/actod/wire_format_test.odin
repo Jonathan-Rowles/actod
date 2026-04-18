@@ -259,7 +259,7 @@ test_network_message_flags :: proc(t: ^testing.T) {
 
 @(test)
 test_lifecycle_event_header_roundtrip :: proc(t: ^testing.T) {
-	spawned_info := get_validated_message_info(Actor_Spawned_Broadcast)
+	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
 
 	from_handle := Handle {
 		idx = 5,
@@ -489,8 +489,8 @@ test_spawned_broadcast_empty_name :: proc(t: ^testing.T) {
 
 @(test)
 test_broadcast_type_hash_lookup :: proc(t: ^testing.T) {
-	spawned_info := get_validated_message_info(Actor_Spawned_Broadcast)
-	terminated_info := get_validated_message_info(Actor_Terminated_Broadcast)
+	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
+	terminated_info := get_validated_message_info_ptr(Actor_Terminated_Broadcast)
 
 	testing.expect(t, spawned_info.type_hash != 0, "Spawned broadcast hash should be non-zero")
 	testing.expect(

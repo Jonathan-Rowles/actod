@@ -1015,7 +1015,7 @@ notify_node_of_termination :: proc(actor: ^Actor($T)) {
 
 @(private)
 fixup_inline_pointers :: proc(inline_data: ^[INLINE_MESSAGE_SIZE]byte, type_id: typeid) {
-	info, ok := get_type_info(type_id)
+	info, ok := get_type_info_ptr(type_id)
 	if !ok || info.flags == {} {
 		return
 	}
@@ -1066,39 +1066,26 @@ reconstruct_msg :: #force_inline proc(msg: ^Message, data: ^any, header: ^^Type_
 	}
 }
 
-send_self :: proc(content: $T) -> Send_Error {
+send_self :: #force_inline proc(content: $T) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_self(content); ok do return Send_Error(r)}
-
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
-	if ok {
-		return send(actor.pid, content, actor)
+	v := content
+	info := get_validated_message_info_ptr(T)
+	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
+		return send_self_impl(&v, size_of(T), typeid_of(T), info, .System)
+	} else {
+		return send_self_impl(&v, size_of(T), typeid_of(T), info, .User)
 	}
-
-	return .ACTOR_NOT_FOUND
 }
 
-send_message :: proc(to: PID, content: $T) -> Send_Error {
+send_message :: #force_inline proc(to: PID, content: $T) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content); ok do return Send_Error(r)}
-
-	if to == 0 {
-		return .ACTOR_NOT_FOUND
+	v := content
+	info := get_validated_message_info_ptr(T)
+	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .System)
+	} else {
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .User)
 	}
-
-	when !intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
-			return .SYSTEM_SHUTTING_DOWN
-		}
-	}
-
-	if !is_local_pid(to) {
-		return send_remote(to, content)
-	}
-
-	actor_ptr := get_relaxed(&global_registry, to)
-	if actor_ptr == nil {
-		return .ACTOR_NOT_FOUND
-	}
-	return send(to, content, cast(^Actor(int))actor_ptr)
 }
 
 // Send message by actor name. Supports both local and remote actors.
@@ -1201,41 +1188,26 @@ send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Erro
 	return .NODE_NOT_FOUND
 }
 
-send_message_to_children :: proc(content: $T) -> bool {
+send_message_to_children :: #force_inline proc(content: $T) -> bool {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return r}
-
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
-	if !ok {
-		return false
+	v := content
+	info := get_validated_message_info_ptr(T)
+	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
+		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .System)
+	} else {
+		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .User)
 	}
-	for child_pid in actor.children {
-		child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
-		if !child_ok {
-			return false
-		}
-
-		if send(child_pid, content, child_actor) != .OK {
-			return false
-		}
-	}
-
-	return true
 }
 
-send_message_to_parent :: proc(content: $T) -> bool {
+send_message_to_parent :: #force_inline proc(content: $T) -> bool {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return r}
-
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
-	if !ok {
-		return false
+	v := content
+	info := get_validated_message_info_ptr(T)
+	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
+		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .System)
+	} else {
+		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .User)
 	}
-
-	parent_actor, got_parent_pid := get_actor_from_pointer(get(&global_registry, actor.parent))
-	if !got_parent_pid {
-		return false
-	}
-
-	return send(actor.parent, content, parent_actor) == .OK
 }
 
 send_message_high :: proc(to: PID, content: $T) -> Send_Error {
@@ -1408,60 +1380,13 @@ report_alloc_error :: #force_inline proc(
 
 @(private)
 send :: #force_inline proc(to: PID, content: $T, actor: ^Actor(int)) -> Send_Error {
-	when !intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
-			return .SYSTEM_SHUTTING_DOWN
-		}
-	}
-
-	current_state := sync.atomic_load(&actor.state)
-
+	v := content
+	info := get_validated_message_info_ptr(T)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		if current_state == .TERMINATED ||
-		   current_state == .THREAD_STOPPED ||
-		   current_state == .STOPPING {
-			return .ACTOR_NOT_FOUND
-		}
+		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .System)
 	} else {
-		if current_state != .RUNNING && current_state != .IDLE && current_state != .INIT {
-			return .ACTOR_NOT_FOUND
-		}
+		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .User)
 	}
-
-	msg: Message
-	msg.from = get_self_pid()
-	info := get_validated_message_info(T)
-
-	if current_state == .STOPPING {
-		when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-			alloc_err, _ := create_message(&msg, &actor.pool, content, info)
-			if alloc_err == .OK {
-				return .OK
-			}
-		}
-		return .ACTOR_NOT_FOUND
-	}
-
-	alloc_err, attempted_size := create_message(&msg, &actor.pool, content, info)
-	if alloc_err != .OK {
-		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
-	}
-
-	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		if !mpsc_push(&actor.system_mailbox, msg) {
-			log.panicf("Couldn't send system message to %v", to)
-		}
-		wake_actor(actor)
-		handle_set_message_stats(msg, to)
-		return .OK
-	}
-
-	result := push_to_mailbox(actor, msg, to, get_send_priority())
-	if result != .OK {
-		free_message(&actor.pool, msg.content)
-	}
-
-	return result
 }
 
 terminate_actor :: proc(to: PID, reason: Termination_Reason = .SHUTDOWN) -> bool {
@@ -1664,7 +1589,7 @@ yield :: proc() {
 @(private)
 calculate_variable_data_size :: #force_inline proc(
 	value_ptr: rawptr,
-	info: Message_Type_Info,
+	info: ^Message_Type_Info,
 ) -> int {
 	total := 0
 
@@ -1705,7 +1630,7 @@ copy_variable_data :: #force_inline proc(
 	dest_base: rawptr,
 	struct_ptr: rawptr,
 	src_value_ptr: rawptr,
-	info: Message_Type_Info,
+	info: ^Message_Type_Info,
 	start_offset: int,
 ) {
 	offset := start_offset
@@ -1785,75 +1710,13 @@ create_message :: #force_inline proc(
 	msg: ^Message,
 	pool: ^Pool,
 	value: $T,
-	info: Message_Type_Info,
+	info: ^Message_Type_Info,
 ) -> (
 	Alloc_Error,
 	int,
 ) {
-	if info.flags == {} {
-		when size_of(T) <= INLINE_MESSAGE_SIZE {
-			msg.inline_type = T
-			msg.content = nil
-			(cast(^T)&msg.inline_data)^ = value
-		} else {
-			aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size_of(T), CACHE_LINE_SIZE)
-
-			buffer, alloc_err := message_alloc(pool, aligned_size)
-			if alloc_err != .OK {
-				return alloc_err, aligned_size
-			}
-
-			header := cast(^Type_Header)buffer
-			header.type_id = T
-			header.size = aligned_size
-
-			data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
-			when size_of(T) > 64 {
-				val := value
-				intrinsics.mem_copy_non_overlapping(data_ptr, &val, size_of(T))
-			} else {
-				(cast(^T)data_ptr)^ = value
-			}
-
-			msg.content = buffer
-			msg.inline_type = nil
-		}
-		return .OK, 0
-	}
-
-	val := value
-	variable_size := calculate_variable_data_size(&val, info)
-	total_message_size := size_of(T) + variable_size
-
-	if total_message_size <= INLINE_MESSAGE_SIZE {
-		msg.inline_type = T
-		msg.content = INLINE_NEEDS_FIXUP
-		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], &val, size_of(T))
-		copy_variable_data(&msg.inline_data[0], &msg.inline_data[0], &val, info, size_of(T))
-	} else {
-		aligned_size := mem.align_forward_int(
-			TYPE_HEADER_SIZE + size_of(T) + variable_size,
-			CACHE_LINE_SIZE,
-		)
-
-		buffer, alloc_err := message_alloc(pool, aligned_size)
-		if alloc_err != .OK {
-			return alloc_err, aligned_size
-		}
-
-		header := cast(^Type_Header)buffer
-		header.type_id = T
-		header.size = aligned_size
-
-		data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
-		intrinsics.mem_copy_non_overlapping(data_ptr, &val, size_of(T))
-		copy_variable_data(buffer, data_ptr, &val, info, TYPE_HEADER_SIZE + size_of(T))
-
-		msg.content = buffer
-		msg.inline_type = nil
-	}
-
-	return .OK, 0
+	v := value
+	return create_message_impl(msg, pool, &v, size_of(T), typeid_of(T), info)
 }
 
 @(private)
@@ -1861,7 +1724,7 @@ create_message_from_payload :: #force_inline proc(
 	msg: ^Message,
 	pool: ^Pool,
 	payload: []byte,
-	info: Message_Type_Info,
+	info: ^Message_Type_Info,
 ) -> (
 	Alloc_Error,
 	int,
@@ -1948,7 +1811,7 @@ copy_variable_data_from_payload :: #force_inline proc(
 	dest_base: rawptr,
 	struct_ptr: rawptr,
 	payload: []byte,
-	info: Message_Type_Info,
+	info: ^Message_Type_Info,
 	dest_start_offset: int,
 ) {
 	dest_offset := dest_start_offset
@@ -2046,7 +1909,7 @@ send_from_payload :: #force_inline proc(
 	to_pid: PID,
 	from_pid: PID,
 	payload: []byte,
-	info: Message_Type_Info,
+	info: ^Message_Type_Info,
 	priority: int = 1,
 ) -> Send_Error {
 	actor, ok := get_actor_from_pointer(get(&global_registry, to_pid))

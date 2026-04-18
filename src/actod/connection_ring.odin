@@ -892,87 +892,36 @@ send_raw_via_ring :: proc(ring: ^Connection_Ring, raw_data_with_size: []byte) ->
 	return batch_append_message(ring, raw_data_with_size)
 }
 
-send_to_connection_ring :: proc(
+send_to_connection_ring :: #force_inline proc(
 	ring: ^Connection_Ring,
 	to: PID,
 	content: $T,
 	base_flags: Network_Message_Flags = {},
 ) -> Send_Error {
-	if ring == nil || ring.state != .Ready {
-		return .NETWORK_ERROR
-	}
-
-	to_handle, _ := unpack_pid(to)
-	from_handle, _ := unpack_pid(get_self_pid())
-
-	exact_size := wire_format_exact_size(content, 0)
-
-	dst, sid, ok := batch_reserve(ring, exact_size)
-	if !ok {
-		return .NETWORK_RING_FULL
-	}
-
-	msg_len := build_wire_format_into_buffer(dst, content, to_handle, from_handle, base_flags, "")
-	if msg_len == 0 {
-		batch_abort(ring, sid, dst)
-		return .NETWORK_ERROR
-	}
-
-	when ODIN_DEBUG {
-		assert(msg_len == exact_size, "wire format size mismatch in send_to_connection_ring")
-	}
-
-	batch_commit(ring, sid)
-	return .OK
+	v := content
+	return send_to_connection_ring_impl(
+		ring,
+		to,
+		&v,
+		get_validated_message_info_ptr(T),
+		base_flags,
+	)
 }
 
-send_to_connection_ring_by_name :: proc(
+send_to_connection_ring_by_name :: #force_inline proc(
 	ring: ^Connection_Ring,
 	actor_name: string,
 	content: $T,
 	base_flags: Network_Message_Flags = {},
 ) -> Send_Error {
-	if ring == nil || ring.state != .Ready {
-		return .NETWORK_ERROR
-	}
-
-	from_handle, _ := unpack_pid(get_self_pid())
-	to_handle := Handle {
-		idx = u32(len(actor_name)),
-		gen = 0,
-	}
-
-	flags := base_flags | {.BY_NAME}
-
-	exact_size := wire_format_exact_size(content, len(actor_name))
-
-	dst, sid, ok := batch_reserve(ring, exact_size)
-	if !ok {
-		return .NETWORK_RING_FULL
-	}
-
-	msg_len := build_wire_format_into_buffer(
-		dst,
-		content,
-		to_handle,
-		from_handle,
-		flags,
+	v := content
+	return send_to_connection_ring_by_name_impl(
+		ring,
 		actor_name,
+		&v,
+		get_validated_message_info_ptr(T),
+		base_flags,
 	)
-	if msg_len == 0 {
-		batch_abort(ring, sid, dst)
-		return .NETWORK_ERROR
-	}
-
-	when ODIN_DEBUG {
-		assert(
-			msg_len == exact_size,
-			"wire format size mismatch in send_to_connection_ring_by_name",
-		)
-	}
-
-	batch_commit(ring, sid)
-	return .OK
 }
 
 create_connection_pool :: proc(

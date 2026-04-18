@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.1] - 2026-04-18
+
+### Changed
+- Internal send-path refactor: generic `send_*` procs are now thin shells
+  over non-generic impls, cutting per-message-type monomorphization.
+  Release binary .text sections shrink ~52% on representative benchmarks.
+  No public API changes; behavior and performance (32B ping-pong p50) unchanged.
+
+### Fixed
+- `Connection_Actor`'s first_message allocator is now pinned to the
+  connection's arena instead of the caller's context (39dcd93).
+- `NODE`'s terminate handler now runs on shutdown (ce5178e).
+- Child registration consolidated into `spawn` — eliminates a race
+  between spawn return and the child appearing in the parent's
+  children list (3b6db9e).
+
+[0.1.1]: https://github.com/Jonathan-Rowles/actod/releases/tag/v0.1.1
+
 ## [0.1.0] - 2026-04-17
 
 Initial public release.
@@ -31,4 +49,4 @@ Initial public release.
 - macOS Apple Silicon
 - Windows x86_64
 
-[0.1.0]: https://github.com/jonathan-rowles/actod/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Jonathan-Rowles/actod/releases/tag/v0.1.0

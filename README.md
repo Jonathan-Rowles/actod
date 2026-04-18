@@ -43,8 +43,8 @@ Vendor actod into your project, pinned to a release tag. Submodule recommended:
 
 ```bash
 git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod
-cd vendor/actod && git checkout v0.1.0 && cd -
-git commit -am "Vendor actod v0.1.0"
+cd vendor/actod && git checkout v0.1.1 && cd -
+git commit -am "Vendor actod v0.1.1"
 ```
 
 Build with a collection flag pointing at the vendored repo:

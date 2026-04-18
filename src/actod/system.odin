@@ -565,9 +565,12 @@ cleanup_node_actor :: proc() {
 	node_ptr, active := get(&global_registry, NODE.pid)
 	if !active || node_ptr == nil do return
 
-	n, ok := get_actor_from_pointer(node_ptr)
+	n, ok := get_actor_from_pointer(node_ptr, true)
 	if ok && n != nil {
 		n.termination_reason = .SHUTDOWN
+		if n.behaviour.terminate != nil {
+			n.behaviour.terminate(n.data)
+		}
 	}
 
 	cleanup_terminated_actor(NODE.pid, node_ptr)

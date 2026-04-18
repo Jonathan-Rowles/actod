@@ -259,6 +259,24 @@ spawn :: proc(
 	actor.termination_reason = .NORMAL
 	actor.child_restarts = make(map[PID]Restart_Info, actor.allocator)
 
+	if parent_pid > 0 && is_local_pid(parent_pid) {
+		parent_ptr := get(&global_registry, parent_pid)
+		if parent_ptr != nil {
+			parent_actor := cast(^Actor(int))parent_ptr
+			if parent_actor.children == nil {
+				parent_actor.children = make([dynamic]PID, parent_actor.allocator)
+			}
+			append(&parent_actor.children, pid)
+			parent_actor.child_restarts[pid] = Restart_Info {
+				count         = 0,
+				first_restart = time.now(),
+				last_restart  = time.now(),
+				child_index   = len(parent_actor.children) - 1,
+				node_id       = 0,
+			}
+		}
+	}
+
 	broadcast_actor_spawned(pid, name, behaviour.actor_type, parent_pid)
 
 	if spawning_blocking_child {
@@ -532,8 +550,6 @@ spawn_initial_children :: proc(actor: ^Actor($T)) {
 	for child_spawn, idx in actor.opts.children {
 		pid, ok := child_spawn("", actor.pid)
 		if !ok do log.panicf("Failed to start child in %s", actor.name)
-
-		append(&actor.children, pid)
 
 		child_node_id: Node_ID = 0
 		if !is_local_pid(pid) {
@@ -2148,6 +2164,7 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 			return
 		}
 
+		append(&actor.children, child_pid)
 		ok = true
 	} else {
 		child_pid, ok = msg.spawn_func("", actor.pid)
@@ -2156,8 +2173,6 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 			return
 		}
 	}
-
-	append(&actor.children, child_pid)
 
 	if actor.opts.children == nil {
 		actor.opts.children = make([dynamic]SPAWN)
@@ -2412,6 +2427,9 @@ restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
 		return
 	}
 
+	if len(actor.children) > 0 && actor.children[len(actor.children) - 1] == new_pid {
+		pop(&actor.children)
+	}
 	actor.children[child_index] = new_pid
 	restart_info.child_index = child_index
 	delete_key(&actor.child_restarts, old_pid)

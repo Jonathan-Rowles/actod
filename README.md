@@ -1,6 +1,6 @@
 # Actod
 
-[![CI](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml/badge.svg)](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml)
+[![CI](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml)
 
 **High-performance actor runtime for the [Odin programming language](https://odin-lang.org/).**
 

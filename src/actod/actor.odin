@@ -1531,6 +1531,15 @@ get_actor_parent :: #force_inline proc(pid: PID) -> PID {
 	return parent_ptr^
 }
 
+// Scary: Raw pointer to the live Actor struct for a PID, or nil if the PID is not
+// active on this node. The returned pointer is only valid while the actor is
+// alive; callers doing field reads via offset_of(Actor(T), ...) must not
+// retain it past the operation. Returns nil for remote PIDs.
+get_actor_ptr :: #force_inline proc(pid: PID) -> rawptr {
+	ptr, _ := get(&global_registry, pid)
+	return ptr
+}
+
 get_self_name :: #force_inline proc() -> string {
 	when ODIN_TEST {if name, ok := ti.intercept_get_self_name(); ok do return name}
 

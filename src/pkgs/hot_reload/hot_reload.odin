@@ -359,7 +359,7 @@ discover_actors_dir :: proc(start_path: string) -> (string, bool) {
 			return candidate, true
 		}
 
-		parent := filepath.dir(current, context.temp_allocator)
+		parent := filepath.dir(current)
 		if parent == current || parent == "" || parent == "." {
 			return "", false
 		}
@@ -386,7 +386,7 @@ discover_collections :: proc(start_path: string, allocator := context.allocator)
 			ols_dir = current
 			break
 		}
-		parent := filepath.dir(current, context.temp_allocator)
+		parent := filepath.dir(current)
 		if parent == current || parent == "" || parent == "." {
 			return nil
 		}

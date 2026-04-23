@@ -36,7 +36,7 @@ handle_message :: proc(data: ^Counter_State, from: PID, content: any) {
 `
 
 	dir := make_test_package("valid_actor", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -63,7 +63,7 @@ Counter_State :: struct {
 `
 
 	dir := make_test_package("changed_state", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -93,7 +93,7 @@ handle_message :: proc(data: rawptr) {
 `
 
 	dir := make_test_package("sig_mismatch", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -119,7 +119,7 @@ setup :: proc "contextless" () {
 `
 
 	dir := make_test_package("init_ok", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(dir, State_Expectation{}, nil)
 
@@ -136,7 +136,7 @@ handle_message :: proc() {
 `
 
 	dir := make_test_package("no_state", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(dir, State_Expectation{name = "Missing_State"}, nil)
 
@@ -156,7 +156,7 @@ this is not valid odin !!!
 `
 
 	dir := make_test_package("bad_syntax", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(dir, State_Expectation{}, nil)
 
@@ -180,7 +180,7 @@ My_State :: struct {
 `
 
 	dir := make_test_package("field_added", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -215,7 +215,7 @@ My_State :: struct {
 `
 
 	dir := make_test_package("field_removed", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -250,7 +250,7 @@ My_State :: struct {
 `
 
 	dir := make_test_package("type_changed", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -289,7 +289,7 @@ handle_message :: proc(data: rawptr, from: i32, content: any) {
 `
 
 	dir := make_test_package("param_types", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -332,7 +332,7 @@ terminate :: proc(data: ^My_State) {
 `
 
 	dir := make_test_package("multi_procs", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -368,7 +368,7 @@ handle_message :: proc(data: ^My_State, from: PID, content: any) {
 `
 
 	dir := make_test_package("opt_missing", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -400,7 +400,7 @@ My_State :: struct {
 `
 
 	dir := make_test_package("ptr_state", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,
@@ -427,7 +427,7 @@ My_State :: struct {
 `
 
 	dir := make_test_package("arr_state", source)
-	defer os.remove_all(filepath.dir(dir, context.temp_allocator))
+	defer os.remove_all(filepath.dir(dir))
 
 	result := validate_package(
 		dir,

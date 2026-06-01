@@ -20,12 +20,12 @@ See [docs](docs/00_getting-started.md) for the full reference.
 | 4:1 32KB fan-in | Fan-in | 2.3M msgs/sec (70 GB/s) | 2.9M msgs/sec (89 GB/s) |
 | 2:2 Ping-Pong | Contention | 42M msgs/sec | 46M msgs/sec |
 
-### Ping-Pong Latency
+### Round-Trip Latency (Ping-Pong)
 
 | Size | p50 (M4 / x86) | p99 (M4 / x86) |
 |------|-----------------|-----------------|
-| 32B | 83ns / 150ns | 146ns / 232ns |
-| 4KB | 271ns / 210ns | 437ns / 280ns |
+| 32B | 167ns / 300ns | 292ns / 464ns |
+| 4KB | 542ns / 420ns | 917ns / 560ns |
 
 ### Network (TCP loopback)
 

@@ -15,7 +15,7 @@ start_parent_monitor :: proc() {
 		for {
 			time.sleep(500 * time.Millisecond)
 			if posix.getppid() != ppid {
-				actod.SHUTDOWN_NODE()
+				actod.shutdown_node()
 				os.exit(1)
 			}
 		}

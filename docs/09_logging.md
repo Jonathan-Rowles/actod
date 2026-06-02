@@ -7,7 +7,7 @@ Each actor has its own logger with configurable level and output options. Loggin
 Set logging defaults at the node level, override per actor:
 
 ```odin
-act.NODE_INIT("myapp", act.make_node_config(
+act.node_init("myapp", act.make_node_config(
     actor_config = act.make_actor_config(
         logging = act.make_log_config(
             level       = .Info,
@@ -18,7 +18,7 @@ act.NODE_INIT("myapp", act.make_node_config(
 ))
 
 // This actor logs at Debug level with a custom ident
-act.spawn("verbose_worker", Worker{}, worker_behaviour, act.make_actor_config(
+_, _ = act.spawn("verbose_worker", Worker{}, worker_behaviour, act.make_actor_config(
     logging = act.make_log_config(
         level = .Debug,
         ident = "worker",

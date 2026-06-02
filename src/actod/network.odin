@@ -388,7 +388,7 @@ deliver_broadcast_locally :: proc(
 
 send_remote :: #force_inline proc(to: PID, content: $T) -> Send_Error {
 	v := content
-	return send_remote_impl(to, &v, get_validated_message_info_ptr(T))
+	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), .NORMAL)
 }
 
 get_or_create_connection :: proc(node_id: Node_ID) -> PID {

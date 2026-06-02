@@ -944,6 +944,7 @@ write_clean_act_odin :: proc(raw_src: string) {
 map_act_alias :: proc(type_str: string) -> string {
 	if type_str == "Log_Level" do return "log.Level"
 	if type_str == "Log_Options" do return "log.Options"
+	if type_str == "Spin_Strategy" do return "SPIN_STRATEGY"
 	return type_str
 }
 

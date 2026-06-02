@@ -2,7 +2,7 @@
 
 Messages are sent between actors. Simple structs (plain data, no pointers) work without registration. Structs containing strings or byte slices are deep-copied.
 
-Any message type can be registered at runtime, but it is strongly recommended to register upfront via `@(init)` procs before `NODE_INIT`.
+Any message type can be registered at runtime, but it is strongly recommended to register upfront via `@(init)` procs before `node_init`.
 
 ```odin
 Chat_Message :: struct {
@@ -23,7 +23,7 @@ register_messages :: proc "contextless" () {
 ```
 
 
-The `@(init)` attribute runs the proc at program startup, before `NODE_INIT`.
+The `@(init)` attribute runs the proc at program startup, before `node_init`.
 
 
 ## Inline vs Allocated

@@ -60,7 +60,7 @@ run_send_once :: proc() {
 		target_port = port_val
 	}
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "SendOnceNode",
 		opts = actod.make_node_config(
 			network = actod.make_network_config(port = 0, auth_password = auth_password),
@@ -93,7 +93,7 @@ run_send_once :: proc() {
 
 	time.sleep(250 * time.Millisecond)
 
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 	os.exit(0)
 }
 
@@ -115,7 +115,7 @@ run_send_burst :: proc() {
 		message_count = count_val
 	}
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "BurstSenderNode",
 		opts = actod.make_node_config(
 			network = actod.make_network_config(port = 0, auth_password = auth_password),
@@ -185,7 +185,7 @@ run_send_burst :: proc() {
 	wait_time := max(1, message_count / 1000)
 	time.sleep(time.Duration(wait_time) * time.Second)
 
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 	os.exit(0)
 }
 
@@ -209,7 +209,7 @@ run_relay_node :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -223,7 +223,7 @@ run_relay_node :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -287,7 +287,7 @@ run_echo_back :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -301,7 +301,7 @@ run_echo_back :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	echo_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -375,7 +375,7 @@ run_concurrent_echo :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -389,7 +389,7 @@ run_concurrent_echo :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	Concurrent_Echo_Data :: struct {
 		actor_name:     string,
@@ -480,7 +480,7 @@ run_lifecycle_server :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -496,7 +496,7 @@ run_lifecycle_server :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	if reply_to_node != "" {
 		reply_addr := net.Endpoint {
@@ -570,7 +570,7 @@ run_lifecycle_broadcast :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -584,7 +584,7 @@ run_lifecycle_broadcast :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -639,7 +639,7 @@ run_registry_exchange :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -653,7 +653,7 @@ run_registry_exchange :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	Registry_Exchange_Data :: struct {
 		name: string,
@@ -742,7 +742,7 @@ run_supervision_server :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -756,7 +756,7 @@ run_supervision_server :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	actod.register_spawn_func("supervision_worker", spawn_supervision_worker)
 
@@ -793,7 +793,7 @@ run_mesh_middle :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -807,7 +807,7 @@ run_mesh_middle :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -842,7 +842,7 @@ run_mesh_leaf :: proc() {
 
 	shared.check_port_available(node_port)
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = node_name,
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -856,7 +856,7 @@ run_mesh_leaf :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -915,7 +915,7 @@ run_pubsub_subscriber :: proc() {
 		subscriber_count = count_val
 	}
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "PubsubNode",
 		opts = actod.make_node_config(
 			network = actod.make_network_config(port = 0, auth_password = auth_password),
@@ -924,7 +924,7 @@ run_pubsub_subscriber :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -1002,7 +1002,7 @@ run_union_sender :: proc() {
 		target_port = port_val
 	}
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "UnionSenderNode",
 		opts = actod.make_node_config(
 			network = actod.make_network_config(port = 0, auth_password = auth_password),
@@ -1050,6 +1050,6 @@ run_union_sender :: proc() {
 
 	time.sleep(500 * time.Millisecond)
 
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 	os.exit(0)
 }

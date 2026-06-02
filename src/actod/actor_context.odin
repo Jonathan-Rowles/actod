@@ -144,7 +144,6 @@ setup_actor_context :: proc(
 	actor_ctx := new(Actor_Context, actor_allocator)
 	actor_ctx.pid = pid
 	actor_ctx.name = strings.clone(name, actor_allocator)
-	actor_ctx.send_priority = .NORMAL
 
 	actor_ctx.subscriptions = make([dynamic]Subscription, actor_allocator)
 	actor_ctx.topic_subscriptions = make([dynamic]Topic_Subscription, actor_allocator)

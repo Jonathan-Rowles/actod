@@ -23,7 +23,7 @@ The node is the root of the actor system. It manages worker threads, the actor r
 import act "actod"
 
 main :: proc() {
-    act.NODE_INIT("myapp", act.make_node_config(
+    act.node_init("myapp", act.make_node_config(
         worker_count = 4,
         actor_config = act.make_actor_config(
             children = act.make_children(spawn_worker),
@@ -34,20 +34,20 @@ main :: proc() {
 }
 ```
 
-`NODE_INIT` must be called before spawning any actors. It:
+`node_init` must be called before spawning any actors. It:
 
 1. Initializes the actor registry
 2. Starts the worker pool (coroutine schedulers)
 3. Spawns the node actor and its children
 4. Starts system actors (timer, optionally observer and hot reload)
 
-`SHUTDOWN_NODE` gracefully terminates all actors through the supervision hierarchy. `await_signal` blocks until an OS signal is received, then calls `SHUTDOWN_NODE` automatically.
+`shutdown_node` gracefully terminates all actors through the supervision hierarchy. `await_signal` blocks until an OS signal is received, then calls `shutdown_node` automatically.
 
 ## API
 
 ```odin
-NODE_INIT :: proc(name: string, opts: System_Config = SYSTEM_CONFIG)
-SHUTDOWN_NODE :: proc()
+node_init :: proc(name: string, opts: System_Config = SYSTEM_CONFIG)
+shutdown_node :: proc()
 await_signal :: proc()
 get_local_node_name :: proc() -> string
 get_local_node_pid :: proc() -> PID

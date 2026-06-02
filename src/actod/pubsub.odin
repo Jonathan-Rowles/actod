@@ -195,9 +195,7 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 	from_handle, _ := unpack_pid(get_self_pid())
 	broadcast_handle := transmute(Handle)actor_type_hash
 
-	p_flags := priority_to_flags(
-		current_actor_context != nil ? current_actor_context.send_priority : .NORMAL,
-	)
+	p_flags := priority_to_flags(.NORMAL)
 
 	ring := get_connection_ring(node_id)
 	if ring != nil && ring.state == .Ready {

@@ -7,13 +7,13 @@ import "core:time"
 import "src/actod"
 
 // Initialize the actor system. Must be called before spawning any actors.
-NODE_INIT :: proc(name: string, opts: System_Config = actod.SYSTEM_CONFIG) {
-	actod.NODE_INIT(name, opts)
+node_init :: proc(name: string, opts: System_Config = actod.SYSTEM_CONFIG) {
+	actod.node_init(name, opts)
 }
 
 // Gracefully shutdown the actor system and terminate all actors.
-SHUTDOWN_NODE :: proc() {
-	actod.SHUTDOWN_NODE()
+shutdown_node :: proc() {
+	actod.shutdown_node()
 }
 
 // Block until SIGINT/SIGTERM received, then shutdown.
@@ -21,6 +21,7 @@ await_signal :: proc() {
 	actod.await_signal()
 }
 
+@(require_results)
 spawn :: proc(
 	name: string,
 	data: $T,
@@ -35,6 +36,7 @@ spawn :: proc(
 }
 
 // Spawn a child actor with the current actor as parent. Must be called from within an actor.
+@(require_results)
 spawn_child :: proc(
 	name: string,
 	data: $T,
@@ -47,7 +49,8 @@ spawn_child :: proc(
 	return actod.spawn_child(name, data, behaviour, opts)
 }
 
-// Spawn an actor using a registered spawn function name. N.B. register_spawn_func
+// Spawn an actor using a name registered via register_spawn_func.
+@(require_results)
 spawn_by_name :: proc(
 	spawn_func_name: string,
 	actor_name: string,
@@ -60,6 +63,7 @@ spawn_by_name :: proc(
 }
 
 // Spawn an actor on a remote node. Blocks until response or timeout.
+@(require_results)
 spawn_remote :: proc(
 	spawn_func_name: string,
 	actor_name: string,
@@ -84,8 +88,8 @@ rename_actor :: proc(pid: PID, new_name: string) -> bool {
 }
 
 // Send a message to an actor by PID. Routes to local or remote transparently.
-send_message :: proc(to: PID, content: $T) -> Send_Error {
-	return actod.send_message(to, content)
+send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error {
+	return actod.send_message(to, content, priority)
 }
 
 // Send a message by name. Use "actor@node" for remote actors.
@@ -111,34 +115,13 @@ send_self :: proc(content: $T) -> Send_Error {
 }
 
 // Send a message to the parent. Must be called from within an actor.
-send_message_to_parent :: proc(content: $T) -> bool {
+send_message_to_parent :: proc(content: $T) -> Send_Error {
 	return actod.send_message_to_parent(content)
 }
 
 // Send a message to all children. Must be called from within an actor.
-send_message_to_children :: proc(content: $T) -> bool {
+send_message_to_children :: proc(content: $T) -> Send_Error {
 	return actod.send_message_to_children(content)
-}
-
-// Send a high priority message. Targets mailbox[0], processed before normal messages.
-send_message_high :: proc(to: PID, content: $T) -> Send_Error {
-	return actod.send_message_high(to, content)
-}
-
-// Send a low priority message. Targets mailbox[2], processed after normal messages.
-send_message_low :: proc(to: PID, content: $T) -> Send_Error {
-	return actod.send_message_low(to, content)
-}
-
-// Set priority for subsequent sends. Use reset_send_priority() after.
-// Useful for batch sends at the same priority.
-set_send_priority :: proc(p: Message_Priority) {
-	actod.set_send_priority(p)
-}
-
-// Reset send priority back to NORMAL. Must be called from within an actor.
-reset_send_priority :: proc() {
-	actod.reset_send_priority()
 }
 
 // Register a message type for deep-copy support and network serialization. Use with @(init).
@@ -168,7 +151,7 @@ self_rename :: proc(new_name: string) -> bool {
 
 // Cooperatively yield from a pooled actor, allowing other actors on the same worker to run.
 // Must be called from within a pooled (non-dedicated-thread) actor.
-// If you need this think about actor design
+// If you need this, reconsider your actor design.
 yield :: proc() {
 	actod.yield()
 }
@@ -178,6 +161,7 @@ now :: proc() -> time.Time {
 	return actod.now()
 }
 
+@(require_results)
 get_actor_pid :: proc(name: string) -> (PID, bool) {
 	return actod.get_actor_pid(name)
 }
@@ -208,6 +192,7 @@ unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
 
 Timer_Tick :: actod.Timer_Tick
 
+@(require_results)
 set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error) {
 	return actod.set_timer(interval, repeat)
 }
@@ -223,11 +208,13 @@ get_children :: proc(parent: PID) -> []PID {
 }
 
 // Dynamically spawn and add a new child to a supervisor.
+@(require_results)
 add_child :: proc(parent: PID, child_spawn: SPAWN) -> (PID, bool) {
 	return actod.add_child(parent, child_spawn)
 }
 
 // Adopt an existing actor as a child of a supervisor.
+@(require_results)
 add_child_existing :: proc(parent: PID, existing_child: PID, child_spawn: SPAWN) -> (PID, bool) {
 	return actod.add_child_existing(parent, existing_child, child_spawn)
 }
@@ -237,17 +224,20 @@ remove_child :: proc(parent: PID, child: PID) -> bool {
 }
 
 // Register a named actor type. Returns the local Actor_Type ID.
+@(require_results)
 register_actor_type :: proc(name: string) -> (Actor_Type, bool) {
 	return actod.register_actor_type(name)
 }
 
 // Get the string name of a registered actor type.
+@(require_results)
 get_actor_type_name :: proc(actor_type: Actor_Type) -> (string, bool) {
 	return actod.get_actor_type_name(actor_type)
 }
 
 // Subscribe to broadcasts from actors of the given type. Must be called from within an actor.
 // Subscriptions are automatically cleaned up on actor termination.
+@(require_results)
 subscribe_type :: proc(actor_type: Actor_Type) -> (Subscription, bool) {
 	return actod.subscribe_type(actor_type)
 }
@@ -267,6 +257,7 @@ get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
 	return actod.get_subscriber_count(actor_type)
 }
 
+@(require_results)
 subscribe_topic :: proc(topic: ^Topic) -> (Topic_Subscription, bool) {
 	return actod.subscribe_topic(topic)
 }
@@ -279,6 +270,7 @@ publish :: proc(topic: ^Topic, msg: $T) {
 	actod.publish(topic, msg)
 }
 
+@(require_results)
 register_node :: proc(
 	name: string,
 	address: net.Endpoint,
@@ -295,10 +287,12 @@ register_spawn_func :: proc(name: string, func: SPAWN) -> bool {
 	return actod.register_spawn_func(name, func)
 }
 
+@(require_results)
 get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
 	return actod.get_node_info(node_id)
 }
 
+@(require_results)
 get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
 	return actod.get_node_by_name(name)
 }
@@ -344,6 +338,7 @@ clear_terminated_stats :: proc() -> bool {
 }
 
 // Subscribe to observer stats snapshots. Must be called from within an actor.
+@(require_results)
 subscribe_to_stats :: proc() -> (Subscription, bool) {
 	return actod.subscribe_to_stats()
 }
@@ -392,7 +387,7 @@ make_node_config :: proc(
 
 make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
-	spin_strategy: SPIN_STRATEGY = actod.SYSTEM_CONFIG.actor_config.spin_strategy,
+	spin_strategy: Spin_Strategy = actod.SYSTEM_CONFIG.actor_config.spin_strategy,
 	logging: Log_Config = actod.SYSTEM_CONFIG.actor_config.logging,
 	message_batch: int = actod.SYSTEM_CONFIG.actor_config.message_batch,
 	page_size: int = actod.SYSTEM_CONFIG.actor_config.page_size,
@@ -501,7 +496,7 @@ Log_Callback :: actod.Log_Callback
 Log_Flush :: actod.Log_Flush
 Log_Level :: log.Level
 Log_Options :: log.Options
-SPIN_STRATEGY :: actod.SPIN_STRATEGY
+Spin_Strategy :: actod.SPIN_STRATEGY
 
 // Networking
 Node_ID :: actod.Node_ID

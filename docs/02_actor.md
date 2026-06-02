@@ -115,9 +115,9 @@ act.send_self(MyMessage{value = 42})
 act.send_message_to_parent(MyMessage{value = 42})
 act.send_message_to_children(MyMessage{value = 42})
 
-// Priority sends
-act.send_message_high(target_pid, Urgent{})   // mailbox[0], processed first
-act.send_message_low(target_pid, Background{}) // mailbox[2], processed last
+// Priority sends (priority defaults to .NORMAL)
+act.send_message(target_pid, Urgent{}, .HIGH)    // mailbox[0], processed first
+act.send_message(target_pid, Background{}, .LOW) // mailbox[2], processed last
 ```
 
 All send functions return `Send_Error`:
@@ -136,16 +136,14 @@ Send_Error :: enum {
 }
 ```
 
-### Batch Priority Control
+### Batch Priority
 
-For sending multiple messages at the same priority, set it once:
+Pass the priority per call; there is no stateful priority mode:
 
 ```odin
-act.set_send_priority(.HIGH)
 for target in targets {
-    act.send_message(target, msg)
+    act.send_message(target, msg, .HIGH)
 }
-act.reset_send_priority()  // back to NORMAL
 ```
 
 ## Priority Mailboxes

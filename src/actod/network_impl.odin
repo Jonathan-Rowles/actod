@@ -341,12 +341,10 @@ build_and_send_network_command_impl :: proc(
 	return result
 }
 
-send_remote_impl :: proc(to: PID, data: rawptr, info: ^Message_Type_Info) -> Send_Error {
+send_remote_impl :: proc(to: PID, data: rawptr, info: ^Message_Type_Info, priority: Message_Priority) -> Send_Error {
 	_, node_id := unpack_pid(to)
 
-	p_flags := priority_to_flags(
-		current_actor_context != nil ? current_actor_context.send_priority : .NORMAL,
-	)
+	p_flags := priority_to_flags(priority)
 
 	ring := get_connection_ring(node_id)
 	if ring != nil && ring.state == .Ready {
@@ -387,9 +385,7 @@ send_remote_by_name_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 
-	p_flags := priority_to_flags(
-		current_actor_context != nil ? current_actor_context.send_priority : .NORMAL,
-	)
+	p_flags := priority_to_flags(.NORMAL)
 
 	ring := get_connection_ring(node_id)
 	if ring != nil && ring.state == .Ready {

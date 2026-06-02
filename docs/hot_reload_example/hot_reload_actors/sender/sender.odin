@@ -23,7 +23,7 @@ spawn_sender :: proc(name: string, parent: act.PID) -> (act.PID, bool) {
 
 sender_init :: proc(d: ^Sender) {
 	log.info("sender started")
-	act.set_timer(1 * time.Second, true)
+	_, _ = act.set_timer(1 * time.Second, true)
 }
 
 sender_handle_message :: proc(d: ^Sender, from: act.PID, msg: any) {

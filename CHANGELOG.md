@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.0] - 2026-06-02
+
+### Added
+- `@(require_results)` on value-returning lookups and spawns (`spawn`,
+  `spawn_child`, `spawn_by_name`, `spawn_remote`, `add_child`,
+  `add_child_existing`, `get_actor_pid`, `get_node_by_name`, `get_node_info`,
+  `get_actor_type_name`, `register_actor_type`, `register_node`, `set_timer`,
+  `subscribe_type`, `subscribe_topic`, `subscribe_to_stats`). Ignoring their
+  result is now a compile error.
+
+### Changed
+- `send_message` takes an optional `priority: Message_Priority = .NORMAL`
+  argument that selects the destination mailbox. Existing two-argument calls
+  are unaffected. Remote sends honor it via the existing wire priority flags.
+- `send_message_to_parent` and `send_message_to_children` return `Send_Error`
+  instead of `bool`, consistent with the rest of the send API.
+- `NODE_INIT` and `SHUTDOWN_NODE` renamed to `node_init` and `shutdown_node`.
+- Public type alias `SPIN_STRATEGY` renamed to `Spin_Strategy`.
+
+### Removed
+- `send_message_high`, `send_message_low`, `set_send_priority`, and
+  `reset_send_priority`. Pass `priority` to `send_message` instead, e.g.
+  `send_message(pid, msg, .HIGH)`. This drops the stateful per-actor send
+  priority that could leak into `broadcast`, `publish`, and `send_self`.
+
+[0.2.0]: https://github.com/Jonathan-Rowles/actod/releases/tag/v0.2.0
+
 ## [0.1.1] - 2026-04-18
 
 ### Changed

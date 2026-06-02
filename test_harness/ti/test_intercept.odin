@@ -135,30 +135,20 @@ intercept_send_message_name :: proc(to: string, content: $T) -> (Send_Error, boo
 	return .ACTOR_NOT_FOUND, true
 }
 
-intercept_send_message_high :: proc(to: u64, content: $T) -> (Send_Error, bool) {
+intercept_send_message_to_children :: proc(content: $T) -> (Send_Error, bool) {
 	if test_intercept == nil do return {}, false
-	return intercept_send_message(to, content, .HIGH)
-}
-
-intercept_send_message_low :: proc(to: u64, content: $T) -> (Send_Error, bool) {
-	if test_intercept == nil do return {}, false
-	return intercept_send_message(to, content, .LOW)
-}
-
-intercept_send_message_to_children :: proc(content: $T) -> (bool, bool) {
-	if test_intercept == nil do return false, false
-	if test_intercept.children_pids == nil do return true, true
+	if test_intercept.children_pids == nil do return .OK, true
 	for child_pid in test_intercept.children_pids {
 		intercept_send_message(child_pid, content)
 	}
-	return true, true
+	return .OK, true
 }
 
-intercept_send_message_to_parent :: proc(content: $T) -> (bool, bool) {
-	if test_intercept == nil do return false, false
-	if test_intercept.parent_pid == 0 do return false, true
+intercept_send_message_to_parent :: proc(content: $T) -> (Send_Error, bool) {
+	if test_intercept == nil do return {}, false
+	if test_intercept.parent_pid == 0 do return .ACTOR_NOT_FOUND, true
 	intercept_send_message(test_intercept.parent_pid, content)
-	return true, true
+	return .OK, true
 }
 
 intercept_send_to :: proc(

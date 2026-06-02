@@ -81,7 +81,7 @@ spawn_worker :: proc(_name: string, _parent: act.PID) -> (act.PID, bool) {
 }
 
 main :: proc() {
-    act.NODE_INIT("myapp", act.make_node_config(
+    act.node_init("myapp", act.make_node_config(
         actor_config = act.make_actor_config(
             children = act.make_children(spawn_worker),
         ),
@@ -109,7 +109,7 @@ act.make_actor_config(
 
 ```odin
 // Node A
-act.NODE_INIT("nodeA", act.make_node_config(
+act.node_init("nodeA", act.make_node_config(
     network = act.make_network_config(port = 5000),
 ))
 act.register_spawn_func("worker", spawn_worker)
@@ -119,7 +119,7 @@ remote_pid, ok := act.spawn_remote("worker", "w1", "nodeA")
 act.send_message(remote_pid, Work_Item{})
 ```
 
-**Priority mailboxes.** Three per-actor mailboxes (high, normal, low) plus a dedicated system mailbox processed first. Send at priority with `send_message_high` / `send_message_low`, or set priority once for a batch.
+**Priority mailboxes.** Three per-actor mailboxes (high, normal, low) plus a dedicated system mailbox processed first. Send at priority with the optional `priority` argument to `send_message` (`.HIGH` / `.NORMAL` / `.LOW`).
 
 **Pub/sub.** Type-based (global, up to 16384 subscribers) and topic-based (scoped to a struct field, up to 64 subscribers). Cross-node for type-based.
 
@@ -159,7 +159,7 @@ Maps and dynamic arrays are excluded from messages intentionally. Every send has
 Three config builders, all with sensible defaults:
 
 ```odin
-act.NODE_INIT("myapp", act.make_node_config(
+act.node_init("myapp", act.make_node_config(
     worker_count = 0,              // 0 = auto (CPU count)
     actor_config = act.make_actor_config(
         message_batch = 64,

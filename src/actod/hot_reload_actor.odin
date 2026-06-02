@@ -16,12 +16,12 @@ import "core:strings"
 import "core:sync"
 
 @(private)
-send_message_any :: proc(to: PID, content: any) -> Send_Error {
+send_message_any :: proc(to: PID, content: any, priority: Message_Priority = .NORMAL) -> Send_Error {
 	@(static) sentinel: Message_Type_Info
 	info, ok := get_type_info_ptr(content.id)
 	if !ok do info = &sentinel
 	size := type_info_of(content.id).size
-	return send_message_impl(to, content.data, size, content.id, info, .User)
+	return send_message_impl(to, content.data, size, content.id, info, priority, .User)
 }
 
 @(private)

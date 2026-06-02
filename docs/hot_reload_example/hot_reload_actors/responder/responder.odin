@@ -21,7 +21,7 @@ spawn_responder :: proc(name: string, parent: act.PID) -> (act.PID, bool) {
 
 responder_init :: proc(d: ^Responder) {
 	log.info("responder started")
-	act.set_timer(3 * time.Second, true)
+	_, _ = act.set_timer(3 * time.Second, true)
 }
 
 responder_handle_message :: proc(d: ^Responder, from: act.PID, msg: any) {

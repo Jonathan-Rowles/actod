@@ -351,8 +351,8 @@ import "core:time"
 import "core:net"
 
 Hot_API :: struct {
-	NODE_INIT:                 proc(name: string, opts: System_Config),
-	SHUTDOWN_NODE:             proc(),
+	node_init:                 proc(name: string, opts: System_Config),
+	shutdown_node:             proc(),
 	await_signal:              proc(),
 	spawn_by_name:             proc(spawn_func_name: string, actor_name: string, parent_pid: PID) -> (PID, bool),
 	spawn_remote:              proc(
@@ -364,9 +364,7 @@ Hot_API :: struct {
 	) -> (PID, bool),
 	terminate_actor:           proc(to: PID, reason: Termination_Reason) -> bool,
 	rename_actor:              proc(pid: PID, new_name: string) -> bool,
-	send_message:              proc(to: PID, content: any) -> Send_Error,
-	set_send_priority:         proc(p: Message_Priority),
-	reset_send_priority:       proc(),
+	send_message:              proc(to: PID, content: any, priority: Message_Priority) -> Send_Error,
 	get_self_pid:              proc() -> PID,
 	get_self_name:             proc() -> string,
 	get_parent_pid:            proc() -> PID,
@@ -486,12 +484,12 @@ Hot_API :: struct {
 @(export)
 hot_api: ^Hot_API
 
-NODE_INIT :: proc(name: string, opts: System_Config = {}) {
-	hot_api.NODE_INIT(name, opts)
+node_init :: proc(name: string, opts: System_Config = {}) {
+	hot_api.node_init(name, opts)
 }
 
-SHUTDOWN_NODE :: proc() {
-	hot_api.SHUTDOWN_NODE()
+shutdown_node :: proc() {
+	hot_api.shutdown_node()
 }
 
 await_signal :: proc() {
@@ -544,53 +542,32 @@ rename_actor :: proc(pid: PID, new_name: string) -> bool {
 	return hot_api.rename_actor(pid, new_name)
 }
 
-send_message :: proc(to: PID, content: $T) -> Send_Error {
-	return hot_api.send_message(to, content)
+send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error {
+	return hot_api.send_message(to, content, priority)
 }
 
 send_message_name :: proc(to: string, content: $T) -> Send_Error {
 	pid, found := hot_api.get_actor_pid(to)
 	if !found do return .ACTOR_NOT_FOUND
-	return hot_api.send_message(pid, content)
+	return hot_api.send_message(pid, content, .NORMAL)
 }
 
 send_self :: proc(content: $T) -> Send_Error {
-	return hot_api.send_message(hot_api.get_self_pid(), content)
+	return hot_api.send_message(hot_api.get_self_pid(), content, .NORMAL)
 }
 
-send_message_to_parent :: proc(content: $T) -> bool {
+send_message_to_parent :: proc(content: $T) -> Send_Error {
 	parent := hot_api.get_parent_pid()
-	if parent == 0 do return false
-	return hot_api.send_message(parent, content) == .OK
+	if parent == 0 do return .ACTOR_NOT_FOUND
+	return hot_api.send_message(parent, content, .NORMAL)
 }
 
-send_message_to_children :: proc(content: $T) -> bool {
+send_message_to_children :: proc(content: $T) -> Send_Error {
 	for child in hot_api.get_children(hot_api.get_self_pid()) {
-		if hot_api.send_message(child, content) != .OK do return false
+		err := hot_api.send_message(child, content, .NORMAL)
+		if err != .OK do return err
 	}
-	return true
-}
-
-send_message_high :: proc(to: PID, content: $T) -> Send_Error {
-	hot_api.set_send_priority(.HIGH)
-	err := hot_api.send_message(to, content)
-	hot_api.set_send_priority(.NORMAL)
-	return err
-}
-
-send_message_low :: proc(to: PID, content: $T) -> Send_Error {
-	hot_api.set_send_priority(.LOW)
-	err := hot_api.send_message(to, content)
-	hot_api.set_send_priority(.NORMAL)
-	return err
-}
-
-set_send_priority :: proc(p: Message_Priority) {
-	hot_api.set_send_priority(p)
-}
-
-reset_send_priority :: proc() {
-	hot_api.reset_send_priority()
+	return .OK
 }
 
 register_message_type :: proc "contextless"(typeid) {

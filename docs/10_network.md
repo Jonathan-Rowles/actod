@@ -17,16 +17,16 @@ Each node-to-node link uses a connection actor that manages the TCP socket, hear
 
 ```odin
 // Node A, listen and register spawn functions
-act.NODE_INIT("nodeA", opts = act.make_node_config(
+act.node_init("nodeA", opts = act.make_node_config(
     network = act.make_network_config(port = 5000, auth_password = "secret"),
 ))
 act.register_spawn_func("worker", spawn_worker)
 
 // Node B, connect to Node A
-act.NODE_INIT("nodeB", opts = act.make_node_config(
+act.node_init("nodeB", opts = act.make_node_config(
     network = act.make_network_config(port = 5001, auth_password = "secret"),
 ))
-act.register_node("nodeA", net.Endpoint{address = ..., port = 5000}, .TCP)
+_, _ = act.register_node("nodeA", net.Endpoint{address = ..., port = 5000}, .TCP)
 ```
 
 ## Configuration
@@ -156,7 +156,7 @@ spawn_remote :: proc(
 ) -> (PID, bool)
 
 // Transparent messaging
-send_message :: proc(to: PID, content: $T) -> Send_Error        // routes automatically
+send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error // routes automatically
 send_message_name :: proc(to: string, content: $T) -> Send_Error // "actor@node" format
 send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Error
 

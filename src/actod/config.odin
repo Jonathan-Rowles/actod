@@ -150,7 +150,7 @@ Actor_Config :: struct {
 	stack_size_dedicated_os_thread: int,
 }
 
-// user overrides config sent to node in actor.NODE_INIT
+// user overrides config sent to node in actor.node_init
 make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
 	spin_strategy: SPIN_STRATEGY = SYSTEM_CONFIG.actor_config.spin_strategy,

@@ -5,7 +5,7 @@ The observer collects per-actor stats (message counts, mailbox sizes, uptime) an
 ## Enabling
 
 ```odin
-act.NODE_INIT("myapp", act.make_node_config(
+act.node_init("myapp", act.make_node_config(
     enable_observer   = true,
     observer_interval = 5 * time.Second,  // auto-collect every 5s, 0 = manual
 ))

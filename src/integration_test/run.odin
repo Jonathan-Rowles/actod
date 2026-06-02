@@ -271,7 +271,7 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 		node_opts.worker_count = entry.worker_count
 	}
 
-	actod.NODE_INIT(name = node_name, opts = node_opts)
+	actod.node_init(name = node_name, opts = node_opts)
 
 	wait_for_node()
 
@@ -280,7 +280,7 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	failed := testing.failed(&t)
 
 	if actod.NODE.started {
-		actod.SHUTDOWN_NODE()
+		actod.shutdown_node()
 	}
 
 	final_count := actod.num_used(&actod.global_registry)

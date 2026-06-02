@@ -12,7 +12,7 @@ main :: proc() {
 	run_local_mailbox_benchmark()
 	run_scaling_benchmark()
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "latency_bench",
 		opts = actod.make_node_config(
 			actor_config = actod.make_actor_config(
@@ -26,7 +26,7 @@ main :: proc() {
 	run_latency_pingpong()
 	run_saturation_test()
 
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 }
 
 print_provenance_header :: proc() {

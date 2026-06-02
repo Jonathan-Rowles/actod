@@ -48,7 +48,7 @@ start_parent_monitor :: proc() {
 		handle := win32.HANDLE(data)
 		win32.WaitForSingleObject(handle, win32.INFINITE)
 		win32.CloseHandle(handle)
-		actod.SHUTDOWN_NODE()
+		actod.shutdown_node()
 		os.exit(1)
 	})
 }

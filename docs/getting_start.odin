@@ -115,7 +115,7 @@ spawn_comedian :: proc(name: string, parent: act.PID) -> (act.PID, bool) {
 }
 
 main :: proc() {
-	act.NODE_INIT(
+	act.node_init(
 		"comedy-club",
 		act.make_node_config(
 			actor_config = act.make_actor_config(
@@ -126,5 +126,5 @@ main :: proc() {
 
 	time.sleep(1 * time.Second)
 
-	act.SHUTDOWN_NODE()
+	act.shutdown_node()
 }

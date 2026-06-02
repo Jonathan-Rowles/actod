@@ -47,7 +47,7 @@ The supervisor tracks restarts within a sliding window. If `max_restarts` is exc
 new_pid, ok := act.add_child(supervisor_pid, spawn_new_worker)
 
 // Add an existing actor as a child
-act.add_child_existing(supervisor_pid, existing_pid, spawn_func)
+pid, ok := act.add_child_existing(supervisor_pid, existing_pid, spawn_func)
 
 // Remove a child
 act.remove_child(supervisor_pid, child_pid)

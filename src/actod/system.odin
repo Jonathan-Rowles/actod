@@ -193,7 +193,7 @@ get_node_log_ctx :: proc() -> log.Logger {
 	return systemLogger
 }
 
-NODE_INIT :: proc(name: string, opts := SYSTEM_CONFIG) {
+node_init :: proc(name: string, opts := SYSTEM_CONFIG) {
 	NODE.name = name
 
 	logging_config := opts.actor_config.logging
@@ -301,7 +301,7 @@ send_to_node_mailbox :: #force_inline proc(actor: ^Actor(int), content: $T) -> b
 		return false
 	}
 
-	result := push_to_mailbox(actor, msg, NODE.pid, get_send_priority())
+	result := push_to_mailbox(actor, msg, NODE.pid)
 	if result != .OK {
 		free_message(&actor.pool, msg.content)
 		return false
@@ -347,7 +347,7 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 		a, _ := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
 		handle_get_stats_request(a, v)
 	case Terminate:
-		log.info("To terminate system node call SHUTDOWN_NODE")
+		log.info("To terminate system node call shutdown_node")
 	case Rename_Actor:
 		log.warn("Rename_Actor not yet handled in system node")
 	case string:
@@ -456,7 +456,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	}
 }
 
-SHUTDOWN_NODE :: proc() {
+shutdown_node :: proc() {
 	context.logger = systemLogger
 	if !NODE.started || NODE.pid == 0 {
 		cleanup_logger_and_context()
@@ -580,7 +580,7 @@ reset_node_state :: proc() {
 	sync.atomic_store(&global_next_node_id, 2)
 	current_node_id = 1
 	NODE.started = false
-	// NOTE: shutting_down stays true until NODE_INIT to prevent
+	// NOTE: shutting_down stays true until node_init to prevent
 	// concurrent senders from accessing freed actor memory.
 	NODE.pid = 0
 	NODE.observer = 0
@@ -672,7 +672,7 @@ await_signal :: proc() {
 	setup_signal_handler()
 	sync.atomic_sema_wait(&signal_wake)
 	if NODE.pid != 0 {
-		SHUTDOWN_NODE()
+		shutdown_node()
 	}
 }
 

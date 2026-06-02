@@ -1487,7 +1487,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 	node_pid := actod.NODE.pid
 	testing.expect(t, node_pid != 0, "Node PID should not be 0 before shutdown")
 
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 
 	for i := 0; i < 1000; i += 1 {
 		intrinsics.cpu_relax()

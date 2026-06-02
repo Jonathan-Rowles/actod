@@ -41,7 +41,7 @@ run_local_throughput :: proc(
 	done_sema: sync.Sema
 	warmup_done_sema: sync.Sema
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "local_bench",
 		opts = actod.make_node_config(
 			worker_count = worker_count,
@@ -138,7 +138,7 @@ run_local_throughput :: proc(
 	actod.terminate_actor(receiver)
 	time.sleep(50 * time.Millisecond)
 
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 
 	duration_sec := f64(elapsed_ns) / 1e9
 	throughput = f64(received) / duration_sec

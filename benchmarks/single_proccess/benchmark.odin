@@ -113,7 +113,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 
 	wc := config.worker_count if config.worker_count > 0 else 0
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "bench",
 		opts = actod.make_node_config(
 			worker_count = wc,
@@ -223,7 +223,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	time.sleep(50 * time.Millisecond)
 
 	wait_for_actors_cleanup()
-	actod.SHUTDOWN_NODE()
+	actod.shutdown_node()
 
 	duration_sec := f64(elapsed_ns) / 1e9
 	throughput := f64(final_received) / duration_sec

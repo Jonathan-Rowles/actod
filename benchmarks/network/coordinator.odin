@@ -65,7 +65,7 @@ cleanup_process :: proc(bp: Benchmark_Process) {
 }
 
 run_benchmark_tests :: proc() {
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "BenchmarkSender",
 		opts = actod.make_node_config(
 			network = actod.make_network_config(
@@ -86,7 +86,7 @@ run_benchmark_tests :: proc() {
 			),
 		),
 	)
-	defer actod.SHUTDOWN_NODE()
+	defer actod.shutdown_node()
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,

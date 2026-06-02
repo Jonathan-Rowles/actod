@@ -139,7 +139,6 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 Actor_Context :: struct {
 	pid:                 PID,
 	name:                string,
-	send_priority:       Message_Priority,
 	panic_jmp_buf:       libc.jmp_buf,
 	panic_message:       [PANIC_MESSAGE_BUF_SIZE]u8,
 	panic_message_len:   int,
@@ -1077,14 +1076,14 @@ send_self :: #force_inline proc(content: $T) -> Send_Error {
 	}
 }
 
-send_message :: #force_inline proc(to: PID, content: $T) -> Send_Error {
-	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content); ok do return Send_Error(r)}
+send_message :: #force_inline proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error {
+	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content, ti.Message_Priority(priority)); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .System)
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .System)
 	} else {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .User)
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .User)
 	}
 }
 
@@ -1188,8 +1187,8 @@ send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Erro
 	return .NODE_NOT_FOUND
 }
 
-send_message_to_children :: #force_inline proc(content: $T) -> bool {
-	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return r}
+send_message_to_children :: #force_inline proc(content: $T) -> Send_Error {
+	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
@@ -1199,8 +1198,8 @@ send_message_to_children :: #force_inline proc(content: $T) -> bool {
 	}
 }
 
-send_message_to_parent :: #force_inline proc(content: $T) -> bool {
-	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return r}
+send_message_to_parent :: #force_inline proc(content: $T) -> Send_Error {
+	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
@@ -1208,40 +1207,6 @@ send_message_to_parent :: #force_inline proc(content: $T) -> bool {
 	} else {
 		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .User)
 	}
-}
-
-send_message_high :: proc(to: PID, content: $T) -> Send_Error {
-	when ODIN_TEST {if r, ok := ti.intercept_send_message_high(u64(to), content); ok do return Send_Error(r)}
-
-	if current_actor_context != nil do current_actor_context.send_priority = .HIGH
-	err := send_message(to, content)
-	if current_actor_context != nil do current_actor_context.send_priority = .NORMAL
-	return err
-}
-
-send_message_low :: proc(to: PID, content: $T) -> Send_Error {
-	when ODIN_TEST {if r, ok := ti.intercept_send_message_low(u64(to), content); ok do return Send_Error(r)}
-
-	if current_actor_context != nil do current_actor_context.send_priority = .LOW
-	err := send_message(to, content)
-	if current_actor_context != nil do current_actor_context.send_priority = .NORMAL
-	return err
-}
-
-set_send_priority :: proc(p: Message_Priority) {
-	if current_actor_context != nil do current_actor_context.send_priority = p
-}
-
-reset_send_priority :: proc() {
-	if current_actor_context != nil do current_actor_context.send_priority = .NORMAL
-}
-
-@(private)
-get_send_priority :: #force_inline proc() -> int {
-	if current_actor_context != nil {
-		return int(current_actor_context.send_priority)
-	}
-	return 1
 }
 
 @(private)
@@ -1383,9 +1348,9 @@ send :: #force_inline proc(to: PID, content: $T, actor: ^Actor(int)) -> Send_Err
 	v := content
 	info := get_validated_message_info_ptr(T)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .System)
+		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .NORMAL, .System)
 	} else {
-		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .User)
+		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .NORMAL, .User)
 	}
 }
 

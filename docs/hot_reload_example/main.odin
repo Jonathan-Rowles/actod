@@ -6,7 +6,7 @@ import "hot_reload_actors/sender"
 
 main :: proc() {
 
-	act.NODE_INIT(
+	act.node_init(
 		"hot-reload_test",
 		act.make_node_config(
 			hot_reload_dev = true,

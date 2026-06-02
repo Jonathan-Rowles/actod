@@ -262,7 +262,7 @@ run_receiver_node :: proc() {
 
 	auth := os.lookup_env("BENCH_AUTH", context.temp_allocator) or_else "bench_password"
 
-	actod.NODE_INIT(
+	actod.node_init(
 		name = "BenchmarkReceiver",
 		opts = actod.make_node_config(
 			network = actod.make_network_config(

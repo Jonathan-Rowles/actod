@@ -23,7 +23,7 @@ This means hot reload is safe for logic changes (fixing a bug in `handle_message
 ## Enabling
 
 ```odin
-act.NODE_INIT("myapp", act.make_node_config(
+act.node_init("myapp", act.make_node_config(
     hot_reload_dev        = true,
     hot_reload_watch_path = "",   // empty = auto-discover actors directory
 ))

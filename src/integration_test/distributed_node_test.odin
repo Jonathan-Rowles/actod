@@ -1605,3 +1605,103 @@ test_distributed_union_messages :: proc(t: ^testing.T) {
 		expected_acks,
 	)
 }
+
+test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
+	ack_count: i32 = 0
+	intact_count: i32 = 0
+	done := sync.Sema{}
+	expected_acks: i32 = 3
+
+	expected_blob := make([]u8, 200)
+	defer delete(expected_blob)
+	for i in 0 ..< len(expected_blob) {
+		expected_blob[i] = u8((i * 7 + 3) & 0xff)
+	}
+	expected_checksum := shared.bytes_checksum(expected_blob)
+
+	Bytes_Receiver_Data :: struct {
+		ack_count:         ^i32,
+		intact_count:      ^i32,
+		done:              ^sync.Sema,
+		expected:          i32,
+		expected_len:      int,
+		expected_checksum: u32,
+	}
+
+	Bytes_Receiver_Behaviour :: actod.Actor_Behaviour(Bytes_Receiver_Data) {
+		handle_message = proc(data: ^Bytes_Receiver_Data, from: actod.PID, msg: any) {
+			switch m in msg {
+			case shared.Network_Bytes_Message:
+				if len(m.blob) == data.expected_len &&
+				   shared.bytes_checksum(m.blob) == data.expected_checksum &&
+				   m.label == "payload" {
+					sync.atomic_add(data.intact_count, 1)
+				}
+
+				actod.send_message(
+					from,
+					shared.Network_Bytes_Ack {
+						id = m.id,
+						blob_len = len(m.blob),
+						checksum = shared.bytes_checksum(m.blob),
+					},
+				)
+
+				count := sync.atomic_add(data.ack_count, 1)
+				if count + 1 >= data.expected {
+					sync.sema_post(data.done)
+				}
+			}
+		},
+	}
+
+	receiver_data := Bytes_Receiver_Data {
+		ack_count         = &ack_count,
+		intact_count      = &intact_count,
+		done              = &done,
+		expected          = expected_acks,
+		expected_len      = len(expected_blob),
+		expected_checksum = expected_checksum,
+	}
+	_, ok := actod.spawn("bytes_receiver", receiver_data, Bytes_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn bytes receiver actor")
+
+	node2_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=bytes_sender",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=bytes_receiver",
+				"AUTH_PASSWORD=test_dist_password",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(node2_desc)
+	if remote_err != nil {
+		panic("failed to start bytes_sender node")
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
+	testing.expectf(
+		t,
+		success,
+		"Timed out waiting for distributed byte slice messages, got %d/%d",
+		sync.atomic_load(&ack_count),
+		expected_acks,
+	)
+
+	testing.expectf(
+		t,
+		sync.atomic_load(&intact_count) == expected_acks,
+		"Every cross-node []u8 payload should arrive byte-for-byte intact, got %d/%d",
+		sync.atomic_load(&intact_count),
+		expected_acks,
+	)
+}

@@ -261,7 +261,7 @@ unused_list_integrity_test :: proc(t: ^testing.T) {
 		remove(test_registry, pid)
 	}
 
-	next := sync.atomic_load(&test_registry.next_unused)
+	next := u32(sync.atomic_load(&test_registry.next_unused))
 	visited := make(map[u32]bool)
 	defer delete(visited)
 

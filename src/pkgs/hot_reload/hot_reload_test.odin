@@ -12,11 +12,21 @@ TEST_SRC_DIR :: "src/pkgs/hot_reload/mocks"
 @(private)
 test_build_counter: u64
 
+@(private)
+mock_module_path :: proc(name: string) -> string {
+	tmp, _ := os.temp_directory(context.temp_allocator)
+	path, _ := filepath.join(
+		{tmp, fmt.tprintf("%s%s", name, SHARED_LIB_EXT)},
+		context.temp_allocator,
+	)
+	return path
+}
+
 @(test)
 test_load_module_bad_path :: proc(t: ^testing.T) {
 	specs := []Symbol_Spec{{name = "handle_message", required = true}}
 
-	mod, err := load_module(fmt.tprintf("/nonexistent/path/module%s", SHARED_LIB_EXT), specs, 4)
+	mod, err := load_module(mock_module_path("actod_missing_module"), specs, 4)
 	testing.expect_value(t, err.kind, Load_Error_Kind.File_Not_Found)
 	testing.expect(t, mod == nil, "module should be nil on error")
 }
@@ -135,7 +145,7 @@ test_error_message_none :: proc(t: ^testing.T) {
 
 @(test)
 test_error_message_file_not_found :: proc(t: ^testing.T) {
-	path := fmt.tprintf("/some/path/actor%s", SHARED_LIB_EXT)
+	path := mock_module_path("actor")
 	msg := load_error_message(
 		Load_Error{kind = .File_Not_Found, module_path = path},
 	)
@@ -145,7 +155,7 @@ test_error_message_file_not_found :: proc(t: ^testing.T) {
 
 @(test)
 test_error_message_missing_required_symbol :: proc(t: ^testing.T) {
-	path := fmt.tprintf("/tmp/chat%s", SHARED_LIB_EXT)
+	path := mock_module_path("chat")
 	msg := load_error_message(
 		Load_Error {
 			kind = .Missing_Required_Symbol,
@@ -159,7 +169,7 @@ test_error_message_missing_required_symbol :: proc(t: ^testing.T) {
 
 @(test)
 test_error_message_state_size_mismatch :: proc(t: ^testing.T) {
-	path := fmt.tprintf("/tmp/actor%s", SHARED_LIB_EXT)
+	path := mock_module_path("actor")
 	msg := load_error_message(
 		Load_Error {
 			kind = .State_Size_Mismatch,
@@ -175,7 +185,7 @@ test_error_message_state_size_mismatch :: proc(t: ^testing.T) {
 
 @(test)
 test_error_message_dlopen_failed :: proc(t: ^testing.T) {
-	path := fmt.tprintf("/tmp/broken%s", SHARED_LIB_EXT)
+	path := mock_module_path("broken")
 	sys_msg := fmt.tprintf("libfoo%s: cannot open shared object file", SHARED_LIB_EXT)
 	msg := load_error_message(
 		Load_Error {

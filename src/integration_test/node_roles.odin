@@ -42,6 +42,8 @@ run_node_role :: proc(command: string) {
 		run_pubsub_subscriber()
 	case "union_sender":
 		run_union_sender()
+	case "bytes_sender":
+		run_bytes_sender()
 	case:
 		fmt.eprintf("Unknown node role: %s\n", command)
 		os.exit(1)
@@ -1046,6 +1048,67 @@ run_union_sender :: proc() {
 	if err3 != .OK {
 		fmt.printf("Failed to send second ping union message: %v\n", err3)
 		os.exit(1)
+	}
+
+	time.sleep(500 * time.Millisecond)
+
+	actod.shutdown_node()
+	os.exit(0)
+}
+
+run_bytes_sender :: proc() {
+	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
+	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "bytes_receiver"
+	auth_password :=
+		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+
+	target_port := 16001
+	if port_val, ok := strconv.parse_int(target_port_str); ok {
+		target_port = port_val
+	}
+
+	actod.node_init(
+		name = "BytesSenderNode",
+		opts = actod.make_node_config(
+			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			actor_config = actod.make_actor_config(
+				logging = actod.make_log_config(level = log_level),
+			),
+		),
+	)
+
+	target_addr := net.Endpoint {
+		address = net.IP4_Loopback,
+		port    = target_port,
+	}
+
+	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	if !ok {
+		fmt.println("Failed to register target node")
+		os.exit(1)
+	}
+
+	time.sleep(250 * time.Millisecond)
+
+	// Non-trivial blob: spans more than one cache line and includes the byte
+	// values a string layout would mangle (0x00, high bytes).
+	blob := make([]u8, 200)
+	for i in 0 ..< len(blob) {
+		blob[i] = u8((i * 7 + 3) & 0xff)
+	}
+
+	for id in 1 ..= 3 {
+		msg := shared.Network_Bytes_Message {
+			id    = id,
+			label = "payload",
+			blob  = blob,
+		}
+		err := actod.send_to(target_actor, target_node, msg)
+		if err != .OK {
+			fmt.printf("Failed to send bytes message %d: %v\n", id, err)
+			os.exit(1)
+		}
 	}
 
 	time.sleep(500 * time.Millisecond)

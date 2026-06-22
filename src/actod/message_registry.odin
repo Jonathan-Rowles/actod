@@ -5,17 +5,12 @@ import "core:fmt"
 import "core:log"
 import "core:strings"
 
-String_Field_Info :: struct {
-	offset: uintptr,
-}
-
-Byte_Slice_Field_Info :: struct {
+Var_Field_Info :: struct {
 	offset: uintptr,
 }
 
 Union_Variant_Fields :: struct {
-	string_fields:     []String_Field_Info,
-	byte_slice_fields: []Byte_Slice_Field_Info,
+	var_fields: []Var_Field_Info,
 }
 
 Union_Field_Info :: struct {
@@ -26,9 +21,8 @@ Union_Field_Info :: struct {
 }
 
 Message_Type_Flags :: enum u32 {
-	Has_Strings     = 0,
-	Has_Byte_Slices = 1,
-	Has_Unions      = 2,
+	Has_Var_Fields = 0,
+	Has_Unions     = 1,
 }
 
 Message_Type_Flags_Set :: bit_set[Message_Type_Flags;u32]
@@ -36,17 +30,16 @@ Message_Type_Flags_Set :: bit_set[Message_Type_Flags;u32]
 Message_Deliver_Proc :: proc(to_pid: PID, from_pid: PID, payload: []byte) -> Send_Error
 
 Message_Type_Info :: struct {
-	type_id:           typeid,
-	name:              string,
-	type_hash:         u64,
-	size:              int,
-	wire_header_size:  int,
-	type_info:         ^runtime.Type_Info,
-	flags:             Message_Type_Flags_Set,
-	string_fields:     []String_Field_Info,
-	byte_slice_fields: []Byte_Slice_Field_Info,
-	union_fields:      []Union_Field_Info,
-	deliver:           Message_Deliver_Proc,
+	type_id:          typeid,
+	name:             string,
+	type_hash:        u64,
+	size:             int,
+	wire_header_size: int,
+	type_info:        ^runtime.Type_Info,
+	flags:            Message_Type_Flags_Set,
+	var_fields:       []Var_Field_Info,
+	union_fields:     []Union_Field_Info,
+	deliver:          Message_Deliver_Proc,
 }
 
 MAX_MESSAGE_TYPES :: 256
@@ -113,8 +106,7 @@ Temp_Union_Info :: struct {
 }
 
 Temp_Variant_Info :: struct {
-	string_fields:     [dynamic]String_Field_Info,
-	byte_slice_fields: [dynamic]Byte_Slice_Field_Info,
+	var_fields: [dynamic]Var_Field_Info,
 }
 
 register_message_type :: proc "contextless" ($T: typeid) {
@@ -137,8 +129,7 @@ register_message_type :: proc "contextless" ($T: typeid) {
 
 	allow_byte_slices := true
 
-	temp_string_fields := make([dynamic]String_Field_Info)
-	temp_byte_slice_fields := make([dynamic]Byte_Slice_Field_Info)
+	temp_var_fields := make([dynamic]Var_Field_Info)
 	temp_union_fields := make([dynamic]Temp_Union_Info)
 
 	info := Message_Type_Info {
@@ -154,14 +145,12 @@ register_message_type :: proc "contextless" ($T: typeid) {
 		"",
 		&info,
 		0,
-		&temp_string_fields,
-		&temp_byte_slice_fields,
+		&temp_var_fields,
 		allow_byte_slices,
 		&temp_union_fields,
 	)
 	if !safe {
-		delete(temp_string_fields)
-		delete(temp_byte_slice_fields)
+		delete(temp_var_fields)
 		cleanup_temp_union_fields(temp_union_fields[:])
 		delete(temp_union_fields)
 		fmt.panicf(
@@ -174,22 +163,13 @@ register_message_type :: proc "contextless" ($T: typeid) {
 		)
 	}
 
-	if len(temp_string_fields) > 0 {
-		info.string_fields = make(
-			[]String_Field_Info,
-			len(temp_string_fields),
+	if len(temp_var_fields) > 0 {
+		info.var_fields = make(
+			[]Var_Field_Info,
+			len(temp_var_fields),
 			g_message_registry.allocator,
 		)
-		copy(info.string_fields, temp_string_fields[:])
-	}
-
-	if len(temp_byte_slice_fields) > 0 {
-		info.byte_slice_fields = make(
-			[]Byte_Slice_Field_Info,
-			len(temp_byte_slice_fields),
-			g_message_registry.allocator,
-		)
-		copy(info.byte_slice_fields, temp_byte_slice_fields[:])
+		copy(info.var_fields, temp_var_fields[:])
 	}
 
 	if len(temp_union_fields) > 0 {
@@ -210,30 +190,18 @@ register_message_type :: proc "contextless" ($T: typeid) {
 				g_message_registry.allocator,
 			)
 			for &vf, vi in uf.variants {
-				if len(vf.string_fields) > 0 {
-					info.union_fields[ui].variants[vi].string_fields = make(
-						[]String_Field_Info,
-						len(vf.string_fields),
+				if len(vf.var_fields) > 0 {
+					info.union_fields[ui].variants[vi].var_fields = make(
+						[]Var_Field_Info,
+						len(vf.var_fields),
 						g_message_registry.allocator,
 					)
-					copy(info.union_fields[ui].variants[vi].string_fields, vf.string_fields[:])
-				}
-				if len(vf.byte_slice_fields) > 0 {
-					info.union_fields[ui].variants[vi].byte_slice_fields = make(
-						[]Byte_Slice_Field_Info,
-						len(vf.byte_slice_fields),
-						g_message_registry.allocator,
-					)
-					copy(
-						info.union_fields[ui].variants[vi].byte_slice_fields,
-						vf.byte_slice_fields[:],
-					)
+					copy(info.union_fields[ui].variants[vi].var_fields, vf.var_fields[:])
 				}
 			}
 		}
 	}
 
-	// Payload format: [struct bytes][string1 data][string2 data]...[bytes1 data][bytes2 data]...
 	info.deliver = proc(to_pid: PID, from_pid: PID, payload: []byte) -> Send_Error {
 		if len(payload) < size_of(T) {
 			log.errorf(
@@ -251,42 +219,22 @@ register_message_type :: proc "contextless" ($T: typeid) {
 		data_offset := size_of(T)
 		payload_len := len(payload)
 
-		if .Has_Strings in type_info.flags {
-			for field in type_info.string_fields {
-				str_ptr := cast(^string)(uintptr(&value) + field.offset)
-				str_len := len(str_ptr^)
-				if str_len > 0 {
-					if data_offset + str_len > payload_len {
+		if .Has_Var_Fields in type_info.flags {
+			for field in type_info.var_fields {
+				field_ptr := cast(^[]byte)(uintptr(&value) + field.offset)
+				field_len := len(field_ptr^)
+				if field_len > 0 {
+					if data_offset + field_len > payload_len {
 						log.errorf(
-							"Payload too small for string field in %v: need %d, have %d",
+							"Payload too small for variable field in %v: need %d, have %d",
 							typeid_of(T),
-							data_offset + str_len,
+							data_offset + field_len,
 							payload_len,
 						)
 						return .NETWORK_ERROR
 					}
-					str_ptr^ = string(payload[data_offset:data_offset + str_len])
-					data_offset += str_len
-				}
-			}
-		}
-
-		if .Has_Byte_Slices in type_info.flags {
-			for field in type_info.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(&value) + field.offset)
-				slice_len := len(slice_ptr^)
-				if slice_len > 0 {
-					if data_offset + slice_len > payload_len {
-						log.errorf(
-							"Payload too small for byte slice field in %v: need %d, have %d",
-							typeid_of(T),
-							data_offset + slice_len,
-							payload_len,
-						)
-						return .NETWORK_ERROR
-					}
-					slice_ptr^ = payload[data_offset:data_offset + slice_len]
-					data_offset += slice_len
+					field_ptr^ = payload[data_offset:data_offset + field_len]
+					data_offset += field_len
 				}
 			}
 		}
@@ -295,38 +243,21 @@ register_message_type :: proc "contextless" ($T: typeid) {
 			for uf in type_info.union_fields {
 				variant, ok := get_active_union_variant(&value, uf)
 				if !ok do continue
-				for field in variant.string_fields {
-					str_ptr := cast(^string)(uintptr(&value) + field.offset)
-					str_len := len(str_ptr^)
-					if str_len > 0 {
-						if data_offset + str_len > payload_len {
+				for field in variant.var_fields {
+					field_ptr := cast(^[]byte)(uintptr(&value) + field.offset)
+					field_len := len(field_ptr^)
+					if field_len > 0 {
+						if data_offset + field_len > payload_len {
 							log.errorf(
-								"Payload too small for union string field in %v: need %d, have %d",
+								"Payload too small for union variable field in %v: need %d, have %d",
 								typeid_of(T),
-								data_offset + str_len,
+								data_offset + field_len,
 								payload_len,
 							)
 							return .NETWORK_ERROR
 						}
-						str_ptr^ = string(payload[data_offset:data_offset + str_len])
-						data_offset += str_len
-					}
-				}
-				for field in variant.byte_slice_fields {
-					slice_ptr := cast(^[]byte)(uintptr(&value) + field.offset)
-					slice_len := len(slice_ptr^)
-					if slice_len > 0 {
-						if data_offset + slice_len > payload_len {
-							log.errorf(
-								"Payload too small for union byte slice field in %v: need %d, have %d",
-								typeid_of(T),
-								data_offset + slice_len,
-								payload_len,
-							)
-							return .NETWORK_ERROR
-						}
-						slice_ptr^ = payload[data_offset:data_offset + slice_len]
-						data_offset += slice_len
+						field_ptr^ = payload[data_offset:data_offset + field_len]
+						data_offset += field_len
 					}
 				}
 			}
@@ -355,8 +286,7 @@ register_message_type :: proc "contextless" ($T: typeid) {
 
 	registry_register(&g_message_registry, type_name, info)
 
-	delete(temp_string_fields)
-	delete(temp_byte_slice_fields)
+	delete(temp_var_fields)
 	cleanup_temp_union_fields(temp_union_fields[:])
 	delete(temp_union_fields)
 }
@@ -364,8 +294,7 @@ register_message_type :: proc "contextless" ($T: typeid) {
 cleanup_temp_union_fields :: proc(fields: []Temp_Union_Info) {
 	for &uf in fields {
 		for &vf in uf.variants {
-			delete(vf.string_fields)
-			delete(vf.byte_slice_fields)
+			delete(vf.var_fields)
 		}
 		delete(uf.variants)
 	}
@@ -417,8 +346,7 @@ check_type_safety :: proc(
 	path: string = "",
 	info: ^Message_Type_Info = nil,
 	base_offset: uintptr = 0,
-	string_fields: ^[dynamic]String_Field_Info = nil,
-	byte_slice_fields: ^[dynamic]Byte_Slice_Field_Info = nil,
+	var_fields: ^[dynamic]Var_Field_Info = nil,
 	allow_byte_slices: bool = false,
 	union_fields: ^[dynamic]Temp_Union_Info = nil,
 ) -> (
@@ -449,10 +377,10 @@ check_type_safety :: proc(
 	case runtime.Type_Info_Slice:
 		if v.elem.id == typeid_of(byte) && allow_byte_slices {
 			if info != nil {
-				info.flags |= {.Has_Byte_Slices}
+				info.flags |= {.Has_Var_Fields}
 			}
-			if byte_slice_fields != nil {
-				append(byte_slice_fields, Byte_Slice_Field_Info{offset = base_offset})
+			if var_fields != nil {
+				append(var_fields, Var_Field_Info{offset = base_offset})
 			}
 			return true, ""
 		}
@@ -471,10 +399,10 @@ check_type_safety :: proc(
 		return false, build_error(path, "map")
 	case runtime.Type_Info_String:
 		if info != nil {
-			info.flags |= {.Has_Strings}
+			info.flags |= {.Has_Var_Fields}
 		}
-		if string_fields != nil {
-			append(string_fields, String_Field_Info{offset = base_offset})
+		if var_fields != nil {
+			append(var_fields, Var_Field_Info{offset = base_offset})
 		}
 		return true, ""
 	case runtime.Type_Info_Any:
@@ -499,22 +427,19 @@ check_type_safety :: proc(
 				variant_path,
 				nil,
 				base_offset,
-				&variant_temps[i].string_fields,
-				&variant_temps[i].byte_slice_fields,
+				&variant_temps[i].var_fields,
 				allow_byte_slices,
 				nil,
 			)
 			if !variant_safe {
 				for &vt in variant_temps {
-					delete(vt.string_fields)
-					delete(vt.byte_slice_fields)
+					delete(vt.var_fields)
 				}
 				delete(variant_temps)
 				return false, msg
 			}
 
-			if len(variant_temps[i].string_fields) > 0 ||
-			   len(variant_temps[i].byte_slice_fields) > 0 {
+			if len(variant_temps[i].var_fields) > 0 {
 				any_has_variable_data = true
 			}
 		}
@@ -537,15 +462,13 @@ check_type_safety :: proc(
 			} else {
 				// No union_fields accumulator, clean up variant temps
 				for &vt in variant_temps {
-					delete(vt.string_fields)
-					delete(vt.byte_slice_fields)
+					delete(vt.var_fields)
 				}
 				delete(variant_temps)
 			}
 		} else {
 			for &vt in variant_temps {
-				delete(vt.string_fields)
-				delete(vt.byte_slice_fields)
+				delete(vt.var_fields)
 			}
 			delete(variant_temps)
 		}
@@ -562,8 +485,7 @@ check_type_safety :: proc(
 			array_path,
 			info,
 			base_offset,
-			string_fields,
-			byte_slice_fields,
+			var_fields,
 			allow_byte_slices,
 			union_fields,
 		)
@@ -586,8 +508,7 @@ check_type_safety :: proc(
 				field_path,
 				info,
 				field_offset,
-				string_fields,
-				byte_slice_fields,
+				var_fields,
 				allow_byte_slices,
 				union_fields,
 			)

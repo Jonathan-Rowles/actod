@@ -1022,22 +1022,26 @@ fixup_inline_pointers :: proc(inline_data: ^[INLINE_MESSAGE_SIZE]byte, type_id: 
 	struct_size := info.type_info.size
 	offset := struct_size
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str := cast(^mem.Raw_Slice)(uintptr(inline_data) + field.offset)
-			if str.len > 0 {
-				str.data = rawptr(uintptr(inline_data) + uintptr(offset))
-				offset += str.len
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(inline_data) + field.offset)
+			if f.len > 0 {
+				f.data = rawptr(uintptr(inline_data) + uintptr(offset))
+				offset += f.len
 			}
 		}
 	}
 
-	if .Has_Byte_Slices in info.flags && info.byte_slice_fields != nil {
-		for field in info.byte_slice_fields {
-			slice := cast(^mem.Raw_Slice)(uintptr(inline_data) + field.offset)
-			if slice.len > 0 {
-				slice.data = rawptr(uintptr(inline_data) + uintptr(offset))
-				offset += slice.len
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, variant_ok := get_active_union_variant(inline_data, uf)
+			if !variant_ok do continue
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(inline_data) + field.offset)
+				if f.len > 0 {
+					f.data = rawptr(uintptr(inline_data) + uintptr(offset))
+					offset += f.len
+				}
 			}
 		}
 	}
@@ -1339,6 +1343,12 @@ report_alloc_error :: #force_inline proc(
 			pool.max_pages,
 		)
 		return .RECEIVER_BACKLOGGED
+	case .MALFORMED_PAYLOAD:
+		log.errorf(
+			"send to %s failed: network payload truncated or malformed (variable data exceeds payload)",
+			get_actor_name(to),
+		)
+		return .NETWORK_ERROR
 	}
 	return .RECEIVER_BACKLOGGED
 }
@@ -1567,17 +1577,10 @@ calculate_variable_data_size :: #force_inline proc(
 ) -> int {
 	total := 0
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(value_ptr) + field.offset)
-			total += len(str_ptr^)
-		}
-	}
-
-	if .Has_Byte_Slices in info.flags && info.byte_slice_fields != nil {
-		for field in info.byte_slice_fields {
-			slice_ptr := cast(^[]byte)(uintptr(value_ptr) + field.offset)
-			total += len(slice_ptr^)
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(value_ptr) + field.offset)
+			total += f.len
 		}
 	}
 
@@ -1585,13 +1588,9 @@ calculate_variable_data_size :: #force_inline proc(
 		for uf in info.union_fields {
 			variant, ok := get_active_union_variant(value_ptr, uf)
 			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(value_ptr) + field.offset)
-				total += len(str_ptr^)
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(value_ptr) + field.offset)
-				total += len(slice_ptr^)
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(value_ptr) + field.offset)
+				total += f.len
 			}
 		}
 	}
@@ -1609,34 +1608,21 @@ copy_variable_data :: #force_inline proc(
 ) {
 	offset := start_offset
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			src_str := cast(^string)(uintptr(src_value_ptr) + field.offset)
-			dst_str := cast(^string)(uintptr(struct_ptr) + field.offset)
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			src := cast(^mem.Raw_Slice)(uintptr(src_value_ptr) + field.offset)
+			dst := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
 
-			if len(src_str^) > 0 {
+			if src.len > 0 {
 				dest := rawptr(uintptr(dest_base) + uintptr(offset))
-				intrinsics.mem_copy_non_overlapping(dest, raw_data(src_str^), len(src_str^))
-				dst_str^ = transmute(string)mem.Raw_Slice{data = dest, len = len(src_str^)}
-				offset += len(src_str^)
+				intrinsics.mem_copy_non_overlapping(dest, src.data, src.len)
+				dst^ = mem.Raw_Slice {
+					data = dest,
+					len  = src.len,
+				}
+				offset += src.len
 			} else {
-				dst_str^ = ""
-			}
-		}
-	}
-
-	if .Has_Byte_Slices in info.flags && info.byte_slice_fields != nil {
-		for field in info.byte_slice_fields {
-			src_slice := cast(^[]byte)(uintptr(src_value_ptr) + field.offset)
-			dst_slice := cast(^[]byte)(uintptr(struct_ptr) + field.offset)
-
-			if len(src_slice^) > 0 {
-				dest := rawptr(uintptr(dest_base) + uintptr(offset))
-				intrinsics.mem_copy_non_overlapping(dest, raw_data(src_slice^), len(src_slice^))
-				dst_slice^ = transmute([]byte)mem.Raw_Slice{data = dest, len = len(src_slice^)}
-				offset += len(src_slice^)
-			} else {
-				dst_slice^ = nil
+				dst^ = mem.Raw_Slice{}
 			}
 		}
 	}
@@ -1645,34 +1631,20 @@ copy_variable_data :: #force_inline proc(
 		for uf in info.union_fields {
 			variant, ok := get_active_union_variant(src_value_ptr, uf)
 			if !ok do continue
-			for field in variant.string_fields {
-				src_str := cast(^string)(uintptr(src_value_ptr) + field.offset)
-				dst_str := cast(^string)(uintptr(struct_ptr) + field.offset)
+			for field in variant.var_fields {
+				src := cast(^mem.Raw_Slice)(uintptr(src_value_ptr) + field.offset)
+				dst := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
 
-				if len(src_str^) > 0 {
+				if src.len > 0 {
 					dest := rawptr(uintptr(dest_base) + uintptr(offset))
-					intrinsics.mem_copy_non_overlapping(dest, raw_data(src_str^), len(src_str^))
-					dst_str^ = transmute(string)mem.Raw_Slice{data = dest, len = len(src_str^)}
-					offset += len(src_str^)
+					intrinsics.mem_copy_non_overlapping(dest, src.data, src.len)
+					dst^ = mem.Raw_Slice {
+						data = dest,
+						len  = src.len,
+					}
+					offset += src.len
 				} else {
-					dst_str^ = ""
-				}
-			}
-			for field in variant.byte_slice_fields {
-				src_slice := cast(^[]byte)(uintptr(src_value_ptr) + field.offset)
-				dst_slice := cast(^[]byte)(uintptr(struct_ptr) + field.offset)
-
-				if len(src_slice^) > 0 {
-					dest := rawptr(uintptr(dest_base) + uintptr(offset))
-					intrinsics.mem_copy_non_overlapping(
-						dest,
-						raw_data(src_slice^),
-						len(src_slice^),
-					)
-					dst_slice^ = transmute([]byte)mem.Raw_Slice{data = dest, len = len(src_slice^)}
-					offset += len(src_slice^)
-				} else {
-					dst_slice^ = nil
+					dst^ = mem.Raw_Slice{}
 				}
 			}
 		}
@@ -1704,6 +1676,10 @@ create_message_from_payload :: #force_inline proc(
 	int,
 ) {
 	struct_size := info.size
+
+	if len(payload) < struct_size {
+		return .MALFORMED_PAYLOAD, 0
+	}
 
 	if info.flags == {} {
 		if struct_size <= INLINE_MESSAGE_SIZE {
@@ -1745,13 +1721,15 @@ create_message_from_payload :: #force_inline proc(
 		msg.inline_type = info.type_id
 		msg.content = INLINE_NEEDS_FIXUP
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], raw_data(payload), struct_size)
-		copy_variable_data_from_payload(
+		if !copy_variable_data_from_payload(
 			&msg.inline_data[0],
 			&msg.inline_data[0],
 			payload,
 			info,
 			struct_size,
-		)
+		) {
+			return .MALFORMED_PAYLOAD, 0
+		}
 		return .OK, 0
 	}
 
@@ -1767,13 +1745,16 @@ create_message_from_payload :: #force_inline proc(
 
 	data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
 	intrinsics.mem_copy_non_overlapping(data_ptr, raw_data(payload), struct_size)
-	copy_variable_data_from_payload(
+	if !copy_variable_data_from_payload(
 		buffer,
 		data_ptr,
 		payload,
 		info,
 		TYPE_HEADER_SIZE + struct_size,
-	)
+	) {
+		free_message(pool, buffer)
+		return .MALFORMED_PAYLOAD, 0
+	}
 
 	msg.content = buffer
 	msg.inline_type = nil
@@ -1787,48 +1768,34 @@ copy_variable_data_from_payload :: #force_inline proc(
 	payload: []byte,
 	info: ^Message_Type_Info,
 	dest_start_offset: int,
-) {
+) -> bool {
 	dest_offset := dest_start_offset
 	payload_offset := info.size
+	payload_len := len(payload)
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			dst_str := cast(^string)(uintptr(struct_ptr) + field.offset)
-			str_len := len(dst_str^)
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
+			field_len := f.len
 
-			if str_len > 0 {
+			if field_len > 0 {
+				if field_len > payload_len - payload_offset {
+					return false
+				}
 				dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
 				intrinsics.mem_copy_non_overlapping(
 					dest,
 					raw_data(payload[payload_offset:]),
-					str_len,
+					field_len,
 				)
-				dst_str^ = transmute(string)mem.Raw_Slice{data = dest, len = str_len}
-				dest_offset += str_len
-				payload_offset += str_len
+				f^ = mem.Raw_Slice {
+					data = dest,
+					len  = field_len,
+				}
+				dest_offset += field_len
+				payload_offset += field_len
 			} else {
-				dst_str^ = ""
-			}
-		}
-	}
-
-	if .Has_Byte_Slices in info.flags && info.byte_slice_fields != nil {
-		for field in info.byte_slice_fields {
-			dst_slice := cast(^[]byte)(uintptr(struct_ptr) + field.offset)
-			slice_len := len(dst_slice^)
-
-			if slice_len > 0 {
-				dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
-				intrinsics.mem_copy_non_overlapping(
-					dest,
-					raw_data(payload[payload_offset:]),
-					slice_len,
-				)
-				dst_slice^ = transmute([]byte)mem.Raw_Slice{data = dest, len = slice_len}
-				dest_offset += slice_len
-				payload_offset += slice_len
-			} else {
-				dst_slice^ = nil
+				f^ = mem.Raw_Slice{}
 			}
 		}
 	}
@@ -1837,44 +1804,34 @@ copy_variable_data_from_payload :: #force_inline proc(
 		for uf in info.union_fields {
 			variant, ok := get_active_union_variant(struct_ptr, uf)
 			if !ok do continue
-			for field in variant.string_fields {
-				dst_str := cast(^string)(uintptr(struct_ptr) + field.offset)
-				str_len := len(dst_str^)
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
+				field_len := f.len
 
-				if str_len > 0 {
+				if field_len > 0 {
+					if field_len > payload_len - payload_offset {
+						return false
+					}
 					dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
 					intrinsics.mem_copy_non_overlapping(
 						dest,
 						raw_data(payload[payload_offset:]),
-						str_len,
+						field_len,
 					)
-					dst_str^ = transmute(string)mem.Raw_Slice{data = dest, len = str_len}
-					dest_offset += str_len
-					payload_offset += str_len
+					f^ = mem.Raw_Slice {
+						data = dest,
+						len  = field_len,
+					}
+					dest_offset += field_len
+					payload_offset += field_len
 				} else {
-					dst_str^ = ""
-				}
-			}
-			for field in variant.byte_slice_fields {
-				dst_slice := cast(^[]byte)(uintptr(struct_ptr) + field.offset)
-				slice_len := len(dst_slice^)
-
-				if slice_len > 0 {
-					dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
-					intrinsics.mem_copy_non_overlapping(
-						dest,
-						raw_data(payload[payload_offset:]),
-						slice_len,
-					)
-					dst_slice^ = transmute([]byte)mem.Raw_Slice{data = dest, len = slice_len}
-					dest_offset += slice_len
-					payload_offset += slice_len
-				} else {
-					dst_slice^ = nil
+					f^ = mem.Raw_Slice{}
 				}
 			}
 		}
 	}
+
+	return true
 }
 
 // Send message directly from network payload to actor's mailbox
@@ -1905,7 +1862,7 @@ send_from_payload :: #force_inline proc(
 	}
 
 	result := push_to_mailbox(actor, msg, to_pid, priority)
-	if result != .OK {
+	if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
 		free_message(&actor.pool, msg.content)
 	}
 

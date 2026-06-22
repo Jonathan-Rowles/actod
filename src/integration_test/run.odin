@@ -216,6 +216,13 @@ ALL_TESTS :: []Test_Entry {
 		node_name = "TestNode1",
 		is_networked = true,
 	},
+	{
+		name = "test_distributed_byte_slice_messages",
+		test_proc = test_distributed_byte_slice_messages,
+		port = 17180,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
 	{name = "test_node_shutdown_under_load", test_proc = test_node_shutdown_under_load},
 
 	// Hot reload tests (Phase 1a)

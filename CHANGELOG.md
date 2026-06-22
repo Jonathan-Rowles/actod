@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.1] - 2026-06-22
+
+### Fixed
+- Top-level `[]u8` message fields were silently dropped by every network
+  serializer (`build_wire_format_into_buffer`, `wire_format_exact_size`, and
+  `build_and_send_network_command`); the receiver then read past the payload,
+  delivering corrupt slice data across nodes. Byte slices now serialize
+  everywhere strings do.
+- The network receive path bounds-checks variable-width data. A truncated or
+  malformed payload, including one smaller than the fixed struct, is rejected
+  with `NETWORK_ERROR` instead of reading out of bounds.
+- `build_and_send_network_command` now also serializes union-variant variable
+  data (previously top-level strings only).
+
+### Changed
+- Strings and byte slices are tracked internally as a single
+  declaration-ordered variable-width field list (`Var_Field_Info`, replacing
+  the separate `String_Field_Info` / `Byte_Slice_Field_Info` and the
+  `Has_Strings` / `Has_Byte_Slices` flags). They share a memory layout and are
+  now handled by one code path, so a message can freely mix `string` and
+  `[]u8` fields. The wire payload for such mixed messages is ordered by field
+  declaration; messages mixing the two never serialized correctly before, so
+  nothing depends on the old order. As always, all nodes in a mesh must run the
+  same actod version.
+
+[0.2.1]: https://github.com/Jonathan-Rowles/actod/releases/tag/v0.2.1
+
 ## [0.2.0] - 2026-06-02
 
 ### Added

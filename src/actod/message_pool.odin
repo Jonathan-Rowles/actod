@@ -94,6 +94,7 @@ Alloc_Error :: enum {
 	OK = 0,
 	SIZE_EXCEEDS_PAGE,
 	POOL_EXHAUSTED,
+	MALFORMED_PAYLOAD,
 }
 
 @(private)

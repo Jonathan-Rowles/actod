@@ -27,6 +27,8 @@ register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Pubsub_Broadcast_Ack)
 	actod.register_message_type(Network_Union_Message)
 	actod.register_message_type(Network_Union_Ack)
+	actod.register_message_type(Network_Bytes_Message)
+	actod.register_message_type(Network_Bytes_Ack)
 }
 
 Two_Node_Message :: struct {
@@ -162,6 +164,29 @@ Network_Union_Message :: union {
 Network_Union_Ack :: struct {
 	seq:        u32,
 	variant_id: u8, // 1 = ping, 2 = chat
+}
+
+// Carries a top-level []u8 plus a string, to verify both variable-width kinds
+// survive a real cross-node round trip in one message.
+Network_Bytes_Message :: struct {
+	id:    int,
+	label: string,
+	blob:  []u8,
+}
+
+Network_Bytes_Ack :: struct {
+	id:       int,
+	blob_len: int,
+	checksum: u32,
+}
+
+bytes_checksum :: proc(data: []u8) -> u32 {
+	// FNV-1a, enough to catch corruption/misalignment over the wire.
+	h: u32 = 0x811c9dc5
+	for b in data {
+		h = (h ~ u32(b)) * 0x0100_0193
+	}
+	return h
 }
 
 check_port_available :: proc(port: int) {

@@ -138,7 +138,7 @@ send_to_actor_impl :: proc(
 		return .OK
 	} else {
 		result := push_to_mailbox(actor, msg, to, int(priority))
-		if result != .OK {
+		if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
 			free_message(&actor.pool, msg.content)
 		}
 		return result

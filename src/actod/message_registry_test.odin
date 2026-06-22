@@ -21,6 +21,8 @@ register_test_types :: proc() {
 	register_message_type(Test_Simple_Message)
 	register_message_type(Test_String_Message)
 	register_message_type(Test_Complex_Message)
+	register_message_type(Test_Bytes_Message)
+	register_message_type(Test_Mixed_Var_Message)
 	register_message_type(Test_Mixed_Union)
 	register_message_type(Test_Mixed_Bytes_Union)
 	register_message_type(Test_Outer_With_Union)
@@ -43,6 +45,17 @@ Test_Complex_Message :: struct {
 	id:       u32,
 	position: [3]f32,
 	flags:    u8,
+}
+
+Test_Bytes_Message :: struct {
+	id:      u64,
+	payload: []byte,
+}
+
+Test_Mixed_Var_Message :: struct {
+	a: string,
+	b: []byte,
+	c: string,
 }
 
 @(test)
@@ -68,7 +81,11 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 		info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(t, info.deliver != nil, "Deliver function should be set")
-		testing.expect(t, .Has_Strings not_in info.flags, "Simple message should not have strings")
+		testing.expect(
+			t,
+			.Has_Var_Fields not_in info.flags,
+			"Simple message should not have variable fields",
+		)
 
 		raw_bytes := mem.ptr_to_bytes(&original)
 		testing.expect(
@@ -98,8 +115,8 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 		testing.expect(
 			t,
-			.Has_Strings not_in info.flags,
-			"Complex message should not have strings",
+			.Has_Var_Fields not_in info.flags,
+			"Complex message should not have variable fields",
 		)
 
 		raw_bytes := mem.ptr_to_bytes(&original)
@@ -127,8 +144,8 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 	{
 		info, ok := get_type_info_ptr(typeid_of(Test_String_Message))
 		testing.expect(t, ok, "Type info should exist")
-		testing.expect(t, .Has_Strings in info.flags, "Should detect strings in message type")
-		testing.expect(t, len(info.string_fields) == 2, "Should detect 2 string fields")
+		testing.expect(t, .Has_Var_Fields in info.flags, "Should detect strings in message type")
+		testing.expect(t, len(info.var_fields) == 2, "Should detect 2 variable fields")
 		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 	}
 }
@@ -156,7 +173,7 @@ test_string_message_binary_format :: proc(t: ^testing.T) {
 	mem.copy(raw_data(payload), &content_copy, size_of(Test_String_Message))
 
 	string_offset := size_of(Test_String_Message)
-	for field in info.string_fields {
+	for field in info.var_fields {
 		str_ptr := cast(^string)(uintptr(&content_copy) + field.offset)
 		if len(str_ptr^) > 0 {
 			mem.copy(
@@ -171,7 +188,7 @@ test_string_message_binary_format :: proc(t: ^testing.T) {
 	value := (cast(^Test_String_Message)raw_data(payload))^
 
 	string_offset = size_of(Test_String_Message)
-	for field in info.string_fields {
+	for field in info.var_fields {
 		str_ptr := cast(^string)(uintptr(&value) + field.offset)
 		str_len := len(str_ptr^)
 		if str_len > 0 {
@@ -199,8 +216,8 @@ test_pod_payload_handling :: proc(t: ^testing.T) {
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(
 			t,
-			.Has_Strings not_in info.flags,
-			"Simple message should NOT have strings flag",
+			.Has_Var_Fields not_in info.flags,
+			"Simple message should NOT have variable fields flag",
 		)
 
 		raw_bytes := mem.ptr_to_bytes(&original)
@@ -230,8 +247,8 @@ test_pod_payload_handling :: proc(t: ^testing.T) {
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(
 			t,
-			.Has_Strings not_in info.flags,
-			"Complex message should NOT have strings flag",
+			.Has_Var_Fields not_in info.flags,
+			"Complex message should NOT have variable fields flag",
 		)
 
 		raw_bytes := mem.ptr_to_bytes(&original)
@@ -360,27 +377,27 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 		testing.expect(t, .Has_Unions in info.flags, "Mixed union should have Has_Unions flag")
 		testing.expect(
 			t,
-			.Has_Strings not_in info.flags,
-			"Union strings should not set top-level Has_Strings",
+			.Has_Var_Fields not_in info.flags,
+			"Union strings should not set top-level Has_Var_Fields",
 		)
 		testing.expect(
 			t,
-			len(info.string_fields) == 0,
-			"Union should have no top-level string fields",
+			len(info.var_fields) == 0,
+			"Union should have no top-level variable fields",
 		)
 		testing.expect(t, len(info.union_fields) == 1, "Should have exactly 1 union field entry")
 		testing.expect(t, len(info.union_fields[0].variants) == 2, "Should track 2 variants")
 
 		testing.expect(
 			t,
-			len(info.union_fields[0].variants[0].string_fields) == 0,
-			"Ping variant should have no string fields",
+			len(info.union_fields[0].variants[0].var_fields) == 0,
+			"Ping variant should have no variable fields",
 		)
 
 		testing.expect(
 			t,
-			len(info.union_fields[0].variants[1].string_fields) == 2,
-			"Chat variant should have 2 string fields",
+			len(info.union_fields[0].variants[1].var_fields) == 2,
+			"Chat variant should have 2 variable fields",
 		)
 	}
 
@@ -396,14 +413,14 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 
 		testing.expect(
 			t,
-			len(info.union_fields[0].variants[0].byte_slice_fields) == 0,
-			"Pod variant should have no byte slice fields",
+			len(info.union_fields[0].variants[0].var_fields) == 0,
+			"Pod variant should have no variable fields",
 		)
 
 		testing.expect(
 			t,
-			len(info.union_fields[0].variants[1].byte_slice_fields) == 1,
-			"Bytes variant should have 1 byte slice field",
+			len(info.union_fields[0].variants[1].var_fields) == 1,
+			"Bytes variant should have 1 variable field",
 		)
 	}
 }
@@ -419,7 +436,7 @@ test_union_struct_with_union_field :: proc(t: ^testing.T) {
 		.Has_Unions in info.flags,
 		"Struct with union field should have Has_Unions flag",
 	)
-	testing.expect(t, .Has_Strings not_in info.flags, "Should not have top-level Has_Strings")
+	testing.expect(t, .Has_Var_Fields not_in info.flags, "Should not have top-level Has_Var_Fields")
 	testing.expect(t, len(info.union_fields) == 1, "Should have 1 union field entry")
 }
 
@@ -470,14 +487,14 @@ test_union_active_variant_lookup :: proc(t: ^testing.T) {
 		value := Test_Mixed_Union(Test_Ping{seq = 1})
 		variant, ok := get_active_union_variant(&value, uf)
 		testing.expect(t, ok, "Should find active variant for Ping")
-		testing.expect_value(t, len(variant.string_fields), 0)
+		testing.expect_value(t, len(variant.var_fields), 0)
 	}
 
 	{
 		value := Test_Mixed_Union(Test_Chat{name = "x", content = "y"})
 		variant, ok := get_active_union_variant(&value, uf)
 		testing.expect(t, ok, "Should find active variant for Chat")
-		testing.expect_value(t, len(variant.string_fields), 2)
+		testing.expect_value(t, len(variant.var_fields), 2)
 	}
 }
 
@@ -542,4 +559,120 @@ test_union_bytes_variant_size :: proc(t: ^testing.T) {
 		size := calculate_variable_data_size(&value, info)
 		testing.expect_value(t, size, 0)
 	}
+}
+
+@(test)
+test_byte_slice_message_binary_format :: proc(t: ^testing.T) {
+	register_test_types()
+
+	blob := []byte{0xde, 0xad, 0xbe, 0xef, 0x42}
+	original := Test_Bytes_Message {
+		id      = 7,
+		payload = blob,
+	}
+
+	info, ok := get_type_info_ptr(typeid_of(Test_Bytes_Message))
+	testing.expect(t, ok, "Test_Bytes_Message should be registered")
+	testing.expect(t, .Has_Var_Fields in info.flags, "Should detect byte slice as variable field")
+	testing.expect(t, len(info.var_fields) == 1, "Should detect 1 variable field")
+
+	variable_size := calculate_variable_data_size(&original, info)
+	testing.expect_value(t, variable_size, 5)
+
+	// wire-style payload: [struct bytes][payload bytes]
+	wire := make([]byte, size_of(Test_Bytes_Message) + variable_size)
+	defer delete(wire)
+	content_copy := original
+	mem.copy(raw_data(wire), &content_copy, size_of(Test_Bytes_Message))
+	mem.copy(
+		rawptr(uintptr(raw_data(wire)) + size_of(Test_Bytes_Message)),
+		raw_data(blob),
+		len(blob),
+	)
+
+	value := (cast(^Test_Bytes_Message)raw_data(wire))^
+	storage: [128]byte
+	copied := copy_variable_data_from_payload(&storage[0], &value, wire, info, 0)
+	testing.expect(t, copied, "Variable data copy should succeed")
+	testing.expect_value(t, value.id, u64(7))
+	testing.expect(t, len(value.payload) == 5, "Payload length should survive")
+	testing.expect(
+		t,
+		uintptr(raw_data(value.payload)) >= uintptr(&storage[0]) &&
+		uintptr(raw_data(value.payload)) < uintptr(&storage[0]) + size_of(storage),
+		"Byte slice should be re-based into receive storage",
+	)
+	for b, i in blob {
+		testing.expect_value(t, value.payload[i], b)
+	}
+}
+
+@(test)
+test_mixed_var_fields_declaration_order :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, ok := get_type_info_ptr(typeid_of(Test_Mixed_Var_Message))
+	testing.expect(t, ok, "Test_Mixed_Var_Message should be registered")
+	testing.expect(t, len(info.var_fields) == 3, "Should track 3 variable fields")
+	testing.expect_value(t, info.var_fields[0].offset, offset_of(Test_Mixed_Var_Message, a))
+	testing.expect_value(t, info.var_fields[1].offset, offset_of(Test_Mixed_Var_Message, b))
+	testing.expect_value(t, info.var_fields[2].offset, offset_of(Test_Mixed_Var_Message, c))
+
+	blob := []byte{9, 8, 7}
+	original := Test_Mixed_Var_Message {
+		a = "first",
+		b = blob,
+		c = "third",
+	}
+
+	variable_size := calculate_variable_data_size(&original, info)
+	testing.expect_value(t, variable_size, 13)
+
+	storage: [256]byte
+	dst := original
+	copy_variable_data(&storage[0], &dst, &original, info, 0)
+
+	testing.expect(t, dst.a == "first", "a should deep-copy")
+	testing.expect(t, dst.c == "third", "c should deep-copy")
+	testing.expect(t, len(dst.b) == 3, "b length should survive")
+	testing.expect(t, dst.b[0] == 9 && dst.b[1] == 8 && dst.b[2] == 7, "b should deep-copy")
+
+	testing.expect(
+		t,
+		uintptr(raw_data(dst.a)) == uintptr(&storage[0]),
+		"a should pack first (declaration order)",
+	)
+	testing.expect(
+		t,
+		uintptr(raw_data(dst.b)) == uintptr(&storage[0]) + 5,
+		"b should pack after a (declaration order)",
+	)
+	testing.expect(
+		t,
+		uintptr(raw_data(dst.c)) == uintptr(&storage[0]) + 8,
+		"c should pack after b (declaration order)",
+	)
+}
+
+@(test)
+test_payload_truncated_var_data_rejected :: proc(t: ^testing.T) {
+	register_test_types()
+
+	blob := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	original := Test_Bytes_Message {
+		id      = 1,
+		payload = blob,
+	}
+	info, _ := get_type_info_ptr(typeid_of(Test_Bytes_Message))
+
+	// struct header claims 8 payload bytes but the wire carries only 3
+	wire := make([]byte, size_of(Test_Bytes_Message) + 3)
+	defer delete(wire)
+	content_copy := original
+	mem.copy(raw_data(wire), &content_copy, size_of(Test_Bytes_Message))
+
+	value := (cast(^Test_Bytes_Message)raw_data(wire))^
+	storage: [128]byte
+	copied := copy_variable_data_from_payload(&storage[0], &value, wire, info, 0)
+	testing.expect(t, !copied, "Truncated payload must be rejected")
 }

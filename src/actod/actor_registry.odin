@@ -21,7 +21,7 @@ PID_Map :: struct($T: typeid, $HT: typeid) {
 	items:        []PID_Entry(T, HT),
 	capacity:     u32,
 	num_items:    u32,
-	next_unused:  u32,
+	next_unused:  u64,
 	unused_items: []u32,
 	num_unused:   u32,
 	name_buckets: [NAME_BUCKET_COUNT]u32,
@@ -96,6 +96,48 @@ try_grow_registry :: proc(m: ^PID_Map($T, $HT)) -> bool {
 }
 
 @(private)
+freelist_pop :: proc(m: ^PID_Map($T, $HT)) -> (u32, bool) {
+	for {
+		head := sync.atomic_load_explicit(&m.next_unused, .Acquire)
+		idx := u32(head)
+		if idx == 0 {
+			return 0, false
+		}
+		next := sync.atomic_load_explicit(&m.unused_items[idx], .Acquire)
+		new_head := ((head >> 32) + 1) << 32 | u64(next)
+		if _, ok := sync.atomic_compare_exchange_strong_explicit(
+			&m.next_unused,
+			head,
+			new_head,
+			.Acq_Rel,
+			.Acquire,
+		); ok {
+			sync.atomic_sub_explicit(&m.num_unused, 1, .Acq_Rel)
+			return idx, true
+		}
+	}
+}
+
+@(private)
+freelist_push :: proc(m: ^PID_Map($T, $HT), idx: u32) {
+	for {
+		head := sync.atomic_load_explicit(&m.next_unused, .Acquire)
+		sync.atomic_store_explicit(&m.unused_items[idx], u32(head), .Release)
+		new_head := ((head >> 32) + 1) << 32 | u64(idx)
+		if _, ok := sync.atomic_compare_exchange_strong_explicit(
+			&m.next_unused,
+			head,
+			new_head,
+			.Acq_Rel,
+			.Acquire,
+		); ok {
+			sync.atomic_add_explicit(&m.num_unused, 1, .Acq_Rel)
+			return
+		}
+	}
+}
+
+@(private)
 add :: proc(
 	m: ^PID_Map($T, $HT),
 	data: T,
@@ -107,53 +149,34 @@ add :: proc(
 ) #optional_ok {
 	name_hash := fnv1a_hash(name)
 
-	for {
-		next := sync.atomic_load_explicit(&m.next_unused, .Acquire)
-		if next == 0 {
-			break
+	if idx, ok := freelist_pop(m); ok {
+		entry := &m.items[idx]
+
+		if entry.remote_name != "" {
+			delete(entry.remote_name, actor_system_allocator)
+			entry.remote_name = ""
 		}
 
-		new_next := sync.atomic_load_explicit(&m.unused_items[next], .Acquire)
-		_, ok := sync.atomic_compare_exchange_strong_explicit(
-			&m.next_unused,
-			next,
-			new_next,
-			.Acq_Rel,
-			.Acquire,
-		)
-		if ok {
-			entry := &m.items[next]
+		old_seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
+		gen := ((old_seq >> 1) + 1) & 0xFFFF
+		new_seq := (gen << 1) | 1
 
-			if entry.remote_name != "" {
-				delete(entry.remote_name, actor_system_allocator)
-				entry.remote_name = ""
-			}
-
-			sync.atomic_store_explicit(&m.unused_items[next], 0, .Release)
-
-			old_seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-			gen := ((old_seq >> 1) + 1) & 0xFFFF
-			new_seq := (gen << 1) | 1
-
-			new_handle := Handle {
-				idx        = next,
-				gen        = u16(gen),
-				actor_type = actor_type,
-			}
-			new_pid := pack_pid(new_handle)
-
-			entry.data = data
-			entry.name_hash = name_hash
-			sync.atomic_store_explicit(&entry.pid, new_pid, .Release)
-
-			sync.atomic_store_explicit(&entry.sequence, new_seq, .Release)
-
-			sync.atomic_sub_explicit(&m.num_unused, 1, .Acq_Rel)
-
-			register_name_bucket(m, name_hash, next)
-
-			return new_pid, true
+		new_handle := Handle {
+			idx        = idx,
+			gen        = u16(gen),
+			actor_type = actor_type,
 		}
+		new_pid := pack_pid(new_handle)
+
+		entry.data = data
+		entry.name_hash = name_hash
+		sync.atomic_store_explicit(&entry.pid, new_pid, .Release)
+
+		sync.atomic_store_explicit(&entry.sequence, new_seq, .Release)
+
+		register_name_bucket(m, name_hash, idx)
+
+		return new_pid, true
 	}
 
 	for {
@@ -332,27 +355,9 @@ add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool,
 	idx: u32
 	got_slot := false
 
-	for {
-		next := sync.atomic_load_explicit(&m.next_unused, .Acquire)
-		if next == 0 {
-			break
-		}
-
-		new_next := sync.atomic_load_explicit(&m.unused_items[next], .Acquire)
-		_, ok := sync.atomic_compare_exchange_strong_explicit(
-			&m.next_unused,
-			next,
-			new_next,
-			.Acq_Rel,
-			.Acquire,
-		)
-		if ok {
-			sync.atomic_store_explicit(&m.unused_items[next], 0, .Release)
-			sync.atomic_sub_explicit(&m.num_unused, 1, .Acq_Rel)
-			idx = next
-			got_slot = true
-			break
-		}
+	if reused_idx, ok := freelist_pop(m); ok {
+		idx = reused_idx
+		got_slot = true
 	}
 
 	if !got_slot {
@@ -421,21 +426,7 @@ add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool,
 		deregister_name_bucket(m, name_hash, idx)
 		sync.atomic_store_explicit(&entry.sequence, 0, .Release)
 
-		for {
-			current_next := sync.atomic_load_explicit(&m.next_unused, .Acquire)
-			sync.atomic_store_explicit(&m.unused_items[idx], current_next, .Release)
-			_, ok := sync.atomic_compare_exchange_strong_explicit(
-				&m.next_unused,
-				current_next,
-				idx,
-				.Acq_Rel,
-				.Acquire,
-			)
-			if ok {
-				sync.atomic_add_explicit(&m.num_unused, 1, .Acq_Rel)
-				break
-			}
-		}
+		freelist_push(m, idx)
 
 		// Update canonical entry's PID if stale
 		canonical_entry := &m.items[canonical_idx]
@@ -488,22 +479,8 @@ remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT) -> bool {
 		// remote_name is intentionally NOT freed here.
 		// A concurrent reader may still hold a pointer to it.
 		// The stale string is freed when the slot is reused in add_remote.
-		for {
-			current_next := sync.atomic_load_explicit(&m.next_unused, .Acquire)
-			sync.atomic_store_explicit(&m.unused_items[idx], current_next, .Release)
-
-			_, ok2 := sync.atomic_compare_exchange_strong_explicit(
-				&m.next_unused,
-				current_next,
-				idx,
-				.Acq_Rel,
-				.Acquire,
-			)
-			if ok2 {
-				sync.atomic_add_explicit(&m.num_unused, 1, .Acq_Rel)
-				return true
-			}
-		}
+		freelist_push(m, idx)
+		return true
 	}
 
 	return false
@@ -660,22 +637,8 @@ remove :: proc(m: ^PID_Map($T, $HT), pid: HT) {
 
 			entry.data = T{}
 
-			for {
-				current_next := sync.atomic_load_explicit(&m.next_unused, .Acquire)
-				sync.atomic_store_explicit(&m.unused_items[handle.idx], current_next, .Release)
-
-				_, ok2 := sync.atomic_compare_exchange_strong_explicit(
-					&m.next_unused,
-					current_next,
-					handle.idx,
-					.Acq_Rel,
-					.Acquire,
-				)
-				if ok2 {
-					sync.atomic_add_explicit(&m.num_unused, 1, .Acq_Rel)
-					return
-				}
-			}
+			freelist_push(m, handle.idx)
+			return
 		}
 	}
 }

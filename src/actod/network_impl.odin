@@ -3,6 +3,7 @@ package actod
 import "base:intrinsics"
 import "core:encoding/endian"
 import "core:log"
+import "core:mem"
 import "core:time"
 
 wire_format_exact_size_impl :: proc(data: rawptr, info: ^Message_Type_Info, name_len: int) -> u32 {
@@ -12,12 +13,25 @@ wire_format_exact_size_impl :: proc(data: rawptr, info: ^Message_Type_Info, name
 		return u32(base)
 	}
 
-	total_variable_size := 0
+	return u32(base + calculate_variable_data_size(data, info))
+}
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(data) + field.offset)
-			total_variable_size += len(str_ptr^)
+@(private)
+append_variable_data :: proc(
+	buffer: []byte,
+	start_offset: int,
+	data: rawptr,
+	info: ^Message_Type_Info,
+) -> int {
+	offset := start_offset
+
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(data) + field.offset)
+			if f.len > 0 {
+				intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), f.data, f.len)
+				offset += f.len
+			}
 		}
 	}
 
@@ -25,18 +39,17 @@ wire_format_exact_size_impl :: proc(data: rawptr, info: ^Message_Type_Info, name
 		for uf in info.union_fields {
 			variant, ok := get_active_union_variant(data, uf)
 			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(data) + field.offset)
-				total_variable_size += len(str_ptr^)
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(data) + field.offset)
-				total_variable_size += len(slice_ptr^)
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(data) + field.offset)
+				if f.len > 0 {
+					intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), f.data, f.len)
+					offset += f.len
+				}
 			}
 		}
 	}
 
-	return u32(base + total_variable_size)
+	return offset
 }
 
 build_wire_format_into_buffer_impl :: proc(
@@ -85,28 +98,7 @@ build_wire_format_into_buffer_impl :: proc(
 		return u32(total_buffer_size)
 	}
 
-	total_variable_size := 0
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(data) + field.offset)
-			total_variable_size += len(str_ptr^)
-		}
-	}
-
-	if .Has_Unions in info.flags {
-		for uf in info.union_fields {
-			variant, ok := get_active_union_variant(data, uf)
-			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(data) + field.offset)
-				total_variable_size += len(str_ptr^)
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(data) + field.offset)
-				total_variable_size += len(slice_ptr^)
-			}
-		}
-	}
+	total_variable_size := calculate_variable_data_size(data, info)
 
 	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + struct_size + total_variable_size
 	total_buffer_size := 4 + message_size
@@ -128,48 +120,7 @@ build_wire_format_into_buffer_impl :: proc(
 	}
 	offset += struct_size
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(data) + field.offset)
-			if len(str_ptr^) > 0 {
-				intrinsics.mem_copy_non_overlapping(
-					rawptr(&buffer[offset]),
-					raw_data(str_ptr^),
-					len(str_ptr^),
-				)
-				offset += len(str_ptr^)
-			}
-		}
-	}
-
-	if .Has_Unions in info.flags {
-		for uf in info.union_fields {
-			variant, ok := get_active_union_variant(data, uf)
-			if !ok do continue
-			for field in variant.string_fields {
-				str_ptr := cast(^string)(uintptr(data) + field.offset)
-				if len(str_ptr^) > 0 {
-					intrinsics.mem_copy_non_overlapping(
-						rawptr(&buffer[offset]),
-						raw_data(str_ptr^),
-						len(str_ptr^),
-					)
-					offset += len(str_ptr^)
-				}
-			}
-			for field in variant.byte_slice_fields {
-				slice_ptr := cast(^[]byte)(uintptr(data) + field.offset)
-				if len(slice_ptr^) > 0 {
-					intrinsics.mem_copy_non_overlapping(
-						rawptr(&buffer[offset]),
-						raw_data(slice_ptr^),
-						len(slice_ptr^),
-					)
-					offset += len(slice_ptr^)
-				}
-			}
-		}
-	}
+	_ = append_variable_data(buffer, offset, data, info)
 
 	return u32(total_buffer_size)
 }
@@ -293,14 +244,7 @@ build_and_send_network_command_impl :: proc(
 		}
 	}
 
-	total_string_size := 0
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(data) + field.offset)
-			total_string_size += len(str_ptr^)
-		}
-	}
-	payload_size := struct_size + total_string_size
+	payload_size := struct_size + calculate_variable_data_size(data, info)
 
 	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + payload_size
 	total_buffer_size := 4 + message_size
@@ -322,19 +266,7 @@ build_and_send_network_command_impl :: proc(
 		offset += struct_size
 	}
 
-	if .Has_Strings in info.flags {
-		for field in info.string_fields {
-			str_ptr := cast(^string)(uintptr(data) + field.offset)
-			if len(str_ptr^) > 0 {
-				intrinsics.mem_copy_non_overlapping(
-					rawptr(&buffer[offset]),
-					raw_data(str_ptr^),
-					len(str_ptr^),
-				)
-				offset += len(str_ptr^)
-			}
-		}
-	}
+	_ = append_variable_data(buffer, offset, data, info)
 
 	result := send_message(conn_pid, Raw_Network_Buffer{data = buffer})
 	delete(buffer)

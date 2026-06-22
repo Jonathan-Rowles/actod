@@ -63,6 +63,8 @@ The PID encodes the node ID in the upper 16 bits. `send_message` checks `is_loca
 
 **Important:** Remote message types must be identical across nodes, same struct, same package, same registration. See [Message Registration: Cross-Node Messages](03_message-registration.md#cross-node-messages).
 
+Variable-width fields (`string` and `[]u8`) serialize transparently across nodes, deep-copied into the receiver's own memory. Because the wire layout is derived from the struct's field order, every node in a mesh must run the same actod version and the same message definitions.
+
 ## Remote Spawning
 
 ```odin

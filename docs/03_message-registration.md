@@ -1,6 +1,6 @@
 # Message Registration
 
-Messages are sent between actors. Simple structs (plain data, no pointers) work without registration. Structs containing strings or byte slices are deep-copied.
+Messages are sent between actors. Simple structs (plain data, no pointers) work without registration. Structs containing strings or byte slices (`[]u8`) are deep-copied.
 
 Any message type can be registered at runtime, but it is strongly recommended to register upfront via `@(init)` procs before `node_init`.
 
@@ -39,7 +39,25 @@ Messages larger than 32 bytes are allocated from the actor's **message pool**.
 
 ## Variable-Length Data
 
-For registered types, the runtime introspects struct fields to find strings and byte slices. On send, the variable data is deep-copied alongside the fixed struct. The receiver gets a fully owned copy, no shared pointers.
+For registered types, the runtime introspects struct fields to find variable-width data. A `string` and a `[]u8` (byte slice) have the same memory layout (a pointer and a length), so they are treated identically: both are deep-copied alongside the fixed struct, both serialize across the network, and both work the same inside the active variant of a union field. Use whichever fits the data, text in a `string`, binary in a `[]u8`.
+
+On send, the variable data is appended after the fixed struct in **field declaration order**, and the receiver gets a fully owned copy with no shared pointers. An empty field arrives as a zero-length value (`""` or a nil slice). This holds for local sends and cross-node sends alike.
+
+```odin
+Envelope :: struct {
+    subject: string,   // variable-width
+    body:    []u8,     // variable-width, same handling as a string
+    id:      u64,      // fixed, stays in the struct
+}
+```
+
+Payload layout on the wire:
+
+```
+[ fixed struct bytes ][ subject bytes ][ body bytes ][ active union variant data ]
+```
+
+The receive path validates that the payload actually contains the variable data it claims; a truncated or malformed payload is rejected rather than read out of bounds.
 
 ## Cross-Node Messages
 

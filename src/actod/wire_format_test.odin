@@ -520,3 +520,94 @@ test_broadcast_type_hash_lookup :: proc(t: ^testing.T) {
 		"Type ID should match for terminated",
 	)
 }
+
+@(test)
+test_wire_format_byte_slice_roundtrip :: proc(t: ^testing.T) {
+	register_test_types()
+
+	blob := []byte{0xca, 0xfe, 0xba, 0xbe, 0x01, 0x02}
+	original := Test_Bytes_Message {
+		id      = 77,
+		payload = blob,
+	}
+
+	exact_size := wire_format_exact_size(original, 0)
+	buf: [512]byte
+	msg_len := build_wire_format_into_buffer(
+		buf[:],
+		original,
+		Handle{},
+		Handle{},
+		{.LIFECYCLE_EVENT},
+		"",
+	)
+	testing.expect(t, msg_len > 0, "Should build wire format successfully")
+	testing.expect_value(t, msg_len, exact_size)
+
+	header, ok := parse_network_header(buf[4:msg_len])
+	testing.expect(t, ok, "Should parse header")
+
+	payload := header.payload
+	testing.expect(
+		t,
+		len(payload) == size_of(Test_Bytes_Message) + len(blob),
+		"Payload should carry struct plus byte slice data",
+	)
+
+	info, _ := get_type_info_ptr(typeid_of(Test_Bytes_Message))
+	value := (cast(^Test_Bytes_Message)raw_data(payload))^
+	storage: [256]byte
+	copied := copy_variable_data_from_payload(&storage[0], &value, payload, info, 0)
+	testing.expect(t, copied, "Receive-side copy should succeed")
+
+	testing.expect_value(t, value.id, u64(77))
+	testing.expect(t, len(value.payload) == len(blob), "Byte slice length should match")
+	testing.expect(
+		t,
+		uintptr(raw_data(value.payload)) >= uintptr(&storage[0]) &&
+		uintptr(raw_data(value.payload)) < uintptr(&storage[0]) + size_of(storage),
+		"Byte slice should be re-based into receive storage",
+	)
+	for b, i in blob {
+		testing.expect_value(t, value.payload[i], b)
+	}
+}
+
+@(test)
+test_wire_format_union_byte_slice_roundtrip :: proc(t: ^testing.T) {
+	register_test_types()
+
+	blob := []byte{10, 20, 30, 40}
+	original := Test_Mixed_Bytes_Union(Test_Bytes_Variant{data = blob, tag = 5})
+
+	exact_size := wire_format_exact_size(original, 0)
+	buf: [512]byte
+	msg_len := build_wire_format_into_buffer(
+		buf[:],
+		original,
+		Handle{},
+		Handle{},
+		{.LIFECYCLE_EVENT},
+		"",
+	)
+	testing.expect(t, msg_len > 0, "Should build wire format successfully")
+	testing.expect_value(t, msg_len, exact_size)
+
+	header, ok := parse_network_header(buf[4:msg_len])
+	testing.expect(t, ok, "Should parse header")
+	payload := header.payload
+
+	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Bytes_Union))
+	value := (cast(^Test_Mixed_Bytes_Union)raw_data(payload))^
+	storage: [256]byte
+	copied := copy_variable_data_from_payload(&storage[0], &value, payload, info, 0)
+	testing.expect(t, copied, "Receive-side copy should succeed")
+
+	variant, is_bytes := value.(Test_Bytes_Variant)
+	testing.expect(t, is_bytes, "Active variant should survive")
+	testing.expect_value(t, variant.tag, u32(5))
+	testing.expect(t, len(variant.data) == 4, "Variant byte slice length should match")
+	for b, i in blob {
+		testing.expect_value(t, variant.data[i], b)
+	}
+}

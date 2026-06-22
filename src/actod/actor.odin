@@ -1246,7 +1246,7 @@ yield_and_retry_local :: #force_no_inline proc(actor: ^Actor(int), msg: Message,
 		if !sync.atomic_load_explicit(&actor.pool_handle.in_ready_queue, .Relaxed) {
 			wake_actor(actor)
 		}
-		handle_set_message_stats(msg, to)
+		handle_set_message_stats(msg.from, to)
 		return true
 	}
 	return false
@@ -1269,7 +1269,7 @@ push_to_mailbox :: #force_inline proc(
 			if !sync.atomic_load_explicit(&actor.pool_handle.in_ready_queue, .Relaxed) {
 				wake_actor(actor)
 			}
-			handle_set_message_stats(msg, to)
+			handle_set_message_stats(msg.from, to)
 			return .OK
 		}
 
@@ -1280,7 +1280,7 @@ push_to_mailbox :: #force_inline proc(
 
 	if mpsc_try_push(&actor.mailbox[priority], msg) {
 		wake_actor(actor)
-		handle_set_message_stats(msg, to)
+		handle_set_message_stats(msg.from, to)
 		return .OK
 	}
 
@@ -1290,7 +1290,7 @@ push_to_mailbox :: #force_inline proc(
 		for _, i in actor.mailbox {
 			if mpsc_try_push(&actor.mailbox[i], msg) {
 				wake_actor(actor)
-				handle_set_message_stats(msg, to)
+				handle_set_message_stats(msg.from, to)
 				return .OK
 			}
 		}
@@ -2321,9 +2321,9 @@ collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 }
 
 @(private)
-handle_set_message_stats :: proc(msg: Message, to: PID) {
+handle_set_message_stats :: #force_inline proc(from: PID, to: PID) {
 	if SYSTEM_CONFIG.enable_observer {
-		if current_actor_context != nil && current_actor_context.pid == msg.from {
+		if current_actor_context != nil && current_actor_context.pid == from {
 			current_actor_context.stats.messages_sent += 1
 			append(&current_actor_context.stats.sent_list, to)
 		}

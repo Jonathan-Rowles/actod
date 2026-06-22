@@ -114,19 +114,15 @@ send_to_actor_impl :: proc(
 	msg: Message
 	msg.from = get_self_pid()
 
-	if current_state == .STOPPING {
-		when class == .System {
-			alloc_err, _ := create_message_impl(&msg, &actor.pool, data, size, tid, info)
-			if alloc_err == .OK {
-				return .OK
-			}
+	if info.flags == {} && size <= INLINE_MESSAGE_SIZE {
+		msg.inline_type = tid
+		msg.content = nil
+		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
+	} else {
+		alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info)
+		if alloc_err != .OK {
+			return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
 		}
-		return .ACTOR_NOT_FOUND
-	}
-
-	alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info)
-	if alloc_err != .OK {
-		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
 	}
 
 	when class == .System {
@@ -134,7 +130,7 @@ send_to_actor_impl :: proc(
 			log.panicf("Couldn't send system message to %v", to)
 		}
 		wake_actor(actor)
-		handle_set_message_stats(msg, to)
+		handle_set_message_stats(msg.from, to)
 		return .OK
 	} else {
 		result := push_to_mailbox(actor, msg, to, int(priority))

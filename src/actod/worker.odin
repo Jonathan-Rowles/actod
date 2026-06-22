@@ -32,10 +32,13 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 Worker :: struct #align (CACHE_LINE_SIZE) {
 	id:          int,
 	thread:      ^thread.Thread,
-	wake_sema:   sync.Atomic_Sema,
-	runnext:     ^Pooled_Actor_Handle, // only accessed by this worker's thread
-	ready_queue: MPSC_Queue(rawptr, WORKER_READY_QUEUE_SIZE),
+	runnext:     ^Pooled_Actor_Handle,
 	running:     bool,
+	_pad0:       [CACHE_LINE_SIZE - size_of(int) - size_of(rawptr) - size_of(rawptr) - size_of(bool)]byte,
+	wake_sema:   sync.Atomic_Sema,
+	parked:      bool,
+	_pad1:       [CACHE_LINE_SIZE - size_of(sync.Atomic_Sema) - size_of(bool)]byte,
+	ready_queue: MPSC_Queue(rawptr, WORKER_READY_QUEUE_SIZE),
 }
 
 Worker_Pool :: struct {
@@ -104,7 +107,11 @@ wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
 			w.runnext = handle
 		} else {
 			mpsc_push(&w.ready_queue, rawptr(handle))
-			sync.atomic_sema_post(&w.wake_sema)
+
+			sync.atomic_thread_fence(.Seq_Cst)
+			if sync.atomic_load_explicit(&w.parked, .Relaxed) {
+				sync.atomic_sema_post(&w.wake_sema)
+			}
 		}
 	}
 }
@@ -172,9 +179,14 @@ worker_loop :: proc(worker: ^Worker) {
 			}
 		}
 
-		if worker.runnext == nil {
+		if worker.runnext != nil do continue
+
+		sync.atomic_store_explicit(&worker.parked, true, .Relaxed)
+		sync.atomic_thread_fence(.Seq_Cst)
+		if worker.runnext == nil && mpsc_size(&worker.ready_queue) == 0 {
 			sync.atomic_sema_wait(&worker.wake_sema)
 		}
+		sync.atomic_store_explicit(&worker.parked, false, .Relaxed)
 	}
 }
 

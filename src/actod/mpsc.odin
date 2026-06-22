@@ -151,7 +151,7 @@ mpsc_pop_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {
 		pos := start_pos + u64(count)
 		entry := &q.buffer[pos & mask]
 
-		if count + 1 < max_count {
+		if count + 3 < max_count {
 			intrinsics.prefetch_read_data(&q.buffer[(pos + 1) & mask], 3)
 		}
 

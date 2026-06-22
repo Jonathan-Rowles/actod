@@ -198,29 +198,29 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 	p_flags := priority_to_flags(.NORMAL)
 
 	ring := get_connection_ring(node_id)
-	if ring != nil && ring.state == .Ready {
-		buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
-
-		msg_len := build_wire_format_into_buffer(
-			buf[:],
-			msg,
-			broadcast_handle,
-			from_handle,
-			p_flags | {.BROADCAST},
-			"",
-		)
-		if msg_len > 0 {
-			if batch_append_message(ring, buf[:msg_len]) {
-				return
-			}
+	if ring == nil {
+		if get_or_create_connection(node_id) == 0 {
+			return
+		}
+		ring = get_connection_ring(node_id)
+		if ring == nil {
+			return
 		}
 	}
 
-	conn_pid := get_or_create_connection(node_id)
-	if conn_pid == 0 {
-		return
+	buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
+
+	msg_len := build_wire_format_into_buffer(
+		buf[:],
+		msg,
+		broadcast_handle,
+		from_handle,
+		p_flags | {.BROADCAST},
+		"",
+	)
+	if msg_len > 0 {
+		batch_append_message(ring, buf[:msg_len])
 	}
-	build_and_send_network_command(conn_pid, msg, p_flags | {.BROADCAST}, broadcast_handle, "")
 }
 
 get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {

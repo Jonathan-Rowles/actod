@@ -4,11 +4,8 @@ import "base:runtime"
 import "core:encoding/endian"
 
 NETWORK_HEADER_SIZE :: 26
-LARGE_MESSAGE_THRESHOLD :: 16 * 1024
 MAX_MESSAGE_SIZE :: 1024 * 1024
 WIRE_FORMAT_OVERHEAD :: 64
-MAX_WIRE_BUFFER_SIZE :: 64 * 1024
-WIRE_FORMAT_NAME_OVERHEAD :: 256
 
 Network_Message_Flags :: bit_set[Network_Message_Flag;u16]
 
@@ -246,13 +243,6 @@ ctrl_get_str :: #force_inline proc(r: ^Ctrl_Reader) -> string {
 	v := string(r.data[r.pos:r.pos + n])
 	r.pos += n
 	return v
-}
-
-wrap_control_message :: proc(ctrl_data: []byte, allocator := context.allocator) -> []byte {
-	buf := make([]byte, NETWORK_HEADER_SIZE + len(ctrl_data), allocator)
-	write_network_header(buf, {.CONTROL}, 0, Handle{}, Handle{})
-	copy(buf[NETWORK_HEADER_SIZE:], ctrl_data)
-	return buf
 }
 
 frame_control_message :: proc(ctrl_data: []byte, buf: []byte) -> int {

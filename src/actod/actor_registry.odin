@@ -868,55 +868,172 @@ get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
 	return info, true
 }
 
-register_connection_pool :: proc(node_id: Node_ID, pool: ^Connection_Pool) {
-	if node_id == 0 || node_id >= MAX_NODES || pool == nil {
-		return
-	}
-
-	sync.rw_mutex_lock(&NODE.node_registry_lock)
-	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
-
-	NODE.node_registry[node_id].connection_pool = pool
-	NODE.connection_pools[node_id] = pool
-	if sync.atomic_load(&pool.ring_count) > 0 {
-		NODE.connection_rings[node_id] = pool.rings[0]
-	}
-}
-
-unregister_connection_pool :: proc(node_id: Node_ID) {
+// Rings are NODE-owned singletons: created once per node, adopted by
+// connection actors, freed only in destroy_all_connection_rings at shutdown.
+// Producers may therefore hold a ring pointer across connection churn.
+get_or_create_node_ring :: proc(
+	node_id: Node_ID,
+	config: Connection_Ring_Config,
+) -> ^Connection_Ring {
 	if node_id == 0 || node_id >= MAX_NODES {
-		return
+		return nil
 	}
 
-	sync.rw_mutex_lock(&NODE.node_registry_lock)
-	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	ring := atomic_load_ring_ptr(&NODE.connection_rings[node_id])
+	if ring != nil {
+		return ring
+	}
 
-	NODE.node_registry[node_id].connection_pool = nil
-	NODE.connection_pools[node_id] = nil
-	NODE.connection_rings[node_id] = nil
+	new_pool := create_connection_pool(node_id, config, get_system_allocator())
+	if new_pool == nil {
+		return nil
+	}
+
+	new_ring := create_connection_ring(
+		config,
+		SYSTEM_CONFIG.network.enable_encryption,
+		get_system_allocator(),
+	)
+	if new_ring == nil {
+		free(new_pool, get_system_allocator())
+		return nil
+	}
+	new_ring.node_id = node_id
+	new_ring.pool = new_pool
+	atomic_store_ring_ptr(&new_pool.rings[0], new_ring)
+	sync.atomic_store_explicit(&new_pool.ring_count, u32(1), .Release)
+
+	old, swapped := sync.atomic_compare_exchange_strong_explicit(
+		cast(^u64)&NODE.connection_rings[node_id],
+		u64(0),
+		u64(uintptr(new_ring)),
+		.Acq_Rel,
+		.Acquire,
+	)
+	if !swapped {
+		destroy_connection_ring(new_ring, get_system_allocator())
+		free(new_pool, get_system_allocator())
+		return cast(^Connection_Ring)rawptr(uintptr(old))
+	}
+	sync.atomic_store_explicit(
+		cast(^u64)&NODE.connection_pools[node_id],
+		u64(uintptr(new_pool)),
+		.Release,
+	)
+	return new_ring
 }
 
 get_connection_pool :: #force_inline proc(node_id: Node_ID) -> ^Connection_Pool {
 	if node_id == 0 || node_id >= MAX_NODES {
 		return nil
 	}
-	return NODE.connection_pools[node_id]
+	return cast(^Connection_Pool)rawptr(
+		uintptr(sync.atomic_load_explicit(cast(^u64)&NODE.connection_pools[node_id], .Acquire)),
+	)
 }
 
-// Fast path: returns ring 0 directly without pool indirection.
-// Falls back to pool round-robin when multiple rings exist.
+find_pool_owner_by_join_token :: proc(token: u64) -> PID {
+	if token == 0 {
+		return 0
+	}
+	for i in 2 ..< MAX_NODES {
+		pool := get_connection_pool(Node_ID(i))
+		if pool == nil {
+			continue
+		}
+		if sync.atomic_load_explicit(&pool.join_token, .Acquire) == token {
+			return PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
+		}
+	}
+	return 0
+}
+
+register_connection_ring :: proc(node_id: Node_ID, ring: ^Connection_Ring) {
+	if node_id == 0 || node_id >= MAX_NODES || ring == nil {
+		return
+	}
+	atomic_store_ring_ptr(&NODE.connection_rings[node_id], ring)
+}
+
 get_connection_ring :: #force_inline proc(node_id: Node_ID) -> ^Connection_Ring {
 	if node_id == 0 || node_id >= MAX_NODES {
 		return nil
 	}
-	ring := NODE.connection_rings[node_id]
+	ring := atomic_load_ring_ptr(&NODE.connection_rings[node_id])
 	if ring != nil {
-		pool := NODE.connection_pools[node_id]
-		if pool != nil && pool.rings[1] != nil {
+		pool := ring.pool
+		if pool != nil && sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 {
 			return get_pool_ring_ready(pool)
 		}
 	}
 	return ring
+}
+
+@(private)
+destroy_ring_if_quiesced :: proc(ring: ^Connection_Ring, node_id: int) -> bool {
+	sync.atomic_store(&ring.io_stop, 1)
+	released := false
+	for _ in 0 ..< 1000 {
+		if sync.atomic_load_explicit(&ring.io_owner, .Acquire) == 0 {
+			released = true
+			break
+		}
+		time.sleep(1 * time.Millisecond)
+	}
+	if !released || ring.io_thread != nil {
+		log.errorf("Leaking connection ring for node %d: IO thread never cleaned up", node_id)
+		return false
+	}
+	destroy_connection_ring(ring, get_system_allocator())
+	return true
+}
+
+destroy_all_connection_rings :: proc() {
+	for i in 1 ..< MAX_NODES {
+		ring := atomic_load_ring_ptr(&NODE.connection_rings[i])
+		pool := get_connection_pool(Node_ID(i))
+		if ring == nil && pool == nil {
+			continue
+		}
+
+		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
+		if conn_pid != 0 {
+			log.errorf("Leaking connection ring for node %d: connection actor still alive", i)
+			continue
+		}
+
+		leaked := false
+		if pool != nil {
+			count := sync.atomic_load(&pool.ring_count)
+			for r: u32 = 1; r < count; r += 1 {
+				pr := atomic_load_ring_ptr(&pool.rings[r])
+				atomic_store_ring_ptr(&pool.rings[r], nil)
+				if pr != nil && pr != ring && !destroy_ring_if_quiesced(pr, i) {
+					leaked = true
+				}
+			}
+			for p in 0 ..< pool.parked_count {
+				if pool.parked[p] != nil && !destroy_ring_if_quiesced(pool.parked[p], i) {
+					leaked = true
+				}
+				pool.parked[p] = nil
+			}
+			pool.parked_count = 0
+			sync.atomic_store(&pool.ring_count, u32(0))
+		}
+
+		if ring != nil {
+			atomic_store_ring_ptr(&NODE.connection_rings[i], nil)
+			if !destroy_ring_if_quiesced(ring, i) {
+				leaked = true
+			}
+		}
+
+		if pool != nil && !leaked {
+			sync.atomic_store_explicit(cast(^u64)&NODE.connection_pools[i], u64(0), .Release)
+			free(pool, get_system_allocator())
+		}
+	}
 }
 
 get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
@@ -943,9 +1060,4 @@ unregister_node :: proc(node_id: Node_ID) {
 		// TODO: be more deterministic
 		time.sleep(10 * time.Millisecond)
 	}
-
-	sync.rw_mutex_lock(&NODE.node_registry_lock)
-	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
-
-	NODE.node_registry[node_id].connection_pool = nil
 }

@@ -114,7 +114,6 @@ init_system_messages :: proc "contextless" () {
 	register_message_type(Set_Parent)
 	register_message_type(Get_Stats)
 	register_message_type(Connect_Request)
-	register_message_type(Raw_Network_Buffer)
 	register_message_type(Remote_Message)
 	register_message_type(Start_Receiving)
 	register_message_type(Rename_Actor)
@@ -126,8 +125,8 @@ init_system_messages :: proc "contextless" () {
 	register_message_type(Subscribe_Remote)
 	register_message_type(Unsubscribe_Remote)
 	register_message_type(Scale_Up_Request)
-	register_message_type(Accept_Pool_Ring_Socket)
 	register_message_type(Pool_Ring_Closed)
+	register_message_type(Adopt_Pool_Ring)
 	register_message_type(Reload_Behaviour)
 }
 
@@ -141,10 +140,14 @@ Node_Behaviour :: Actor_Behaviour(Node_Data) {
 init_system :: proc(data: ^Node_Data) {
 	current_node_id = 1
 	init_network(current_node_id, data.name)
+	init_udp()
 }
 
 @(private)
 terminate_system :: proc(data: ^Node_Data) {
+	shutdown_udp()
+	destroy_all_connection_rings()
+
 	for i in 0 ..< MAX_NODES {
 		if NODE.node_registry[i].node_name != "" {
 			delete(NODE.node_registry[i].node_name, get_system_allocator())
@@ -166,8 +169,8 @@ Node_Data :: struct {
 	started:                  bool,
 	shutting_down:            bool,
 	node_registry:            [MAX_NODES]Node_Info,
-	connection_pools:         [MAX_NODES]^Connection_Pool,
-	connection_rings:         [MAX_NODES]^Connection_Ring, // fast-path cache of pool ring 0
+	connection_rings:         [MAX_NODES]^Connection_Ring, // NODE-owned, see get_or_create_node_ring
+	connection_pools:         [MAX_NODES]^Connection_Pool, // NODE-owned, rings park instead of freeing
 	node_name_to_id:          map[string]Node_ID,
 	node_registry_lock:       sync.RW_Mutex,
 	connection_actors:        [MAX_NODES]PID,
@@ -476,7 +479,9 @@ shutdown_node :: proc() {
 	send_terminate_to_active_actors_and_wait()
 
 	stop_network_listener()
+	shutdown_udp()
 	broadcast_graceful_disconnect("shutdown")
+	terminate_connection_actors_and_wait()
 
 	clear_all_subscriptions()
 
@@ -547,6 +552,22 @@ cleanup_remote_proxy_entries :: proc() {
 	for node_id in 2 ..< Node_ID(MAX_NODES) {
 		handle_node_disconnect(node_id)
 	}
+}
+
+// Connection actors must be fully terminated before terminate_system frees the
+// NODE-owned rings they adopt; they are skipped by the general actor sweep.
+terminate_connection_actors_and_wait :: proc() {
+	conn_actors: [dynamic]PID
+	defer delete(conn_actors)
+
+	for i in 0 ..< MAX_NODES {
+		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
+		if conn_pid != 0 && terminate_actor(conn_pid, .SHUTDOWN) {
+			append(&conn_actors, conn_pid)
+		}
+	}
+
+	wait_for_pids(conn_actors[:])
 }
 
 is_connection_actor :: proc(pid: PID) -> bool {

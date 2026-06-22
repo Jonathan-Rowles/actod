@@ -17,6 +17,9 @@ SPIN_STRATEGY :: enum {
 Network_Config :: struct {
 	auth_password:           string,
 	port:                    int,
+	udp_port:                int,
+	udp_max_datagram:        int,
+	enable_encryption:       bool,
 	heartbeat_interval:      time.Duration,
 	heartbeat_timeout:       time.Duration,
 	reconnect_initial_delay: time.Duration,
@@ -27,6 +30,9 @@ Network_Config :: struct {
 DEFAULT_NETWORK_CONFIG := Network_Config {
 	auth_password           = "",
 	port                    = 0,
+	udp_port                = 0,
+	udp_max_datagram        = 1400,
+	enable_encryption       = false,
 	heartbeat_interval      = 30 * time.Second,
 	heartbeat_timeout       = 90 * time.Second,
 	reconnect_initial_delay = 2 * time.Second,
@@ -37,6 +43,9 @@ DEFAULT_NETWORK_CONFIG := Network_Config {
 make_network_config :: proc(
 	auth_password: string = DEFAULT_NETWORK_CONFIG.auth_password,
 	port: int = DEFAULT_NETWORK_CONFIG.port,
+	udp_port: int = DEFAULT_NETWORK_CONFIG.udp_port,
+	udp_max_datagram: int = DEFAULT_NETWORK_CONFIG.udp_max_datagram,
+	enable_encryption: bool = DEFAULT_NETWORK_CONFIG.enable_encryption,
 	heartbeat_interval: time.Duration = DEFAULT_NETWORK_CONFIG.heartbeat_interval,
 	heartbeat_timeout: time.Duration = DEFAULT_NETWORK_CONFIG.heartbeat_timeout,
 	reconnect_initial_delay: time.Duration = DEFAULT_NETWORK_CONFIG.reconnect_initial_delay,
@@ -46,6 +55,9 @@ make_network_config :: proc(
 	return Network_Config {
 		auth_password = auth_password,
 		port = port,
+		udp_port = udp_port,
+		udp_max_datagram = udp_max_datagram,
+		enable_encryption = enable_encryption,
 		heartbeat_interval = heartbeat_interval,
 		heartbeat_timeout = heartbeat_timeout,
 		reconnect_initial_delay = reconnect_initial_delay,

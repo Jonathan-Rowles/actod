@@ -1,9 +1,8 @@
 package actod
 
 import "base:intrinsics"
-import "base:runtime"
+import "core:crypto"
 import "core:crypto/hash"
-import "core:encoding/endian"
 import "core:fmt"
 import "core:log"
 import "core:net"
@@ -12,52 +11,24 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-CTRL_MSG_HANDSHAKE :: 1
+WIRE_PROTOCOL_VERSION :: 2
+HANDSHAKE_TIMEOUT_SECS :: 5
+DUPLICATE_TAKEOVER_TIMEOUT :: 5 * time.Second
+
 CTRL_MSG_HEARTBEAT :: 2
 CTRL_MSG_NODE_DIRECTORY :: 3
 CTRL_MSG_DISCONNECT :: 4
-CTRL_MSG_POOL_RING :: 5
+CTRL_MSG_HELLO :: 6
+CTRL_MSG_NOISE_1 :: 7
+CTRL_MSG_NOISE_2 :: 8
+CTRL_MSG_UDP_INFO :: 9
 
-Connection_Control_Message :: union {
-	Handshake_Message,
-	Heartbeat_Message,
-}
-
-Handshake_Message :: struct {
-	node_id:    Node_ID,
-	node_name:  string,
-	version:    u32,
-	auth_token: string,
-	nonce:      u64,
-}
-
-Heartbeat_Message :: struct {
-	timestamp: time.Time,
-	seq_num:   u64,
-}
-
-Connection_Command :: union {
-	Connect_Request,
-	Close_Connection,
-	Start_Receiving,
-	Reconnect,
-	Raw_Network_Buffer,
-	Accept_Pool_Ring_Socket,
-	Pool_Ring_Closed,
-}
-
-Accept_Pool_Ring_Socket :: struct {
-	socket: net.TCP_Socket,
-}
-
-Pool_Ring_Closed :: struct {
-	ring_idx: u32,
-}
+HELLO_FLAG_ENCRYPTED: u8 : 1 << 0
+HELLO_FLAG_POOL_JOIN: u8 : 1 << 1
 
 Connect_Request :: struct {
-	node_id:   Node_ID,
-	address:   net.Endpoint,
-	transport: Transport_Strategy,
+	node_id: Node_ID,
+	address: net.Endpoint,
 }
 
 Close_Connection :: struct {
@@ -70,14 +41,23 @@ Reconnect :: struct {
 	delay: time.Duration,
 }
 
-Raw_Network_Buffer :: struct {
-	data: []byte,
+// keys_ptr boxes a Noise_Transport on the system heap (messages must be
+// pointer-free for the validator, and cipher contexts contain unions); the
+// adopting actor copies, wipes, and frees it on every path.
+Adopt_Pool_Ring :: struct {
+	socket:   net.TCP_Socket,
+	keys_ptr: u64,
+}
+
+Establish_Result :: enum {
+	Established,
+	Failed,
+	Transferred,
 }
 
 Connection_State :: enum {
 	Disconnected,
 	Connecting,
-	Handshaking,
 	Connected,
 	Failed,
 }
@@ -86,27 +66,32 @@ Connection_Actor_Data :: struct {
 	node_id:                   Node_ID,
 	node_name:                 string,
 	state:                     Connection_State,
-	transport:                 Transport_Strategy,
 	address:                   net.Endpoint,
 	tcp_socket:                net.TCP_Socket,
+	ring:                      ^Connection_Ring,
+	io_ctx:                    ^IO_Context,
 	last_heartbeat:            time.Time,
-	last_activity:             time.Time,
 	heartbeat_interval:        time.Duration,
 	heartbeat_timeout:         time.Duration,
 	reconnect_initial_delay:   time.Duration,
 	reconnect_retry_delay:     time.Duration,
 	auth_password:             string,
+	encrypted:                 bool,
 	is_incoming:               bool,
 	peer_initiated_disconnect: bool,
-	first_message:             []byte,
-	pending_messages:          [dynamic][]byte,
-	pool:                      ^Connection_Pool,
-	io_threads:                [MAX_POOL_RINGS]^thread.Thread,
-	io_stop_flags:             [MAX_POOL_RINGS]i32,
-	io_contexts:               [MAX_POOL_RINGS]^IO_Context,
+	pending_incoming_released: bool,
 	ring_config:               Connection_Ring_Config,
 	heartbeat_timer_id:        u32,
 	reconnect_timer_id:        u32,
+	peer_listen_port:          u16,
+	peer_udp_port:             u16,
+	my_join_token:             u64,
+	peer_join_token:           u64,
+	my_udp_token:              u32,
+	peer_udp_token:            u32,
+	udp_seed:                  [UDP_SEED_SIZE]byte,
+	udp_seed_set:              bool,
+	udp_activated:             bool,
 }
 
 Connection_Actor_Behaviour :: Actor_Behaviour(Connection_Actor_Data) {
@@ -116,67 +101,44 @@ Connection_Actor_Behaviour :: Actor_Behaviour(Connection_Actor_Data) {
 }
 
 connection_actor_init :: proc(data: ^Connection_Actor_Data) {
-	data.pending_messages = make([dynamic][]byte, 0, 10)
-
-	max_rings := data.ring_config.max_pool_rings
-	if max_rings == 0 do max_rings = 8
-	data.pool = create_connection_pool(data.node_id, max_rings)
-
-	ring := create_connection_ring(data.ring_config)
-	if ring != nil {
-		ring.node_id = data.node_id
-		pool_add_ring(data.pool, ring)
-	}
-
-	for i in 0 ..< MAX_POOL_RINGS {
-		sync.atomic_store(&data.io_stop_flags[i], 0)
+	data.encrypted = SYSTEM_CONFIG.network.enable_encryption
+	if data.node_id != 0 {
+		data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
 	}
 }
 
 connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
+	is_active := is_active_connection(data)
+
+	if data.ring != nil {
+		sync.atomic_store(&data.ring.io_stop, 1)
+	}
 	if data.tcp_socket != 0 {
 		net.close(data.tcp_socket)
 		data.tcp_socket = 0
 	}
+	stop_connection_io(data)
 
-	if data.pool != nil {
-		ring_count := sync.atomic_load(&data.pool.ring_count)
-		for i in 0 ..< ring_count {
-			if data.pool.rings[i] != nil do data.pool.rings[i].state = .Draining
-		}
-	}
-
-	for i in 0 ..< MAX_POOL_RINGS {
-		sync.atomic_store(&data.io_stop_flags[i], 1)
-	}
-
-	for i in 0 ..< MAX_POOL_RINGS {
-		if data.io_threads[i] != nil {
-			thread.join(data.io_threads[i])
-			thread.destroy(data.io_threads[i])
-			data.io_threads[i] = nil
-		}
-	}
-
-	is_active := is_active_connection(data)
+	cancel_timer(data.heartbeat_timer_id)
+	cancel_timer(data.reconnect_timer_id)
 
 	if data.node_id != 0 && is_active {
-		unregister_connection_pool(data.node_id)
-	}
-
-	if data.pool != nil {
-		ring_count := sync.atomic_load(&data.pool.ring_count)
-		for i in 0 ..< ring_count {
-			if data.pool.rings[i] != nil {
-				destroy_connection_ring(data.pool.rings[i])
-				data.pool.rings[i] = nil
+		udp_clear_peer(data.node_id)
+		if data.ring != nil {
+			teardown_pool_rings(data)
+			if pool := data.ring.pool; pool != nil {
+				sync.atomic_store_explicit(&pool.conn_pid, u64(0), .Release)
+			}
+			dropped := ring_reset(data.ring)
+			if dropped > 0 {
+				log.warnf(
+					"Connection actor for node %s (id=%d) terminating with %d buffered slots dropped",
+					data.node_name,
+					data.node_id,
+					dropped,
+				)
 			}
 		}
-		destroy_connection_pool(data.pool)
-		data.pool = nil
-	}
-
-	if data.node_id != 0 && data.node_id < MAX_NODES && is_active {
 		sync.atomic_store_explicit(
 			cast(^u64)&NODE.connection_actors[data.node_id],
 			u64(0),
@@ -184,64 +146,97 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 		)
 	}
 
-	if len(data.pending_messages) > 0 {
-		log.warnf(
-			"Connection actor for node %s (id=%d) terminating with %d unsent messages dropped",
-			data.node_name,
-			data.node_id,
-			len(data.pending_messages),
-		)
-	}
-	for msg in data.pending_messages {
-		delete(msg)
-	}
-	delete(data.pending_messages)
+	release_pending_incoming(data)
+}
 
-	if data.first_message != nil {
-		delete(data.first_message, actor_system_allocator)
-		data.first_message = nil
+@(private)
+release_pending_incoming :: proc(data: ^Connection_Actor_Data) {
+	if data.is_incoming && !data.pending_incoming_released {
+		data.pending_incoming_released = true
+		sync.atomic_sub(&g_pending_incoming_handshakes, 1)
 	}
 }
 
 connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: any) {
 	switch m in msg {
 	case Connect_Request:
-		if data.state != .Disconnected {
-			log.warnf("Connection already in progress for node %d", data.node_id)
+		if data.state != .Disconnected && data.state != .Failed {
 			return
 		}
-
+		cancel_timer(data.reconnect_timer_id)
 		data.address = m.address
-		data.transport = m.transport
+		if data.node_id == 0 {
+			data.node_id = m.node_id
+		}
 		data.state = .Connecting
-
 		if !initiate_connection(data) {
 			data.state = .Failed
 			data.reconnect_timer_id, _ = set_timer(data.reconnect_retry_delay, false)
-			return
 		}
 
 	case Close_Connection:
+		if data.state == .Disconnected || data.state == .Failed {
+			return
+		}
 		log.infof("Closing connection to node %d: %s", data.node_id, m.reason)
 		close_connection(data)
 
 	case Start_Receiving:
-		if data.is_incoming && data.tcp_socket != 0 {
-			if data.first_message != nil {
-				handle_incoming_data(data, data.first_message)
-				delete(data.first_message, actor_system_allocator)
-				data.first_message = nil
+		if !data.is_incoming || data.tcp_socket == 0 || data.state != .Disconnected {
+			return
+		}
+		data.state = .Connecting
+		result := establish_connection(data)
+		release_pending_incoming(data)
+		if result != .Established {
+			if data.tcp_socket != 0 {
+				net.close(data.tcp_socket)
+				data.tcp_socket = 0
 			}
-			start_io_thread(data)
+			data.state = .Disconnected
+			terminate_actor(get_self_pid(), .SHUTDOWN)
 		}
 
 	case Remote_Message:
 		handle_incoming_data(data, m.data)
 
+	case Scale_Up_Request:
+		if data.state == .Connected {
+			pool := data.ring != nil ? data.ring.pool : nil
+			if pool != nil {
+				sync.atomic_store(&pool.contention_count, u32(0))
+				if pool_active_count(pool) < pool.max_rings {
+					establish_pool_ring(data)
+					sync.atomic_store(&pool.scale_up_requested, u32(0))
+				}
+				// At max_rings the flag stays set so producers stop
+				// re-requesting; the heartbeat tick re-arms it.
+			}
+		}
+
+	case Adopt_Pool_Ring:
+		adopt_pool_ring(data, m)
+
+	case Pool_Ring_Closed:
+		pool := data.ring != nil ? data.ring.pool : nil
+		if pool != nil {
+			count := pool_active_count(pool)
+			for i: u32 = 1; i < count; i += 1 {
+				pr := get_pool_ring_at(pool, i)
+				if pr == nil || u64(uintptr(pr)) != m.ring_ptr {
+					continue
+				}
+				if sync.atomic_load(&pr.park_state) == .Active {
+					sync.atomic_store(&pr.park_state, Ring_Park_State.Park_Asked)
+				}
+				break
+			}
+		}
+
 	case Timer_Tick:
 		if data.state == .Connected {
 			if m.id == data.heartbeat_timer_id && data.heartbeat_interval > 0 {
-				send_heartbeat_message(data)
+				send_heartbeat(data)
 				check_heartbeat_timeout(data)
 				pool_check_scaling(data)
 			}
@@ -260,300 +255,860 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 				attempt_reconnect(data)
 			}
 		}
-
-	case Scale_Up_Request:
-		if data.state == .Connected && data.pool != nil {
-			pool_scale_up(data)
-			sync.atomic_store(&data.pool.contention_count, 0)
-			sync.atomic_store(&data.pool.scale_up_requested, 0)
-		}
-
-	case Raw_Network_Buffer:
-		if data.state != .Connected {
-			log.warnf("Cannot send - not connected to node %d, queueing raw buffer", data.node_id)
-			buffer_copy := make([]byte, len(m.data) - 4)
-			copy(buffer_copy, m.data[4:])
-			append(&data.pending_messages, buffer_copy)
-			if data.state == .Disconnected {
-				send_message(
-					get_self_pid(),
-					Connect_Request {
-						node_id = data.node_id,
-						address = data.address,
-						transport = data.transport,
-					},
-				)
-			}
-			return
-		}
-
-		ring := get_pool_ring_ready(data.pool)
-		if ring != nil {
-			// Must go through ring, blocking send would interleave with NBIO.
-			sent := false
-			for attempt in 0 ..< 10_000 {
-				if send_raw_via_ring(ring, m.data) {
-					sent = true
-					break
-				}
-				if attempt < 100 {
-					intrinsics.cpu_relax()
-				} else {
-					time.sleep(1 * time.Microsecond)
-				}
-			}
-			if sent {
-				data.last_activity = time.now()
-			} else {
-				log.errorf(
-					"Raw buffer dropped, ring full after retries for node %d",
-					data.node_id,
-				)
-			}
-		} else {
-			if !tcp_send_all(data.tcp_socket, m.data) {
-				log.errorf(
-					"Failed to send raw buffer to node %s (id=%d) - message dropped",
-					data.node_name,
-					data.node_id,
-				)
-				data.state = .Disconnected
-			} else {
-				data.last_activity = time.now()
-			}
-		}
-
-	case Accept_Pool_Ring_Socket:
-		if data.state != .Connected || data.pool == nil {
-			log.warnf("Cannot accept pool ring - not connected to node %d", data.node_id)
-			net.close(m.socket)
-			return
-		}
-
-		ring := create_connection_ring(data.ring_config)
-		if ring == nil {
-			net.close(m.socket)
-			return
-		}
-
-		ring.node_id = data.node_id
-		ring.socket = net.Socket(m.socket)
-		ring.conn_pid = get_self_pid()
-		if !init_connection_ring_nbio(ring) {
-			destroy_connection_ring(ring)
-			net.close(m.socket)
-			return
-		}
-
-		if !pool_add_ring(data.pool, ring) {
-			destroy_connection_ring(ring)
-			net.close(m.socket)
-			return
-		}
-
-		new_idx := sync.atomic_load(&data.pool.ring_count) - 1
-		start_io_thread_for_ring(data, new_idx, m.socket)
-
-		log.infof(
-			"Accepted pool ring from node %s (id=%d): %d rings",
-			data.node_name,
-			data.node_id,
-			sync.atomic_load(&data.pool.ring_count),
-		)
-
-	case Pool_Ring_Closed:
-		if m.ring_idx == 0 {
-			close_connection(data)
-			return
-		}
-
-		if data.pool == nil {
-			return
-		}
-
-		ring_count := sync.atomic_load(&data.pool.ring_count)
-		if m.ring_idx >= ring_count {
-			return
-		}
-
-		last_idx := ring_count - 1
-		ring := pool_remove_ring(data.pool, m.ring_idx)
-		if ring == nil {
-			return
-		}
-
-		cleanup_ring_io_state(data, m.ring_idx, last_idx, join_thread = false)
-		pool_submit_drain_and_wait(data.pool, ring)
-
-		log.infof(
-			"Pool ring %d closed for node %s (id=%d): %d rings remaining",
-			m.ring_idx,
-			data.node_name,
-			data.node_id,
-			sync.atomic_load(&data.pool.ring_count),
-		)
 	}
 }
 
 initiate_connection :: proc(data: ^Connection_Actor_Data) -> bool {
-	#partial switch data.transport {
-	case .TCP_Custom_Protocol:
-		sock, err := net.dial_tcp(data.address)
-		if err != nil {
-			log.errorf("Failed to connect to node %d: %v", data.node_id, err)
-			return false
-		}
-
-		data.tcp_socket = sock
-		data.state = .Handshaking
-
-		if !send_handshake_message(data) {
-			net.close(sock)
-			return false
-		}
-
-		start_io_thread(data)
-		return true
-
-	case:
-		log.errorf("Unsupported transport: %v", data.transport)
+	sock, err := net.dial_tcp(data.address)
+	if err != nil {
+		log.errorf("Failed to connect to node %d: %v", data.node_id, err)
 		return false
 	}
-}
 
-send_handshake_message :: proc(data: ^Connection_Actor_Data) -> bool {
-	nonce := generate_nonce()
-
-	auth_token := ""
-	if data.auth_password != "" {
-		auth_input := fmt.tprintf("%s:%s:%d", data.auth_password, NODE.name, nonce)
-
-		hash_digest := hash.hash_string(.SHA256, auth_input)
-		auth_token = fmt.tprintf("%x", hash_digest)
-		delete(hash_digest)
-	}
-
-	handshake := Handshake_Message {
-		node_id    = current_node_id,
-		node_name  = NODE.name,
-		version    = 1,
-		auth_token = auth_token,
-		nonce      = nonce,
-	}
-
-	msg := Connection_Control_Message(handshake)
-	return send_control_message(data, msg)
-}
-
-send_control_message :: proc(
-	data: ^Connection_Actor_Data,
-	msg: Connection_Control_Message,
-) -> bool {
-	switch m in msg {
-	case Handshake_Message:
-		total := 1 + 2 + (2 + len(m.node_name)) + 4 + (2 + len(m.auth_token)) + 8
-		ctrl_data := make([]byte, total)
-		defer delete(ctrl_data)
-
-		w := Ctrl_Writer {
-			buf = ctrl_data,
+	data.tcp_socket = sock
+	if establish_connection(data) != .Established {
+		if data.tcp_socket != 0 {
+			net.close(data.tcp_socket)
+			data.tcp_socket = 0
 		}
-		ctrl_put_u8(&w, CTRL_MSG_HANDSHAKE)
-		ctrl_put_u16(&w, u16(m.node_id))
-		ctrl_put_str(&w, m.node_name)
-		ctrl_put_u32(&w, m.version)
-		ctrl_put_str(&w, m.auth_token)
-		ctrl_put_u64(&w, m.nonce)
-
-		msg_buffer := wrap_control_message(ctrl_data)
-		defer delete(msg_buffer)
-		return send_raw_connection_data(data, msg_buffer)
-
-	case Heartbeat_Message:
-		ctrl_buf: [17]byte
-		w := Ctrl_Writer {
-			buf = ctrl_buf[:],
-		}
-		ctrl_put_u8(&w, CTRL_MSG_HEARTBEAT)
-		ctrl_put_u64(&w, u64(time.to_unix_nanoseconds(m.timestamp)))
-		ctrl_put_u64(&w, m.seq_num)
-
-		msg_buf: [NETWORK_HEADER_SIZE + 17]byte
-		write_network_header(msg_buf[:], {.CONTROL}, 0, Handle{}, Handle{})
-		copy(msg_buf[NETWORK_HEADER_SIZE:], ctrl_buf[:])
-		return send_raw_connection_data(data, msg_buf[:])
-	}
-	return false
-}
-
-send_raw_connection_data :: proc(data: ^Connection_Actor_Data, raw_data: []byte) -> bool {
-	#partial switch data.transport {
-	case .TCP_Custom_Protocol:
-		total_size := 4 + len(raw_data)
-		msg_buffer := make([]byte, total_size)
-		defer delete(msg_buffer)
-
-		endian.put_u32(msg_buffer[0:4], .Little, u32(len(raw_data)))
-		copy(msg_buffer[4:], raw_data)
-
-		ring := get_pool_ring_ready(data.pool)
-		if ring != nil {
-			for attempt in 0 ..< 10_000 {
-				if send_raw_via_ring(ring, msg_buffer) {
-					data.last_activity = time.now()
-					return true
-				}
-				if attempt < 100 {
-					intrinsics.cpu_relax()
-				} else {
-					time.sleep(1 * time.Microsecond)
-				}
-			}
-			log.warn("Ring send failed after retries for raw connection data")
-			return false
-		}
-
-		if !tcp_send_all(data.tcp_socket, msg_buffer) {
-			return false
-		}
-
-		data.last_activity = time.now()
-		return true
-
-	case:
 		return false
-	}
-}
-
-tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
-	if len(data) == 0 {
-		return true
-	}
-
-	total_sent := 0
-	wouldblock_spins: u32 = 0
-	for total_sent < len(data) {
-		n, err := net.send_tcp(socket, data[total_sent:])
-		if err != nil {
-			if err == .Would_Block {
-				wouldblock_spins += 1
-				if wouldblock_spins > 100_000 {
-					return false
-				}
-				intrinsics.cpu_relax()
-				continue
-			}
-			log.errorf("TCP send error: %v", err)
-			return false
-		}
-		if n == 0 {
-			log.error("TCP send returned 0 bytes")
-			return false
-		}
-		total_sent += n
-		wouldblock_spins = 0
 	}
 	return true
+}
+
+attempt_reconnect :: proc(data: ^Connection_Actor_Data) {
+	log.infof("Attempting to reconnect to node %d", data.node_id)
+	data.state = .Connecting
+
+	if !initiate_connection(data) {
+		data.state = .Failed
+		data.reconnect_timer_id, _ = set_timer(data.reconnect_retry_delay, false)
+		log.infof("Reconnect failed, retry scheduled in %v", data.reconnect_retry_delay)
+	}
+}
+
+Hello_Info :: struct {
+	version:     u32,
+	encrypted:   bool,
+	pool_join:   bool,
+	listen_port: u16,
+	udp_port:    u16,
+	node_name:   string,
+	auth_token:  string,
+	nonce:       u64,
+	join_token:  u64,
+}
+
+// Primary handshakes carry the token we issue for pool joins towards us;
+// pool-join handshakes echo the token the target issued.
+@(private)
+build_hello_body :: proc(
+	data: ^Connection_Actor_Data,
+	nonce: u64,
+	join_token: u64,
+	pool_join: bool,
+) -> []byte {
+	auth_token := ""
+	if !data.encrypted && data.auth_password != "" {
+		auth_input := fmt.tprintf("%s:%s:%d", data.auth_password, NODE.name, nonce)
+		digest := hash.hash_string(.SHA256, auth_input)
+		auth_token = fmt.tprintf("%x", digest)
+		delete(digest)
+	}
+
+	flags: u8 = 0
+	if data.encrypted {
+		flags |= HELLO_FLAG_ENCRYPTED
+	}
+	if pool_join {
+		flags |= HELLO_FLAG_POOL_JOIN
+	}
+
+	total := 1 + 4 + 1 + 2 + 2 + (2 + len(NODE.name)) + (2 + len(auth_token)) + 8 + 8
+	body := make([]byte, total)
+	w := Ctrl_Writer {
+		buf = body,
+	}
+	ctrl_put_u8(&w, CTRL_MSG_HELLO)
+	ctrl_put_u32(&w, WIRE_PROTOCOL_VERSION)
+	ctrl_put_u8(&w, flags)
+	ctrl_put_u16(&w, u16(SYSTEM_CONFIG.network.port))
+	ctrl_put_u16(&w, u16(SYSTEM_CONFIG.network.udp_port))
+	ctrl_put_str(&w, NODE.name)
+	ctrl_put_str(&w, auth_token)
+	ctrl_put_u64(&w, nonce)
+	ctrl_put_u64(&w, join_token)
+	return body
+}
+
+@(private)
+parse_hello :: proc(payload: []byte) -> (info: Hello_Info, ok: bool) {
+	r := Ctrl_Reader {
+		data = payload,
+		pos  = 1,
+		ok   = true,
+	}
+	info.version = ctrl_get_u32(&r)
+	flags := ctrl_get_u8(&r)
+	info.listen_port = ctrl_get_u16(&r)
+	info.udp_port = ctrl_get_u16(&r)
+	info.node_name = ctrl_get_str(&r)
+	info.auth_token = ctrl_get_str(&r)
+	info.nonce = ctrl_get_u64(&r)
+	info.join_token = ctrl_get_u64(&r)
+	info.encrypted = flags & HELLO_FLAG_ENCRYPTED != 0
+	info.pool_join = flags & HELLO_FLAG_POOL_JOIN != 0
+	return info, r.ok && len(info.node_name) > 0
+}
+
+@(private)
+verify_hello_auth :: proc(data: ^Connection_Actor_Data, info: Hello_Info) -> bool {
+	if data.encrypted || data.auth_password == "" {
+		return true
+	}
+	auth_input := fmt.tprintf("%s:%s:%d", data.auth_password, info.node_name, info.nonce)
+	digest := hash.hash_string(.SHA256, auth_input)
+	expected := fmt.tprintf("%x", digest)
+	delete(digest)
+	return info.auth_token == expected
+}
+
+@(private)
+handshake_send_ctrl :: proc(sock: net.TCP_Socket, ctrl_body: []byte) -> bool {
+	frame := make([]byte, 4 + NETWORK_HEADER_SIZE + len(ctrl_body))
+	defer delete(frame)
+	n := frame_control_message(ctrl_body, frame)
+	return tcp_send_all(sock, frame[:n])
+}
+
+@(private)
+handshake_recv_ctrl :: proc(
+	sock: net.TCP_Socket,
+	expected_type: u8,
+) -> (
+	raw: []byte,
+	payload: []byte,
+) {
+	raw = tcp_recv_framed_message(sock)
+	if raw == nil {
+		return nil, nil
+	}
+	header, ok := parse_network_header(raw)
+	if !ok ||
+	   .CONTROL not_in header.flags ||
+	   len(header.payload) < 1 ||
+	   header.payload[0] != expected_type {
+		delete(raw, actor_system_allocator)
+		return nil, nil
+	}
+	return raw, header.payload
+}
+
+@(private)
+run_noise_handshake :: proc(
+	data: ^Connection_Actor_Data,
+	sock: net.TCP_Socket,
+	initiator: bool,
+	my_hello: []byte,
+	peer_hello: []byte,
+	keys: ^Noise_Transport,
+) -> bool {
+	psk := derive_cluster_psk(data.auth_password)
+
+	dialer_body := my_hello if initiator else peer_hello
+	responder_body := peer_hello if initiator else my_hello
+	prologue := make([]byte, len(dialer_body) + len(responder_body))
+	defer delete(prologue)
+	copy(prologue, dialer_body)
+	copy(prologue[len(dialer_body):], responder_body)
+
+	hs: Noise_Handshake
+	if !noise_handshake_begin(&hs, initiator, prologue, psk[:]) {
+		log.error("Failed to initialize noise handshake")
+		return false
+	}
+
+	if initiator {
+		msg1, _, ok1 := noise_handshake_step(&hs, nil)
+		if !ok1 || msg1 == nil {
+			return false
+		}
+		sent1 := send_noise_ctrl(sock, CTRL_MSG_NOISE_1, msg1)
+		delete(msg1)
+		if !sent1 {
+			return false
+		}
+
+		raw2, payload2 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_2)
+		if raw2 == nil {
+			log.warn("Did not receive noise response from peer")
+			return false
+		}
+		defer delete(raw2, actor_system_allocator)
+
+		out, done, ok2 := noise_handshake_step(&hs, payload2[1:])
+		if out != nil {
+			delete(out)
+		}
+		if !ok2 || !done {
+			log.error("Noise handshake failed (wrong cluster password?)")
+			return false
+		}
+	} else {
+		raw1, payload1 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_1)
+		if raw1 == nil {
+			log.warn("Did not receive noise initiation from peer")
+			return false
+		}
+		defer delete(raw1, actor_system_allocator)
+
+		msg2, done, ok2 := noise_handshake_step(&hs, payload1[1:])
+		if !ok2 || !done || msg2 == nil {
+			log.error("Noise handshake failed (wrong cluster password?)")
+			return false
+		}
+		sent2 := send_noise_ctrl(sock, CTRL_MSG_NOISE_2, msg2)
+		delete(msg2)
+		if !sent2 {
+			return false
+		}
+	}
+
+	return noise_handshake_finish(&hs, keys)
+}
+
+@(private)
+send_noise_ctrl :: proc(sock: net.TCP_Socket, ctrl_type: u8, msg: []byte) -> bool {
+	body := make([]byte, 1 + len(msg))
+	defer delete(body)
+	body[0] = ctrl_type
+	copy(body[1:], msg)
+	return handshake_send_ctrl(sock, body)
+}
+
+// Synchronous v2 handshake plus connection setup, run on the actor's dedicated
+// thread: HELLO exchange, optional Noise NNpsk0, peer registration and
+// duplicate tiebreak, ring adoption, IO thread start. Incoming pool-join
+// handshakes divert to the owning connection actor instead.
+@(private)
+establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
+	sock := data.tcp_socket
+	net.set_blocking(sock, true)
+	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
+
+	data.my_join_token = generate_nonce()
+	for data.my_join_token == 0 {
+		data.my_join_token = generate_nonce()
+	}
+
+	my_hello := build_hello_body(data, generate_nonce(), data.my_join_token, false)
+	defer delete(my_hello)
+
+	peer_raw: []byte
+	peer_payload: []byte
+	if data.is_incoming {
+		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO)
+		if peer_raw == nil {
+			log.warn("Failed to read HELLO from incoming connection")
+			return .Failed
+		}
+		if !handshake_send_ctrl(sock, my_hello) {
+			delete(peer_raw, actor_system_allocator)
+			return .Failed
+		}
+	} else {
+		if !handshake_send_ctrl(sock, my_hello) {
+			return .Failed
+		}
+		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO)
+		if peer_raw == nil {
+			log.warnf("Failed to read HELLO from node %d", data.node_id)
+			return .Failed
+		}
+	}
+	defer delete(peer_raw, actor_system_allocator)
+
+	info, parsed := parse_hello(peer_payload)
+	if !parsed {
+		log.warn("Malformed HELLO from peer")
+		return .Failed
+	}
+	if info.version != WIRE_PROTOCOL_VERSION {
+		log.warnf(
+			"Protocol version mismatch with node %s: peer v%d, ours v%d",
+			info.node_name,
+			info.version,
+			WIRE_PROTOCOL_VERSION,
+		)
+		return .Failed
+	}
+	if info.encrypted != data.encrypted {
+		log.warnf(
+			"Encryption mode mismatch with node %s (peer encrypted=%v, ours=%v)",
+			info.node_name,
+			info.encrypted,
+			data.encrypted,
+		)
+		return .Failed
+	}
+	if !verify_hello_auth(data, info) {
+		log.errorf("Authentication failed from node %s", info.node_name)
+		return .Failed
+	}
+
+	if info.pool_join {
+		if !data.is_incoming {
+			log.warn("Unexpected pool-join flag in HELLO response")
+			return .Failed
+		}
+		return handle_incoming_pool_join(data, my_hello, peer_payload, info)
+	}
+
+	keys: Noise_Transport
+	if data.encrypted {
+		if !run_noise_handshake(data, sock, !data.is_incoming, my_hello, peer_payload, &keys) {
+			return .Failed
+		}
+	}
+
+	set_recv_timeout(sock, 0)
+
+	if data.is_incoming {
+		if !resolve_incoming_peer(data, info) {
+			return .Failed
+		}
+	}
+
+	if data.ring == nil {
+		data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
+	}
+	if data.ring == nil {
+		log.errorf("No connection ring available for node %d", data.node_id)
+		return .Failed
+	}
+
+	ring := data.ring
+	ring.node_id = data.node_id
+	ring.conn_pid = get_self_pid()
+	ring.tcp_socket = data.tcp_socket
+	if data.encrypted {
+		ring.transport_keys = keys
+	}
+	register_connection_ring(data.node_id, ring)
+
+	if !start_connection_io(data) {
+		return .Failed
+	}
+
+	registry_name, _ := get_node_name(data.node_id)
+	data.node_name = registry_name
+	data.peer_listen_port = info.listen_port
+	data.peer_udp_port = info.udp_port
+	data.peer_join_token = info.join_token
+	data.last_heartbeat = time.now()
+	data.peer_initiated_disconnect = false
+	data.state = .Connected
+
+	if pool := ring.pool; pool != nil {
+		sync.atomic_store_explicit(&pool.conn_pid, u64(get_self_pid()), .Release)
+		sync.atomic_store(&pool.join_token, data.my_join_token)
+	}
+
+	self_rename(fmt.tprintf("%s_connection", data.node_name))
+
+	log.infof(
+		"Handshake successful with node %s (id=%d, v%d, encrypted=%v)",
+		data.node_name,
+		data.node_id,
+		info.version,
+		data.encrypted,
+	)
+
+	send_registry_snapshot(data)
+	send_node_directory(data)
+	send_udp_info(data)
+	try_activate_udp(data)
+
+	if data.heartbeat_interval > 0 {
+		data.heartbeat_timer_id, _ = set_timer(data.heartbeat_interval, true)
+	}
+
+	return .Established
+}
+
+// Runs on the temporary incoming actor: finish the join handshake, then hand
+// the socket (and session keys) to the connection actor that owns the pool.
+@(private)
+handle_incoming_pool_join :: proc(
+	data: ^Connection_Actor_Data,
+	my_hello: []byte,
+	peer_hello: []byte,
+	info: Hello_Info,
+) -> Establish_Result {
+	sock := data.tcp_socket
+
+	keys: Noise_Transport
+	if data.encrypted {
+		if !run_noise_handshake(data, sock, false, my_hello, peer_hello, &keys) {
+			return .Failed
+		}
+	}
+
+	set_recv_timeout(sock, 0)
+
+	owner_pid := find_pool_owner_by_join_token(info.join_token)
+	if owner_pid == 0 {
+		log.warnf("Pool join from %s with unknown token", info.node_name)
+		return .Failed
+	}
+
+	keys_ptr: u64 = 0
+	if data.encrypted {
+		keys_box := new(Noise_Transport, get_system_allocator())
+		keys_box^ = keys
+		crypto.zero_explicit(&keys, size_of(Noise_Transport))
+		keys_ptr = u64(uintptr(keys_box))
+	}
+
+	err := send_message(owner_pid, Adopt_Pool_Ring{socket = sock, keys_ptr = keys_ptr})
+	if err != .OK {
+		log.warnf("Failed to hand pool ring to connection actor: %v", err)
+		free_boxed_keys(keys_ptr)
+		return .Failed
+	}
+
+	data.tcp_socket = 0
+	log.infof("Accepted pool ring join from node %s", info.node_name)
+	return .Transferred
+}
+
+// Outgoing scale-up: dial another connection to the peer and run a pool-join
+// handshake presenting the token the peer issued on the primary handshake.
+@(private)
+establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
+	pool := data.ring != nil ? data.ring.pool : nil
+	if pool == nil || data.peer_join_token == 0 {
+		return false
+	}
+	if pool_active_count(pool) >= pool.max_rings {
+		return false
+	}
+
+	dial_endpoint := net.Endpoint {
+		address = data.address.address,
+		port    = int(data.peer_listen_port),
+	}
+	sock, err := net.dial_tcp(dial_endpoint)
+	if err != nil {
+		log.warnf("Pool scale-up: failed to dial node %d: %v", data.node_id, err)
+		return false
+	}
+
+	net.set_blocking(sock, true)
+	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
+
+	ok := false
+	defer if !ok do net.close(sock)
+
+	my_hello := build_hello_body(data, generate_nonce(), data.peer_join_token, true)
+	defer delete(my_hello)
+
+	if !handshake_send_ctrl(sock, my_hello) {
+		return false
+	}
+	peer_raw, peer_payload := handshake_recv_ctrl(sock, CTRL_MSG_HELLO)
+	if peer_raw == nil {
+		log.warnf("Pool scale-up: no HELLO reply from node %d", data.node_id)
+		return false
+	}
+	defer delete(peer_raw, actor_system_allocator)
+
+	info, parsed := parse_hello(peer_payload)
+	if !parsed || info.version != WIRE_PROTOCOL_VERSION || info.encrypted != data.encrypted {
+		return false
+	}
+	if !verify_hello_auth(data, info) {
+		log.errorf("Pool scale-up: authentication failed from node %s", info.node_name)
+		return false
+	}
+
+	keys: Noise_Transport
+	if data.encrypted {
+		if !run_noise_handshake(data, sock, true, my_hello, peer_payload, &keys) {
+			return false
+		}
+	}
+
+	set_recv_timeout(sock, 0)
+
+	if !attach_pool_ring(data, sock, keys) {
+		return false
+	}
+
+	ok = true
+	log.infof(
+		"Pool scaled up for node %s (id=%d): %d rings",
+		data.node_name,
+		data.node_id,
+		pool_active_count(pool),
+	)
+	return true
+}
+
+@(private)
+attach_pool_ring :: proc(
+	data: ^Connection_Actor_Data,
+	sock: net.TCP_Socket,
+	keys: Noise_Transport,
+) -> bool {
+	pool := data.ring != nil ? data.ring.pool : nil
+	if pool == nil {
+		return false
+	}
+
+	ring := pool_take_parked(pool)
+	if ring == nil {
+		ring = create_connection_ring(data.ring_config, data.encrypted, get_system_allocator())
+	}
+	if ring == nil {
+		return false
+	}
+
+	ring.node_id = data.node_id
+	ring.conn_pid = get_self_pid()
+	ring.tcp_socket = sock
+	if data.encrypted {
+		ring.transport_keys = keys
+	}
+
+	if !set_tcp_nodelay(sock, ring.tcp_nodelay) {
+		log.warn("Failed to set TCP_NODELAY on pool ring")
+	}
+	if !set_socket_buffers(sock) {
+		log.warn("Failed to set socket buffers on pool ring")
+	}
+
+	if !pool_add_ring(pool, ring) {
+		ring.tcp_socket = 0
+		pool_park(pool, ring)
+		return false
+	}
+	return true
+}
+
+@(private)
+free_boxed_keys :: proc(keys_ptr: u64) {
+	if keys_ptr == 0 {
+		return
+	}
+	keys_box := cast(^Noise_Transport)rawptr(uintptr(keys_ptr))
+	crypto.zero_explicit(keys_box, size_of(Noise_Transport))
+	free(keys_box, get_system_allocator())
+}
+
+@(private)
+adopt_pool_ring :: proc(data: ^Connection_Actor_Data, msg: Adopt_Pool_Ring) {
+	keys: Noise_Transport
+	if msg.keys_ptr != 0 {
+		keys_box := cast(^Noise_Transport)rawptr(uintptr(msg.keys_ptr))
+		keys = keys_box^
+	}
+	free_boxed_keys(msg.keys_ptr)
+
+	pool := data.ring != nil ? data.ring.pool : nil
+	if data.state != .Connected || pool == nil {
+		net.close(msg.socket)
+		return
+	}
+	if pool_active_count(pool) >= pool.max_rings {
+		net.close(msg.socket)
+		return
+	}
+	if !attach_pool_ring(data, msg.socket, keys) {
+		net.close(msg.socket)
+		return
+	}
+	log.infof(
+		"Adopted pool ring from node %s (id=%d): %d rings",
+		data.node_name,
+		data.node_id,
+		pool_active_count(pool),
+	)
+}
+
+@(private)
+pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
+	pool := data.ring != nil ? data.ring.pool : nil
+	if pool == nil {
+		return
+	}
+
+	finalize_parked_rings(data, pool)
+
+	idle_secs := data.ring_config.scale_down_idle_seconds
+	if idle_secs == 0 {
+		idle_secs = 10
+	}
+	idle_ns := i64(idle_secs) * 1_000_000_000
+	now_ns := time.to_unix_nanoseconds(time.now())
+
+	count := pool_active_count(pool)
+	for i: u32 = 1; i < count; i += 1 {
+		ring := get_pool_ring_at(pool, i)
+		if ring == nil {
+			continue
+		}
+		if sync.atomic_load(&ring.park_state) != .Active {
+			continue
+		}
+		last := sync.atomic_load(&ring.last_send_time)
+		if last != 0 && (now_ns - last) > idle_ns {
+			sync.atomic_store(&ring.park_state, Ring_Park_State.Park_Asked)
+		}
+	}
+
+	contention := sync.atomic_exchange(&pool.contention_count, 0)
+	if contention > pool.contention_threshold && pool_active_count(pool) < pool.max_rings {
+		establish_pool_ring(data)
+	}
+	sync.atomic_store(&pool.scale_up_requested, 0)
+}
+
+@(private)
+finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Pool) {
+	count := pool_active_count(pool)
+	for i := count; i > 1; i -= 1 {
+		ring := get_pool_ring_at(pool, i - 1)
+		if ring == nil {
+			continue
+		}
+		if sync.atomic_load(&ring.park_state) != .Park_Acked {
+			continue
+		}
+		pool_remove_active(pool, ring)
+		if ring.tcp_socket != 0 {
+			net.close(ring.tcp_socket)
+		}
+		ring_reset(ring)
+		pool_park(pool, ring)
+		log.infof(
+			"Pool ring parked for node %s (id=%d): %d rings",
+			data.node_name,
+			data.node_id,
+			pool_active_count(pool),
+		)
+	}
+}
+
+// Called with the IO thread already stopped and joined: every pool ring is
+// quiesced, so reset them all and park for reuse by the next session.
+@(private)
+teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
+	pool := data.ring != nil ? data.ring.pool : nil
+	if pool == nil {
+		return
+	}
+
+	count := pool_active_count(pool)
+	for i := count; i > 1; i -= 1 {
+		ring := get_pool_ring_at(pool, i - 1)
+		if ring == nil {
+			continue
+		}
+		pool_remove_active(pool, ring)
+		if ring.tcp_socket != 0 {
+			net.close(ring.tcp_socket)
+		}
+		ring_reset(ring)
+		pool_park(pool, ring)
+	}
+
+	sync.atomic_store(&pool.contention_count, u32(0))
+	sync.atomic_store(&pool.scale_up_requested, u32(0))
+	sync.atomic_store(&pool.join_token, u64(0))
+}
+
+@(private)
+resolve_incoming_peer :: proc(data: ^Connection_Actor_Data, info: Hello_Info) -> bool {
+	peer_endpoint := net.Endpoint {
+		address = data.address.address,
+		port    = int(info.listen_port),
+	}
+
+	local_node_id, registered := register_node(info.node_name, peer_endpoint, .TCP_Custom_Protocol)
+	if !registered {
+		local_node_id, registered = get_node_by_name(info.node_name)
+		if !registered {
+			log.errorf("Failed to register remote node %s", info.node_name)
+			return false
+		}
+	}
+	data.node_id = local_node_id
+
+	existing_conn := PID(
+		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[local_node_id], .Acquire),
+	)
+	if existing_conn != 0 && existing_conn != get_self_pid() {
+		our_port := SYSTEM_CONFIG.network.port
+		their_port := int(info.listen_port)
+		we_keep_outgoing :=
+			our_port > their_port || (our_port == their_port && NODE.name < info.node_name)
+
+		if we_keep_outgoing {
+			log.infof(
+				"Closing duplicate incoming from %s (keeping outgoing, port %d > %d)",
+				info.node_name,
+				our_port,
+				their_port,
+			)
+			return false
+		}
+
+		log.infof(
+			"Replacing outgoing with incoming from %s (port %d <= %d)",
+			info.node_name,
+			our_port,
+			their_port,
+		)
+		terminate_actor(existing_conn, .SHUTDOWN)
+		if !wait_for_actor_exit(existing_conn, DUPLICATE_TAKEOVER_TIMEOUT) {
+			log.errorf("Timed out waiting for duplicate connection actor to exit")
+			return false
+		}
+	}
+
+	sync.atomic_store_explicit(
+		cast(^u64)&NODE.connection_actors[local_node_id],
+		u64(get_self_pid()),
+		.Release,
+	)
+	return true
+}
+
+@(private)
+wait_for_actor_exit :: proc(pid: PID, timeout: time.Duration) -> bool {
+	iterations := int(timeout / time.Millisecond)
+	for _ in 0 ..< iterations {
+		if actor_ptr, exists := get(&global_registry, pid); !exists || actor_ptr == nil {
+			return true
+		}
+		time.sleep(1 * time.Millisecond)
+	}
+	actor_ptr, exists := get(&global_registry, pid)
+	return !exists || actor_ptr == nil
+}
+
+@(private)
+start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
+	ring := data.ring
+
+	if !set_tcp_nodelay(data.tcp_socket, ring.tcp_nodelay) {
+		log.warn("Failed to set TCP_NODELAY")
+	}
+	if !set_socket_buffers(data.tcp_socket) {
+		log.warn("Failed to set socket buffers")
+	}
+
+	ctx := new(IO_Context)
+	ctx.ring = ring
+	ctx.conn_pid = get_self_pid()
+	ctx.allocator = context.allocator
+	ctx.logger = context.logger
+
+	sync.atomic_store(&ring.io_stop, 0)
+
+	t := thread.create(nbio_io_loop)
+	if t == nil {
+		free(ctx)
+		log.error("Failed to create connection IO thread")
+		return false
+	}
+	t.user_args[0] = ctx
+	data.io_ctx = ctx
+	ring.io_thread = t
+	thread.start(t)
+	return true
+}
+
+@(private)
+stop_connection_io :: proc(data: ^Connection_Actor_Data) {
+	ring := data.ring
+	if ring == nil {
+		return
+	}
+	sync.atomic_store(&ring.io_stop, 1)
+	if ring.io_thread != nil {
+		thread.join(ring.io_thread)
+		thread.destroy(ring.io_thread)
+		ring.io_thread = nil
+	}
+	sync.atomic_store(&ring.io_stop, 0)
+	if data.io_ctx != nil {
+		free(data.io_ctx)
+		data.io_ctx = nil
+	}
+}
+
+is_active_connection :: proc(data: ^Connection_Actor_Data) -> bool {
+	if data.node_id == 0 || data.node_id >= MAX_NODES {
+		return false
+	}
+	current_conn := PID(
+		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[data.node_id], .Acquire),
+	)
+	return current_conn == get_self_pid()
+}
+
+close_connection :: proc(data: ^Connection_Actor_Data) {
+	is_active := is_active_connection(data)
+
+	if data.node_id != 0 && is_active {
+		clear_subscriptions_for_node(data.node_id)
+		broadcast_disconnect_terminations(data.node_id)
+		handle_node_disconnect(data.node_id)
+		udp_clear_peer(data.node_id)
+	}
+
+	if data.ring != nil {
+		sync.atomic_store(&data.ring.io_stop, 1)
+	}
+	if data.tcp_socket != 0 {
+		net.close(data.tcp_socket)
+		data.tcp_socket = 0
+	}
+	stop_connection_io(data)
+
+	if data.ring != nil && is_active {
+		teardown_pool_rings(data)
+		dropped := ring_reset(data.ring)
+		if dropped > 0 {
+			log.warnf(
+				"Dropped %d buffered send slots for node %d on disconnect",
+				dropped,
+				data.node_id,
+			)
+		}
+	}
+
+	data.state = .Disconnected
+	data.udp_activated = false
+	data.peer_udp_token = 0
+	data.udp_seed_set = false
+	cancel_timer(data.heartbeat_timer_id)
+
+	if data.is_incoming {
+		terminate_actor(get_self_pid(), .SHUTDOWN)
+		return
+	}
+
+	if !data.peer_initiated_disconnect {
+		data.reconnect_timer_id, _ = set_timer(data.reconnect_initial_delay, false)
+		log.infof(
+			"Scheduled reconnection for node %d in %v",
+			data.node_id,
+			data.reconnect_initial_delay,
+		)
+	}
 }
 
 handle_incoming_data :: proc(data: ^Connection_Actor_Data, raw_data: []byte) {
@@ -565,13 +1120,11 @@ handle_incoming_data :: proc(data: ^Connection_Actor_Data, raw_data: []byte) {
 
 	if .CONTROL in header.flags {
 		handle_control_message(data, header.payload)
-		data.last_activity = time.now()
 		return
 	}
 
 	if .LIFECYCLE_EVENT in header.flags {
 		handle_lifecycle_event(data.node_id, header.type_hash, header.payload)
-		data.last_activity = time.now()
 		return
 	}
 
@@ -584,7 +1137,6 @@ handle_incoming_data :: proc(data: ^Connection_Actor_Data, raw_data: []byte) {
 		header.to_name,
 		header.payload,
 	)
-	data.last_activity = time.now()
 }
 
 handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) {
@@ -593,138 +1145,7 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 		return
 	}
 
-	msg_type := ctrl_data[0]
-
-	switch msg_type {
-	case CTRL_MSG_HANDSHAKE:
-		r := Ctrl_Reader {
-			data = ctrl_data,
-			pos  = 1,
-			ok   = true,
-		}
-		node_id := Node_ID(ctrl_get_u16(&r))
-		node_name := ctrl_get_str(&r)
-		version := ctrl_get_u32(&r)
-		auth_token := ctrl_get_str(&r)
-		nonce := ctrl_get_u64(&r)
-		if !r.ok {
-			log.error("Handshake message truncated")
-			return
-		}
-
-		if data.auth_password != "" {
-			auth_input := fmt.tprintf("%s:%s:%d", data.auth_password, node_name, nonce)
-
-			hash_digest := hash.hash_string(.SHA256, auth_input)
-			expected_token := fmt.tprintf("%x", hash_digest)
-			delete(hash_digest)
-
-			if auth_token != expected_token {
-				log.errorf("Authentication failed from node %s (%d)", node_name, node_id)
-				close_connection(data)
-				return
-			}
-		}
-
-		log.infof(
-			"Handshake successful with node %s (remote node's self ID: %d, version: %d)",
-			node_name,
-			node_id,
-			version,
-		)
-
-		if data.is_incoming {
-			local_node_id, registered := register_node(node_name, data.address, data.transport)
-			if !registered {
-				local_node_id, registered = get_node_by_name(node_name)
-				if !registered {
-					log.errorf("Failed to register remote node %s", node_name)
-					close_connection(data)
-					return
-				}
-			}
-			data.node_id = local_node_id
-
-			existing_conn := PID(
-				sync.atomic_load_explicit(
-					cast(^u64)&NODE.connection_actors[local_node_id],
-					.Acquire,
-				),
-			)
-			if existing_conn != 0 {
-				our_port := SYSTEM_CONFIG.network.port
-				their_port := data.address.port
-				if remote_info, ok := get_node_info(local_node_id); ok {
-					their_port = remote_info.address.port
-				}
-
-				we_keep_outgoing :=
-					our_port > their_port || (our_port == their_port && NODE.name < node_name)
-
-				if we_keep_outgoing {
-					log.infof(
-						"Closing duplicate incoming from %s (keeping outgoing, port %d > %d)",
-						node_name,
-						our_port,
-						their_port,
-					)
-					close_connection(data)
-					return
-				} else {
-					log.infof(
-						"Replacing outgoing with incoming from %s (port %d <= %d)",
-						node_name,
-						our_port,
-						their_port,
-					)
-					terminate_actor(existing_conn, .SHUTDOWN)
-				}
-			}
-
-			if data.pool != nil {
-				data.pool.node_id = local_node_id
-				ring_count := sync.atomic_load(&data.pool.ring_count)
-				for ri in 0 ..< ring_count {
-					if data.pool.rings[ri] != nil do data.pool.rings[ri].node_id = local_node_id
-				}
-			}
-
-			sync.atomic_store_explicit(
-				cast(^u64)&NODE.connection_actors[local_node_id],
-				u64(get_self_pid()),
-				.Release,
-			)
-		}
-
-		data.node_name = strings.clone(node_name)
-		data.last_heartbeat = time.now()
-
-		new_name := fmt.tprintf("%s_connection", node_name)
-		defer delete(new_name)
-		self_rename(new_name)
-
-		if data.is_incoming {
-			send_handshake_message(data)
-		}
-
-		data.state = .Connected
-
-		send_registry_snapshot(data)
-		send_node_directory(data)
-
-		if data.heartbeat_interval > 0 {
-			data.heartbeat_timer_id, _ = set_timer(data.heartbeat_interval, true)
-		}
-
-		if len(data.pending_messages) > 0 {
-			for i := 0; i < len(data.pending_messages); i += 1 {
-				msg := data.pending_messages[i]
-				send_raw_connection_data(data, msg)
-				delete(msg)
-			}
-			clear_dynamic_array(&data.pending_messages)
-		}
-
+	switch ctrl_data[0] {
 	case CTRL_MSG_HEARTBEAT:
 		if len(ctrl_data) < 1 + 8 + 8 {
 			log.error("Heartbeat message too short")
@@ -743,11 +1164,160 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 		}
 		node_id := Node_ID(ctrl_get_u16(&r))
 		reason := ctrl_get_str(&r)
-		if !r.ok {return}
+		if !r.ok {
+			return
+		}
 		log.infof("Node %s (id=%d) graceful disconnect: %s", data.node_name, node_id, reason)
 		data.peer_initiated_disconnect = true
 		close_connection(data)
+
+	case CTRL_MSG_UDP_INFO:
+		handle_udp_info(data, ctrl_data)
+
+	case:
+		log.warnf("Unexpected control message type %d", ctrl_data[0])
 	}
+}
+
+@(private)
+ring_append_ctrl :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
+	if ring == nil {
+		return false
+	}
+	total := u32(4 + NETWORK_HEADER_SIZE + len(ctrl_body))
+	if total > ring.usable_slot_size {
+		return false
+	}
+	dst, sid, ok := batch_reserve(ring, total)
+	if !ok {
+		return false
+	}
+	_ = frame_control_message(ctrl_body, dst)
+	batch_commit(ring, sid)
+	return true
+}
+
+send_heartbeat :: proc(data: ^Connection_Actor_Data) {
+	body: [17]byte
+	w := Ctrl_Writer {
+		buf = body[:],
+	}
+	ctrl_put_u8(&w, CTRL_MSG_HEARTBEAT)
+	ctrl_put_u64(&w, u64(time.to_unix_nanoseconds(time.now())))
+	ctrl_put_u64(&w, 0)
+	if !ring_append_ctrl(data.ring, body[:]) {
+		log.debug("Heartbeat append failed, ring full")
+	}
+}
+
+check_heartbeat_timeout :: proc(data: ^Connection_Actor_Data) {
+	if data.heartbeat_timeout > 0 {
+		time_since := time.since(data.last_heartbeat)
+		if time_since > data.heartbeat_timeout {
+			log.warnf("Connection to node %d timed out", data.node_id)
+			close_connection(data)
+		}
+	}
+}
+
+@(private)
+send_udp_info :: proc(data: ^Connection_Actor_Data) {
+	if SYSTEM_CONFIG.network.udp_port <= 0 {
+		return
+	}
+
+	data.my_udp_token = generate_udp_token()
+
+	include_seed := data.encrypted && !data.is_incoming
+	if include_seed && !data.udp_seed_set {
+		data.udp_seed = generate_udp_seed()
+		data.udp_seed_set = true
+	}
+
+	seed_len := include_seed ? UDP_SEED_SIZE : 0
+	body: [1 + 2 + 4 + 1 + UDP_SEED_SIZE]byte
+	w := Ctrl_Writer {
+		buf = body[:],
+	}
+	ctrl_put_u8(&w, CTRL_MSG_UDP_INFO)
+	ctrl_put_u16(&w, u16(SYSTEM_CONFIG.network.udp_port))
+	ctrl_put_u32(&w, data.my_udp_token)
+	ctrl_put_u8(&w, u8(seed_len))
+	if include_seed {
+		ctrl_put_bytes(&w, data.udp_seed[:])
+	}
+
+	if !ring_append_ctrl(data.ring, body[:w.pos]) {
+		log.warn("Failed to send UDP lane info")
+	}
+}
+
+@(private)
+handle_udp_info :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) {
+	r := Ctrl_Reader {
+		data = ctrl_data,
+		pos  = 1,
+		ok   = true,
+	}
+	port := ctrl_get_u16(&r)
+	token := ctrl_get_u32(&r)
+	seed_len := int(ctrl_get_u8(&r))
+	if !r.ok {
+		log.warn("Malformed UDP info message")
+		return
+	}
+	if seed_len > 0 {
+		if seed_len != UDP_SEED_SIZE {
+			log.warnf("Unexpected UDP seed length %d", seed_len)
+			return
+		}
+		seed_bytes := ctrl_get_bytes(&r, seed_len)
+		if !r.ok {
+			return
+		}
+		copy(data.udp_seed[:], seed_bytes)
+		data.udp_seed_set = true
+	}
+
+	data.peer_udp_port = port
+	data.peer_udp_token = token
+	try_activate_udp(data)
+}
+
+@(private)
+try_activate_udp :: proc(data: ^Connection_Actor_Data) {
+	if data.udp_activated || data.state != .Connected {
+		return
+	}
+	if !udp_local_enabled() {
+		return
+	}
+	if data.peer_udp_port == 0 || data.peer_udp_token == 0 || data.my_udp_token == 0 {
+		return
+	}
+	if data.encrypted && !data.udp_seed_set {
+		return
+	}
+
+	keys: Udp_Keys
+	if data.encrypted {
+		keys = derive_udp_keys(data.udp_seed[:], !data.is_incoming)
+	}
+
+	endpoint := net.Endpoint {
+		address = data.address.address,
+		port    = int(data.peer_udp_port),
+	}
+	udp_register_peer(
+		data.node_id,
+		endpoint,
+		data.peer_udp_token,
+		data.my_udp_token,
+		keys,
+		data.encrypted,
+	)
+	data.udp_activated = true
+	log.infof("UDP lane active for node %s (id=%d)", data.node_name, data.node_id)
 }
 
 broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {
@@ -793,561 +1363,6 @@ broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {
 
 		broadcast_to_others(msg, disconnected_node_id)
 	}
-}
-
-is_active_connection :: proc(data: ^Connection_Actor_Data) -> bool {
-	if data.node_id == 0 || data.node_id >= MAX_NODES {
-		return false
-	}
-	current_conn := PID(
-		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[data.node_id], .Acquire),
-	)
-	return current_conn == get_self_pid()
-}
-
-close_connection :: proc(data: ^Connection_Actor_Data) {
-	is_active := is_active_connection(data)
-
-	if data.node_id != 0 && is_active {
-		clear_subscriptions_for_node(data.node_id)
-		broadcast_disconnect_terminations(data.node_id)
-		handle_node_disconnect(data.node_id)
-	}
-
-	for i in 0 ..< MAX_POOL_RINGS {
-		sync.atomic_store(&data.io_stop_flags[i], 1)
-	}
-
-	if data.pool != nil {
-		ring_count := sync.atomic_load(&data.pool.ring_count)
-		for i in 0 ..< ring_count {
-			if data.pool.rings[i] != nil do data.pool.rings[i].state = .Draining
-		}
-	}
-
-	if data.state == .Connected || data.state == .Connecting || data.state == .Handshaking {
-		#partial switch data.transport {
-		case .TCP_Custom_Protocol:
-			if data.tcp_socket != 0 {
-				net.close(data.tcp_socket)
-				data.tcp_socket = 0
-			}
-		}
-	}
-
-	for i in 0 ..< MAX_POOL_RINGS {
-		if data.io_threads[i] != nil {
-			thread.join(data.io_threads[i])
-			thread.destroy(data.io_threads[i])
-			data.io_threads[i] = nil
-		}
-		sync.atomic_store(&data.io_stop_flags[i], 0)
-	}
-
-	if data.node_id != 0 && is_active {
-		unregister_connection_pool(data.node_id)
-	}
-
-	if data.pool != nil {
-		ring_count := sync.atomic_load(&data.pool.ring_count)
-		for i := ring_count; i > 1; i -= 1 {
-			idx := i - 1
-			ring := data.pool.rings[idx]
-			if ring != nil {
-				destroy_connection_ring(ring)
-				data.pool.rings[idx] = nil
-			}
-		}
-		sync.atomic_store(&data.pool.ring_count, data.pool.rings[0] != nil ? 1 : 0)
-
-		if data.pool.rings[0] != nil {
-			reset_connection_ring(data.pool.rings[0])
-		}
-		sync.atomic_store(&data.pool.contention_count, 0)
-	}
-
-	data.state = .Disconnected
-
-	cancel_timer(data.heartbeat_timer_id)
-
-	if !data.is_incoming && !data.peer_initiated_disconnect {
-		data.reconnect_timer_id, _ = set_timer(data.reconnect_initial_delay, false)
-		log.infof(
-			"Scheduled reconnection for node %d in %v",
-			data.node_id,
-			data.reconnect_initial_delay,
-		)
-	}
-}
-
-attempt_reconnect :: proc(data: ^Connection_Actor_Data) {
-	log.infof("Attempting to reconnect to node %d", data.node_id)
-	data.state = .Connecting
-
-	if !initiate_connection(data) {
-		data.state = .Failed
-		data.reconnect_timer_id, _ = set_timer(data.reconnect_retry_delay, false)
-		log.infof("Reconnect failed, retry scheduled in %v", data.reconnect_retry_delay)
-	}
-}
-
-send_heartbeat_message :: proc(data: ^Connection_Actor_Data) {
-	heartbeat := Heartbeat_Message {
-		timestamp = time.now(),
-		seq_num   = 0,
-	}
-
-	msg := Connection_Control_Message(heartbeat)
-	send_control_message(data, msg)
-}
-
-check_heartbeat_timeout :: proc(data: ^Connection_Actor_Data) {
-	if data.heartbeat_timeout > 0 {
-		time_since := time.since(data.last_heartbeat)
-		if time_since > data.heartbeat_timeout {
-			log.warnf("Connection to node %d timed out", data.node_id)
-			close_connection(data)
-		}
-	}
-}
-
-pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
-	pool := data.pool
-	if pool == nil do return
-
-	ring_count := sync.atomic_load(&pool.ring_count)
-	threshold := data.ring_config.scale_up_contention_threshold
-	if threshold == 0 do threshold = 100
-	idle_secs := data.ring_config.scale_down_idle_seconds
-	if idle_secs == 0 do idle_secs = 10
-
-	contention := sync.atomic_exchange(&pool.contention_count, 0)
-	if contention > threshold && ring_count < pool.max_rings {
-		pool_scale_up(data)
-	}
-
-	if ring_count > 1 {
-		now_ns := time.to_unix_nanoseconds(time.now())
-		idle_ns := i64(idle_secs) * 1_000_000_000
-
-		for i := ring_count; i > 1; i -= 1 {
-			idx := i - 1
-			ring := pool.rings[idx]
-			if ring == nil do continue
-			last := sync.atomic_load(&ring.last_send_time)
-			if last != 0 && (now_ns - last) > idle_ns {
-				pool_scale_down(data, idx)
-			}
-		}
-	}
-}
-
-pool_scale_up :: proc(data: ^Connection_Actor_Data) {
-	pool := data.pool
-	ring_count := sync.atomic_load(&pool.ring_count)
-	if ring_count >= pool.max_rings do return
-
-	sock, err := net.dial_tcp(data.address)
-	if err != nil {
-		log.errorf("Pool scale-up: failed to connect to node %d: %v", data.node_id, err)
-		return
-	}
-
-	if !send_pool_ring_identifier(sock) {
-		log.errorf("Pool scale-up: failed to send pool ring identifier to node %d", data.node_id)
-		net.close(sock)
-		return
-	}
-
-	ring := create_connection_ring(data.ring_config)
-	if ring == nil {
-		net.close(sock)
-		return
-	}
-
-	ring.node_id = data.node_id
-	ring.socket = net.Socket(sock)
-	ring.conn_pid = get_self_pid()
-	if !init_connection_ring_nbio(ring) {
-		destroy_connection_ring(ring)
-		net.close(sock)
-		return
-	}
-
-	if !pool_add_ring(pool, ring) {
-		destroy_connection_ring(ring)
-		net.close(sock)
-		return
-	}
-
-	new_idx := sync.atomic_load(&pool.ring_count) - 1
-	start_io_thread_for_ring(data, new_idx, sock)
-
-	log.infof(
-		"Pool scaled up for node %d: %d rings",
-		data.node_id,
-		sync.atomic_load(&pool.ring_count),
-	)
-}
-
-send_pool_ring_identifier :: proc(sock: net.TCP_Socket) -> bool {
-	// Wire format: [size:u32][header:26][CTRL_MSG_POOL_RING:u8][name_len:u16][node_name]
-	ctrl_size := 1 + 2 + len(NODE.name)
-	ctrl_buf := make([]byte, ctrl_size)
-	defer delete(ctrl_buf)
-
-	w := Ctrl_Writer {
-		buf = ctrl_buf,
-	}
-	ctrl_put_u8(&w, CTRL_MSG_POOL_RING)
-	ctrl_put_str(&w, NODE.name)
-
-	frame_buf := make([]byte, 4 + NETWORK_HEADER_SIZE + ctrl_size)
-	defer delete(frame_buf)
-	n := frame_control_message(ctrl_buf, frame_buf)
-
-	return tcp_send_all(sock, frame_buf[:n])
-}
-
-cleanup_ring_io_state :: proc(
-	data: ^Connection_Actor_Data,
-	ring_idx: u32,
-	last_idx: u32,
-	join_thread: bool,
-) {
-	if join_thread {
-		sync.atomic_store(&data.io_stop_flags[ring_idx], 1)
-	}
-
-	if data.io_threads[ring_idx] != nil {
-		thread.join(data.io_threads[ring_idx])
-		thread.destroy(data.io_threads[ring_idx])
-		data.io_threads[ring_idx] = nil
-	}
-	sync.atomic_store(&data.io_stop_flags[ring_idx], 0)
-
-	if data.io_contexts[ring_idx] != nil {
-		free(data.io_contexts[ring_idx])
-		data.io_contexts[ring_idx] = nil
-	}
-
-	if ring_idx != last_idx {
-		data.io_threads[ring_idx] = data.io_threads[last_idx]
-		data.io_threads[last_idx] = nil
-		sync.atomic_store(
-			&data.io_stop_flags[ring_idx],
-			sync.atomic_load(&data.io_stop_flags[last_idx]),
-		)
-		sync.atomic_store(&data.io_stop_flags[last_idx], 0)
-		data.io_contexts[ring_idx] = data.io_contexts[last_idx]
-		data.io_contexts[last_idx] = nil
-
-		if data.io_contexts[ring_idx] != nil {
-			data.io_contexts[ring_idx].stop_flag = &data.io_stop_flags[ring_idx]
-		}
-	}
-}
-
-DRAIN_SPIN_LIMIT :: 1_000_000
-
-@(private)
-pool_submit_drain_and_wait :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) {
-	drain_idx := sync.atomic_load(&pool.drain_count)
-	pool.draining_rings[drain_idx] = ring
-	sync.atomic_store(&pool.drain_count, drain_idx + 1)
-
-	for spin := 0; spin < DRAIN_SPIN_LIMIT; spin += 1 {
-		if sync.atomic_load(&pool.drained_count) > 0 {
-			break
-		}
-		intrinsics.cpu_relax()
-	}
-
-	drained_count := sync.atomic_load(&pool.drained_count)
-	if drained_count > 0 {
-		for i in 0 ..< drained_count {
-			dr := pool.drained_rings[i]
-			if dr != nil {
-				if dr.tcp_socket != 0 {
-					net.close(dr.tcp_socket)
-				}
-				destroy_connection_ring(dr)
-				pool.drained_rings[i] = nil
-			}
-		}
-		sync.atomic_store(&pool.drained_count, 0)
-	} else {
-		dc := sync.atomic_load(&pool.drain_count)
-		for i in 0 ..< dc {
-			dr := pool.draining_rings[i]
-			if dr != nil {
-				if dr.tcp_socket != 0 {
-					net.close(dr.tcp_socket)
-				}
-				destroy_connection_ring(dr)
-				pool.draining_rings[i] = nil
-			}
-		}
-		sync.atomic_store(&pool.drain_count, 0)
-	}
-}
-
-pool_scale_down :: proc(data: ^Connection_Actor_Data, ring_idx: u32) {
-	pool := data.pool
-	if ring_idx == 0 do return
-
-	ring_count := sync.atomic_load(&pool.ring_count)
-	last_idx := ring_count - 1
-
-	ring := pool_remove_ring(pool, ring_idx)
-	if ring == nil do return
-
-	cleanup_ring_io_state(data, ring_idx, last_idx, join_thread = false)
-	pool_submit_drain_and_wait(pool, ring)
-
-	log.infof(
-		"Pool scaled down for node %d: %d rings",
-		data.node_id,
-		sync.atomic_load(&pool.ring_count),
-	)
-}
-
-start_io_thread :: proc(data: ^Connection_Actor_Data) {
-	start_io_thread_for_ring(data, 0, data.tcp_socket)
-}
-
-start_io_thread_for_ring :: proc(
-	data: ^Connection_Actor_Data,
-	ring_idx: u32,
-	socket: net.TCP_Socket,
-) {
-	if data.io_threads[ring_idx] != nil {
-		return
-	}
-
-	ring: ^Connection_Ring
-	if data.pool != nil && ring_idx < sync.atomic_load(&data.pool.ring_count) {
-		ring = data.pool.rings[ring_idx]
-	}
-
-	tcp_nodelay := ring != nil ? ring.tcp_nodelay : false
-	if !set_tcp_nodelay(socket, tcp_nodelay) {
-		log.warn("Failed to set TCP_NODELAY")
-	}
-
-	if !set_socket_buffers(socket) {
-		log.warn("Failed to set socket buffers")
-	}
-
-	if ring != nil {
-		if ring_idx == 0 {
-			ring.socket = net.Socket(socket)
-			ring.node_id = data.node_id
-			ring.conn_pid = get_self_pid()
-		}
-
-		if ring.tcp_socket != 0 || init_connection_ring_nbio(ring) {
-			if ring_idx == 0 {
-				data.pool.conn_pid = get_self_pid()
-				threshold := data.ring_config.scale_up_contention_threshold
-				if threshold == 0 do threshold = 100
-				data.pool.contention_threshold = threshold
-				register_connection_pool(data.node_id, data.pool)
-
-				ctx := new(IO_Context)
-				ctx.ring = ring
-				ctx.pool = data.pool
-				ctx.stop_flag = &data.io_stop_flags[0]
-				ctx.conn_pid = get_self_pid()
-				ctx.allocator = context.allocator
-				ctx.logger = context.logger
-				data.io_contexts[0] = ctx
-
-				t := thread.create(nbio_io_loop)
-				if t != nil {
-					t.user_args[0] = ctx
-					thread.start(t)
-					data.io_threads[0] = t
-					return
-				}
-				free(ctx)
-				data.io_contexts[0] = nil
-			} else {
-				// Ring 0's IO thread will adopt this ring.
-				return
-			}
-			log.error("Failed to create nbio_io_loop thread")
-		}
-		log.info("NBIO not available, using blocking TCP fallback")
-	}
-
-	if ring_idx == 0 {
-		start_blocking_recv_thread(data)
-	}
-}
-
-Blocking_Recv_Context :: struct {
-	socket:      net.TCP_Socket,
-	node_id_ptr: ^Node_ID,
-	conn_pid:    PID,
-	stop_flag:   ^i32,
-	allocator:   runtime.Allocator,
-	logger:      runtime.Logger,
-}
-
-BLOCKING_RECV_TIMEOUT_SECS :: 10
-
-start_blocking_recv_thread :: proc(data: ^Connection_Actor_Data) {
-	net.set_blocking(data.tcp_socket, true)
-	set_recv_timeout(data.tcp_socket, BLOCKING_RECV_TIMEOUT_SECS)
-
-	ctx := new(Blocking_Recv_Context)
-	ctx.socket = data.tcp_socket
-	ctx.node_id_ptr = &data.node_id
-	ctx.conn_pid = get_self_pid()
-	ctx.stop_flag = &data.io_stop_flags[0]
-	ctx.allocator = context.allocator
-	ctx.logger = context.logger
-
-	t := thread.create(blocking_recv_loop)
-	if t != nil {
-		t.user_args[0] = ctx
-		thread.start(t)
-		data.io_threads[0] = t
-		log.infof("Started blocking recv thread for node %d", data.node_id)
-	} else {
-		free(ctx)
-		log.error("Failed to create blocking recv thread")
-	}
-}
-
-@(private)
-blocking_dispatch_message :: proc(ctx: ^Blocking_Recv_Context, msg_data: []byte) {
-	process_blocking_recv_message(ctx, msg_data)
-}
-
-blocking_recv_loop :: proc(t: ^thread.Thread) {
-	ctx := cast(^Blocking_Recv_Context)t.user_args[0]
-	if ctx == nil {
-		return
-	}
-	defer free(ctx)
-
-	context.allocator = ctx.allocator
-	context.logger = ctx.logger
-
-	RECV_BUFFER_SIZE :: 4 * 1024 * 1024
-
-	recv_buffer := make([]byte, RECV_BUFFER_SIZE)
-	defer delete(recv_buffer)
-
-	write_pos: u32 = 0
-
-	for sync.atomic_load(ctx.stop_flag) == 0 {
-		available := RECV_BUFFER_SIZE - int(write_pos)
-		if available < 1024 {
-			log.error("Blocking recv buffer overflow")
-			break
-		}
-
-		n, err := net.recv_tcp(ctx.socket, recv_buffer[write_pos:])
-		if err != nil {
-			if sync.atomic_load(ctx.stop_flag) != 0 {
-				break
-			}
-			if err == .Timeout || err == .Would_Block {
-				continue // recv timeout, re-check stop flag
-			}
-			log.errorf("Blocking recv error: %v", err)
-			send_message(ctx.conn_pid, Close_Connection{reason = "recv error"})
-			break
-		}
-
-		if n == 0 {
-			log.info("Connection closed by peer (blocking recv)")
-			send_message(ctx.conn_pid, Close_Connection{reason = "peer closed"})
-			break
-		}
-
-		write_pos += u32(n)
-
-		new_pos, frame_err := process_recv_frames(
-			recv_buffer,
-			write_pos,
-			ctx,
-			blocking_dispatch_message,
-		)
-		if frame_err != .None {
-			reason: string
-			switch frame_err {
-			case .Zero_Size:
-				reason = "zero message size"
-			case .Too_Large:
-				reason = "message too large"
-			case .None:
-				unreachable()
-			}
-			send_message(ctx.conn_pid, Close_Connection{reason = reason})
-			return
-		}
-		write_pos = new_pos
-	}
-
-	log.debug("Blocking recv loop exiting")
-}
-
-process_blocking_recv_message :: proc(ctx: ^Blocking_Recv_Context, msg_data: []byte) {
-	header, ok := parse_network_header(msg_data)
-	if !ok {
-		log.warn("Failed to parse network header in blocking recv")
-		return
-	}
-
-	node_id := ctx.node_id_ptr^
-
-	if .CONTROL in header.flags || .LIFECYCLE_EVENT in header.flags {
-		msg_copy := make([]byte, len(msg_data))
-		copy(msg_copy, msg_data)
-		remote_msg := Remote_Message {
-			from = pack_pid(Handle{}, node_id),
-			data = msg_copy,
-		}
-		err := send_message(ctx.conn_pid, remote_msg)
-		if err != .OK {
-			log.warnf("Failed to send control/lifecycle message: %v", err)
-		}
-		delete(msg_copy)
-		return
-	}
-
-	deliver_to_target(
-		node_id,
-		header.flags,
-		header.type_hash,
-		header.from_handle,
-		header.to_handle,
-		header.to_name,
-		header.payload,
-	)
-}
-
-@(private)
-build_and_send_network_command :: #force_inline proc(
-	conn_pid: PID,
-	content: $T,
-	base_flags: Network_Message_Flags,
-	to_handle: Handle,
-	to_name: string,
-) -> Send_Error {
-	v := content
-	return build_and_send_network_command_impl(
-		conn_pid,
-		&v,
-		get_validated_message_info_ptr(T),
-		base_flags,
-		to_handle,
-		to_name,
-	)
 }
 
 handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) {
@@ -1528,7 +1543,7 @@ handle_remote_spawn_response :: proc(payload: []byte) {
 @(private)
 send_spawn_response :: proc(to_node: Node_ID, response: Remote_Spawn_Response) {
 	ring := get_connection_ring(to_node)
-	if ring != nil && ring.state == .Ready {
+	if ring != nil {
 		send_lifecycle_message(ring, response)
 	} else {
 		log.warnf("Cannot send spawn response to node %d - not connected", to_node)
@@ -1584,14 +1599,9 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 			continue
 		}
 
-		ring := get_pool_ring_ready(data.pool)
-		if ring != nil {
-			batch_append_message(ring, buf[:msg_len])
-		} else {
-			send_raw_connection_data(data, buf[4:msg_len])
+		if batch_append_message(data.ring, buf[:msg_len]) {
+			sent += 1
 		}
-
-		sent += 1
 	}
 
 	log.infof("Sent registry snapshot with %d actors to node %s", sent, data.node_name)
@@ -1599,7 +1609,7 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 
 send_node_directory :: proc(data: ^Connection_Actor_Data) {
 	entry_count: u16 = 0
-	total_size := 1 + 2 // type + entry_count
+	total_size := 1 + 2
 	for i in 2 ..< MAX_NODES {
 		info := NODE.node_registry[i]
 		if info.node_name == "" do continue
@@ -1631,11 +1641,9 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 		ctrl_put_u16(&w, u16(info.address.port))
 	}
 
-	msg_buffer := wrap_control_message(ctrl_data)
-	defer delete(msg_buffer)
-
-	send_raw_connection_data(data, msg_buffer)
-	log.infof("Sent node directory with %d entries to node %s", entry_count, data.node_name)
+	if ring_append_ctrl(data.ring, ctrl_data) {
+		log.infof("Sent node directory with %d entries to node %s", entry_count, data.node_name)
+	}
 }
 
 handle_node_directory :: proc(ctrl_data: []byte) {
@@ -1774,7 +1782,7 @@ send_disconnect_to_ring :: proc(ring: ^Connection_Ring, reason: string) {
 broadcast_graceful_disconnect :: proc(reason: string) {
 	for node_id in 2 ..< MAX_NODES {
 		ring := get_connection_ring(Node_ID(node_id))
-		if ring != nil && ring.state == .Ready {
+		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
 			send_disconnect_to_ring(ring, reason)
 		}
 	}

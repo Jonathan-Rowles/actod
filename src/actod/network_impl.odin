@@ -4,6 +4,7 @@ import "base:intrinsics"
 import "core:encoding/endian"
 import "core:log"
 import "core:mem"
+import "core:sync"
 import "core:time"
 
 wire_format_exact_size_impl :: proc(data: rawptr, info: ^Message_Type_Info, name_len: int) -> u32 {
@@ -132,7 +133,7 @@ send_to_connection_ring_impl :: proc(
 	info: ^Message_Type_Info,
 	base_flags: Network_Message_Flags,
 ) -> Send_Error {
-	if ring == nil || ring.state != .Ready {
+	if ring == nil {
 		return .NETWORK_ERROR
 	}
 
@@ -140,6 +141,9 @@ send_to_connection_ring_impl :: proc(
 	from_handle, _ := unpack_pid(get_self_pid())
 
 	exact_size := wire_format_exact_size_impl(data, info, 0)
+	if exact_size > ring.usable_slot_size {
+		return .MESSAGE_TOO_LARGE
+	}
 
 	dst, sid, ok := batch_reserve(ring, exact_size)
 	if !ok {
@@ -175,7 +179,7 @@ send_to_connection_ring_by_name_impl :: proc(
 	info: ^Message_Type_Info,
 	base_flags: Network_Message_Flags,
 ) -> Send_Error {
-	if ring == nil || ring.state != .Ready {
+	if ring == nil {
 		return .NETWORK_ERROR
 	}
 
@@ -188,6 +192,9 @@ send_to_connection_ring_by_name_impl :: proc(
 	flags := base_flags | {.BY_NAME}
 
 	exact_size := wire_format_exact_size_impl(data, info, len(actor_name))
+	if exact_size > ring.usable_slot_size {
+		return .MESSAGE_TOO_LARGE
+	}
 
 	dst, sid, ok := batch_reserve(ring, exact_size)
 	if !ok {
@@ -219,90 +226,41 @@ send_to_connection_ring_by_name_impl :: proc(
 	return .OK
 }
 
-build_and_send_network_command_impl :: proc(
-	conn_pid: PID,
-	data: rawptr,
-	info: ^Message_Type_Info,
-	base_flags: Network_Message_Flags,
-	to_handle: Handle,
-	to_name: string,
-) -> Send_Error {
-	from_handle, _ := unpack_pid(get_self_pid())
-
-	flags := base_flags | {.POD_PAYLOAD}
-	struct_size := info.size
-
-	to_name_bytes: []byte
-	to_name_len: u16 = 0
-	actual_to_handle := to_handle
-	if .BY_NAME in base_flags {
-		to_name_bytes = transmute([]byte)to_name
-		to_name_len = u16(len(to_name_bytes))
-		actual_to_handle = Handle {
-			idx = u32(to_name_len),
-			gen = 0,
-		}
+// The ring buffers while disconnected; ensure a connection actor exists to
+// drain it whenever the fast path finds the ring absent or not yet Ready.
+@(private)
+ensure_ring_for_node :: proc(node_id: Node_ID) -> ^Connection_Ring {
+	ring := get_connection_ring(node_id)
+	if ring != nil && sync.atomic_load(&ring.state) == .Ready {
+		return ring
 	}
-
-	payload_size := struct_size + calculate_variable_data_size(data, info)
-
-	message_size := NETWORK_HEADER_SIZE + int(to_name_len) + payload_size
-	total_buffer_size := 4 + message_size
-
-	buffer := make([]byte, total_buffer_size)
-
-	endian.put_u32(buffer[0:4], .Little, u32(message_size))
-	write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
-
-	offset := 4 + NETWORK_HEADER_SIZE
-
-	if .BY_NAME in base_flags {
-		copy(buffer[offset:], to_name_bytes)
-		offset += int(to_name_len)
+	if get_or_create_connection(node_id) == 0 {
+		return nil
 	}
-
-	if struct_size > 0 {
-		intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), data, struct_size)
-		offset += struct_size
-	}
-
-	_ = append_variable_data(buffer, offset, data, info)
-
-	result := send_message(conn_pid, Raw_Network_Buffer{data = buffer})
-	delete(buffer)
-	return result
+	return get_connection_ring(node_id)
 }
 
 send_remote_impl :: proc(to: PID, data: rawptr, info: ^Message_Type_Info, priority: Message_Priority) -> Send_Error {
 	_, node_id := unpack_pid(to)
 
-	p_flags := priority_to_flags(priority)
-
-	ring := get_connection_ring(node_id)
-	if ring != nil && ring.state == .Ready {
-		for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-			result := send_to_connection_ring_impl(ring, to, data, info, p_flags)
-			if result == .OK {
-				return .OK
-			}
-			if result != .NETWORK_RING_FULL {
-				return result
-			}
-			if retry < RING_SEND_SPIN_RETRIES {
-				intrinsics.cpu_relax()
-			} else {
-				time.sleep(1 * time.Microsecond)
-			}
-		}
-	}
-
-	conn_pid := get_or_create_connection(node_id)
-	if conn_pid == 0 {
+	ring := ensure_ring_for_node(node_id)
+	if ring == nil {
 		return .NODE_DISCONNECTED
 	}
 
-	to_handle, _ := unpack_pid(to)
-	return build_and_send_network_command_impl(conn_pid, data, info, p_flags, to_handle, "")
+	p_flags := priority_to_flags(priority)
+	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
+		result := send_to_connection_ring_impl(ring, to, data, info, p_flags)
+		if result != .NETWORK_RING_FULL {
+			return result
+		}
+		if retry < RING_SEND_SPIN_RETRIES {
+			intrinsics.cpu_relax()
+		} else {
+			time.sleep(1 * time.Microsecond)
+		}
+	}
+	return .NETWORK_RING_FULL
 }
 
 send_remote_by_name_impl :: proc(
@@ -317,41 +275,63 @@ send_remote_by_name_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 
-	p_flags := priority_to_flags(.NORMAL)
+	ring := ensure_ring_for_node(node_id)
+	if ring == nil {
+		return .NODE_DISCONNECTED
+	}
 
-	ring := get_connection_ring(node_id)
-	if ring != nil && ring.state == .Ready {
-		for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-			result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, p_flags)
-			if result == .OK {
+	p_flags := priority_to_flags(.NORMAL)
+	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
+		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, p_flags)
+		if result != .NETWORK_RING_FULL {
+			return result
+		}
+		if retry < RING_SEND_SPIN_RETRIES {
+			intrinsics.cpu_relax()
+		} else {
+			time.sleep(1 * time.Microsecond)
+		}
+	}
+	return .NETWORK_RING_FULL
+}
+
+send_unreliable :: #force_inline proc(to: PID, content: $T) -> Send_Error {
+	if is_local_pid(to) {
+		return send_message(to, content)
+	}
+	v := content
+	return send_unreliable_remote_impl(to, &v, get_validated_message_info_ptr(T))
+}
+
+send_unreliable_remote_impl :: proc(
+	to: PID,
+	data: rawptr,
+	info: ^Message_Type_Info,
+) -> Send_Error {
+	_, node_id := unpack_pid(to)
+
+	max_frame := udp_max_frame_bytes()
+	if max_frame > 0 {
+		exact_size := wire_format_exact_size_impl(data, info, 0)
+		if int(exact_size) <= max_frame {
+			to_handle, _ := unpack_pid(to)
+			from_handle, _ := unpack_pid(get_self_pid())
+
+			buf: [UDP_FRAME_BUFFER]byte
+			msg_len := build_wire_format_into_buffer_impl(
+				buf[:exact_size],
+				data,
+				info,
+				to_handle,
+				from_handle,
+				priority_to_flags(.NORMAL),
+				"",
+			)
+			if msg_len != 0 && udp_try_send(node_id, buf[:msg_len]) {
 				return .OK
-			}
-			if result != .NETWORK_RING_FULL {
-				return result
-			}
-			if retry < RING_SEND_SPIN_RETRIES {
-				intrinsics.cpu_relax()
-			} else {
-				time.sleep(1 * time.Microsecond)
 			}
 		}
 	}
 
-	conn_pid := get_or_create_connection(node_id)
-	if conn_pid == 0 {
-		return .NODE_DISCONNECTED
-	}
-
-	to_handle := Handle {
-		idx = u32(len(actor_name)),
-		gen = 0,
-	}
-	return build_and_send_network_command_impl(
-		conn_pid,
-		data,
-		info,
-		p_flags | {.BY_NAME},
-		to_handle,
-		actor_name,
-	)
+	return send_remote_impl(to, data, info, .NORMAL)
 }

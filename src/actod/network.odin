@@ -54,10 +54,9 @@ Transport_Strategy :: enum {
 }
 
 Node_Info :: struct {
-	node_name:       string,
-	address:         net.Endpoint,
-	transport:       Transport_Strategy,
-	connection_pool: ^Connection_Pool,
+	node_name: string,
+	address:   net.Endpoint,
+	transport: Transport_Strategy,
 }
 
 @(private)
@@ -173,61 +172,21 @@ init_network :: proc(local_node_id: Node_ID, node_name: string) {
 	}
 }
 
-ACCEPT_RECV_TIMEOUT_SECS :: 5
+MAX_PENDING_INCOMING_HANDSHAKES :: 32
+
+g_pending_incoming_handshakes: i32
 
 accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> bool {
-	// On macOS/BSD and Windows, accepted sockets inherit the non-blocking flag from the listener.
-	// Ensure blocking mode for the handshake recv.
-	when ODIN_OS == .Darwin || ODIN_OS == .Windows {net.set_blocking(sock, true)}
-	set_recv_timeout(sock, ACCEPT_RECV_TIMEOUT_SECS)
-	first_msg := tcp_recv_framed_message(sock)
-	if first_msg == nil {
-		log.warn("Failed to read first message from incoming connection")
+	pending := sync.atomic_add(&g_pending_incoming_handshakes, 1)
+	if pending >= MAX_PENDING_INCOMING_HANDSHAKES {
+		sync.atomic_sub(&g_pending_incoming_handshakes, 1)
+		log.warnf("Rejecting connection from %v: too many pending handshakes", addr)
 		return false
-	}
-
-	header, header_ok := parse_network_header(first_msg)
-	if header_ok &&
-	   .CONTROL in header.flags &&
-	   len(header.payload) >= 1 &&
-	   header.payload[0] == CTRL_MSG_POOL_RING {
-		defer delete(first_msg, actor_system_allocator)
-
-		if len(header.payload) < 4 { 	// type(1) + name_len(2) + at least 1 byte name
-			log.warn("Pool ring control message too short")
-			return false
-		}
-
-		name_len := int(endian.unchecked_get_u16le(header.payload[1:]))
-		if len(header.payload) < 3 + name_len {
-			log.warn("Pool ring control message truncated")
-			return false
-		}
-
-		peer_name := string(header.payload[3:3 + name_len])
-		local_node_id, found := get_node_by_name(peer_name)
-		if !found {
-			log.warnf("Pool ring from unknown peer '%s'", peer_name)
-			return false
-		}
-
-		conn_pid := PID(
-			sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[local_node_id], .Acquire),
-		)
-		if conn_pid == 0 {
-			log.warnf("Pool ring from '%s' but no connection actor exists", peer_name)
-			return false
-		}
-
-		when ODIN_OS == .Darwin || ODIN_OS == .Windows {net.set_blocking(sock, false)}
-		send_message(conn_pid, Accept_Pool_Ring_Socket{socket = sock})
-		return true
 	}
 
 	conn_data := Connection_Actor_Data {
 		node_id                 = 0,
-		state                   = .Connected,
-		transport               = .TCP_Custom_Protocol,
+		state                   = .Disconnected,
 		address                 = addr,
 		tcp_socket              = sock,
 		heartbeat_interval      = SYSTEM_CONFIG.network.heartbeat_interval,
@@ -237,7 +196,6 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 		auth_password           = get_auth_password(),
 		is_incoming             = true,
 		ring_config             = SYSTEM_CONFIG.network.connection_ring,
-		first_message           = first_msg,
 	}
 
 	actor_name := fmt.tprintf("incoming_%v_%d", addr, time.to_unix_nanoseconds(time.now()))
@@ -252,12 +210,43 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 		parent_pid = NODE.pid,
 	)
 	if !ok {
-		delete(first_msg, actor_system_allocator)
+		sync.atomic_sub(&g_pending_incoming_handshakes, 1)
 		return false
 	}
 
 	send_message(conn_pid, Start_Receiving{})
 
+	return true
+}
+
+tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
+	if len(data) == 0 {
+		return true
+	}
+
+	total_sent := 0
+	wouldblock_spins: u32 = 0
+	for total_sent < len(data) {
+		n, err := net.send_tcp(socket, data[total_sent:])
+		if err != nil {
+			if err == .Would_Block {
+				wouldblock_spins += 1
+				if wouldblock_spins > 100_000 {
+					return false
+				}
+				intrinsics.cpu_relax()
+				continue
+			}
+			log.errorf("TCP send error: %v", err)
+			return false
+		}
+		if n == 0 {
+			log.error("TCP send returned 0 bytes")
+			return false
+		}
+		total_sent += n
+		wouldblock_spins = 0
+	}
 	return true
 }
 
@@ -396,6 +385,11 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		return 0
 	}
 
+	node_info, info_ok := get_node_info(node_id)
+	if !info_ok {
+		return 0
+	}
+
 	existing_pid := PID(
 		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[node_id], .Acquire),
 	)
@@ -403,25 +397,16 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 	if existing_pid != 0 {
 		actor_ptr, actor_exists := get(&global_registry, existing_pid)
 		if actor_exists && actor_ptr != nil {
+			send_message(
+				existing_pid,
+				Connect_Request{node_id = node_id, address = node_info.address},
+			)
 			return existing_pid
 		}
 		sync.atomic_store_explicit(cast(^u64)&NODE.connection_actors[node_id], u64(0), .Release)
 	}
 
-	actor_name := fmt.tprintf("connection_%d", node_id)
-	if found_pid, found := get_actor_pid(actor_name); found {
-		sync.atomic_compare_exchange_strong_explicit(
-			cast(^u64)&NODE.connection_actors[node_id],
-			u64(0),
-			u64(found_pid),
-			.Acq_Rel,
-			.Acquire,
-		)
-		return found_pid
-	}
-
-	node_info, info_ok := get_node_info(node_id)
-	if !info_ok {
+	if get_or_create_node_ring(node_id, SYSTEM_CONFIG.network.connection_ring) == nil {
 		return 0
 	}
 
@@ -429,7 +414,6 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		node_id                 = node_id,
 		node_name               = node_info.node_name,
 		state                   = .Disconnected,
-		transport               = node_info.transport,
 		address                 = node_info.address,
 		heartbeat_interval      = SYSTEM_CONFIG.network.heartbeat_interval,
 		heartbeat_timeout       = SYSTEM_CONFIG.network.heartbeat_timeout,
@@ -472,14 +456,7 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		return existing
 	}
 
-	send_message(
-		conn_pid,
-		Connect_Request {
-			node_id = node_id,
-			address = node_info.address,
-			transport = node_info.transport,
-		},
-	)
+	send_message(conn_pid, Connect_Request{node_id = node_id, address = node_info.address})
 
 	return conn_pid
 }
@@ -553,10 +530,12 @@ broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_R
 	broadcast_to_all_nodes(msg)
 }
 
+// Gossip goes only to live connections; reconnecting peers re-sync via the
+// registry snapshot exchanged on handshake.
 broadcast_to_all_nodes :: proc(msg: $T) {
 	for node_id in 2 ..< MAX_NODES {
 		ring := get_connection_ring(Node_ID(node_id))
-		if ring != nil && ring.state == .Ready {
+		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
 			send_lifecycle_message(ring, msg)
 		}
 	}
@@ -568,14 +547,14 @@ broadcast_to_others :: proc(msg: $T, except: Node_ID) {
 			continue
 		}
 		ring := get_connection_ring(Node_ID(node_id))
-		if ring != nil && ring.state == .Ready {
+		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
 			send_lifecycle_message(ring, msg)
 		}
 	}
 }
 
 send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
-	if ring == nil || ring.state != .Ready {
+	if ring == nil {
 		return
 	}
 
@@ -691,16 +670,18 @@ spawn_remote :: proc(
 	}
 
 	ring := get_connection_ring(node_id)
-	if ring != nil && ring.state == .Ready {
-		send_lifecycle_message(ring, request)
-	} else {
-		conn_pid := get_or_create_connection(node_id)
-		if conn_pid == 0 {
+	if ring == nil {
+		if get_or_create_connection(node_id) == 0 {
 			sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 			return 0, false
 		}
-		build_and_send_network_command(conn_pid, request, {.LIFECYCLE_EVENT}, Handle{}, "")
+		ring = get_connection_ring(node_id)
 	}
+	if ring == nil {
+		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
+		return 0, false
+	}
+	send_lifecycle_message(ring, request)
 
 	if !sync.atomic_sema_wait_with_timeout(&pending.sema, timeout) {
 		log.errorf(

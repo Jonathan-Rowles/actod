@@ -25,6 +25,17 @@ send_message_any :: proc(to: PID, content: any, priority: Message_Priority = .NO
 }
 
 @(private)
+send_unreliable_any :: proc(to: PID, content: any) -> Send_Error {
+	if is_local_pid(to) {
+		return send_message_any(to, content)
+	}
+	@(static) sentinel: Message_Type_Info
+	info, ok := get_type_info_ptr(content.id)
+	if !ok do info = &sentinel
+	return send_unreliable_remote_impl(to, content.data, info)
+}
+
+@(private)
 broadcast_any :: proc(content: any) {
 	self_pid := get_self_pid()
 	actor_type := get_pid_actor_type(self_pid)

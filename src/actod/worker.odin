@@ -138,8 +138,10 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 		sync.atomic_thread_fence(.Acq_Rel)
 		reschedule := has_pending_messages(handle)
 		if !reschedule {
-			for _ in 0 ..< 8 {
-				intrinsics.cpu_relax()
+			if worker.runnext == nil && mpsc_size(&worker.ready_queue) == 0 {
+				for _ in 0 ..< 8 {
+					intrinsics.cpu_relax()
+				}
 			}
 			reschedule = has_pending_messages(handle)
 		}

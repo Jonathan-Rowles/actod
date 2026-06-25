@@ -125,6 +125,13 @@ send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL)
 	return actod.send_message(to, content, priority)
 }
 
+// Fire-and-forget send over the UDP lane when the target node has one:
+// at-most-once, unordered, silently lossy. Falls back to the reliable TCP
+// path for local PIDs, oversized messages, or peers without a UDP lane.
+send_unreliable :: proc(to: PID, content: $T) -> Send_Error {
+	return actod.send_unreliable(to, content)
+}
+
 // Send a message by name. Use "actor@node" for remote actors.
 @(hot = `compose
 pid, found := hot_api.get_actor_pid(to)
@@ -512,6 +519,9 @@ make_actor_config :: proc(
 make_network_config :: proc(
 	auth_password: string = actod.DEFAULT_NETWORK_CONFIG.auth_password,
 	port: int = actod.DEFAULT_NETWORK_CONFIG.port,
+	udp_port: int = actod.DEFAULT_NETWORK_CONFIG.udp_port,
+	udp_max_datagram: int = actod.DEFAULT_NETWORK_CONFIG.udp_max_datagram,
+	enable_encryption: bool = actod.DEFAULT_NETWORK_CONFIG.enable_encryption,
 	heartbeat_interval: time.Duration = actod.DEFAULT_NETWORK_CONFIG.heartbeat_interval,
 	heartbeat_timeout: time.Duration = actod.DEFAULT_NETWORK_CONFIG.heartbeat_timeout,
 	reconnect_initial_delay: time.Duration = actod.DEFAULT_NETWORK_CONFIG.reconnect_initial_delay,
@@ -521,6 +531,9 @@ make_network_config :: proc(
 	return actod.make_network_config(
 		auth_password,
 		port,
+		udp_port,
+		udp_max_datagram,
+		enable_encryption,
 		heartbeat_interval,
 		heartbeat_timeout,
 		reconnect_initial_delay,

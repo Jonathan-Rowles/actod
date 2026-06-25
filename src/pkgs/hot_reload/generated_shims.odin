@@ -8,8 +8,6 @@ import "base:runtime"
 import "core:log"
 import "core:time"
 import "core:net"
-import "core:sync"
-import "core:nbio"
 
 ACTOR_TYPE_UNTYPED :: Actor_Type(0)
 
@@ -96,57 +94,6 @@ Actor_Stats_Entry :: struct {
 
 Actor_Type :: distinct u8
 
-CACHE_LINE_SIZE :: 64
-
-Connection_Pool :: struct {
-	rings:                [MAX_POOL_RINGS]^Connection_Ring,
-	ring_count:           u32,
-	next_ring:            u32,
-	contention_count:     u32,
-	scale_up_requested:   u32,
-	node_id:              Node_ID,
-	conn_pid:             PID,
-	max_rings:            u32,
-	contention_threshold: u32,
-	draining_rings:       [MAX_POOL_RINGS]^Connection_Ring,
-	drain_count:          u32,
-	drained_rings:        [MAX_POOL_RINGS]^Connection_Ring,
-	drained_count:        u32,
-}
-
-Connection_Ring :: struct {
-	socket:                net.Socket,
-	tcp_socket:            net.TCP_Socket,
-	node_id:               Node_ID,
-	conn_pid:              PID,
-	ring_idx:              u32,
-	state:                 Connection_Ring_State,
-	send_mask:             u32,
-	send_slot_size:        u32,
-	send_slot_count:       u32,
-	send_slots:            []Send_Slot,
-	send_data_buffer:      []byte,
-	recv_buffer:           []byte,
-	recv_buffer_size:      u32,
-	tcp_nodelay:           bool,
-	pool:                  ^Connection_Pool,
-	last_send_time:        i64,
-	_pad_producer:         [CACHE_LINE_SIZE]byte,
-	batch_mutex:           sync.Mutex,
-	batch_slot_idx:        i32,
-	batch_write_pos:       u32,
-	nearly_full_threshold: u32,
-	send_write_idx:        u32,
-	batch_pending:         u32,
-	_pad_consumer:         [CACHE_LINE_SIZE]byte,
-	send_submit_idx:       u32,
-	send_complete_idx:     u32,
-	recv_write_pos:        u32,
-	pending_recv:          ^nbio.Operation,
-	send_in_flight:        bool,
-	send_bufs:             [][]byte,
-}
-
 Connection_Ring_Config :: struct {
 	send_slot_count:               u32,
 	send_slot_size:                u32,
@@ -155,12 +102,6 @@ Connection_Ring_Config :: struct {
 	max_pool_rings:                u32,
 	scale_up_contention_threshold: u32,
 	scale_down_idle_seconds:       u32,
-}
-
-Connection_Ring_State :: enum {
-	Not_Initialized,
-	Ready,
-	Draining,
 }
 
 Handle :: struct {
@@ -187,8 +128,6 @@ Log_Flush :: proc()
 
 MAX_ACTOR_NAME_LEN :: 32
 
-MAX_POOL_RINGS :: 16
-
 MAX_SNAPSHOT_ACTORS :: 64
 
 MAX_SNAPSHOT_FLOWS :: 256
@@ -210,6 +149,9 @@ Message_Priority :: enum u8 {
 Network_Config :: struct {
 	auth_password:           string,
 	port:                    int,
+	udp_port:                int,
+	udp_max_datagram:        int,
+	enable_encryption:       bool,
 	heartbeat_interval:      time.Duration,
 	heartbeat_timeout:       time.Duration,
 	reconnect_initial_delay: time.Duration,
@@ -220,10 +162,9 @@ Network_Config :: struct {
 Node_ID :: distinct u16
 
 Node_Info :: struct {
-	node_name:       string,
-	address:         net.Endpoint,
-	transport:       Transport_Strategy,
-	connection_pool: ^Connection_Pool,
+	node_name: string,
+	address:   net.Endpoint,
+	transport: Transport_Strategy,
 }
 
 PID :: distinct u64
@@ -262,19 +203,6 @@ Send_Error :: enum {
 	NETWORK_RING_FULL,
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
-}
-
-Send_Slot :: struct #align (CACHE_LINE_SIZE) {
-	state:          Send_Slot_State,
-	length:         u32,
-	active_writers: i32,
-}
-
-Send_Slot_State :: enum u32 {
-	FREE    = 0,
-	WRITING = 1,
-	SEALED  = 2,
-	READY   = 3,
 }
 
 Stats_Response :: struct {
@@ -365,6 +293,7 @@ Hot_API :: struct {
 	terminate_actor:           proc(to: PID, reason: Termination_Reason) -> bool,
 	rename_actor:              proc(pid: PID, new_name: string) -> bool,
 	send_message:              proc(to: PID, content: any, priority: Message_Priority) -> Send_Error,
+	send_unreliable:           proc(to: PID, content: any) -> Send_Error,
 	get_self_pid:              proc() -> PID,
 	get_self_name:             proc() -> string,
 	get_parent_pid:            proc() -> PID,
@@ -444,6 +373,9 @@ Hot_API :: struct {
 	make_network_config:       proc(
 		auth_password: string,
 		port: int,
+		udp_port: int,
+		udp_max_datagram: int,
+		enable_encryption: bool,
 		heartbeat_interval: time.Duration,
 		heartbeat_timeout: time.Duration,
 		reconnect_initial_delay: time.Duration,
@@ -544,6 +476,10 @@ rename_actor :: proc(pid: PID, new_name: string) -> bool {
 
 send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error {
 	return hot_api.send_message(to, content, priority)
+}
+
+send_unreliable :: proc(to: PID, content: $T) -> Send_Error {
+	return hot_api.send_unreliable(to, content)
 }
 
 send_message_name :: proc(to: string, content: $T) -> Send_Error {
@@ -774,8 +710,8 @@ make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_ST
 	return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread)
 }
 
-make_network_config :: proc(auth_password: string = "", port: int = 0, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}) -> Network_Config {
-	return hot_api.make_network_config(auth_password, port, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring)
+make_network_config :: proc(auth_password: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}) -> Network_Config {
+	return hot_api.make_network_config(auth_password, port, udp_port, udp_max_datagram, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring)
 }
 
 make_log_config :: proc(level: log.Level = {}, console_opts: log.Options = {}, file_opts: log.Options = {}, ident: string = "", enable_file: bool = false, log_path: string = "", custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {

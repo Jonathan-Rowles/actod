@@ -309,6 +309,8 @@ host_func_name :: proc(p: Proc_Info) -> string {
 		switch p.name {
 		case "send_message":
 			return "send_message_any"
+		case "send_unreliable":
+			return "send_unreliable_any"
 		case "broadcast":
 			return "broadcast_any"
 		case "publish":

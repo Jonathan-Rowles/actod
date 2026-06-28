@@ -88,7 +88,7 @@ test_parse_network_header_with_name :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_network_header_control_message :: proc(t: ^testing.T) {
-	ctrl_payload := []byte{CTRL_MSG_HANDSHAKE, 0, 1, 0, 4, 't', 'e', 's', 't'}
+	ctrl_payload := []byte{CTRL_MSG_HELLO, 0, 1, 0, 4, 't', 'e', 's', 't'}
 
 	header_size := 2 + 8 + 8 + 8
 	total_size := header_size + len(ctrl_payload)
@@ -143,7 +143,7 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	defer delete(payload)
 
 	offset := 0
-	payload[offset] = CTRL_MSG_HANDSHAKE
+	payload[offset] = CTRL_MSG_HELLO
 	offset += 1
 	endian.put_u16(payload[offset:], .Little, u16(node_id))
 	offset += 2
@@ -159,7 +159,7 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	offset += len(token_bytes)
 	endian.put_u64(payload[offset:], .Little, nonce)
 
-	testing.expect(t, payload[0] == CTRL_MSG_HANDSHAKE, "Message type should be handshake")
+	testing.expect(t, payload[0] == CTRL_MSG_HELLO, "Message type should be handshake")
 
 	parse_offset := 1
 	parsed_node_id := Node_ID(endian.unchecked_get_u16le(payload[parse_offset:]))

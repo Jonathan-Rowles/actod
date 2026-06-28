@@ -230,7 +230,7 @@ test_create_destroy_connection_ring :: proc(t: ^testing.T) {
 	testing.expect(t, ring.send_slot_size == 1024, "Slot size mismatch")
 	testing.expect(t, ring.send_mask == 7, "Mask should be count-1")
 	testing.expect(t, ring.recv_buffer_size == 4096, "Recv buffer size mismatch")
-	testing.expect(t, ring.state == .Not_Initialized, "Initial state should be Not_Initialized")
+	testing.expect(t, ring.state == .Buffering, "Initial state should be Buffering")
 	testing.expect(t, len(ring.send_slots) == 8, "Send slots length mismatch")
 	testing.expect(t, len(ring.recv_buffer) == 4096, "Recv buffer length mismatch")
 
@@ -1409,4 +1409,91 @@ test_drainer_flush_not_starved :: proc(t: ^testing.T) {
 		"Drainer should have recycled slots (recycled=%d)",
 		fctx.recycled,
 	)
+}
+
+@(private = "file")
+pool_test_config :: Connection_Ring_Config {
+	send_slot_count               = 4,
+	send_slot_size                = 1024,
+	recv_buffer_size              = 4096,
+	tcp_nodelay                   = false,
+	max_pool_rings                = 4,
+	scale_up_contention_threshold = 2,
+	scale_down_idle_seconds       = 1,
+}
+
+@(test)
+test_pool_add_park_reuse :: proc(t: ^testing.T) {
+	pool := create_connection_pool(5, pool_test_config)
+	defer free(pool)
+
+	ring0 := create_connection_ring(pool_test_config)
+	defer destroy_connection_ring(ring0)
+	ring0.pool = pool
+	atomic_store_ring_ptr(&pool.rings[0], ring0)
+	sync.atomic_store(&pool.ring_count, u32(1))
+
+	ring1 := create_connection_ring(pool_test_config)
+	defer destroy_connection_ring(ring1)
+
+	testing.expect(t, pool_add_ring(pool, ring1), "add should succeed")
+	testing.expect(t, pool_active_count(pool) == 2, "two active rings")
+	testing.expect(t, ring1.pool == pool, "ring linked to pool")
+
+	testing.expect(t, pool_remove_active(pool, ring1), "remove should succeed")
+	testing.expect(t, pool_active_count(pool) == 1, "one active ring after remove")
+	testing.expect(t, !pool_remove_active(pool, ring0), "primary must never be removed")
+
+	pool_park(pool, ring1)
+	testing.expect(t, pool.parked_count == 1, "ring parked")
+
+	reused := pool_take_parked(pool)
+	testing.expect(t, reused == ring1, "parked ring reused")
+	testing.expect(t, pool.parked_count == 0, "parked list empty after reuse")
+	testing.expect(t, pool_take_parked(pool) == nil, "empty parked list returns nil")
+}
+
+@(test)
+test_pool_round_robin_skips_parked :: proc(t: ^testing.T) {
+	pool := create_connection_pool(6, pool_test_config)
+	defer free(pool)
+
+	rings: [3]^Connection_Ring
+	for i in 0 ..< 3 {
+		rings[i] = create_connection_ring(pool_test_config)
+		rings[i].state = .Ready
+	}
+	defer for i in 0 ..< 3 do destroy_connection_ring(rings[i])
+
+	rings[0].pool = pool
+	atomic_store_ring_ptr(&pool.rings[0], rings[0])
+	sync.atomic_store(&pool.ring_count, u32(1))
+	testing.expect(t, pool_add_ring(pool, rings[1]), "add ring 1")
+	testing.expect(t, pool_add_ring(pool, rings[2]), "add ring 2")
+
+	seen: [3]bool
+	for _ in 0 ..< 12 {
+		r := get_pool_ring_ready(pool)
+		for i in 0 ..< 3 {
+			if r == rings[i] do seen[i] = true
+		}
+	}
+	testing.expect(t, seen[0] && seen[1] && seen[2], "round robin should visit all rings")
+
+	sync.atomic_store(&rings[1].park_state, Ring_Park_State.Park_Asked)
+	for _ in 0 ..< 12 {
+		testing.expect(t, get_pool_ring_ready(pool) != rings[1], "parked ring must be skipped")
+	}
+}
+
+@(test)
+test_pool_contention_sets_scale_request :: proc(t: ^testing.T) {
+	pool := create_connection_pool(7, pool_test_config)
+	defer free(pool)
+
+	pool_note_contention(pool)
+	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 0, "below threshold")
+	pool_note_contention(pool)
+	pool_note_contention(pool)
+	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 1, "threshold crossed")
 }

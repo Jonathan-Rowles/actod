@@ -5,28 +5,45 @@ import "core:net"
 import "core:sync"
 import "core:testing"
 
+// Tests in this package run concurrently in one process and share NODE.
+// Node-registry tests must serialize against each other, never delete the
+// shared name map (node_init-based tests use it too), and only remove the
+// entries they registered, under the registry lock.
+@(private = "file")
+g_network_test_mutex: sync.Mutex
+
+@(private = "file")
+network_test_setup :: proc() {
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	if NODE.node_name_to_id == nil {
+		NODE.node_name_to_id = make(map[string]Node_ID, actor_system_allocator)
+	}
+	sync.rw_mutex_unlock(&NODE.node_registry_lock)
+}
+
+@(private = "file")
+network_test_remove_nodes :: proc(names: ..string) {
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	for name in names {
+		id, ok := NODE.node_name_to_id[name]
+		if !ok {
+			continue
+		}
+		delete_key(&NODE.node_name_to_id, name)
+		if NODE.node_registry[id].node_name == name {
+			delete(NODE.node_registry[id].node_name, get_system_allocator())
+			NODE.node_registry[id] = {}
+		}
+	}
+}
+
 @(test)
 test_node_registry :: proc(t: ^testing.T) {
-	if NODE.node_name_to_id == nil {
-		NODE.node_name_to_id = make(map[string]Node_ID)
-	}
-
-	defer {
-		keys := make([dynamic]string, 0, len(NODE.node_name_to_id))
-		for name, id in NODE.node_name_to_id {
-			append(&keys, name)
-			if NODE.node_registry[id].node_name != "" {
-				delete(NODE.node_registry[id].node_name, get_system_allocator())
-				NODE.node_registry[id] = {}
-			}
-		}
-		for key in keys {
-			delete_key(&NODE.node_name_to_id, key)
-		}
-		delete(keys)
-		delete(NODE.node_name_to_id)
-		NODE.node_name_to_id = nil
-	}
+	sync.mutex_lock(&g_network_test_mutex)
+	defer sync.mutex_unlock(&g_network_test_mutex)
+	network_test_setup()
+	defer network_test_remove_nodes("remote_node")
 
 	test_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -154,25 +171,10 @@ test_pid_generation_boundary :: proc(t: ^testing.T) {
 
 @(test)
 test_get_node_by_name :: proc(t: ^testing.T) {
-	if NODE.node_name_to_id == nil {
-		NODE.node_name_to_id = make(map[string]Node_ID)
-	}
-	defer {
-		keys := make([dynamic]string, 0, len(NODE.node_name_to_id))
-		for name, id in NODE.node_name_to_id {
-			append(&keys, name)
-			if NODE.node_registry[id].node_name != "" {
-				delete(NODE.node_registry[id].node_name, get_system_allocator())
-				NODE.node_registry[id] = {}
-			}
-		}
-		for key in keys {
-			delete_key(&NODE.node_name_to_id, key)
-		}
-		delete(keys)
-		delete(NODE.node_name_to_id)
-		NODE.node_name_to_id = nil
-	}
+	sync.mutex_lock(&g_network_test_mutex)
+	defer sync.mutex_unlock(&g_network_test_mutex)
+	network_test_setup()
+	defer network_test_remove_nodes("test_remote")
 
 	test_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -291,25 +293,10 @@ test_build_endpoint_zero_port :: proc(t: ^testing.T) {
 
 @(test)
 test_register_node_deduplication :: proc(t: ^testing.T) {
-	if NODE.node_name_to_id == nil {
-		NODE.node_name_to_id = make(map[string]Node_ID)
-	}
-	defer {
-		keys := make([dynamic]string, 0, len(NODE.node_name_to_id))
-		for name, id in NODE.node_name_to_id {
-			append(&keys, name)
-			if NODE.node_registry[id].node_name != "" {
-				delete(NODE.node_registry[id].node_name, get_system_allocator())
-				NODE.node_registry[id] = {}
-			}
-		}
-		for key in keys {
-			delete_key(&NODE.node_name_to_id, key)
-		}
-		delete(keys)
-		delete(NODE.node_name_to_id)
-		NODE.node_name_to_id = nil
-	}
+	sync.mutex_lock(&g_network_test_mutex)
+	defer sync.mutex_unlock(&g_network_test_mutex)
+	network_test_setup()
+	defer network_test_remove_nodes("dedup_node")
 
 	current_node_id = 1
 	sync.atomic_store(&global_next_node_id, 2)
@@ -335,6 +322,9 @@ test_register_node_deduplication :: proc(t: ^testing.T) {
 
 @(test)
 test_node_directory_serialization :: proc(t: ^testing.T) {
+	sync.mutex_lock(&g_network_test_mutex)
+	defer sync.mutex_unlock(&g_network_test_mutex)
+
 	node1_name := "node_alpha"
 	node2_name := "node_beta"
 
@@ -371,25 +361,8 @@ test_node_directory_serialization :: proc(t: ^testing.T) {
 
 	testing.expect(t, offset == total_size, "Buffer should be fully written")
 
-	if NODE.node_name_to_id == nil {
-		NODE.node_name_to_id = make(map[string]Node_ID)
-	}
-	defer {
-		keys := make([dynamic]string, 0, len(NODE.node_name_to_id))
-		for name, id in NODE.node_name_to_id {
-			append(&keys, name)
-			if NODE.node_registry[id].node_name != "" {
-				delete(NODE.node_registry[id].node_name, get_system_allocator())
-				NODE.node_registry[id] = {}
-			}
-		}
-		for key in keys {
-			delete_key(&NODE.node_name_to_id, key)
-		}
-		delete(keys)
-		delete(NODE.node_name_to_id)
-		NODE.node_name_to_id = nil
-	}
+	network_test_setup()
+	defer network_test_remove_nodes("node_alpha", "node_beta")
 
 	NODE.name = "local_node"
 	current_node_id = 1

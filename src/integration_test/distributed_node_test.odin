@@ -1705,3 +1705,194 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 		expected_acks,
 	)
 }
+
+Count_Receiver_Data :: struct {
+	received: int,
+	expected: int,
+	done:     ^sync.Sema,
+}
+
+Count_Receiver_Behaviour :: actod.Actor_Behaviour(Count_Receiver_Data) {
+	handle_message = proc(data: ^Count_Receiver_Data, from: actod.PID, msg: any) {
+		switch m in msg {
+		case shared.Two_Node_Message:
+			_ = m
+			data.received += 1
+			if data.received == data.expected {
+				sync.sema_post(data.done)
+			}
+		}
+	},
+}
+
+test_encrypted_distributed_burst :: proc(t: ^testing.T) {
+	// RING_SCALE_THRESHOLD=1 forces pool scale-up on the sender, so this also
+	// exercises encrypted pool-ring joins and multi-ring delivery.
+	message_count := 200
+	done := sync.Sema{}
+	receiver_data := Count_Receiver_Data {
+		expected = message_count,
+		done     = &done,
+	}
+	_, ok := actod.spawn("secure_receiver", receiver_data, Count_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn receiver actor")
+
+	remote_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=send_burst",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=secure_receiver",
+				"AUTH_PASSWORD=test_dist_password",
+				fmt.tprintf("MESSAGE_COUNT=%d", message_count),
+				"ENABLE_ENCRYPTION=1",
+				"RING_SCALE_THRESHOLD=1",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(remote_desc)
+	if remote_err != nil {
+		panic("failed to start encrypted sender")
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	success := sync.sema_wait_with_timeout(&done, 10 * time.Second)
+	testing.expect(t, success, "Did not receive all messages over the encrypted connection")
+
+	adopted_rings: u32 = 0
+	if node_id, found := actod.get_node_by_name("BurstSenderNode"); found {
+		if pool := actod.get_connection_pool(node_id); pool != nil {
+			adopted_rings = actod.pool_active_count(pool)
+			fmt.printf("[test] pool rings toward sender: %d\n", adopted_rings)
+		}
+	}
+	testing.expect(t, adopted_rings >= 2, "Sender scale-up should have added pool rings here")
+}
+
+test_encryption_mismatch_rejected :: proc(t: ^testing.T) {
+	done := sync.Sema{}
+	receiver_data := Count_Receiver_Data {
+		expected = 1,
+		done     = &done,
+	}
+	_, ok := actod.spawn("mismatch_receiver", receiver_data, Count_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn receiver actor")
+
+	remote_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=send_once",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=mismatch_receiver",
+				"AUTH_PASSWORD=test_dist_password",
+				"ENABLE_ENCRYPTION=1",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(remote_desc)
+	if remote_err != nil {
+		panic("failed to start mismatched sender")
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
+	testing.expect(
+		t,
+		!success,
+		"Message must not be delivered between encrypted and plaintext nodes",
+	)
+}
+
+test_udp_send_unreliable :: proc(t: ^testing.T) {
+	message_count := 50
+	expected := 40 // loopback rarely drops, but UDP makes no promises
+	done := sync.Sema{}
+	receiver_data := Count_Receiver_Data {
+		expected = expected,
+		done     = &done,
+	}
+	_, ok := actod.spawn("udp_receiver", receiver_data, Count_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn receiver actor")
+
+	remote_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=send_burst",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=udp_receiver",
+				"AUTH_PASSWORD=test_dist_password",
+				fmt.tprintf("MESSAGE_COUNT=%d", message_count),
+				"ENABLE_ENCRYPTION=1",
+				fmt.tprintf("UDP_PORT=%d", test_base_port + 4),
+				"USE_UDP=1",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(remote_desc)
+	if remote_err != nil {
+		panic("failed to start udp sender")
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	success := sync.sema_wait_with_timeout(&done, 15 * time.Second)
+	testing.expect(t, success, "Did not receive enough messages over the encrypted UDP lane")
+}
+
+test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
+	message_count := 20
+	done := sync.Sema{}
+	receiver_data := Count_Receiver_Data {
+		expected = message_count,
+		done     = &done,
+	}
+	_, ok := actod.spawn("fallback_receiver", receiver_data, Count_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn receiver actor")
+
+	// This node has no UDP port, so the sender's send_unreliable must fall
+	// back to TCP and deliver every message.
+	remote_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=send_burst",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=fallback_receiver",
+				"AUTH_PASSWORD=test_dist_password",
+				fmt.tprintf("MESSAGE_COUNT=%d", message_count),
+				fmt.tprintf("UDP_PORT=%d", test_base_port + 4),
+				"USE_UDP=1",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(remote_desc)
+	if remote_err != nil {
+		panic("failed to start fallback sender")
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	success := sync.sema_wait_with_timeout(&done, 10 * time.Second)
+	testing.expect(t, success, "send_unreliable must fall back to TCP when the peer has no UDP lane")
+}

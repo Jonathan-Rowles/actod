@@ -23,6 +23,8 @@ Test_Entry :: struct {
 	worker_count:          int,
 	hot_reload_dev:        bool,
 	hot_reload_watch_path: string,
+	enable_encryption:     bool,
+	udp_port:              int,
 }
 
 ALL_TESTS :: []Test_Entry {
@@ -134,6 +136,37 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_registry_exchange",
 		test_proc = test_registry_exchange,
 		port = 17060,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_encrypted_distributed_burst",
+		test_proc = test_encrypted_distributed_burst,
+		port = 17190,
+		node_name = "TestNode1",
+		is_networked = true,
+		enable_encryption = true,
+	},
+	{
+		name = "test_encryption_mismatch_rejected",
+		test_proc = test_encryption_mismatch_rejected,
+		port = 17210,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_udp_send_unreliable",
+		test_proc = test_udp_send_unreliable,
+		port = 17220,
+		node_name = "TestNode1",
+		is_networked = true,
+		enable_encryption = true,
+		udp_port = 17223,
+	},
+	{
+		name = "test_udp_fallback_to_tcp",
+		test_proc = test_udp_fallback_to_tcp,
+		port = 17230,
 		node_name = "TestNode1",
 		is_networked = true,
 	},
@@ -262,6 +295,8 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	network_config := actod.make_network_config(
 		auth_password = "test_dist_password",
 		port = port,
+		udp_port = entry.udp_port,
+		enable_encryption = entry.enable_encryption,
 		heartbeat_interval = 100 * time.Millisecond,
 		heartbeat_timeout = 300 * time.Millisecond,
 		reconnect_initial_delay = 200 * time.Millisecond,

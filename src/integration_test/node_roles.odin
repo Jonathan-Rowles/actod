@@ -56,6 +56,8 @@ run_send_once :: proc() {
 	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "dist_receiver"
 	auth_password :=
 		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+	enable_encryption :=
+		(os.lookup_env("ENABLE_ENCRYPTION", context.temp_allocator) or_else "0") == "1"
 
 	target_port := 16001
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -65,7 +67,11 @@ run_send_once :: proc() {
 	actod.node_init(
 		name = "SendOnceNode",
 		opts = actod.make_node_config(
-			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			network = actod.make_network_config(
+				port = 0,
+				auth_password = auth_password,
+				enable_encryption = enable_encryption,
+			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
 			),
@@ -93,7 +99,7 @@ run_send_once :: proc() {
 		os.exit(1)
 	}
 
-	time.sleep(250 * time.Millisecond)
+	time.sleep(500 * time.Millisecond)
 
 	actod.shutdown_node()
 	os.exit(0)
@@ -106,6 +112,12 @@ run_send_burst :: proc() {
 	auth_password :=
 		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
 	message_count_str := os.lookup_env("MESSAGE_COUNT", context.temp_allocator) or_else "1000"
+	enable_encryption :=
+		(os.lookup_env("ENABLE_ENCRYPTION", context.temp_allocator) or_else "0") == "1"
+	udp_port_str := os.lookup_env("UDP_PORT", context.temp_allocator) or_else "0"
+	use_udp := (os.lookup_env("USE_UDP", context.temp_allocator) or_else "0") == "1"
+	scale_threshold_str :=
+		os.lookup_env("RING_SCALE_THRESHOLD", context.temp_allocator) or_else "0"
 
 	target_port := 16001
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -117,10 +129,29 @@ run_send_burst :: proc() {
 		message_count = count_val
 	}
 
+	udp_port := 0
+	if port_val, ok := strconv.parse_int(udp_port_str); ok {
+		udp_port = port_val
+	}
+
+	ring_config := actod.DEFAULT_CONNECTION_RING_CONFIG
+	sender_count := 1
+	if threshold_val, ok := strconv.parse_int(scale_threshold_str); ok && threshold_val > 0 {
+		ring_config.scale_up_contention_threshold = u32(threshold_val)
+		ring_config.max_pool_rings = 4
+		sender_count = 4
+	}
+
 	actod.node_init(
 		name = "BurstSenderNode",
 		opts = actod.make_node_config(
-			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			network = actod.make_network_config(
+				port = 0,
+				auth_password = auth_password,
+				enable_encryption = enable_encryption,
+				udp_port = udp_port,
+				connection_ring = ring_config,
+			),
 		),
 	)
 
@@ -141,17 +172,51 @@ run_send_burst :: proc() {
 		target_node:   string,
 		target_actor:  string,
 		message_count: int,
+		use_udp:       bool,
 		done:          ^sync.Sema,
 	}
 
 	Burst_Sender_Behaviour :: actod.Actor_Behaviour(Burst_Sender_Data) {
 		init = proc(data: ^Burst_Sender_Data) {
-			for i in 0 ..< data.message_count {
+			start := 0
+			target_pid: actod.PID
+
+			if data.use_udp {
+				msg := shared.make_two_node_message(0, "udp warmup", "BurstSenderNode")
+				if actod.send_to(data.target_actor, data.target_node, msg) != .OK {
+					fmt.println("Failed to send UDP warmup message")
+					if data.done != nil do sync.sema_post(data.done)
+					return
+				}
+				start = 1
+
+				qualified := fmt.tprintf("%s@%s", data.target_actor, data.target_node)
+				for _ in 0 ..< 250 {
+					if pid, found := actod.get_actor_pid(qualified); found {
+						target_pid = pid
+						break
+					}
+					time.sleep(20 * time.Millisecond)
+				}
+				if target_pid == 0 {
+					fmt.println("Failed to resolve remote actor pid for UDP sends")
+					if data.done != nil do sync.sema_post(data.done)
+					return
+				}
+				time.sleep(200 * time.Millisecond)
+			}
+
+			for i in start ..< data.message_count {
 				msg_content := fmt.tprintf("Burst msg %d", i)
 				msg := shared.make_two_node_message(i, msg_content, "BurstSenderNode")
 				delete(msg_content)
 
-				err := actod.send_to(data.target_actor, data.target_node, msg)
+				err: actod.Send_Error
+				if data.use_udp {
+					err = actod.send_unreliable(target_pid, msg)
+				} else {
+					err = actod.send_to(data.target_actor, data.target_node, msg)
+				}
 				if err != .OK {
 					fmt.printf("Failed to send message %d: %v\n", i, err)
 					break
@@ -169,20 +234,64 @@ run_send_burst :: proc() {
 		handle_message = proc(data: ^Burst_Sender_Data, from: actod.PID, msg: any) {},
 	}
 
-	done_sema := sync.Sema{}
-	sender_data := Burst_Sender_Data {
-		target_node   = target_node,
-		target_actor  = target_actor,
-		message_count = message_count,
-		done          = &done_sema,
-	}
-	_, spawn_ok := actod.spawn("burst_sender", sender_data, Burst_Sender_Behaviour)
-	if !spawn_ok {
-		fmt.println("Failed to spawn burst sender")
-		os.exit(1)
+	if sender_count > 1 {
+		warmup := shared.make_two_node_message(0, "scale warmup", "BurstSenderNode")
+		if actod.send_to(target_actor, target_node, warmup) != .OK {
+			fmt.println("Failed to send scale warmup message")
+			os.exit(1)
+		}
+
+		node_id, _ := actod.get_node_by_name(target_node)
+		for _ in 0 ..< 200 {
+			ring := actod.get_connection_ring(node_id)
+			if ring != nil && sync.atomic_load(&ring.state) == .Ready {
+				break
+			}
+			time.sleep(10 * time.Millisecond)
+		}
+
+		conn_pid := actod.PID(
+			sync.atomic_load(cast(^u64)&actod.NODE.connection_actors[node_id]),
+		)
+		if conn_pid != 0 {
+			actod.send_message(conn_pid, actod.Scale_Up_Request{})
+			time.sleep(50 * time.Millisecond)
+			actod.send_message(conn_pid, actod.Scale_Up_Request{})
+			time.sleep(150 * time.Millisecond)
+		}
 	}
 
-	sync.sema_wait(&done_sema)
+	done_sema := sync.Sema{}
+	per_sender := message_count / sender_count
+	for i in 0 ..< sender_count {
+		count := per_sender
+		if i == 0 {
+			count += message_count % sender_count
+		}
+		sender_data := Burst_Sender_Data {
+			target_node   = target_node,
+			target_actor  = target_actor,
+			message_count = count,
+			use_udp       = use_udp,
+			done          = &done_sema,
+		}
+		name := fmt.tprintf("burst_sender_%d", i)
+		_, spawn_ok := actod.spawn(name, sender_data, Burst_Sender_Behaviour)
+		if !spawn_ok {
+			fmt.println("Failed to spawn burst sender")
+			os.exit(1)
+		}
+	}
+
+	for _ in 0 ..< sender_count {
+		sync.sema_wait(&done_sema)
+	}
+
+	if node_id, node_ok := actod.get_node_by_name(target_node); node_ok {
+		if pool := actod.get_connection_pool(node_id); pool != nil {
+			fmt.printf("[burst] active rings: %d\n", actod.pool_active_count(pool))
+		}
+	}
 
 	wait_time := max(1, message_count / 1000)
 	time.sleep(time.Duration(wait_time) * time.Second)

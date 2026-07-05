@@ -13,6 +13,7 @@ import "core:time"
 
 WIRE_PROTOCOL_VERSION :: 2
 HANDSHAKE_TIMEOUT_SECS :: 5
+HANDSHAKE_TIMEOUT :: HANDSHAKE_TIMEOUT_SECS * time.Second
 DUPLICATE_TAKEOVER_TIMEOUT :: 5 * time.Second
 
 CTRL_MSG_HEARTBEAT :: 2
@@ -385,11 +386,12 @@ handshake_send_ctrl :: proc(sock: net.TCP_Socket, ctrl_body: []byte) -> bool {
 handshake_recv_ctrl :: proc(
 	sock: net.TCP_Socket,
 	expected_type: u8,
+	deadline: time.Time,
 ) -> (
 	raw: []byte,
 	payload: []byte,
 ) {
-	raw = tcp_recv_framed_message(sock)
+	raw = tcp_recv_framed_message(sock, deadline)
 	if raw == nil {
 		return nil, nil
 	}
@@ -412,6 +414,7 @@ run_noise_handshake :: proc(
 	my_hello: []byte,
 	peer_hello: []byte,
 	keys: ^Noise_Transport,
+	deadline: time.Time,
 ) -> bool {
 	psk := derive_cluster_psk(data.auth_password)
 
@@ -439,7 +442,7 @@ run_noise_handshake :: proc(
 			return false
 		}
 
-		raw2, payload2 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_2)
+		raw2, payload2 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_2, deadline)
 		if raw2 == nil {
 			log.warn("Did not receive noise response from peer")
 			return false
@@ -455,7 +458,7 @@ run_noise_handshake :: proc(
 			return false
 		}
 	} else {
-		raw1, payload1 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_1)
+		raw1, payload1 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_1, deadline)
 		if raw1 == nil {
 			log.warn("Did not receive noise initiation from peer")
 			return false
@@ -495,6 +498,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	sock := data.tcp_socket
 	net.set_blocking(sock, true)
 	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
+	deadline := time.time_add(time.now(), HANDSHAKE_TIMEOUT)
 
 	data.my_join_token = generate_nonce()
 	for data.my_join_token == 0 {
@@ -507,7 +511,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	peer_raw: []byte
 	peer_payload: []byte
 	if data.is_incoming {
-		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO)
+		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO, deadline)
 		if peer_raw == nil {
 			log.warn("Failed to read HELLO from incoming connection")
 			return .Failed
@@ -520,7 +524,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 		if !handshake_send_ctrl(sock, my_hello) {
 			return .Failed
 		}
-		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO)
+		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO, deadline)
 		if peer_raw == nil {
 			log.warnf("Failed to read HELLO from node %d", data.node_id)
 			return .Failed
@@ -561,12 +565,12 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 			log.warn("Unexpected pool-join flag in HELLO response")
 			return .Failed
 		}
-		return handle_incoming_pool_join(data, my_hello, peer_payload, info)
+		return handle_incoming_pool_join(data, my_hello, peer_payload, info, deadline)
 	}
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !run_noise_handshake(data, sock, !data.is_incoming, my_hello, peer_payload, &keys) {
+		if !run_noise_handshake(data, sock, !data.is_incoming, my_hello, peer_payload, &keys, deadline) {
 			return .Failed
 		}
 	}
@@ -644,12 +648,13 @@ handle_incoming_pool_join :: proc(
 	my_hello: []byte,
 	peer_hello: []byte,
 	info: Hello_Info,
+	deadline: time.Time,
 ) -> Establish_Result {
 	sock := data.tcp_socket
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !run_noise_handshake(data, sock, false, my_hello, peer_hello, &keys) {
+		if !run_noise_handshake(data, sock, false, my_hello, peer_hello, &keys, deadline) {
 			return .Failed
 		}
 	}
@@ -706,6 +711,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	net.set_blocking(sock, true)
 	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
+	deadline := time.time_add(time.now(), HANDSHAKE_TIMEOUT)
 
 	ok := false
 	defer if !ok do net.close(sock)
@@ -716,7 +722,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	if !handshake_send_ctrl(sock, my_hello) {
 		return false
 	}
-	peer_raw, peer_payload := handshake_recv_ctrl(sock, CTRL_MSG_HELLO)
+	peer_raw, peer_payload := handshake_recv_ctrl(sock, CTRL_MSG_HELLO, deadline)
 	if peer_raw == nil {
 		log.warnf("Pool scale-up: no HELLO reply from node %d", data.node_id)
 		return false
@@ -734,7 +740,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !run_noise_handshake(data, sock, true, my_hello, peer_payload, &keys) {
+		if !run_noise_handshake(data, sock, true, my_hello, peer_payload, &keys, deadline) {
 			return false
 		}
 	}

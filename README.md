@@ -108,6 +108,12 @@ act.make_actor_config(
 **Distributed actors.** Remote and local sends use the same API. PIDs encode the node ID. `send_message` routes transparently. Actor lifecycle events gossip across the mesh so every node maintains a proxy registry.
 
 ```odin
+// Every node must register each message type it sends or receives.
+@(init)
+register_types :: proc "contextless" () {
+    act.register_message_type(Work_Item)
+}
+
 // Node A
 act.node_init("nodeA", act.make_node_config(
     network = act.make_network_config(port = 5000),
@@ -118,6 +124,8 @@ act.register_spawn_func("worker", spawn_worker)
 remote_pid, ok := act.spawn_remote("worker", "w1", "nodeA")
 act.send_message(remote_pid, Work_Item{})
 ```
+
+`send_message` returns `.OK` once the message is accepted into the target node's send buffer, which can happen even while that node is disconnected (it buffers and delivers on reconnect). `.OK` does not mean "delivered" or "peer reachable." See [Networking](docs/10_network.md).
 
 **Priority mailboxes.** Three per-actor mailboxes (high, normal, low) plus a dedicated system mailbox processed first. Send at priority with the optional `priority` argument to `send_message` (`.HIGH` / `.NORMAL` / `.LOW`).
 
@@ -203,7 +211,5 @@ sender, _   := act.spawn("sender", Sender{}, sender_behaviour,
 ---
 
 ## TODO
-- TLS encryption for node-to-node communication
 - Cross-node topics
-- UDP Support
 - Cross-node config changes (system msgs)

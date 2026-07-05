@@ -71,6 +71,14 @@ init_udp :: proc() -> bool {
 		return true
 	}
 
+	if !SYSTEM_CONFIG.network.enable_encryption {
+		log.warnf(
+			"UDP lane on port %d disabled: enable_encryption is required (plaintext UDP is unauthenticated); send_unreliable will use TCP",
+			port,
+		)
+		return true
+	}
+
 	recv_sock, recv_err := net.make_bound_udp_socket(net.IP4_Any, port)
 	if recv_err != nil {
 		log.errorf("Failed to bind UDP port %d: %v", port, recv_err)

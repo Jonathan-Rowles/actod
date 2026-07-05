@@ -26,8 +26,10 @@ act.register_spawn_func("worker", spawn_worker)
 act.node_init("nodeB", opts = act.make_node_config(
     network = act.make_network_config(port = 5001, auth_password = "secret"),
 ))
-_, _ = act.register_node("nodeA", net.Endpoint{address = ..., port = 5000}, .TCP)
+_, _ = act.register_node("nodeA", net.Endpoint{address = ..., port = 5000})
 ```
+
+> **Note:** the current `register_node` still takes a trailing `transport: Transport_Strategy` argument (pass `.TCP_Custom_Protocol`). That argument is slated for removal, so treat `register_node(name, address)` as the stable shape and don't build code around the transport value.
 
 ## Configuration
 
@@ -35,19 +37,62 @@ _, _ = act.register_node("nodeA", net.Endpoint{address = ..., port = 5000}, .TCP
 act.make_network_config(
     port                    = 0,             // 0 = networking disabled
     auth_password           = "",            // empty = no auth
+    enable_encryption       = false,         // Noise NNpsk0 over the TCP link
+    udp_port                = 0,             // 0 = no UDP lane
+    udp_max_datagram        = 1400,          // requested cap (see UDP Lane)
     heartbeat_interval      = 30 * time.Second,
     heartbeat_timeout       = 90 * time.Second,
     reconnect_initial_delay = 2 * time.Second,
     reconnect_retry_delay   = 3 * time.Second,
-    connection_ring         = act.make_connection_ring_config(
-        send_slot_count    = 16,             // ring buffer slots (power-of-2)
-        send_slot_size     = 64 * 1024,      // 64KB per slot
-        recv_buffer_size   = 512 * 1024,     // 512KB receive buffer
-        tcp_nodelay        = true,           // disable Nagle
-        max_pool_rings     = 8,              // contention scaling
-    ),
 )
 ```
+
+`connection_ring` is a `Connection_Ring_Config` field for expert tuning of the per-node send ring (slot counts, buffer sizes, Nagle). It has working defaults; leave it unset unless you have a measured reason to change it. There is no builder for it, populate the struct directly if needed.
+
+## Encryption
+
+Set `enable_encryption = true` with a shared `auth_password` to encrypt every node-to-node TCP link. The link is secured with a Noise `NNpsk0` handshake (`Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s`); the password is the cluster key, derived into the pre-shared key.
+
+```odin
+act.make_network_config(
+    port              = 5000,
+    enable_encryption = true,
+    auth_password     = "shared-cluster-secret",
+)
+```
+
+Rules:
+
+- **Both nodes must agree.** Both ends must set `enable_encryption` and the *same* `auth_password`. If one side is encrypted and the other is not, the HELLO exchange reports an encryption-mode mismatch and the connection is refused. If both are encrypted but the passwords differ, the Noise handshake fails. Either way the connection never reaches `Ready`, so no messages flow.
+- **A mismatch shows up in the logs** as a failed handshake ("Encryption mode mismatch..." or "Noise handshake failed (wrong cluster password?)").
+- **A password is required with encryption.** `enable_encryption` needs a non-empty `auth_password` (or the `ACTOD_AUTH_PASSWORD` env var); an empty password would derive a fixed, world-known key, so `node_init` rejects that combination at startup.
+
+Without `enable_encryption`, a non-empty `auth_password` still gives you challenge-response authentication on the link (peers prove they know the password), but the traffic itself is sent in the clear.
+
+## UDP Lane
+
+Setting `udp_port` opens a node-wide UDP socket alongside the TCP listener. Once it is enabled, `send_unreliable(pid, msg)` delivers over UDP: **at-most-once, unordered, and silently lossy**. Use it only for data where dropping a message is acceptable (telemetry, position updates, and similar).
+
+```odin
+act.node_init("nodeA", opts = act.make_node_config(
+    network = act.make_network_config(
+        port              = 5000,
+        udp_port          = 6000,
+        enable_encryption = true,
+        auth_password     = "shared-cluster-secret",
+    ),
+))
+
+// elsewhere, from within an actor
+act.send_unreliable(remote_pid, Telemetry{...})
+```
+
+`send_unreliable` transparently falls back to the reliable TCP path when UDP cannot be used: for local PIDs, for messages too large for a single datagram, or for peers that have no UDP lane. A UDP send that is attempted but lost in the network is *not* retried and reports `.OK`.
+
+Notes:
+
+- **Small size cap.** The effective per-message size limit is about 2 KB (`UDP_FRAME_BUFFER` in `network_udp.odin`), regardless of the `udp_max_datagram` you request. Larger messages fall back to TCP.
+- **Pair it with encryption.** UDP datagrams are authenticated and encrypted using keys established during the (encrypted) TCP handshake. Plaintext UDP (UDP lane on, encryption off) is unauthenticated and is not a recommended mode; run the UDP lane together with `enable_encryption`.
 
 ## Sending to Remote Actors
 
@@ -60,6 +105,8 @@ act.send_message_name("worker@nodeA", MyMessage{data = 42})
 ```
 
 The PID encodes the node ID in the upper 16 bits. `send_message` checks `is_local_pid(to)` and routes to the connection ring automatically.
+
+**`.OK` means buffered, not delivered.** For a remote send, `send_message` returns `.OK` as soon as the message is accepted into that node's per-node send buffer. The buffer keeps filling even while the peer is disconnected, and its contents are flushed when the connection (re)establishes. So `.OK` does *not* mean the message was delivered, or even that the peer is currently reachable. There is no "is this node connected?" helper yet; design for messages that may sit buffered until a peer comes back. A remote send only returns an error (for example `.NODE_DISCONNECTED` or `.NETWORK_RING_FULL`) when it cannot even be buffered.
 
 **Important:** Remote message types must be identical across nodes, same struct, same package, same registration. See [Message Registration: Cross-Node Messages](03_message-registration.md#cross-node-messages).
 
@@ -142,7 +189,8 @@ Subscription state is synced between nodes. Each node tracks remote subscriber c
 
 ```odin
 // Node management
-register_node :: proc(name: string, address: net.Endpoint, transport: Transport_Strategy) -> (Node_ID, bool)
+// The trailing transport argument is being removed; treat register_node(name, address) as stable.
+register_node :: proc(name: string, address: net.Endpoint) -> (Node_ID, bool)
 get_node_by_name :: proc(name: string) -> (Node_ID, bool)
 get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool)
 unregister_node :: proc(node_id: Node_ID)
@@ -159,6 +207,7 @@ spawn_remote :: proc(
 
 // Transparent messaging
 send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error // routes automatically
+send_unreliable :: proc(to: PID, content: $T) -> Send_Error // UDP lane, falls back to TCP
 send_message_name :: proc(to: string, content: $T) -> Send_Error // "actor@node" format
 send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Error
 
@@ -167,17 +216,6 @@ get_local_node_name :: proc() -> string
 get_local_node_pid :: proc() -> PID
 is_local_pid :: proc(pid: PID) -> bool
 get_node_id :: proc(pid: PID) -> Node_ID
-
-// Connection ring config builder
-make_connection_ring_config :: proc(
-    send_slot_count: u32 = 16,
-    send_slot_size: u32 = 65536,
-    recv_buffer_size: u32 = 524288,
-    tcp_nodelay: bool = true,
-    max_pool_rings: u32 = 8,
-    scale_up_contention_threshold: u32 = 100,
-    scale_down_idle_seconds: u32 = 10,
-) -> Connection_Ring_Config
 ```
 
 ---

@@ -250,9 +250,9 @@ tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
 	return true
 }
 
-tcp_recv_framed_message :: proc(sock: net.TCP_Socket) -> []byte {
+tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []byte {
 	size_buf: [4]byte
-	if !tcp_recv_exactly(sock, size_buf[:]) {
+	if !tcp_recv_exactly(sock, size_buf[:], deadline) {
 		return nil
 	}
 
@@ -262,14 +262,17 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket) -> []byte {
 	}
 
 	msg := make([]byte, msg_size, actor_system_allocator)
-	if !tcp_recv_exactly(sock, msg) {
+	if !tcp_recv_exactly(sock, msg, deadline) {
 		delete(msg, actor_system_allocator)
 		return nil
 	}
 	return msg
 }
 
-tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte) -> bool {
+// deadline bounds the whole read, not each recv: SO_RCVTIMEO alone lets a peer
+// dribble one byte per timeout window forever, so a total wall-clock deadline
+// is required to defeat slowloris-style handshake stalls.
+tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time) -> bool {
 	total := 0
 	for total < len(buf) {
 		n, err := net.recv_tcp(sock, buf[total:])
@@ -277,6 +280,9 @@ tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte) -> bool {
 			return false
 		}
 		total += n
+		if total < len(buf) && time.diff(deadline, time.now()) > 0 {
+			return false
+		}
 	}
 	return true
 }

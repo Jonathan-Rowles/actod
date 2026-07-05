@@ -206,6 +206,12 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG) {
 
 	SYSTEM_CONFIG = opts
 
+	if opts.network.enable_encryption && get_auth_password() == "" {
+		log.panicf(
+			"enable_encryption requires a non-empty auth_password (or ACTOD_AUTH_PASSWORD env var); empty password derives a globally-shared key",
+		)
+	}
+
 	NODE.started = true
 	NODE.shutting_down = false
 	if NODE.node_name_to_id == nil {

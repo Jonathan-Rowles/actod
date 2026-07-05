@@ -124,6 +124,40 @@ test_distributed_communication :: proc(t: ^testing.T) {
 	_, _ = os.process_wait(remote_process)
 }
 
+test_distributed_wrong_password_rejected :: proc(t: ^testing.T) {
+	received := sync.Sema{}
+	receiver_data := Distributed_Receiver_Data {
+		expected_count = 1,
+		done           = &received,
+	}
+	_, ok := actod.spawn("dist_receiver", receiver_data, Distributed_Receiver_Behaviour)
+	testing.expect(t, ok, "Failed to spawn receiver actor")
+
+	node2_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=send_once",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"TARGET_ACTOR=dist_receiver",
+				"AUTH_PASSWORD=the_wrong_password",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(node2_desc)
+	if remote_err != nil {
+		panic("failed to start node2")
+	}
+
+	delivered := sync.sema_wait_with_timeout(&received, 2 * time.Second)
+	testing.expect(t, !delivered, "Message from a wrong-password peer must be rejected")
+
+	_ = os.process_kill(remote_process)
+	_, _ = os.process_wait(remote_process)
+}
+
 test_distributed_network_message_routing :: proc(t: ^testing.T) {
 	Origin_Data :: struct {
 		received_back: bool,

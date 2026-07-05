@@ -2,10 +2,13 @@ package actod
 
 import "core:crypto"
 import "core:crypto/aead"
+import "core:crypto/argon2id"
 import "core:crypto/hash"
 import "core:crypto/hkdf"
 import "core:crypto/noise"
 import "core:encoding/endian"
+import "core:log"
+import "core:sync"
 
 NOISE_PROTOCOL_NAME :: "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s"
 
@@ -17,10 +20,47 @@ MAX_ENVELOPE_PLAINTEXT :: noise.MAX_PACKET_SIZE - noise.TAG_SIZE
 Noise_Transport :: noise.Cipher_States
 Noise_Handshake :: noise.Handshake_State
 
+CLUSTER_PSK_SALT :: "actod-cluster-psk-v2"
+CLUSTER_PSK_ARGON2_MEMORY_KIB :: 65536
+CLUSTER_PSK_ARGON2_PASSES :: 3
+CLUSTER_PSK_ARGON2_PARALLELISM :: 1
+
+@(private)
+g_cluster_psk: [CLUSTER_PSK_SIZE]byte
+@(private)
+g_cluster_psk_key: [32]byte
+@(private)
+g_cluster_psk_set: bool
+@(private)
+g_cluster_psk_mutex: sync.Mutex
+
 derive_cluster_psk :: proc(password: string) -> [CLUSTER_PSK_SIZE]byte {
-	psk: [CLUSTER_PSK_SIZE]byte
-	hash.hash_string_to_buffer(.SHA256, password, psk[:])
-	return psk
+	cache_key: [32]byte
+	hash.hash_string_to_buffer(.SHA256, password, cache_key[:])
+
+	sync.mutex_lock(&g_cluster_psk_mutex)
+	defer sync.mutex_unlock(&g_cluster_psk_mutex)
+
+	if !g_cluster_psk_set || g_cluster_psk_key != cache_key {
+		params := argon2id.Parameters {
+			memory_size = CLUSTER_PSK_ARGON2_MEMORY_KIB,
+			passes      = CLUSTER_PSK_ARGON2_PASSES,
+			parallelism = CLUSTER_PSK_ARGON2_PARALLELISM,
+		}
+		err := argon2id.derive(
+			&params,
+			transmute([]byte)password,
+			transmute([]byte)string(CLUSTER_PSK_SALT),
+			g_cluster_psk[:],
+		)
+		if err != nil {
+			log.errorf("Failed to derive cluster PSK: %v", err)
+		}
+		g_cluster_psk_key = cache_key
+		g_cluster_psk_set = true
+	}
+
+	return g_cluster_psk
 }
 
 noise_handshake_begin :: proc(

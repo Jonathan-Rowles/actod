@@ -128,66 +128,39 @@ test_parse_network_header_invalid :: proc(t: ^testing.T) {
 
 @(test)
 test_control_message_handshake_format :: proc(t: ^testing.T) {
-	// [type:u8][node_id:u16][name_len:u16][name][version:u32][token_len:u16][token][nonce:u64]
 	node_name := "TestNode"
-	auth_token := "secret123"
-	node_id: Node_ID = 42
-	version: u32 = 1
+	version: u32 = WIRE_PROTOCOL_VERSION
+	flags: u8 = HELLO_FLAG_ENCRYPTED | HELLO_FLAG_POOL_JOIN
+	listen_port: u16 = 4242
+	udp_port: u16 = 4243
 	nonce: u64 = 0x123456789ABCDEF0
+	join_token: u64 = 0x0FEDCBA987654321
 
-	name_bytes := transmute([]byte)node_name
-	token_bytes := transmute([]byte)auth_token
-	total := 1 + 2 + 2 + len(name_bytes) + 4 + 2 + len(token_bytes) + 8
-
-	payload := make([]byte, total)
+	payload := make([]byte, 1 + 4 + 1 + 2 + 2 + (2 + len(node_name)) + 8 + 8)
 	defer delete(payload)
 
-	offset := 0
-	payload[offset] = CTRL_MSG_HELLO
-	offset += 1
-	endian.put_u16(payload[offset:], .Little, u16(node_id))
-	offset += 2
-	endian.put_u16(payload[offset:], .Little, u16(len(name_bytes)))
-	offset += 2
-	copy(payload[offset:], name_bytes)
-	offset += len(name_bytes)
-	endian.put_u32(payload[offset:], .Little, version)
-	offset += 4
-	endian.put_u16(payload[offset:], .Little, u16(len(token_bytes)))
-	offset += 2
-	copy(payload[offset:], token_bytes)
-	offset += len(token_bytes)
-	endian.put_u64(payload[offset:], .Little, nonce)
+	w := Ctrl_Writer {
+		buf = payload,
+	}
+	ctrl_put_u8(&w, CTRL_MSG_HELLO)
+	ctrl_put_u32(&w, version)
+	ctrl_put_u8(&w, flags)
+	ctrl_put_u16(&w, listen_port)
+	ctrl_put_u16(&w, udp_port)
+	ctrl_put_str(&w, node_name)
+	ctrl_put_u64(&w, nonce)
+	ctrl_put_u64(&w, join_token)
 
-	testing.expect(t, payload[0] == CTRL_MSG_HELLO, "Message type should be handshake")
-
-	parse_offset := 1
-	parsed_node_id := Node_ID(endian.unchecked_get_u16le(payload[parse_offset:]))
-	parse_offset += 2
-	testing.expect(t, parsed_node_id == node_id, "Node ID mismatch")
-
-	parsed_name_len := int(endian.unchecked_get_u16le(payload[parse_offset:]))
-	parse_offset += 2
-	testing.expect(t, parsed_name_len == len(node_name), "Name length mismatch")
-
-	parsed_name := string(payload[parse_offset:parse_offset + parsed_name_len])
-	parse_offset += parsed_name_len
-	testing.expect(t, parsed_name == node_name, "Node name mismatch")
-
-	parsed_version := endian.unchecked_get_u32le(payload[parse_offset:])
-	parse_offset += 4
-	testing.expect(t, parsed_version == version, "Version mismatch")
-
-	parsed_token_len := int(endian.unchecked_get_u16le(payload[parse_offset:]))
-	parse_offset += 2
-	testing.expect(t, parsed_token_len == len(auth_token), "Token length mismatch")
-
-	parsed_token := string(payload[parse_offset:parse_offset + parsed_token_len])
-	parse_offset += parsed_token_len
-	testing.expect(t, parsed_token == auth_token, "Auth token mismatch")
-
-	parsed_nonce := endian.unchecked_get_u64le(payload[parse_offset:])
-	testing.expect(t, parsed_nonce == nonce, "Nonce mismatch")
+	info, ok := parse_hello(payload[:w.pos])
+	testing.expect(t, ok, "parse_hello should succeed")
+	testing.expect(t, info.version == version, "Version mismatch")
+	testing.expect(t, info.node_name == node_name, "Node name mismatch")
+	testing.expect(t, info.listen_port == listen_port, "Listen port mismatch")
+	testing.expect(t, info.udp_port == udp_port, "UDP port mismatch")
+	testing.expect(t, info.nonce == nonce, "Nonce mismatch")
+	testing.expect(t, info.join_token == join_token, "Join token mismatch")
+	testing.expect(t, info.encrypted, "Encrypted flag mismatch")
+	testing.expect(t, info.pool_join, "Pool-join flag mismatch")
 }
 
 @(test)

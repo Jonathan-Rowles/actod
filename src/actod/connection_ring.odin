@@ -516,6 +516,20 @@ batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	return true
 }
 
+batch_append_message_retry :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
+	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
+		if batch_append_message(ring, msg_data) {
+			return true
+		}
+		if retry < RING_SEND_SPIN_RETRIES {
+			intrinsics.cpu_relax()
+		} else {
+			time.sleep(1 * time.Microsecond)
+		}
+	}
+	return false
+}
+
 @(private)
 batch_reserve :: proc(
 	ring: ^Connection_Ring,
@@ -753,6 +767,34 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	if sync.atomic_load(&ring.state) == .Ready {
 		submit_nbio_recv(ring)
 	}
+}
+
+@(private)
+g_nbio_probe_mutex: sync.Mutex
+@(private)
+g_nbio_probed: bool
+@(private)
+g_nbio_available: bool
+
+nbio_available :: proc() -> bool {
+	sync.mutex_lock(&g_nbio_probe_mutex)
+	defer sync.mutex_unlock(&g_nbio_probe_mutex)
+
+	if !g_nbio_probed {
+		g_nbio_probed = true
+		if err := nbio.acquire_thread_event_loop(); err != nil {
+			log.errorf(
+				"Async IO backend (nbio/io_uring) unavailable on this host: %v. actod networking requires io_uring support (recent Linux kernel); remote messaging is disabled. Set network.port = 0 for a local-only node, or run on a host with io_uring.",
+				err,
+			)
+			g_nbio_available = false
+		} else {
+			nbio.release_thread_event_loop()
+			g_nbio_available = true
+		}
+	}
+
+	return g_nbio_available
 }
 
 nbio_io_loop :: proc(t: ^thread.Thread) {

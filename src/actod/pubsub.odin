@@ -197,15 +197,9 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 
 	p_flags := priority_to_flags(.NORMAL)
 
-	ring := get_connection_ring(node_id)
+	ring := ensure_ring_for_node(node_id)
 	if ring == nil {
-		if get_or_create_connection(node_id) == 0 {
-			return
-		}
-		ring = get_connection_ring(node_id)
-		if ring == nil {
-			return
-		}
+		return
 	}
 
 	buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
@@ -219,7 +213,9 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 		"",
 	)
 	if msg_len > 0 {
-		batch_append_message(ring, buf[:msg_len])
+		if !batch_append_message_retry(ring, buf[:msg_len]) {
+			log.warnf("Broadcast to node %d dropped, ring full", node_id)
+		}
 	}
 }
 

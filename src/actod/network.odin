@@ -21,6 +21,14 @@ generate_nonce :: proc() -> u64 {
 	return nonce
 }
 
+generate_nonzero_nonce :: proc() -> u64 {
+	nonce := generate_nonce()
+	for nonce == 0 {
+		nonce = generate_nonce()
+	}
+	return nonce
+}
+
 set_tcp_nodelay :: proc(sock: net.TCP_Socket, enabled: bool = true) -> bool {
 	val: i32 = enabled ? 1 : 0
 	result := platform_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, size_of(i32))
@@ -90,6 +98,10 @@ init_network :: proc(local_node_id: Node_ID, node_name: string) {
 
 
 	if SYSTEM_CONFIG.network.port == 0 {
+		return
+	}
+
+	if !nbio_available() {
 		return
 	}
 
@@ -391,6 +403,10 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		return 0
 	}
 
+	if !nbio_available() {
+		return 0
+	}
+
 	node_info, info_ok := get_node_info(node_id)
 	if !info_ok {
 		return 0
@@ -581,7 +597,7 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 		return
 	}
 
-	if !batch_append_message(ring, buf[:msg_len]) {
+	if !batch_append_message_retry(ring, buf[:msg_len]) {
 		log.warnf("Failed to append lifecycle message to ring for node %d", ring.node_id)
 	}
 }
@@ -675,14 +691,7 @@ spawn_remote :: proc(
 		actor_name           = actor_name,
 	}
 
-	ring := get_connection_ring(node_id)
-	if ring == nil {
-		if get_or_create_connection(node_id) == 0 {
-			sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
-			return 0, false
-		}
-		ring = get_connection_ring(node_id)
-	}
+	ring := ensure_ring_for_node(node_id)
 	if ring == nil {
 		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		return 0, false

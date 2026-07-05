@@ -98,6 +98,13 @@ ALL_TESTS :: []Test_Entry {
 		is_networked = true,
 	},
 	{
+		name = "test_distributed_wrong_password_rejected",
+		test_proc = test_distributed_wrong_password_rejected,
+		port = 17240,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
 		name = "test_distributed_network_message_routing",
 		test_proc = test_distributed_network_message_routing,
 		port = 17010,

@@ -23,6 +23,7 @@ CTRL_MSG_HELLO :: 6
 CTRL_MSG_NOISE_1 :: 7
 CTRL_MSG_NOISE_2 :: 8
 CTRL_MSG_UDP_INFO :: 9
+CTRL_MSG_AUTH :: 10
 
 HELLO_FLAG_ENCRYPTED: u8 : 1 << 0
 HELLO_FLAG_POOL_JOIN: u8 : 1 << 1
@@ -111,19 +112,20 @@ connection_actor_init :: proc(data: ^Connection_Actor_Data) {
 connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 	is_active := is_active_connection(data)
 
-	if data.ring != nil {
-		sync.atomic_store(&data.ring.io_stop, 1)
-	}
 	if data.tcp_socket != 0 {
 		net.close(data.tcp_socket)
 		data.tcp_socket = 0
 	}
-	stop_connection_io(data)
 
 	cancel_timer(data.heartbeat_timer_id)
 	cancel_timer(data.reconnect_timer_id)
 
 	if data.node_id != 0 && is_active {
+		if data.ring != nil {
+			sync.atomic_store(&data.ring.io_stop, 1)
+		}
+		stop_connection_io(data)
+
 		udp_clear_peer(data.node_id)
 		if data.ring != nil {
 			teardown_pool_rings(data)
@@ -295,7 +297,6 @@ Hello_Info :: struct {
 	listen_port: u16,
 	udp_port:    u16,
 	node_name:   string,
-	auth_token:  string,
 	nonce:       u64,
 	join_token:  u64,
 }
@@ -309,14 +310,6 @@ build_hello_body :: proc(
 	join_token: u64,
 	pool_join: bool,
 ) -> []byte {
-	auth_token := ""
-	if !data.encrypted && data.auth_password != "" {
-		auth_input := fmt.tprintf("%s:%s:%d", data.auth_password, NODE.name, nonce)
-		digest := hash.hash_string(.SHA256, auth_input)
-		auth_token = fmt.tprintf("%x", digest)
-		delete(digest)
-	}
-
 	flags: u8 = 0
 	if data.encrypted {
 		flags |= HELLO_FLAG_ENCRYPTED
@@ -325,7 +318,7 @@ build_hello_body :: proc(
 		flags |= HELLO_FLAG_POOL_JOIN
 	}
 
-	total := 1 + 4 + 1 + 2 + 2 + (2 + len(NODE.name)) + (2 + len(auth_token)) + 8 + 8
+	total := 1 + 4 + 1 + 2 + 2 + (2 + len(NODE.name)) + 8 + 8
 	body := make([]byte, total)
 	w := Ctrl_Writer {
 		buf = body,
@@ -336,7 +329,6 @@ build_hello_body :: proc(
 	ctrl_put_u16(&w, u16(SYSTEM_CONFIG.network.port))
 	ctrl_put_u16(&w, u16(SYSTEM_CONFIG.network.udp_port))
 	ctrl_put_str(&w, NODE.name)
-	ctrl_put_str(&w, auth_token)
 	ctrl_put_u64(&w, nonce)
 	ctrl_put_u64(&w, join_token)
 	return body
@@ -354,7 +346,6 @@ parse_hello :: proc(payload: []byte) -> (info: Hello_Info, ok: bool) {
 	info.listen_port = ctrl_get_u16(&r)
 	info.udp_port = ctrl_get_u16(&r)
 	info.node_name = ctrl_get_str(&r)
-	info.auth_token = ctrl_get_str(&r)
 	info.nonce = ctrl_get_u64(&r)
 	info.join_token = ctrl_get_u64(&r)
 	info.encrypted = flags & HELLO_FLAG_ENCRYPTED != 0
@@ -363,15 +354,61 @@ parse_hello :: proc(payload: []byte) -> (info: Hello_Info, ok: bool) {
 }
 
 @(private)
-verify_hello_auth :: proc(data: ^Connection_Actor_Data, info: Hello_Info) -> bool {
+compute_auth_proof :: proc(password, node_name: string, challenge: u64) -> string {
+	auth_input := fmt.tprintf("%s:%s:%d", password, node_name, challenge)
+	digest := hash.hash_string(.SHA256, auth_input)
+	proof := fmt.tprintf("%x", digest)
+	delete(digest)
+	return proof
+}
+
+@(private)
+perform_plaintext_auth :: proc(
+	data: ^Connection_Actor_Data,
+	sock: net.TCP_Socket,
+	my_nonce: u64,
+	info: Hello_Info,
+	deadline: time.Time,
+) -> bool {
 	if data.encrypted || data.auth_password == "" {
 		return true
 	}
-	auth_input := fmt.tprintf("%s:%s:%d", data.auth_password, info.node_name, info.nonce)
-	digest := hash.hash_string(.SHA256, auth_input)
-	expected := fmt.tprintf("%x", digest)
-	delete(digest)
-	return info.auth_token == expected
+
+	proof := compute_auth_proof(data.auth_password, NODE.name, info.nonce)
+	body := make([]byte, 1 + 2 + len(proof))
+	defer delete(body)
+	w := Ctrl_Writer {
+		buf = body,
+	}
+	ctrl_put_u8(&w, CTRL_MSG_AUTH)
+	ctrl_put_str(&w, proof)
+	if !handshake_send_ctrl(sock, body[:w.pos]) {
+		return false
+	}
+
+	raw, payload := handshake_recv_ctrl(sock, CTRL_MSG_AUTH, deadline)
+	if raw == nil {
+		log.errorf("Authentication failed from node %s (no proof)", info.node_name)
+		return false
+	}
+	defer delete(raw, actor_system_allocator)
+
+	r := Ctrl_Reader {
+		data = payload,
+		pos  = 1,
+		ok   = true,
+	}
+	peer_proof := ctrl_get_str(&r)
+	if !r.ok {
+		return false
+	}
+
+	expected := compute_auth_proof(data.auth_password, info.node_name, my_nonce)
+	if crypto.compare_constant_time(transmute([]byte)peer_proof, transmute([]byte)expected) != 1 {
+		log.errorf("Authentication failed from node %s", info.node_name)
+		return false
+	}
+	return true
 }
 
 @(private)
@@ -500,12 +537,9 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
 	deadline := time.time_add(time.now(), HANDSHAKE_TIMEOUT)
 
-	data.my_join_token = generate_nonce()
-	for data.my_join_token == 0 {
-		data.my_join_token = generate_nonce()
-	}
-
-	my_hello := build_hello_body(data, generate_nonce(), data.my_join_token, false)
+	data.my_join_token = generate_nonzero_nonce()
+	my_nonce := generate_nonce()
+	my_hello := build_hello_body(data, my_nonce, data.my_join_token, false)
 	defer delete(my_hello)
 
 	peer_raw: []byte
@@ -555,8 +589,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 		)
 		return .Failed
 	}
-	if !verify_hello_auth(data, info) {
-		log.errorf("Authentication failed from node %s", info.node_name)
+	if !perform_plaintext_auth(data, sock, my_nonce, info, deadline) {
 		return .Failed
 	}
 
@@ -667,6 +700,11 @@ handle_incoming_pool_join :: proc(
 		return .Failed
 	}
 
+	if owner_ptr, owner_alive := get(&global_registry, owner_pid); !owner_alive || owner_ptr == nil {
+		log.warnf("Pool join from %s: owner connection gone", info.node_name)
+		return .Failed
+	}
+
 	keys_ptr: u64 = 0
 	if data.encrypted {
 		keys_box := new(Noise_Transport, get_system_allocator())
@@ -716,7 +754,8 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	ok := false
 	defer if !ok do net.close(sock)
 
-	my_hello := build_hello_body(data, generate_nonce(), data.peer_join_token, true)
+	my_nonce := generate_nonce()
+	my_hello := build_hello_body(data, my_nonce, data.peer_join_token, true)
 	defer delete(my_hello)
 
 	if !handshake_send_ctrl(sock, my_hello) {
@@ -733,8 +772,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	if !parsed || info.version != WIRE_PROTOCOL_VERSION || info.encrypted != data.encrypted {
 		return false
 	}
-	if !verify_hello_auth(data, info) {
-		log.errorf("Pool scale-up: authentication failed from node %s", info.node_name)
+	if !perform_plaintext_auth(data, sock, my_nonce, info, deadline) {
 		return false
 	}
 
@@ -1203,6 +1241,21 @@ ring_append_ctrl :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
 	return true
 }
 
+@(private)
+ring_append_ctrl_retry :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
+	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
+		if ring_append_ctrl(ring, ctrl_body) {
+			return true
+		}
+		if retry < RING_SEND_SPIN_RETRIES {
+			intrinsics.cpu_relax()
+		} else {
+			time.sleep(1 * time.Microsecond)
+		}
+	}
+	return false
+}
+
 send_heartbeat :: proc(data: ^Connection_Actor_Data) {
 	body: [17]byte
 	w := Ctrl_Writer {
@@ -1211,8 +1264,8 @@ send_heartbeat :: proc(data: ^Connection_Actor_Data) {
 	ctrl_put_u8(&w, CTRL_MSG_HEARTBEAT)
 	ctrl_put_u64(&w, u64(time.to_unix_nanoseconds(time.now())))
 	ctrl_put_u64(&w, 0)
-	if !ring_append_ctrl(data.ring, body[:]) {
-		log.debug("Heartbeat append failed, ring full")
+	if !ring_append_ctrl_retry(data.ring, body[:]) {
+		log.warnf("Heartbeat to node %d dropped, ring full", data.node_id)
 	}
 }
 
@@ -1253,7 +1306,7 @@ send_udp_info :: proc(data: ^Connection_Actor_Data) {
 		ctrl_put_bytes(&w, data.udp_seed[:])
 	}
 
-	if !ring_append_ctrl(data.ring, body[:w.pos]) {
+	if !ring_append_ctrl_retry(data.ring, body[:w.pos]) {
 		log.warn("Failed to send UDP lane info")
 	}
 }
@@ -1605,8 +1658,13 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 			continue
 		}
 
-		if batch_append_message(data.ring, buf[:msg_len]) {
+		if batch_append_message_retry(data.ring, buf[:msg_len]) {
 			sent += 1
+		} else {
+			log.warnf(
+				"Registry snapshot entry for node %s dropped, ring full",
+				data.node_name,
+			)
 		}
 	}
 
@@ -1647,8 +1705,10 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 		ctrl_put_u16(&w, u16(info.address.port))
 	}
 
-	if ring_append_ctrl(data.ring, ctrl_data) {
+	if ring_append_ctrl_retry(data.ring, ctrl_data) {
 		log.infof("Sent node directory with %d entries to node %s", entry_count, data.node_name)
+	} else {
+		log.warnf("Failed to send node directory to node %s", data.node_name)
 	}
 }
 

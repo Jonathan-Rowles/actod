@@ -33,12 +33,13 @@ PID_Map :: struct($T: typeid, $HT: typeid) {
 @(private)
 PID_Entry :: struct($T: typeid, $HT: typeid) #align (CACHE_LINE_SIZE) {
 	sequence:    u32,
+	home_worker: i32,
 	pid:         HT,
 	name_hash:   u64,
 	remote_name: string,
 	data:        T,
-	_pad:        [CACHE_LINE_SIZE - size_of(
-		u32,
+	_pad:        [CACHE_LINE_SIZE - size_of(u32) - size_of(
+		i32,
 	) - size_of(HT) - size_of(u64) - size_of(string) - size_of(T)]byte,
 }
 
@@ -593,6 +594,52 @@ get_relaxed :: #force_inline proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, bool) #o
 	}
 
 	return entry.data, true
+}
+
+@(private)
+get_relaxed_loc :: #force_inline proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, i32, bool) {
+	handle, _ := unpack_pid(pid)
+
+	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Relaxed) {
+		return nil, 0, false
+	}
+
+	entry := &m.items[handle.idx]
+
+	seq := sync.atomic_load_explicit(&entry.sequence, .Relaxed)
+
+	if (seq & 1) == 0 {
+		return nil, 0, false
+	}
+
+	gen := u16(seq >> 1)
+	if gen != handle.gen {
+		return nil, 0, false
+	}
+
+	stored_pid := sync.atomic_load_explicit(&entry.pid, .Relaxed)
+	if stored_pid != pid {
+		return nil, 0, false
+	}
+
+	home_worker := sync.atomic_load_explicit(&entry.home_worker, .Relaxed)
+	return entry.data, home_worker, true
+}
+
+@(private)
+set_entry_home_worker :: proc(m: ^PID_Map($T, $HT), pid: HT, worker_idx: int) {
+	handle, _ := unpack_pid(pid)
+
+	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Relaxed) {
+		return
+	}
+
+	entry := &m.items[handle.idx]
+	if sync.atomic_load_explicit(&entry.pid, .Relaxed) != pid {
+		return
+	}
+
+	sync.atomic_store_explicit(&entry.home_worker, i32(worker_idx) + 1, .Release)
 }
 
 @(private)

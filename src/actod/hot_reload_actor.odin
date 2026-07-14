@@ -235,6 +235,7 @@ spawn_from_raw :: proc(
 			}
 		}
 		handle.home_worker = &worker_pool.workers[idx]
+		set_entry_home_worker(&global_registry, actor.pid, idx)
 		sync.atomic_store(&handle.in_ready_queue, true)
 		mpsc_push(&handle.home_worker.ready_queue, rawptr(handle))
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)

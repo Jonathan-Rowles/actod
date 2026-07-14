@@ -457,8 +457,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		}
 	}
 
-	cleanup_actor_arena(actor_ptr)
-	free(actor_ptr, actor_system_allocator)
+	reclaim_retire(actor_ptr)
+	reclaim_scan()
 
 	if pid == NODE.pid {
 		NODE.pid = 0
@@ -517,6 +517,8 @@ shutdown_node :: proc() {
 
 	delete(shutdown_deferred_frees)
 	shutdown_deferred_frees = {}
+
+	reclaim_drain_all()
 
 	destroy(&global_registry)
 
@@ -604,6 +606,7 @@ cleanup_node_actor :: proc() {
 }
 
 reset_node_state :: proc() {
+	reclaim_reset()
 	sync.atomic_store(&global_next_node_id, 2)
 	current_node_id = 1
 	NODE.started = false

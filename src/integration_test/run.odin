@@ -42,6 +42,11 @@ ALL_TESTS :: []Test_Entry {
 	},
 	{name = "test_registry_consistency", test_proc = test_registry_consistency},
 	{name = "test_worker_contention", test_proc = test_worker_contention, worker_count = 2},
+	{
+		name = "test_reclaim_churn_under_termination",
+		test_proc = test_reclaim_churn_under_termination,
+		worker_count = 4,
+	},
 
 	// Supervisor hierarchy tests
 	{name = "test_supervisor_child_lifecycle", test_proc = test_supervisor_child_lifecycle},

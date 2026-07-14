@@ -357,6 +357,7 @@ spawn :: proc(
 			}
 		}
 		handle.home_worker = &worker_pool.workers[idx]
+		set_entry_home_worker(&global_registry, pid, idx)
 		sync.atomic_store(&handle.in_ready_queue, true)
 		mpsc_push(&handle.home_worker.ready_queue, rawptr(handle))
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)
@@ -1240,11 +1241,16 @@ yield_and_retry_local :: #force_no_inline proc(actor: ^Actor(int), msg: Message,
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 	handle.wants_reschedule = true
 	coro.yield(co)
-	if actor.local_write - actor.local_read < LOCAL_MAILBOX_SIZE {
-		actor.local_buf[actor.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
-		actor.local_write += 1
-		if !sync.atomic_load_explicit(&actor.pool_handle.in_ready_queue, .Relaxed) {
-			wake_actor(actor)
+	fresh, ok := get_relaxed(&global_registry, to)
+	if !ok || fresh == nil {
+		return false
+	}
+	target := cast(^Actor(int))fresh
+	if target.local_write - target.local_read < LOCAL_MAILBOX_SIZE {
+		target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
+		target.local_write += 1
+		if !sync.atomic_load_explicit(&target.pool_handle.in_ready_queue, .Relaxed) {
+			wake_actor(target)
 		}
 		handle_set_message_stats(msg.from, to)
 		return true

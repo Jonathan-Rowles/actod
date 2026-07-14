@@ -183,6 +183,8 @@ worker_loop :: proc(worker: ^Worker) {
 
 		if worker.runnext != nil do continue
 
+		reclaim_scan()
+
 		sync.atomic_store_explicit(&worker.parked, true, .Relaxed)
 		sync.atomic_thread_fence(.Seq_Cst)
 		if worker.runnext == nil && mpsc_size(&worker.ready_queue) == 0 {

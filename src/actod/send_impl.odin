@@ -165,10 +165,26 @@ send_message_impl :: proc(
 		return send_remote_impl(to, data, info, priority)
 	}
 
-	actor_ptr := get_relaxed(&global_registry, to)
-	if actor_ptr == nil {
+	actor_ptr, home_worker, ok := get_relaxed_loc(&global_registry, to)
+	if !ok || actor_ptr == nil {
 		return .ACTOR_NOT_FOUND
 	}
+
+	if current_worker != nil && home_worker == i32(current_worker.id) + 1 {
+		return send_to_actor_impl(
+			to,
+			cast(^Actor(int))actor_ptr,
+			data,
+			size,
+			tid,
+			info,
+			priority,
+			class,
+		)
+	}
+
+	reclaim_pin()
+	defer reclaim_unpin()
 	return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, priority, class)
 }
 

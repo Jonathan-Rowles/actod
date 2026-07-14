@@ -822,6 +822,10 @@ register_node :: proc(
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
 
+	if NODE.node_name_to_id == nil {
+		NODE.node_name_to_id = make(map[string]Node_ID, get_system_allocator())
+	}
+
 	if existing_id, exists := NODE.node_name_to_id[name]; exists {
 		NODE.node_registry[existing_id].address = address
 		NODE.node_registry[existing_id].transport = transport

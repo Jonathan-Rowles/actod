@@ -16,7 +16,7 @@ g_network_test_mutex: sync.Mutex
 network_test_setup :: proc() {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	if NODE.node_name_to_id == nil {
-		NODE.node_name_to_id = make(map[string]Node_ID, actor_system_allocator)
+		NODE.node_name_to_id = make(map[string]Node_ID, get_system_allocator())
 	}
 	sync.rw_mutex_unlock(&NODE.node_registry_lock)
 }

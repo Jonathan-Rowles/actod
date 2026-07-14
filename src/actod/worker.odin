@@ -96,6 +96,9 @@ shutdown_worker_pool :: proc() {
 }
 
 wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
+	if handle.home_worker != current_worker {
+		sync.atomic_thread_fence(.Seq_Cst)
+	}
 	if sync.atomic_load_explicit(&handle.in_ready_queue, .Relaxed) do return
 	_, ok := sync.atomic_compare_exchange_strong(&handle.in_ready_queue, false, true)
 	if ok {
@@ -135,7 +138,7 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 		mpsc_push(&worker.ready_queue, rawptr(handle))
 	} else {
 		sync.atomic_store_explicit(&handle.in_ready_queue, false, .Release)
-		sync.atomic_thread_fence(.Acq_Rel)
+		sync.atomic_thread_fence(.Seq_Cst)
 		reschedule := has_pending_messages(handle)
 		if !reschedule {
 			if worker.runnext == nil && mpsc_size(&worker.ready_queue) == 0 {

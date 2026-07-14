@@ -23,7 +23,7 @@ jobs:
         uses: laytan/setup-odin@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          release: dev-2026-04
+          release: dev-2026-07
 
       - name: Print Odin version
         run: odin version

@@ -65,7 +65,7 @@ udp_max_frame_bytes :: proc() -> int {
 	return min(limit - overhead, UDP_FRAME_BUFFER)
 }
 
-init_udp :: proc() -> bool {
+init_udp :: proc(loc := #caller_location) -> bool {
 	port := SYSTEM_CONFIG.network.udp_port
 	if port <= 0 {
 		return true
@@ -73,21 +73,32 @@ init_udp :: proc() -> bool {
 
 	if !SYSTEM_CONFIG.network.enable_encryption {
 		log.warnf(
-			"UDP lane on port %d disabled: enable_encryption is required (plaintext UDP is unauthenticated); send_unreliable will use TCP",
+			"UDP lane on port %d disabled: enable_encryption is required (plaintext UDP is unauthenticated); set enable_encryption = true in make_network_config or send_unreliable will fall back to TCP",
 			port,
+			location = loc,
 		)
 		return true
 	}
 
 	recv_sock, recv_err := net.make_bound_udp_socket(net.IP4_Any, port)
 	if recv_err != nil {
-		log.errorf("Failed to bind UDP port %d: %v", port, recv_err)
+		log.errorf(
+			"Failed to bind UDP port %d: %v; another process may already hold it, change udp_port in make_network_config",
+			port,
+			recv_err,
+			location = loc,
+		)
 		return false
 	}
 
 	send_sock, send_err := net.make_unbound_udp_socket(.IP4)
 	if send_err != nil {
-		log.errorf("Failed to create UDP send socket: %v", send_err)
+		log.errorf(
+			"Failed to create the UDP send socket for port %d: %v; the UDP lane will be unavailable",
+			port,
+			send_err,
+			location = loc,
+		)
 		net.close(recv_sock)
 		return false
 	}
@@ -107,7 +118,11 @@ init_udp :: proc() -> bool {
 	t := thread.create(udp_recv_loop)
 	context.allocator = prev_allocator
 	if t == nil {
-		log.error("Failed to create UDP recv thread")
+		log.errorf(
+			"Failed to create the UDP recv thread for port %d; the UDP lane will be unavailable",
+			port,
+			location = loc,
+		)
 		free(ctx, get_system_allocator())
 		net.close(recv_sock)
 		net.close(send_sock)
@@ -255,6 +270,11 @@ udp_try_send :: proc(node_id: Node_ID, frame_with_size: []byte) -> bool {
 				out[UDP_HEADER_SEALED:],
 			)
 			if !sealed {
+				log.errorf(
+					"Failed to seal a %d byte UDP frame for node %d; falling back to TCP",
+					len(frame_with_size),
+					node_id,
+				)
 				return false
 			}
 			total = UDP_HEADER_SEALED + sealed_len

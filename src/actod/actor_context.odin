@@ -11,6 +11,50 @@ import "core:time"
 PANIC_MESSAGE_BUF_SIZE :: 512
 
 @(private)
+diagnostic_logger :: proc(current: log.Logger) -> log.Logger {
+	if current.procedure == nil || current.procedure == runtime.default_logger_proc {
+		return systemLogger
+	}
+	return current
+}
+
+@(private)
+panic_at :: proc(loc: runtime.Source_Code_Location, format: string, args: ..any) -> ! {
+	context.logger = diagnostic_logger(context.logger)
+	message := fmt.tprintf(format, ..args)
+	log.fatal(message, location = loc)
+	panic(message, loc)
+}
+
+@(private)
+config_origin :: proc(loc: runtime.Source_Code_Location) -> string {
+	if loc.file_path == "" {
+		return ""
+	}
+	return fmt.tprintf(" (config built at %s:%d)", loc.file_path, loc.line)
+}
+
+@(private)
+actor_origin :: proc(pid: PID) -> string {
+	actor_ptr, active := get(&global_registry, pid)
+	if !active || actor_ptr == nil {
+		return fmt.tprintf("PID %v (no longer registered)", pid)
+	}
+
+	actor := cast(^Actor(int))actor_ptr
+	if actor.spawn_loc.file_path == "" {
+		return fmt.tprintf("'%s' (PID %v)", actor.name, pid)
+	}
+	return fmt.tprintf(
+		"'%s' (PID %v, spawned at %s:%d)",
+		actor.name,
+		pid,
+		actor.spawn_loc.file_path,
+		actor.spawn_loc.line,
+	)
+}
+
+@(private)
 Actor_File_Logger :: struct {
 	file_logger: log.Logger,
 	file_handle: ^os.File,

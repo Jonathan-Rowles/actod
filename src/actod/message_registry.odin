@@ -53,8 +53,14 @@ cleanup_message_registry :: proc "contextless" () {
 	registry_destroy(&g_message_registry)
 }
 
-get_type_info_ptr :: proc(id: typeid) -> (^Message_Type_Info, bool) {
-	registry_ensure_init(&g_message_registry)
+get_type_info_ptr :: proc(
+	id: typeid,
+	loc := #caller_location,
+) -> (
+	^Message_Type_Info,
+	bool,
+) {
+	registry_ensure_init(&g_message_registry, loc)
 
 	for i in 0 ..< g_message_registry.count {
 		if g_message_registry.entries[i].value.type_id == id {
@@ -65,8 +71,14 @@ get_type_info_ptr :: proc(id: typeid) -> (^Message_Type_Info, bool) {
 	return nil, false
 }
 
-get_type_info_by_hash :: #force_inline proc(type_hash: u64) -> (^Message_Type_Info, bool) {
-	return registry_get_by_hash(&g_message_registry, type_hash)
+get_type_info_by_hash :: #force_inline proc(
+	type_hash: u64,
+	loc := #caller_location,
+) -> (
+	^Message_Type_Info,
+	bool,
+) {
+	return registry_get_by_hash(&g_message_registry, type_hash, loc)
 }
 
 get_active_union_variant :: #force_inline proc(
@@ -109,9 +121,9 @@ Temp_Variant_Info :: struct {
 	var_fields: [dynamic]Var_Field_Info,
 }
 
-register_message_type :: proc "contextless" ($T: typeid) {
+register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location) {
 	context = runtime.default_context()
-	registry_ensure_init(&g_message_registry)
+	registry_ensure_init(&g_message_registry, loc)
 
 	// Fast path: already registered?
 	for i in 0 ..< g_message_registry.count {
@@ -124,7 +136,11 @@ register_message_type :: proc "contextless" ($T: typeid) {
 
 	type_name := get_type_name(ti, allocator = g_message_registry.allocator)
 	if type_name == "" {
-		panic("could not find type name")
+		panic_at(
+			loc,
+			"register_message_type: could not derive a name for type %v, message types must be named types, not anonymous ones",
+			typeid_of(T),
+		)
 	}
 
 	allow_byte_slices := true
@@ -153,7 +169,8 @@ register_message_type :: proc "contextless" ($T: typeid) {
 		delete(temp_var_fields)
 		cleanup_temp_union_fields(temp_union_fields[:])
 		delete(temp_union_fields)
-		fmt.panicf(
+		panic_at(
+			loc,
 			"\n\nACTOR SAFETY ERROR: Message type '%v' contains unsafe field!\n" +
 			"  Unsafe field: %s\n" +
 			"  Use fixed-size arrays [N]T instead of slices []T.\n" +
@@ -273,10 +290,11 @@ register_message_type :: proc "contextless" ($T: typeid) {
 	info.name = type_name
 
 	when ODIN_DEBUG {
-		existing, found := get_type_info_by_hash(type_hash)
+		existing, found := get_type_info_by_hash(type_hash, loc)
 		if found && existing.type_id != T {
-			log.panicf(
-				"FATAL: Message type hash collision! '%v' and '%v' both hash to %x",
+			panic_at(
+				loc,
+				"message type hash collision: '%v' and '%v' both hash to %x. Rename one of them.",
 				existing.type_id,
 				typeid_of(T),
 				type_hash,
@@ -284,7 +302,7 @@ register_message_type :: proc "contextless" ($T: typeid) {
 		}
 	}
 
-	registry_register(&g_message_registry, type_name, info)
+	registry_register(&g_message_registry, type_name, info, loc)
 
 	delete(temp_var_fields)
 	cleanup_temp_union_fields(temp_union_fields[:])
@@ -300,24 +318,33 @@ cleanup_temp_union_fields :: proc(fields: []Temp_Union_Info) {
 	}
 }
 
-get_validated_message_info_ptr :: #force_inline proc($T: typeid) -> ^Message_Type_Info {
+get_validated_message_info_ptr :: #force_inline proc(
+	$T: typeid,
+	loc := #caller_location,
+) -> ^Message_Type_Info {
 	@(static) _cached: ^Message_Type_Info
 	@(static) _sentinel: Message_Type_Info
 
 	if _cached == nil {
-		ptr, ok := get_type_info_ptr(T)
+		ptr, ok := get_type_info_ptr(T, loc)
 		if !ok {
-			register_message_type(T)
-			ptr, _ = get_type_info_ptr(T)
+			register_message_type(T, loc)
+			ptr, _ = get_type_info_ptr(T, loc)
 			if ptr == nil {
 				log.warnf(
-					"message type not registered and registration failed (name collision?): %v",
+					"message type %v is not registered and registering it now failed, most likely a type name hash collision or a full message registry (cap %d)",
 					typeid_of(T),
+					MAX_MESSAGE_TYPES,
+					location = loc,
 				)
 				_cached = &_sentinel
 				return _cached
 			}
-			log.warnf("use @(init) and register you types ahead of time: %s", ptr.name)
+			log.warnf(
+				"message type %s was registered lazily on first use, register your types ahead of time with register_message_type in an @(init) proc",
+				ptr.name,
+				location = loc,
+			)
 		}
 		_cached = ptr
 	}

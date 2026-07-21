@@ -128,6 +128,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	thread:             ^thread.Thread,
 	restart_info:       Restart_Info,
 	termination_reason: Termination_Reason,
+	spawn_loc:          runtime.Source_Code_Location,
 
 	// keep unknown sizes at the bottom
 	children:           [dynamic]PID,
@@ -165,10 +166,12 @@ spawn :: proc(
 	behaviour: Actor_Behaviour(T),
 	opts := SYSTEM_CONFIG.actor_config,
 	parent_pid: PID = 0,
+	loc := #caller_location,
 ) -> (
 	PID,
 	bool,
 ) {
+	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {
 		if pid, ok := ti.intercept_spawn(name, T); ok {
 			return PID(pid), true
@@ -176,30 +179,44 @@ spawn :: proc(
 	}
 
 	if !NODE.started {
-		log.panic("Must call actor.INIT_NODE() first.")
+		panic_at(loc, "spawn('%s'): node_init() must be called before spawning any actor", name)
 	}
 
 	if behaviour.handle_message == nil {
-		log.panic("Actor_Behaviour.handle_message must not be nil")
+		panic_at(
+			loc,
+			"spawn('%s'): Actor_Behaviour(%v).handle_message must not be nil",
+			name,
+			typeid_of(T),
+		)
 	}
 
 	actor := new(Actor(T), actor_system_allocator)
 
 	if actor.state != .ZERO {
-		log.panic("reusing non zero memory")
+		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor(%v)", name, typeid_of(T))
 	}
 
 	arena_err := vmem.arena_init_static(&actor.arena)
-	ensure(arena_err == nil)
+	if arena_err != nil {
+		panic_at(loc, "spawn('%s'): failed to reserve actor arena: %v", name, arena_err)
+	}
 	actor.allocator = vmem.arena_allocator(&actor.arena)
 	context.allocator = actor.allocator
 
 	actor.name = strings.clone(name, context.allocator)
+	actor.spawn_loc = loc
 
 	when size_of(T) > 0 {
 		actor.data = new(T, actor.allocator)
 		if actor.data == nil {
-			log.errorf("Failed to allocate actor data for %s", name)
+			log.errorf(
+				"spawn('%s') failed: could not allocate %d B of actor data for %v",
+				name,
+				size_of(T),
+				typeid_of(T),
+				location = loc,
+			)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -208,7 +225,13 @@ spawn :: proc(
 	} else {
 		ptr, err := mem.alloc(1, align_of(T), actor.allocator)
 		if err != nil {
-			log.errorf("Failed to allocate actor data for %s: %v", name, err)
+			log.errorf(
+				"spawn('%s') failed: could not allocate actor data for %v: %v",
+				name,
+				typeid_of(T),
+				err,
+				location = loc,
+			)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -227,16 +250,26 @@ spawn :: proc(
 		}
 	}
 	if actor.opts.message_batch <= 0 {
-		log.panicf(
-			"Actor '%s' has message_batch=0, use make_actor_config() instead of raw Actor_Config{{}}",
+		panic_at(
+			loc,
+			"spawn('%s'): opts.message_batch is %d. Build the config with make_actor_config() rather than a raw Actor_Config{{}}%s",
 			name,
+			actor.opts.message_batch,
+			config_origin(actor.opts.loc),
 		)
 	}
 
 	if parent_pid > 0 {
 		_, ok := get(&global_registry, parent_pid)
 
-		if !ok do panic("provided parent pid does not exist")
+		if !ok {
+			panic_at(
+				loc,
+				"spawn('%s'): parent_pid %v is not a live actor (never spawned, or already terminated)",
+				name,
+				parent_pid,
+			)
+		}
 
 		actor.parent = parent_pid
 	}
@@ -246,8 +279,14 @@ spawn :: proc(
 		init_mpsc(&actor.mailbox[i])
 	}
 
-	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type)
+	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
+		log.errorf(
+			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size or enable allow_registry_growth in make_node_config()",
+			name,
+			global_registry.num_items,
+			location = loc,
+		)
 		vmem.arena_destroy(&actor.arena)
 		free(actor, actor_system_allocator)
 		return 0, false
@@ -280,9 +319,11 @@ spawn :: proc(
 
 	if spawning_blocking_child {
 		if current_actor_context != nil {
-			log.panicf(
-				"Cannot spawn blocking actor '%s' - blocking actors can only be spawned from main thread",
+			panic_at(
+				loc,
+				"spawn('%s'): a blocking actor can only be spawned from the main thread, not from inside actor '%s'",
 				name,
+				current_actor_context.name,
 			)
 		}
 		actor.opts.blocking = true
@@ -313,7 +354,13 @@ spawn :: proc(
 		desc.user_data = handle
 		co, co_res := coro.create(&desc)
 		if co_res != .Success {
-			log.errorf("Failed to create coroutine for actor %s: %v", name, co_res)
+			log.errorf(
+				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
+				name,
+				coro_stack,
+				co_res,
+				location = loc,
+			)
 			remove(&global_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
@@ -325,11 +372,14 @@ spawn :: proc(
 		idx := -1
 		if actor.opts.home_worker >= 0 {
 			if actor.opts.home_worker >= worker_pool.worker_count {
-				log.panicf(
-					"Actor '%s' home_worker=%d exceeds worker_count=%d",
+				panic_at(
+					loc,
+					"spawn('%s'): home_worker=%d but this node has only %d workers (valid indices 0-%d)%s",
 					name,
 					actor.opts.home_worker,
 					worker_pool.worker_count,
+					worker_pool.worker_count - 1,
+					config_origin(actor.opts.loc),
 				)
 			}
 			idx = actor.opts.home_worker
@@ -366,7 +416,13 @@ spawn :: proc(
 				actor_loop(cast(^Actor(T))actor_ptr)
 			}, uint(actor.opts.stack_size_dedicated_os_thread))
 		if actor.thread == nil {
-			log.errorf("Failed to create thread for actor %s (PID %d)", name, pid)
+			log.errorf(
+				"spawn('%s') failed: could not create a dedicated OS thread with a %d B stack (PID %v)",
+				name,
+				actor.opts.stack_size_dedicated_os_thread,
+				pid,
+				location = loc,
+			)
 			remove(&global_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
@@ -397,6 +453,7 @@ spawn_child :: proc(
 	data: $T,
 	behaviour: Actor_Behaviour(T),
 	opts := SYSTEM_CONFIG.actor_config,
+	loc := #caller_location,
 ) -> (
 	PID,
 	bool,
@@ -408,8 +465,14 @@ spawn_child :: proc(
 	}
 
 	self_pid := get_self_pid()
-	if self_pid == 0 do panic("Call form inside actor context")
-	return spawn(name, data, behaviour, opts, parent_pid = self_pid)
+	if self_pid == 0 {
+		panic_at(
+			loc,
+			"spawn_child('%s'): must be called from inside an actor. Use spawn() with an explicit parent_pid outside one",
+			name,
+		)
+	}
+	return spawn(name, data, behaviour, opts, self_pid, loc)
 }
 
 @(private)
@@ -1070,25 +1133,25 @@ reconstruct_msg :: #force_inline proc(msg: ^Message, data: ^any, header: ^^Type_
 	}
 }
 
-send_self :: #force_inline proc(content: $T) -> Send_Error {
+send_self :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_self(content); ok do return Send_Error(r)}
 	v := content
-	info := get_validated_message_info_ptr(T)
+	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_self_impl(&v, size_of(T), typeid_of(T), info, .System)
+		return send_self_impl(&v, size_of(T), typeid_of(T), info, .System, loc)
 	} else {
-		return send_self_impl(&v, size_of(T), typeid_of(T), info, .User)
+		return send_self_impl(&v, size_of(T), typeid_of(T), info, .User, loc)
 	}
 }
 
-send_message :: #force_inline proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error {
+send_message :: #force_inline proc(to: PID, content: $T, priority: Message_Priority = .NORMAL, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content, ti.Message_Priority(priority)); ok do return Send_Error(r)}
 	v := content
-	info := get_validated_message_info_ptr(T)
+	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .System)
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .System, loc)
 	} else {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .User)
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .User, loc)
 	}
 }
 
@@ -1099,7 +1162,8 @@ send_message :: #force_inline proc(to: PID, content: $T, priority: Message_Prior
 //   send_message_name("my_actor@remote_node", msg)    // Remote actor on "remote_node"
 // For dynamic node/actor names, use send_to(actor, node, msg) instead.
 // For performance with known PIDs, use send_message(to: PID, content) instead.
-send_message_name :: proc(to: string, content: $T) -> Send_Error {
+send_message_name :: proc(to: string, content: $T, loc := #caller_location) -> Send_Error {
+	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_name(to, content); ok do return Send_Error(r)}
 
 	for c, i in to {
@@ -1108,18 +1172,29 @@ send_message_name :: proc(to: string, content: $T) -> Send_Error {
 			node_name := to[i + 1:]
 
 			if _, exists := get_node_by_name(node_name); exists {
-				return send_remote_by_name(node_name, actor_name, content)
+				return send_remote_by_name(node_name, actor_name, content, loc)
 			}
 
+			log.errorf(
+				"send_message_name('%s') failed: no node named '%s' is registered. Call register_node() first",
+				to,
+				node_name,
+				location = loc,
+			)
 			return .NODE_NOT_FOUND
 		}
 	}
 
 	local_pid, found := get_actor_pid(to)
 	if !found {
+		log.errorf(
+			"send_message_name('%s') failed: no local actor is registered under that name. Use \"actor@node\" to reach a remote actor",
+			to,
+			location = loc,
+		)
 		return .ACTOR_NOT_FOUND
 	}
-	return send_message(local_pid, content)
+	return send_message(local_pid, content, .NORMAL, loc)
 }
 
 // Send by name with a local PID cache. Resolves name→PID on first call, then
@@ -1128,7 +1203,8 @@ send_message_name :: proc(to: string, content: $T) -> Send_Error {
 // Local actors only, does not support "actor@node" remote format.
 // The cache is a simple linear scan, intended for a small number of target names
 // per message type. If you're sending to many distinct names, use get_actor_pid + send_message.
-send_by_name_cached :: proc(to: string, content: $T) -> Send_Error {
+send_by_name_cached :: proc(to: string, content: $T, loc := #caller_location) -> Send_Error {
+	context.logger = diagnostic_logger(context.logger)
 	NAME_CACHE_MAX :: 16
 
 	Name_PID_Entry :: struct {
@@ -1152,7 +1228,14 @@ send_by_name_cached :: proc(to: string, content: $T) -> Send_Error {
 
 	if pid == 0 {
 		resolved, found := get_actor_pid(to)
-		if !found do return .ACTOR_NOT_FOUND
+		if !found {
+			log.errorf(
+				"send_by_name_cached('%s') failed: no local actor is registered under that name",
+				to,
+				location = loc,
+			)
+			return .ACTOR_NOT_FOUND
+		}
 		pid = resolved
 
 		if cache_count < NAME_CACHE_MAX {
@@ -1165,52 +1248,72 @@ send_by_name_cached :: proc(to: string, content: $T) -> Send_Error {
 		}
 	}
 
-	err := send_message(pid, content)
+	err := send_message(pid, content, .NORMAL, loc)
 
 	if err == .ACTOR_NOT_FOUND {
 		resolved, found := get_actor_pid(to)
-		if !found do return .ACTOR_NOT_FOUND
+		if !found {
+			log.errorf(
+				"send_by_name_cached('%s') failed: the cached actor died and no actor is registered under that name any more",
+				to,
+				location = loc,
+			)
+			return .ACTOR_NOT_FOUND
+		}
 		pid = resolved
 
 		if cache_idx >= 0 {
 			cache[cache_idx].pid = pid
 		}
 
-		err = send_message(pid, content)
+		err = send_message(pid, content, .NORMAL, loc)
 	}
 
 	return err
 }
 
 // Send message to a remote actor with dynamic node and actor names.
-send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Error {
+send_to :: proc(
+	actor_name: string,
+	node_name: string,
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
+	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if r, ok := ti.intercept_send_to(actor_name, node_name, content); ok do return Send_Error(r)}
 
 	if _, exists := get_node_by_name(node_name); exists {
-		return send_remote_by_name(node_name, actor_name, content)
+		return send_remote_by_name(node_name, actor_name, content, loc)
 	}
+	log.errorf(
+		"send_to('%s', '%s') failed: no node named '%s' is registered. Call register_node() first",
+		actor_name,
+		node_name,
+		node_name,
+		location = loc,
+	)
 	return .NODE_NOT_FOUND
 }
 
-send_message_to_children :: #force_inline proc(content: $T) -> Send_Error {
+send_message_to_children :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return Send_Error(r)}
 	v := content
-	info := get_validated_message_info_ptr(T)
+	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .System)
+		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .System, loc)
 	} else {
-		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .User)
+		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .User, loc)
 	}
 }
 
-send_message_to_parent :: #force_inline proc(content: $T) -> Send_Error {
+send_message_to_parent :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return Send_Error(r)}
 	v := content
-	info := get_validated_message_info_ptr(T)
+	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .System)
+		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .System, loc)
 	} else {
-		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .User)
+		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .User, loc)
 	}
 }
 
@@ -1264,6 +1367,7 @@ push_to_mailbox :: #force_inline proc(
 	msg: Message,
 	to: PID,
 	priority: int = 1,
+	loc := #caller_location,
 ) -> Send_Error {
 	// Local if on same worker
 	if current_worker != nil &&
@@ -1316,10 +1420,11 @@ push_to_mailbox :: #force_inline proc(
 	}
 
 	log.errorf(
-		"send to %s failed: all %d priority mailboxes full after %d retries, receiver is backlogged",
-		get_actor_name(to),
+		"send to %s failed: all %d priority mailboxes still full after %d retries, receiver is not draining",
+		actor_origin(to),
 		MAILBOX_PRIORITY_COUNT,
 		MAX_SEND_RETRIES,
+		location = loc,
 	)
 	return .RECEIVER_BACKLOGGED
 }
@@ -1330,29 +1435,49 @@ report_alloc_error :: #force_inline proc(
 	attempted_size: int,
 	pool: ^Pool,
 	to: PID,
+	loc := #caller_location,
 ) -> Send_Error {
 	switch err {
 	case .OK:
 		return .OK
 	case .SIZE_EXCEEDS_PAGE:
 		log.errorf(
-			"send to %s failed: message size %d B exceeds actor page size %d B, increase actor_config.page_size",
-			get_actor_name(to),
+			"send to %s failed: message needs %d B but the receiver's page size is %d B. Raise page_size in make_actor_config() for that actor",
+			actor_origin(to),
 			attempted_size,
 			pool.page_size,
+			location = loc,
 		)
 		return .MESSAGE_TOO_LARGE
 	case .POOL_EXHAUSTED:
 		log.errorf(
-			"send to %s failed: message pool exhausted (max %d pages in use), receiver is backlogged",
-			get_actor_name(to),
+			"send to %s failed: message pool is at its %d page cap, receiver is not draining its mailbox",
+			actor_origin(to),
 			pool.max_pages,
+			location = loc,
+		)
+		return .RECEIVER_BACKLOGGED
+	case .OUT_OF_MEMORY:
+		log.errorf(
+			"send to %s failed: the host is out of memory (could not allocate a %d B message page)",
+			actor_origin(to),
+			attempted_size,
+			location = loc,
+		)
+		return .RECEIVER_BACKLOGGED
+	case .ALLOC_CONTENDED:
+		log.errorf(
+			"send to %s failed: message page allocation lost %d contended attempts, the pool is thrashing under load",
+			actor_origin(to),
+			MAX_ALLOC_RETRIES,
+			location = loc,
 		)
 		return .RECEIVER_BACKLOGGED
 	case .MALFORMED_PAYLOAD:
 		log.errorf(
 			"send to %s failed: network payload truncated or malformed (variable data exceeds payload)",
-			get_actor_name(to),
+			actor_origin(to),
+			location = loc,
 		)
 		return .NETWORK_ERROR
 	}
@@ -1360,17 +1485,47 @@ report_alloc_error :: #force_inline proc(
 }
 
 @(private)
-send :: #force_inline proc(to: PID, content: $T, actor: ^Actor(int)) -> Send_Error {
+send :: #force_inline proc(
+	to: PID,
+	content: $T,
+	actor: ^Actor(int),
+	loc := #caller_location,
+) -> Send_Error {
 	v := content
-	info := get_validated_message_info_ptr(T)
+	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .NORMAL, .System)
+		return send_to_actor_impl(
+			to,
+			actor,
+			&v,
+			size_of(T),
+			typeid_of(T),
+			info,
+			.NORMAL,
+			.System,
+			loc,
+		)
 	} else {
-		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .NORMAL, .User)
+		return send_to_actor_impl(
+			to,
+			actor,
+			&v,
+			size_of(T),
+			typeid_of(T),
+			info,
+			.NORMAL,
+			.User,
+			loc,
+		)
 	}
 }
 
-terminate_actor :: proc(to: PID, reason: Termination_Reason = .SHUTDOWN) -> bool {
+terminate_actor :: proc(
+	to: PID,
+	reason: Termination_Reason = .SHUTDOWN,
+	loc := #caller_location,
+) -> bool {
+	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if ti.intercept_terminate_actor(u64(to), ti.Termination_Reason(reason)) do return true}
 
 	// TODO: shutdown remote actor here
@@ -1394,19 +1549,40 @@ terminate_actor :: proc(to: PID, reason: Termination_Reason = .SHUTDOWN) -> bool
 
 	actor, ok := get_actor_from_pointer(actor_ptr, is_system_op)
 	if !ok {
+		log.errorf(
+			"terminate_actor(%v) failed: the PID is stale, it refers to a slot that has since been reused",
+			to,
+			location = loc,
+		)
 		return false
 	}
-	return send(to, Terminate{reason = reason}, actor) == .OK
+	err := send(to, Terminate{reason = reason}, actor, loc)
+	if err != .OK {
+		log.errorf(
+			"terminate_actor failed for %s: could not deliver Terminate: %v",
+			actor_origin(to),
+			err,
+			location = loc,
+		)
+		return false
+	}
+	return true
 }
 
 // Dynamically add a child to a supervisor
-add_child :: proc(parent: PID, child_spawn: SPAWN) -> (PID, bool) {
+add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (PID, bool) {
+	context.logger = diagnostic_logger(context.logger)
 	if child_spawn == nil {
-		log.panic("need spawn func")
+		panic_at(loc, "add_child(parent=%v): child_spawn must not be nil", parent)
 	}
 
 	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
 	if !ok {
+		log.errorf(
+			"add_child failed: parent %v is not a live actor (never spawned, already terminated, or a stale PID)",
+			parent,
+			location = loc,
+		)
 		return 0, false
 	}
 
@@ -1415,9 +1591,14 @@ add_child :: proc(parent: PID, child_spawn: SPAWN) -> (PID, bool) {
 		spawn_func   = child_spawn,
 		existing_pid = 0,
 	}
-	err := send(parent, msg, parent_actor)
+	err := send(parent, msg, parent_actor, loc)
 	if err != .OK {
-		log.errorf("Failed to send Add_Child message: %v", err)
+		log.errorf(
+			"add_child failed: could not deliver Add_Child to parent %s: %v",
+			actor_origin(parent),
+			err,
+			location = loc,
+		)
 		return 0, false
 	}
 
@@ -1430,12 +1611,19 @@ add_child_existing :: proc(
 	existing_child: PID,
 	child_spawn: SPAWN,
 	spawn_func_name_hash: u64 = 0,
+	loc := #caller_location,
 ) -> (
 	PID,
 	bool,
 ) {
+	context.logger = diagnostic_logger(context.logger)
 	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
 	if !ok {
+		log.errorf(
+			"add_child_existing failed: parent %v is not a live actor (never spawned, already terminated, or a stale PID)",
+			parent,
+			location = loc,
+		)
 		return 0, false
 	}
 
@@ -1444,9 +1632,15 @@ add_child_existing :: proc(
 		existing_pid         = existing_child,
 		spawn_func_name_hash = spawn_func_name_hash,
 	}
-	err := send(parent, msg, parent_actor)
+	err := send(parent, msg, parent_actor, loc)
 	if err != .OK {
-		log.errorf("Failed to send Add_Child message for existing actor: %v", err)
+		log.errorf(
+			"add_child_existing(child=%v) failed: could not deliver Add_Child to parent %s: %v",
+			existing_child,
+			actor_origin(parent),
+			err,
+			location = loc,
+		)
 		return 0, false
 	}
 
@@ -1455,9 +1649,16 @@ add_child_existing :: proc(
 
 // Remove a child from a supervisor
 // remote??
-remove_child :: proc(parent: PID, child: PID) -> bool {
+remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
+	context.logger = diagnostic_logger(context.logger)
 	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
 	if !ok {
+		log.errorf(
+			"remove_child(child=%v) failed: parent %v is not a live actor",
+			child,
+			parent,
+			location = loc,
+		)
 		return false
 	}
 
@@ -1465,7 +1666,18 @@ remove_child :: proc(parent: PID, child: PID) -> bool {
 		child_pid = child,
 	}
 
-	return send(parent, msg, parent_actor) == .OK
+	err := send(parent, msg, parent_actor, loc)
+	if err != .OK {
+		log.errorf(
+			"remove_child(child=%v) failed: could not deliver Remove_Child to parent %s: %v",
+			child,
+			actor_origin(parent),
+			err,
+			location = loc,
+		)
+		return false
+	}
+	return true
 }
 
 // Get list of children for an actor
@@ -1535,41 +1747,75 @@ get_self_pid :: #force_inline proc() -> PID {
 	return pack_pid(Handle{idx = 0, gen = 0, actor_type = 0}, current_node_id)
 }
 
-self_terminate :: proc(reason: Termination_Reason = .NORMAL) -> bool {
+self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_location) -> bool {
 	when ODIN_TEST {if ti.intercept_self_terminate(ti.Termination_Reason(reason)) do return true}
 
 	pid := get_self_pid()
-	if pid == 0 do return false
-	return terminate_actor(pid, reason)
+	if pid == 0 {
+		log.error(
+			"self_terminate failed: must be called from inside an actor",
+			location = loc,
+		)
+		return false
+	}
+	return terminate_actor(pid, reason, loc)
 }
 
-rename_actor :: proc(pid: PID, new_name: string) -> bool {
+rename_actor :: proc(pid: PID, new_name: string, loc := #caller_location) -> bool {
+	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if ti.intercept_rename_actor(u64(pid), new_name) do return true}
 
 	actor, ok := get_actor_from_pointer(get(&global_registry, pid), true)
-	if !ok do return false
+	if !ok {
+		log.errorf(
+			"rename_actor(%v, '%s') failed: no live actor with that PID",
+			pid,
+			new_name,
+			location = loc,
+		)
+		return false
+	}
 
 	msg := Rename_Actor {
 		new_name = new_name,
 	}
 
-	return send(pid, msg, actor) == .OK
+	err := send(pid, msg, actor, loc)
+	if err != .OK {
+		log.errorf(
+			"rename_actor('%s') failed: could not deliver Rename_Actor to %s: %v",
+			new_name,
+			actor_origin(pid),
+			err,
+			location = loc,
+		)
+		return false
+	}
+	return true
 }
 
-self_rename :: proc(new_name: string) -> bool {
+self_rename :: proc(new_name: string, loc := #caller_location) -> bool {
 	when ODIN_TEST {if ti.intercept_self_rename(new_name) do return true}
 
 	pid := get_self_pid()
 	if pid == 0 {
+		log.errorf(
+			"self_rename('%s') failed: must be called from inside an actor",
+			new_name,
+			location = loc,
+		)
 		return false
 	}
-	return rename_actor(pid, new_name)
+	return rename_actor(pid, new_name, loc)
 }
 
-yield :: proc() {
+yield :: proc(loc := #caller_location) {
 	co := coro.running()
 	if co == nil {
-		log.panic("yield called outside of pooled actor context")
+		panic_at(
+			loc,
+			"yield() must be called from inside a pooled actor. It is not available on the main thread, or in an actor spawned with use_dedicated_os_thread or blocking",
+		)
 	}
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 	handle.wants_reschedule = true

@@ -139,8 +139,8 @@ Node_Behaviour :: Actor_Behaviour(Node_Data) {
 @(private)
 init_system :: proc(data: ^Node_Data) {
 	current_node_id = 1
-	init_network(current_node_id, data.name)
-	init_udp()
+	init_network(current_node_id, data.name, SYSTEM_CONFIG.loc)
+	init_udp(SYSTEM_CONFIG.loc)
 }
 
 @(private)
@@ -196,7 +196,7 @@ get_node_log_ctx :: proc() -> log.Logger {
 	return systemLogger
 }
 
-node_init :: proc(name: string, opts := SYSTEM_CONFIG) {
+node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) {
 	NODE.name = name
 
 	logging_config := opts.actor_config.logging
@@ -205,10 +205,16 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG) {
 	context.logger = systemLogger
 
 	SYSTEM_CONFIG = opts
+	if SYSTEM_CONFIG.loc.file_path == "" {
+		SYSTEM_CONFIG.loc = loc
+	}
 
 	if opts.network.enable_encryption && get_auth_password() == "" {
-		log.panicf(
-			"enable_encryption requires a non-empty auth_password (or ACTOD_AUTH_PASSWORD env var); empty password derives a globally-shared key",
+		panic_at(
+			loc,
+			"node_init('%s'): network.enable_encryption is set but auth_password is empty%s. Set auth_password in make_network_config() or the ACTOD_AUTH_PASSWORD env var, an empty password derives a key shared by every actod process",
+			name,
+			config_origin(opts.loc),
 		)
 	}
 
@@ -251,10 +257,10 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG) {
 	SYSTEM_CONFIG.actor_config.children = nil
 	system_config.children = system_children
 
-	NODE.pid, NODE.started = spawn(name, NODE, Node_Behaviour, system_config)
+	NODE.pid, NODE.started = spawn(name, NODE, Node_Behaviour, system_config, 0, loc)
 	delete(system_children)
 	if !NODE.started {
-		log.panic("node failed to start")
+		panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
 	}
 
 	if opts.blocking_child != nil {
@@ -266,52 +272,74 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG) {
 
 }
 
-send_node_msg :: proc(content: SYSTEM_MSG) -> bool {
+send_node_msg :: proc(content: SYSTEM_MSG, loc := #caller_location) -> bool {
 	actor, ok := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
 	if !ok {
+		log.errorf(
+			"cannot deliver %v to the node actor: the node is not running, call node_init() first",
+			content,
+			location = loc,
+		)
 		return false
 	}
 
 	switch v in content {
 	case Terminate:
-		return send(NODE.pid, v, actor) == .OK
+		return send(NODE.pid, v, actor, loc) == .OK
 	case Actor_Stopped:
-		return send_to_node_mailbox(actor, v)
+		return send_to_node_mailbox(actor, v, loc)
 	case Remove_Child:
-		return send_to_node_mailbox(actor, v)
+		return send_to_node_mailbox(actor, v, loc)
 	case Add_Child:
-		return send_to_node_mailbox(actor, v)
+		return send_to_node_mailbox(actor, v, loc)
 	case Set_Parent:
-		return send_to_node_mailbox(actor, v)
+		return send_to_node_mailbox(actor, v, loc)
 	case Get_Stats:
-		return send_to_node_mailbox(actor, v)
+		return send_to_node_mailbox(actor, v, loc)
 	case Rename_Actor:
-		return send_to_node_mailbox(actor, v)
+		return send_to_node_mailbox(actor, v, loc)
 	case Reload_Behaviour:
-		return send_to_node_mailbox(actor, v) // forwarded to target actors
+		return send_to_node_mailbox(actor, v, loc) // forwarded to target actors
 	}
 
 	unreachable()
 }
 
 @(private)
-send_to_node_mailbox :: #force_inline proc(actor: ^Actor(int), content: $T) -> bool {
+send_to_node_mailbox :: #force_inline proc(
+	actor: ^Actor(int),
+	content: $T,
+	loc := #caller_location,
+) -> bool {
 	state := sync.atomic_load(&actor.state)
 	if state == .TERMINATED || state == .THREAD_STOPPED {
+		log.errorf(
+			"cannot deliver %v to the node actor: it is already %v",
+			typeid_of(T),
+			state,
+			location = loc,
+		)
 		return false
 	}
 
 	msg: Message
 	msg.from = get_self_pid()
-	info := get_validated_message_info_ptr(T)
+	info := get_validated_message_info_ptr(T, loc)
 
-	alloc_err, _ := create_message(&msg, &actor.pool, content, info)
+	alloc_err, attempted_size := create_message(&msg, &actor.pool, content, info)
 	if alloc_err != .OK {
+		report_alloc_error(alloc_err, attempted_size, &actor.pool, NODE.pid, loc)
 		return false
 	}
 
-	result := push_to_mailbox(actor, msg, NODE.pid)
+	result := push_to_mailbox(actor, msg, NODE.pid, 1, loc)
 	if result != .OK {
+		log.errorf(
+			"cannot deliver %v to the node actor: %v",
+			typeid_of(T),
+			result,
+			location = loc,
+		)
 		free_message(&actor.pool, msg.content)
 		return false
 	}
@@ -323,12 +351,20 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 	switch v in msg {
 	case Actor_Stopped:
 		if !valid(&global_registry, from) {
-			log.fatal("not valid pid")
+			log.fatalf(
+				"Actor_Stopped received from PID %v, which is not a valid handle (child '%s')",
+				from,
+				v.child_name,
+			)
 		}
 
 		actor_ptr, active := get(&global_registry, from)
 		if !active || actor_ptr == nil {
-			log.fatal("trying to terminate actor that is not in registry")
+			log.fatalf(
+				"Actor_Stopped received from PID %v (child '%s'), which is no longer in the registry",
+				from,
+				v.child_name,
+			)
 		}
 
 		state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
@@ -356,17 +392,28 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 		a, _ := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
 		handle_get_stats_request(a, v)
 	case Terminate:
-		log.info("To terminate system node call shutdown_node")
+		log.warnf(
+			"the node actor ignores Terminate (requested by %s), call shutdown_node() instead",
+			actor_origin(from),
+		)
 	case Rename_Actor:
-		log.warn("Rename_Actor not yet handled in system node")
+		log.warnf(
+			"the node actor cannot be renamed to '%s' (requested by %s), Rename_Actor is not handled here",
+			v.new_name,
+			actor_origin(from),
+		)
 	case string:
-		log.infof("Got message from %s: message -> %s", get_actor_name(from), v)
+		log.debugf("node received a string message from %s: %s", actor_origin(from), v)
 		err := send_message(from, "received message")
 		if err != .OK {
-			log.warnf("Failed to send reply: %v", err)
+			log.warnf("node could not reply to %s: %v", actor_origin(from), err)
 		}
 	case:
-		log.warn("unhandled msg type in system node: %T", v)
+		log.warnf(
+			"the node actor received a message of type %T from %s that it does not handle",
+			v,
+			actor_origin(from),
+		)
 	}
 }
 
@@ -443,7 +490,11 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 		for child_pid in child_pids {
 			if !terminate_actor(child_pid, .SHUTDOWN) {
-				log.warnf("Failed to shutdown child %d of actor %d", child_pid, pid)
+				log.warnf(
+					"could not shut down child %s of parent %s",
+					actor_origin(child_pid),
+					actor_origin(pid),
+				)
 			}
 		}
 
@@ -465,15 +516,23 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	}
 }
 
-shutdown_node :: proc() {
+shutdown_node :: proc(loc := #caller_location) {
 	context.logger = systemLogger
 	if !NODE.started || NODE.pid == 0 {
+		log.debug(
+			"shutdown_node ignored: the node is not running (already shut down, or node_init was never called)",
+			location = loc,
+		)
 		cleanup_logger_and_context()
 		reset_node_state()
 		return
 	}
 
 	if coro.running() != nil {
+		log.debug(
+			"shutdown_node called from inside an actor: signalling shutdown and returning, the node will stop once this actor yields",
+			location = loc,
+		)
 		sync.atomic_store(&NODE.shutting_down, true)
 		sync.atomic_sema_post(&signal_wake)
 		return
@@ -503,7 +562,12 @@ shutdown_node :: proc() {
 	if TIMER_PID != 0 {
 		system_actors += 1
 	}
-	wait_for_actors_to_clear(max_remaining = system_actors, max_wait_ms = 1000)
+	if !wait_for_actors_to_clear(max_remaining = system_actors, max_wait_ms = 1000) {
+		log.warnf(
+			"shutdown: %d actors were still alive after 1000 ms and are being torn down anyway",
+			num_used(&global_registry) - system_actors,
+		)
+	}
 
 	stop_timer_actor()
 
@@ -649,7 +713,12 @@ wait_for_actors_to_clear :: proc(
 	return false
 }
 
-wait_for_pids :: proc(pids: []PID, poll_interval_ms: int = 10, max_wait_ms: int = 5000) {
+wait_for_pids :: proc(
+	pids: []PID,
+	poll_interval_ms: int = 10,
+	max_wait_ms: int = 5000,
+	loc := #caller_location,
+) {
 	start := time.now()
 	max_wait := time.Duration(max_wait_ms) * time.Millisecond
 	poll_interval := time.Duration(poll_interval_ms) * time.Millisecond
@@ -672,9 +741,10 @@ wait_for_pids :: proc(pids: []PID, poll_interval_ms: int = 10, max_wait_ms: int 
 		elapsed := time.since(start)
 		if elapsed > max_wait {
 			log.warnf(
-				"[SHUTDOWN] wait_for_pids timed out after %d ms, stuck on PID %d",
+				"shutdown timed out after %d ms waiting for %s to terminate, giving up",
 				max_wait_ms,
-				stuck_pid,
+				actor_origin(stuck_pid),
+				location = loc,
 			)
 			return
 		}

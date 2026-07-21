@@ -36,10 +36,12 @@ registry_verify_no_collision :: #force_inline proc(
 	idx: int,
 	name: string,
 	name_hash: u64,
+	loc := #caller_location,
 ) {
 	if r.entries[idx].name != name {
-		log.panicf(
-			"FATAL: Hash collision '%s' and '%s' both hash to %x",
+		panic_at(
+			loc,
+			"registry hash collision: '%s' and the already registered '%s' both hash to %x. Rename one of them.",
 			name,
 			r.entries[idx].name,
 			name_hash,
@@ -47,7 +49,7 @@ registry_verify_no_collision :: #force_inline proc(
 	}
 }
 
-registry_ensure_init :: proc(r: ^Name_Registry($T, $N)) {
+registry_ensure_init :: proc(r: ^Name_Registry($T, $N), loc := #caller_location) {
 	if sync.atomic_load(&r.initialized) {
 		return
 	}
@@ -61,7 +63,7 @@ registry_ensure_init :: proc(r: ^Name_Registry($T, $N)) {
 
 	arena_err := vmem.arena_init_static(&r.arena)
 	if arena_err != nil {
-		log.panic("Failed to initialize registry arena")
+		panic_at(loc, "failed to initialize registry arena: %v", arena_err)
 	}
 
 	r.allocator = vmem.arena_allocator(&r.arena)
@@ -69,14 +71,22 @@ registry_ensure_init :: proc(r: ^Name_Registry($T, $N)) {
 	sync.atomic_store(&r.initialized, true)
 }
 
-registry_register :: proc(r: ^Name_Registry($T, $N), name: string, value: T) -> (int, bool) {
-	registry_ensure_init(r)
+registry_register :: proc(
+	r: ^Name_Registry($T, $N),
+	name: string,
+	value: T,
+	loc := #caller_location,
+) -> (
+	int,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	name_hash := fnv1a_hash(name)
 
 	sync.shared_lock(&r.mtx)
 	if idx, exists := r.hash_to_idx[name_hash]; exists {
-		registry_verify_no_collision(r, idx, name, name_hash)
+		registry_verify_no_collision(r, idx, name, name_hash, loc)
 		sync.shared_unlock(&r.mtx)
 		return idx, false
 	}
@@ -86,12 +96,17 @@ registry_register :: proc(r: ^Name_Registry($T, $N), name: string, value: T) -> 
 	defer sync.unlock(&r.mtx)
 
 	if idx, exists := r.hash_to_idx[name_hash]; exists {
-		registry_verify_no_collision(r, idx, name, name_hash)
+		registry_verify_no_collision(r, idx, name, name_hash, loc)
 		return idx, false
 	}
 
 	if r.count >= N {
-		log.warnf("Registry full, cannot register '%s'", name)
+		log.warnf(
+			"registry is full at its compile time cap of %d entries, cannot register '%s'",
+			N,
+			name,
+			location = loc,
+		)
 		return -1, false
 	}
 
@@ -108,8 +123,15 @@ registry_register :: proc(r: ^Name_Registry($T, $N), name: string, value: T) -> 
 	return idx, true
 }
 
-registry_get_by_name :: proc(r: ^Name_Registry($T, $N), name: string) -> (^T, bool) {
-	registry_ensure_init(r)
+registry_get_by_name :: proc(
+	r: ^Name_Registry($T, $N),
+	name: string,
+	loc := #caller_location,
+) -> (
+	^T,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	name_hash := fnv1a_hash(name)
 
@@ -122,8 +144,15 @@ registry_get_by_name :: proc(r: ^Name_Registry($T, $N), name: string) -> (^T, bo
 	return nil, false
 }
 
-registry_get_by_hash :: proc(r: ^Name_Registry($T, $N), hash: u64) -> (^T, bool) {
-	registry_ensure_init(r)
+registry_get_by_hash :: proc(
+	r: ^Name_Registry($T, $N),
+	hash: u64,
+	loc := #caller_location,
+) -> (
+	^T,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
@@ -134,8 +163,15 @@ registry_get_by_hash :: proc(r: ^Name_Registry($T, $N), hash: u64) -> (^T, bool)
 	return nil, false
 }
 
-registry_get_by_index :: proc(r: ^Name_Registry($T, $N), idx: int) -> (^T, bool) {
-	registry_ensure_init(r)
+registry_get_by_index :: proc(
+	r: ^Name_Registry($T, $N),
+	idx: int,
+	loc := #caller_location,
+) -> (
+	^T,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
@@ -146,8 +182,15 @@ registry_get_by_index :: proc(r: ^Name_Registry($T, $N), idx: int) -> (^T, bool)
 	return &r.entries[idx].value, true
 }
 
-registry_get_hash :: proc(r: ^Name_Registry($T, $N), idx: int) -> (u64, bool) {
-	registry_ensure_init(r)
+registry_get_hash :: proc(
+	r: ^Name_Registry($T, $N),
+	idx: int,
+	loc := #caller_location,
+) -> (
+	u64,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
@@ -158,8 +201,15 @@ registry_get_hash :: proc(r: ^Name_Registry($T, $N), idx: int) -> (u64, bool) {
 	return r.entries[idx].name_hash, true
 }
 
-registry_get_name :: proc(r: ^Name_Registry($T, $N), idx: int) -> (string, bool) {
-	registry_ensure_init(r)
+registry_get_name :: proc(
+	r: ^Name_Registry($T, $N),
+	idx: int,
+	loc := #caller_location,
+) -> (
+	string,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
@@ -170,8 +220,15 @@ registry_get_name :: proc(r: ^Name_Registry($T, $N), idx: int) -> (string, bool)
 	return r.entries[idx].name, true
 }
 
-registry_get_name_by_hash :: proc(r: ^Name_Registry($T, $N), hash: u64) -> (string, bool) {
-	registry_ensure_init(r)
+registry_get_name_by_hash :: proc(
+	r: ^Name_Registry($T, $N),
+	hash: u64,
+	loc := #caller_location,
+) -> (
+	string,
+	bool,
+) {
+	registry_ensure_init(r, loc)
 
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
@@ -182,8 +239,8 @@ registry_get_name_by_hash :: proc(r: ^Name_Registry($T, $N), hash: u64) -> (stri
 	return "", false
 }
 
-registry_has :: proc(r: ^Name_Registry($T, $N), name: string) -> bool {
-	registry_ensure_init(r)
+registry_has :: proc(r: ^Name_Registry($T, $N), name: string, loc := #caller_location) -> bool {
+	registry_ensure_init(r, loc)
 
 	name_hash := fnv1a_hash(name)
 

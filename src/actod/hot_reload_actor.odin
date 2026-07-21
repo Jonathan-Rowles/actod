@@ -16,32 +16,42 @@ import "core:strings"
 import "core:sync"
 
 @(private)
-send_message_any :: proc(to: PID, content: any, priority: Message_Priority = .NORMAL) -> Send_Error {
+send_message_any :: proc(
+	to: PID,
+	content: any,
+	priority: Message_Priority = .NORMAL,
+	loc := #caller_location,
+) -> Send_Error {
 	@(static) sentinel: Message_Type_Info
-	info, ok := get_type_info_ptr(content.id)
+	info, ok := get_type_info_ptr(content.id, loc)
 	if !ok do info = &sentinel
 	size := type_info_of(content.id).size
-	return send_message_impl(to, content.data, size, content.id, info, priority, .User)
+	return send_message_impl(to, content.data, size, content.id, info, priority, .User, loc)
 }
 
 @(private)
-send_unreliable_any :: proc(to: PID, content: any) -> Send_Error {
+send_unreliable_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
 	if is_local_pid(to) {
-		return send_message_any(to, content)
+		return send_message_any(to, content, .NORMAL, loc)
 	}
 	@(static) sentinel: Message_Type_Info
-	info, ok := get_type_info_ptr(content.id)
+	info, ok := get_type_info_ptr(content.id, loc)
 	if !ok do info = &sentinel
-	return send_unreliable_remote_impl(to, content.data, info)
+	return send_unreliable_remote_impl(to, content.data, info, loc)
 }
 
 @(private)
-broadcast_any :: proc(content: any) {
+broadcast_any :: proc(content: any, loc := #caller_location) {
 	self_pid := get_self_pid()
 	actor_type := get_pid_actor_type(self_pid)
 
 	if actor_type == ACTOR_TYPE_UNTYPED {
-		log.warn("broadcast() called from untyped actor")
+		log.errorf(
+			"broadcast(%v) dropped: actor %s is untyped. Set actor_type on its Actor_Behaviour to broadcast",
+			content.id,
+			actor_origin(self_pid),
+			location = loc,
+		)
 		return
 	}
 
@@ -51,14 +61,15 @@ broadcast_any :: proc(content: any) {
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
 		if pid != 0 && pid != self_pid {
-			send_message_any(pid, content)
+			send_message_any(pid, content, .NORMAL, loc)
 		}
 	}
 }
 
 @(private)
-publish_any :: proc(topic: ^Topic, content: any) {
+publish_any :: proc(topic: ^Topic, content: any, loc := #caller_location) {
 	if topic == nil {
+		log.errorf("publish(%v) dropped: topic is nil", content.id, location = loc)
 		return
 	}
 	self_pid := get_self_pid()
@@ -67,7 +78,7 @@ publish_any :: proc(topic: ^Topic, content: any) {
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
 		if pid != 0 && pid != self_pid {
-			send_message_any(pid, content)
+			send_message_any(pid, content, .NORMAL, loc)
 		}
 	}
 }
@@ -90,35 +101,45 @@ spawn_from_raw :: proc(
 	behaviour: Raw_Spawn_Behaviour,
 	opts: Actor_Config,
 	parent_pid: PID,
+	loc := #caller_location,
 ) -> (
 	PID,
 	bool,
 ) {
 	if !NODE.started {
-		log.panic("Must call actor.INIT_NODE() first.")
+		panic_at(loc, "spawn('%s'): node_init() must be called before spawning any actor", name)
 	}
 
 	if behaviour.handle_message == nil {
-		log.panic("Actor_Behaviour.handle_message must not be nil")
+		panic_at(loc, "spawn('%s'): Actor_Behaviour.handle_message must not be nil", name)
 	}
 
 	actor := new(Actor(int), actor_system_allocator)
 
 	if actor.state != .ZERO {
-		log.panic("reusing non zero memory")
+		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
 	}
 
 	arena_err := vmem.arena_init_static(&actor.arena)
-	ensure(arena_err == nil)
+	if arena_err != nil {
+		panic_at(loc, "spawn('%s'): failed to reserve actor arena: %v", name, arena_err)
+	}
 	actor.allocator = vmem.arena_allocator(&actor.arena)
 	context.allocator = actor.allocator
 
 	actor.name = strings.clone(name, context.allocator)
+	actor.spawn_loc = loc
 
 	if data_size > 0 {
 		ptr, alloc_err := mem.alloc(data_size, align_of(int), actor.allocator)
 		if alloc_err != nil {
-			log.errorf("Failed to allocate actor data for %s", name)
+			log.errorf(
+				"spawn('%s') failed: could not allocate %d B of actor data: %v",
+				name,
+				data_size,
+				alloc_err,
+				location = loc,
+			)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -128,7 +149,12 @@ spawn_from_raw :: proc(
 	} else {
 		ptr, alloc_err := mem.alloc(1, align_of(int), actor.allocator)
 		if alloc_err != nil {
-			log.errorf("Failed to allocate actor data for %s", name)
+			log.errorf(
+				"spawn('%s') failed: could not allocate actor data: %v",
+				name,
+				alloc_err,
+				location = loc,
+			)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -154,15 +180,25 @@ spawn_from_raw :: proc(
 		}
 	}
 	if actor.opts.message_batch <= 0 {
-		log.panicf(
-			"Actor '%s' has message_batch=0, use make_actor_config() instead of raw Actor_Config{{}}",
+		panic_at(
+			loc,
+			"spawn('%s'): opts.message_batch is %d. Build the config with make_actor_config() rather than a raw Actor_Config{{}}%s",
 			name,
+			actor.opts.message_batch,
+			config_origin(actor.opts.loc),
 		)
 	}
 
 	if parent_pid > 0 {
 		_, ok := get(&global_registry, parent_pid)
-		if !ok do panic("provided parent pid does not exist")
+		if !ok {
+			panic_at(
+				loc,
+				"spawn('%s'): parent_pid %v is not a live actor (never spawned, or already terminated)",
+				name,
+				parent_pid,
+			)
+		}
 		actor.parent = parent_pid
 	}
 
@@ -171,8 +207,14 @@ spawn_from_raw :: proc(
 		init_mpsc(&actor.mailbox[i])
 	}
 
-	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type)
+	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
+		log.errorf(
+			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size or enable allow_registry_growth in make_node_config()",
+			name,
+			global_registry.num_items,
+			location = loc,
+		)
 		vmem.arena_destroy(&actor.arena)
 		free(actor, actor_system_allocator)
 		return 0, false
@@ -206,7 +248,13 @@ spawn_from_raw :: proc(
 		desc.user_data = handle
 		co, co_res := coro.create(&desc)
 		if co_res != .Success {
-			log.errorf("Failed to create coroutine for actor %s: %v", name, co_res)
+			log.errorf(
+				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
+				name,
+				coro_stack,
+				co_res,
+				location = loc,
+			)
 			remove(&global_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
@@ -218,11 +266,14 @@ spawn_from_raw :: proc(
 		idx: int
 		if actor.opts.home_worker >= 0 {
 			if actor.opts.home_worker >= worker_pool.worker_count {
-				log.panicf(
-					"Actor '%s' home_worker=%d exceeds worker_count=%d",
+				panic_at(
+					loc,
+					"spawn('%s'): home_worker=%d but this node has only %d workers (valid indices 0-%d)%s",
 					name,
 					actor.opts.home_worker,
 					worker_pool.worker_count,
+					worker_pool.worker_count - 1,
+					config_origin(actor.opts.loc),
 				)
 			}
 			idx = actor.opts.home_worker
@@ -244,7 +295,13 @@ spawn_from_raw :: proc(
 				actor_loop(cast(^Actor(int))actor_ptr)
 			}, uint(actor.opts.stack_size_dedicated_os_thread))
 		if actor.thread == nil {
-			log.errorf("Failed to create thread for actor %s (PID %d)", name, pid)
+			log.errorf(
+				"spawn('%s') failed: could not create a dedicated OS thread with a %d B stack (PID %v)",
+				name,
+				actor.opts.stack_size_dedicated_os_thread,
+				pid,
+				location = loc,
+			)
 			remove(&global_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
@@ -274,13 +331,20 @@ spawn_child_from_raw :: proc(
 	data_size: int,
 	behaviour: Raw_Spawn_Behaviour,
 	opts: Actor_Config,
+	loc := #caller_location,
 ) -> (
 	PID,
 	bool,
 ) {
 	self_pid := get_self_pid()
-	if self_pid == 0 do panic("Call from inside actor context")
-	return spawn_from_raw(name, data_ptr, data_size, behaviour, opts, self_pid)
+	if self_pid == 0 {
+		panic_at(
+			loc,
+			"spawn_child('%s'): must be called from inside an actor. Use spawn() with an explicit parent_pid outside one",
+			name,
+		)
+	}
+	return spawn_from_raw(name, data_ptr, data_size, behaviour, opts, self_pid, loc)
 }
 
 hot_module_table: map[u32]^hot_reload.Hot_Module

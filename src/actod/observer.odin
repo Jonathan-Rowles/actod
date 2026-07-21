@@ -1,6 +1,7 @@
 package actod
 
 import "base:intrinsics"
+import "base:runtime"
 import "core:log"
 import "core:strings"
 import "core:time"
@@ -122,7 +123,10 @@ Observer_Behaviour := Actor_Behaviour(Observer_Data) {
 spawn_observer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 	pid, ok := start_observer(SYSTEM_CONFIG.observer_interval)
 	if !ok {
-		log.panic("observer failed to start")
+		panic_at(
+			SYSTEM_CONFIG.loc,
+			"node startup failed: the observer actor could not be spawned, disable it with enable_observer = false in make_node_config if it is not needed",
+		)
 	}
 	NODE.observer = pid
 	return pid, ok
@@ -170,7 +174,14 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 		data.auto_collect = m.interval > 0
 		if data.auto_collect {
 			data.next_collection = time.time_add(time.now(), m.interval)
-			data.collection_timer_id, _ = set_timer(m.interval, true)
+			timer_id, timer_err := set_timer(m.interval, true)
+			if timer_err != .OK {
+				log.errorf(
+					"observer: could not start the stats collection timer (%v), automatic stats collection is disabled, use trigger_stats_collection to collect manually",
+					timer_err,
+				)
+			}
+			data.collection_timer_id = timer_id
 		}
 
 	case Trigger_Collection:
@@ -249,6 +260,11 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 
 	for pid, stats in data.active_stats {
 		if snapshot.actor_count >= MAX_SNAPSHOT_ACTORS {
+			log.warnf(
+				"observer snapshot truncated: %d active actors exceed MAX_SNAPSHOT_ACTORS (%d), subscribers receive a partial snapshot",
+				len(data.active_stats),
+				MAX_SNAPSHOT_ACTORS,
+			)
 			break
 		}
 
@@ -269,6 +285,10 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 		if stats.sent_to != nil {
 			for to_pid, count in stats.sent_to {
 				if snapshot.flow_count >= MAX_SNAPSHOT_FLOWS {
+					log.warnf(
+						"observer snapshot truncated: message flows exceed MAX_SNAPSHOT_FLOWS (%d), subscribers receive a partial flow list",
+						MAX_SNAPSHOT_FLOWS,
+					)
 					break
 				}
 				flow := &snapshot.flows[snapshot.flow_count]
@@ -284,6 +304,11 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 
 	for &stats in data.terminated_stats {
 		if snapshot.actor_count >= MAX_SNAPSHOT_ACTORS {
+			log.warnf(
+				"observer snapshot truncated: active plus terminated actors exceed MAX_SNAPSHOT_ACTORS (%d), %d terminated actors were omitted, subscribers receive a partial snapshot",
+				MAX_SNAPSHOT_ACTORS,
+				len(data.terminated_stats),
+			)
 			break
 		}
 
@@ -354,14 +379,32 @@ terminate_observer :: proc(data: ^Observer_Data) {
 
 OBSERVER_PID: PID
 
-start_observer :: proc(collection_interval: time.Duration = 0) -> (PID, bool) {
+start_observer :: proc(
+	collection_interval: time.Duration = 0,
+	loc := #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	context.logger = diagnostic_logger(context.logger)
 	if OBSERVER_PID != {} {
-		log.warnf("Observer already started with PID %v", OBSERVER_PID)
+		log.warnf(
+			"Observer already started with PID %v, this start_observer call had no effect and the existing observer was returned",
+			OBSERVER_PID,
+			location = loc,
+		)
 		return OBSERVER_PID, true
 	}
 
 	if OBSERVER_TYPE == ACTOR_TYPE_UNTYPED {
-		OBSERVER_TYPE, _ = register_actor_type("observer")
+		observer_type, type_ok := register_actor_type("observer")
+		if !type_ok {
+			log.error(
+				"start_observer: could not register the 'observer' actor type, the observer will run as ACTOR_TYPE_UNTYPED and every stats snapshot broadcast will be silently discarded",
+				location = loc,
+			)
+		}
+		OBSERVER_TYPE = observer_type
 	}
 
 	behaviour := Observer_Behaviour
@@ -375,7 +418,13 @@ start_observer :: proc(collection_interval: time.Duration = 0) -> (PID, bool) {
 		SYSTEM_CONFIG.actor_config,
 		parent_pid = NODE.pid,
 	)
-	if !ok do return PID{}, false
+	if !ok {
+		log.error(
+			"start_observer failed: could not spawn the observer actor, no actor statistics will be collected",
+			location = loc,
+		)
+		return PID{}, false
+	}
 
 	OBSERVER_PID = pid
 
@@ -395,12 +444,18 @@ stop_observer :: proc() {
 			return
 		}
 
-		a, _ := get_actor_from_pointer(a_ptr, true)
-
-		for priority in 0 ..< MAILBOX_PRIORITY_COUNT {
-			for mpsc_size(&a.mailbox[priority]) > 0 {
-				intrinsics.cpu_relax()
+		a, actor_ok := get_actor_from_pointer(a_ptr, true)
+		if actor_ok && a != nil {
+			for priority in 0 ..< MAILBOX_PRIORITY_COUNT {
+				for mpsc_size(&a.mailbox[priority]) > 0 {
+					intrinsics.cpu_relax()
+				}
 			}
+		} else {
+			log.warnf(
+				"stop_observer: observer PID %v is registered but its actor could not be resolved, terminating without draining its mailbox",
+				OBSERVER_PID,
+			)
 		}
 
 		terminate_actor(OBSERVER_PID, .SHUTDOWN)
@@ -416,17 +471,49 @@ stop_observer :: proc() {
 	SYSTEM_CONFIG.enable_observer = false
 }
 
-trigger_stats_collection :: proc() -> bool {
+@(private)
+log_observer_not_started :: proc(proc_name: string, loc: runtime.Source_Code_Location) {
+	context.logger = diagnostic_logger(context.logger)
+	log.errorf(
+		"%s failed: the observer is not running, enable it with enable_observer = true in make_node_config or call start_observer",
+		proc_name,
+		location = loc,
+	)
+}
+
+@(private)
+log_observer_send_failed :: proc(
+	proc_name: string,
+	err: Send_Error,
+	loc: runtime.Source_Code_Location,
+) {
+	context.logger = diagnostic_logger(context.logger)
+	log.errorf(
+		"%s failed: could not reach the observer actor (PID %v): %v",
+		proc_name,
+		OBSERVER_PID,
+		err,
+		location = loc,
+	)
+}
+
+trigger_stats_collection :: proc(loc := #caller_location) -> bool {
 	if OBSERVER_PID == {} {
+		log_observer_not_started("trigger_stats_collection", loc)
 		return false
 	}
 	msg := Trigger_Collection{}
-	return send_message(OBSERVER_PID, msg) == .OK
+	err := send_message(OBSERVER_PID, msg)
+	if err != .OK {
+		log_observer_send_failed("trigger_stats_collection", err, loc)
+	}
+	return err == .OK
 }
 
 
-request_actor_stats :: proc(actor_pid: PID, requester: PID) -> bool {
+request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_location) -> bool {
 	if OBSERVER_PID == {} {
+		log_observer_not_started("request_actor_stats", loc)
 		return false
 	}
 
@@ -435,12 +522,17 @@ request_actor_stats :: proc(actor_pid: PID, requester: PID) -> bool {
 		requester = requester,
 	}
 
-	return send_message(OBSERVER_PID, request) == .OK
+	err := send_message(OBSERVER_PID, request)
+	if err != .OK {
+		log_observer_send_failed("request_actor_stats", err, loc)
+	}
+	return err == .OK
 }
 
 
-request_all_stats :: proc(requester: PID) -> bool {
+request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
 	if OBSERVER_PID == {} {
+		log_observer_not_started("request_all_stats", loc)
 		return false
 	}
 
@@ -448,34 +540,49 @@ request_all_stats :: proc(requester: PID) -> bool {
 		requester = requester,
 	}
 
-	return send_message(OBSERVER_PID, request) == .OK
+	err := send_message(OBSERVER_PID, request)
+	if err != .OK {
+		log_observer_send_failed("request_all_stats", err, loc)
+	}
+	return err == .OK
 }
 
-set_stats_collection_interval :: proc(interval: time.Duration) -> bool {
+set_stats_collection_interval :: proc(interval: time.Duration, loc := #caller_location) -> bool {
 	if OBSERVER_PID == {} {
+		log_observer_not_started("set_stats_collection_interval", loc)
 		return false
 	}
 	msg := Set_Collection_Interval {
 		interval = interval,
 	}
-	return send_message(OBSERVER_PID, msg) == .OK
+	err := send_message(OBSERVER_PID, msg)
+	if err != .OK {
+		log_observer_send_failed("set_stats_collection_interval", err, loc)
+	}
+	return err == .OK
 }
 
-clear_terminated_stats :: proc() -> bool {
+clear_terminated_stats :: proc(loc := #caller_location) -> bool {
 	if OBSERVER_PID == {} {
+		log_observer_not_started("clear_terminated_stats", loc)
 		return false
 	}
 	msg := Clear_Terminated_Stats{}
-	return send_message(OBSERVER_PID, msg) == .OK
+	err := send_message(OBSERVER_PID, msg)
+	if err != .OK {
+		log_observer_send_failed("clear_terminated_stats", err, loc)
+	}
+	return err == .OK
 }
 
-subscribe_to_stats :: proc() -> (Subscription, bool) {
+subscribe_to_stats :: proc(loc := #caller_location) -> (Subscription, bool) {
 	if OBSERVER_TYPE == ACTOR_TYPE_UNTYPED {
+		log_observer_not_started("subscribe_to_stats", loc)
 		return {}, false
 	}
-	return subscribe_type(OBSERVER_TYPE)
+	return subscribe_type(OBSERVER_TYPE, loc)
 }
 
-unsubscribe_from_stats :: proc(sub: Subscription) -> bool {
-	return pubsub_unsubscribe(sub)
+unsubscribe_from_stats :: proc(sub: Subscription, loc := #caller_location) -> bool {
+	return pubsub_unsubscribe(sub, loc)
 }

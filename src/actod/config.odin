@@ -51,7 +51,36 @@ make_network_config :: proc(
 	reconnect_initial_delay: time.Duration = DEFAULT_NETWORK_CONFIG.reconnect_initial_delay,
 	reconnect_retry_delay: time.Duration = DEFAULT_NETWORK_CONFIG.reconnect_retry_delay,
 	connection_ring: Connection_Ring_Config = DEFAULT_NETWORK_CONFIG.connection_ring,
+	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Network_Config {
+	if port < 0 || port > 65535 {
+		panic_at(loc, "make_network_config: port must be 0-65535, got %d", port)
+	}
+	if udp_port < 0 || udp_port > 65535 {
+		panic_at(loc, "make_network_config: udp_port must be 0-65535, got %d", udp_port)
+	}
+	if udp_max_datagram <= 0 {
+		panic_at(
+			loc,
+			"make_network_config: udp_max_datagram must be > 0, got %d",
+			udp_max_datagram,
+		)
+	}
+	if connection_ring.send_slot_count != 0 && !is_power_of_two(connection_ring.send_slot_count) {
+		panic_at(
+			loc,
+			"make_network_config: connection_ring.send_slot_count must be a power of 2, got %d",
+			connection_ring.send_slot_count,
+		)
+	}
+	if connection_ring.recv_buffer_size < 0 {
+		panic_at(
+			loc,
+			"make_network_config: connection_ring.recv_buffer_size must be >= 0, got %d",
+			connection_ring.recv_buffer_size,
+		)
+	}
+
 	return Network_Config {
 		auth_password = auth_password,
 		port = port,
@@ -78,6 +107,7 @@ System_Config :: struct {
 	worker_count:          int, // 0 = auto (CPU count)
 	hot_reload_dev:        bool, // Spawns Hot_Reload_Actor, enables file watching + auto-reload
 	hot_reload_watch_path: string, // Override actors directory (default "" = auto-discover)
+	loc:                   runtime.Source_Code_Location,
 }
 
 SYSTEM_CONFIG := System_Config {
@@ -95,8 +125,9 @@ SYSTEM_CONFIG := System_Config {
 		message_batch = BATCH_SIZE,
 		logging = Log_Config {
 			level = .Info,
-			console_opts = log.Options{.Level, .Terminal_Color} | log.Full_Timestamp_Opts,
-			file_opts = log.Options{.Level, .Short_File_Path} | log.Full_Timestamp_Opts,
+			console_opts = log.Options{.Level, .Terminal_Color, .Short_File_Path, .Line} |
+			log.Full_Timestamp_Opts,
+			file_opts = log.Options{.Level, .Short_File_Path, .Line} | log.Full_Timestamp_Opts,
 			ident = "",
 			enable_file = false,
 			log_path = "log",
@@ -124,8 +155,25 @@ make_node_config :: proc(
 	worker_count: int = SYSTEM_CONFIG.worker_count,
 	hot_reload_dev: bool = SYSTEM_CONFIG.hot_reload_dev,
 	hot_reload_watch_path: string = SYSTEM_CONFIG.hot_reload_watch_path,
+	loc: runtime.Source_Code_Location = #caller_location,
 ) -> System_Config {
+	if actor_registry_size <= 0 {
+		panic_at(
+			loc,
+			"make_node_config: actor_registry_size must be > 0, got %d (it is rounded up to a power of two)",
+			actor_registry_size,
+		)
+	}
+	if worker_count < 0 {
+		panic_at(
+			loc,
+			"make_node_config: worker_count must be >= 0 (0 = one per CPU), got %d",
+			worker_count,
+		)
+	}
+
 	return System_Config {
+		loc = loc,
 		actor_registry_size = actor_registry_size,
 		allow_registry_growth = allow_registry_growth,
 		enable_observer = enable_observer,
@@ -160,6 +208,7 @@ Actor_Config :: struct {
 	blocking:                       bool,
 	// Stack size per actor thread in bytes (0 = OS default)
 	stack_size_dedicated_os_thread: int,
+	loc:                            runtime.Source_Code_Location,
 }
 
 // user overrides config sent to node in actor.node_init
@@ -178,8 +227,39 @@ make_actor_config :: proc(
 	coro_stack_size: int = SYSTEM_CONFIG.actor_config.coro_stack_size,
 	use_dedicated_os_thread: bool = SYSTEM_CONFIG.actor_config.use_dedicated_os_thread,
 	stack_size_dedicated_os_thread: int = SYSTEM_CONFIG.actor_config.stack_size_dedicated_os_thread,
+	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Actor_Config {
+	if message_batch <= 0 {
+		panic_at(loc, "make_actor_config: message_batch must be > 0, got %d", message_batch)
+	}
+	if page_size < CACHE_LINE_SIZE * 2 {
+		panic_at(
+			loc,
+			"make_actor_config: page_size must be at least %d B, got %d",
+			CACHE_LINE_SIZE * 2,
+			page_size,
+		)
+	}
+	if home_worker < -1 {
+		panic_at(
+			loc,
+			"make_actor_config: home_worker must be -1 (auto) or a worker index, got %d",
+			home_worker,
+		)
+	}
+	if max_restarts < 0 {
+		panic_at(loc, "make_actor_config: max_restarts must be >= 0, got %d", max_restarts)
+	}
+	if stack_size_dedicated_os_thread < 0 {
+		panic_at(
+			loc,
+			"make_actor_config: stack_size_dedicated_os_thread must be >= 0, got %d",
+			stack_size_dedicated_os_thread,
+		)
+	}
+
 	return Actor_Config {
+		loc = loc,
 		logging = logging,
 		spin_strategy = spin_strategy,
 		children = children,

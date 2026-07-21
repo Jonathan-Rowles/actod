@@ -112,7 +112,10 @@ reset_timer_registry :: proc() {
 spawn_timer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 	pid, ok := start_timer_actor(parent_pid)
 	if !ok {
-		log.panic("timer actor failed to start")
+		panic_at(
+			SYSTEM_CONFIG.loc,
+			"node startup failed: the timer actor could not be spawned, set_timer and cancel_timer would never fire",
+		)
 	}
 	return pid, ok
 }
@@ -207,6 +210,10 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 		t.user_args[0] = ctx
 		thread.start(t)
 		data.timer_thread = t
+	} else {
+		log.error(
+			"timer actor init failed: could not create the timer thread, NO TIMER WILL EVER FIRE on this node, set_timer will appear to succeed but Timer_Tick will never be delivered",
+		)
 	}
 }
 
@@ -236,17 +243,22 @@ timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any)
 
 		if pq.len(timer_registry.heap) >= MAX_TIMERS {
 			log.errorf(
-				"Timer capacity exceeded (%d), dropping timer id=%d from %v",
+				"Timer capacity exceeded (%d, MAX_TIMERS), dropping timer id=%d requested by %s",
 				MAX_TIMERS,
 				v.id,
-				from,
+				actor_origin(from),
 			)
 			return
 		}
 
 		key := Timer_Key{v.id, from}
 		if key in timer_registry.index_map {
-			log.panicf("Duplicate timer: id=%d already registered for owner %v", v.id, from)
+			panic_at(
+				SYSTEM_CONFIG.loc,
+				"Duplicate timer: id=%d is already registered for owner %s",
+				v.id,
+				actor_origin(from),
+			)
 		}
 
 		entry := Timer_Entry {
@@ -306,6 +318,10 @@ start_timer_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 	)
 	if ok {
 		TIMER_PID = pid
+	} else {
+		log.error(
+			"start_timer_actor failed: could not spawn the timer actor, set_timer and cancel_timer will fail and no Timer_Tick will ever be delivered",
+		)
 	}
 	return pid, ok
 }
@@ -318,14 +334,44 @@ stop_timer_actor :: proc() {
 	}
 }
 
-set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error) {
+set_timer :: proc(
+	interval: time.Duration,
+	repeat: bool,
+	loc := #caller_location,
+) -> (
+	u32,
+	Send_Error,
+) {
 	when ODIN_TEST {if id, err, ok := ti.intercept_set_timer(interval, repeat); ok do return id, Send_Error(err)}
 
 	id := sync.atomic_add(&next_timer_id, 1) + 1
 	if current_actor_context != nil {
 		append(&current_actor_context.timers, Timer_Registration(id))
 	}
-	err := send_message(TIMER_PID, Start_Timer{id = id, interval = interval, repeat = repeat})
+
+	if TIMER_PID == 0 {
+		log.errorf(
+			"set_timer failed: the timer actor is not running, timer id=%d will never fire, start the node with node_init or call start_timer_actor",
+			id,
+			location = loc,
+		)
+		return id, .ACTOR_NOT_FOUND
+	}
+
+	err := send_message(
+		TIMER_PID,
+		Start_Timer{id = id, interval = interval, repeat = repeat},
+		.NORMAL,
+		loc,
+	)
+	if err != .OK {
+		log.errorf(
+			"set_timer failed: could not reach the timer actor (%v), timer id=%d will never fire",
+			err,
+			id,
+			location = loc,
+		)
+	}
 	return id, err
 }
 
@@ -334,7 +380,7 @@ now :: proc() -> time.Time {
 	return time.now()
 }
 
-cancel_timer :: proc(id: u32) -> Send_Error {
+cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if err, ok := ti.intercept_cancel_timer(id); ok do return Send_Error(err)}
 
 	if current_actor_context != nil {
@@ -345,5 +391,24 @@ cancel_timer :: proc(id: u32) -> Send_Error {
 			}
 		}
 	}
-	return send_message(TIMER_PID, Cancel_Timer{id = id})
+
+	if TIMER_PID == 0 {
+		log.errorf(
+			"cancel_timer failed: the timer actor is not running, timer id=%d was not cancelled",
+			id,
+			location = loc,
+		)
+		return .ACTOR_NOT_FOUND
+	}
+
+	err := send_message(TIMER_PID, Cancel_Timer{id = id}, .NORMAL, loc)
+	if err != .OK {
+		log.errorf(
+			"cancel_timer failed: could not reach the timer actor (%v), timer id=%d was not cancelled and may still fire",
+			err,
+			id,
+			location = loc,
+		)
+	}
+	return err
 }

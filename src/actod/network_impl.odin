@@ -132,8 +132,15 @@ send_to_connection_ring_impl :: proc(
 	data: rawptr,
 	info: ^Message_Type_Info,
 	base_flags: Network_Message_Flags,
+	loc := #caller_location,
 ) -> Send_Error {
 	if ring == nil {
+		log.errorf(
+			"Cannot send '%s' to %v: there is no connection ring for that node",
+			info.name,
+			to,
+			location = loc,
+		)
 		return .NETWORK_ERROR
 	}
 
@@ -142,6 +149,13 @@ send_to_connection_ring_impl :: proc(
 
 	exact_size := wire_format_exact_size_impl(data, info, 0)
 	if exact_size > ring.usable_slot_size {
+		log.errorf(
+			"Message '%s' is %d bytes on the wire but the connection ring slot holds %d; raise connection_ring.send_slot_size in make_network_config or split the message",
+			info.name,
+			exact_size,
+			ring.usable_slot_size,
+			location = loc,
+		)
 		return .MESSAGE_TOO_LARGE
 	}
 
@@ -161,6 +175,13 @@ send_to_connection_ring_impl :: proc(
 	)
 	if msg_len == 0 {
 		batch_abort(ring, sid, dst)
+		log.errorf(
+			"Failed to serialize '%s' (%d bytes) for node %d; the message type may contain a field the wire format cannot encode",
+			info.name,
+			exact_size,
+			ring.node_id,
+			location = loc,
+		)
 		return .NETWORK_ERROR
 	}
 
@@ -178,8 +199,15 @@ send_to_connection_ring_by_name_impl :: proc(
 	data: rawptr,
 	info: ^Message_Type_Info,
 	base_flags: Network_Message_Flags,
+	loc := #caller_location,
 ) -> Send_Error {
 	if ring == nil {
+		log.errorf(
+			"Cannot send '%s' to '%s': there is no connection ring for that node",
+			info.name,
+			actor_name,
+			location = loc,
+		)
 		return .NETWORK_ERROR
 	}
 
@@ -193,6 +221,14 @@ send_to_connection_ring_by_name_impl :: proc(
 
 	exact_size := wire_format_exact_size_impl(data, info, len(actor_name))
 	if exact_size > ring.usable_slot_size {
+		log.errorf(
+			"Message '%s' addressed to '%s' is %d bytes on the wire but the connection ring slot holds %d; raise connection_ring.send_slot_size in make_network_config or split the message",
+			info.name,
+			actor_name,
+			exact_size,
+			ring.usable_slot_size,
+			location = loc,
+		)
 		return .MESSAGE_TOO_LARGE
 	}
 
@@ -212,6 +248,13 @@ send_to_connection_ring_by_name_impl :: proc(
 	)
 	if msg_len == 0 {
 		batch_abort(ring, sid, dst)
+		log.errorf(
+			"Failed to serialize '%s' (%d bytes) addressed to '%s'; the message type may contain a field the wire format cannot encode",
+			info.name,
+			exact_size,
+			actor_name,
+			location = loc,
+		)
 		return .NETWORK_ERROR
 	}
 
@@ -240,17 +283,30 @@ ensure_ring_for_node :: proc(node_id: Node_ID) -> ^Connection_Ring {
 	return get_connection_ring(node_id)
 }
 
-send_remote_impl :: proc(to: PID, data: rawptr, info: ^Message_Type_Info, priority: Message_Priority) -> Send_Error {
+send_remote_impl :: proc(
+	to: PID,
+	data: rawptr,
+	info: ^Message_Type_Info,
+	priority: Message_Priority,
+	loc := #caller_location,
+) -> Send_Error {
 	_, node_id := unpack_pid(to)
 
 	ring := ensure_ring_for_node(node_id)
 	if ring == nil {
+		log.warnf(
+			"Dropping '%s' for %v: no connection to node %d could be established; register the node with register_node and check it is reachable",
+			info.name,
+			to,
+			node_id,
+			location = loc,
+		)
 		return .NODE_DISCONNECTED
 	}
 
 	p_flags := priority_to_flags(priority)
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		result := send_to_connection_ring_impl(ring, to, data, info, p_flags)
+		result := send_to_connection_ring_impl(ring, to, data, info, p_flags, loc)
 		if result != .NETWORK_RING_FULL {
 			return result
 		}
@@ -260,6 +316,14 @@ send_remote_impl :: proc(to: PID, data: rawptr, info: ^Message_Type_Info, priori
 			time.sleep(1 * time.Microsecond)
 		}
 	}
+	log.warnf(
+		"Dropping '%s' for %v: the send ring for node %d stayed full for %d retries; the peer is not draining fast enough, raise connection_ring.send_slot_count or slow the producer",
+		info.name,
+		to,
+		node_id,
+		RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES,
+		location = loc,
+	)
 	return .NETWORK_RING_FULL
 }
 
@@ -268,21 +332,35 @@ send_remote_by_name_impl :: proc(
 	actor_name: string,
 	data: rawptr,
 	info: ^Message_Type_Info,
+	loc := #caller_location,
 ) -> Send_Error {
 	node_id, ok := get_node_by_name(node_name)
 	if !ok {
-		log.errorf("Unknown node: %s", node_name)
+		log.errorf(
+			"Cannot send '%s' to '%s@%s': that node is not known; check the spelling and register it with register_node before sending",
+			info.name,
+			actor_name,
+			node_name,
+			location = loc,
+		)
 		return .ACTOR_NOT_FOUND
 	}
 
 	ring := ensure_ring_for_node(node_id)
 	if ring == nil {
+		log.warnf(
+			"Dropping '%s' for '%s@%s': no connection to that node could be established; check it is running and reachable",
+			info.name,
+			actor_name,
+			node_name,
+			location = loc,
+		)
 		return .NODE_DISCONNECTED
 	}
 
 	p_flags := priority_to_flags(.NORMAL)
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, p_flags)
+		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, p_flags, loc)
 		if result != .NETWORK_RING_FULL {
 			return result
 		}
@@ -292,21 +370,34 @@ send_remote_by_name_impl :: proc(
 			time.sleep(1 * time.Microsecond)
 		}
 	}
+	log.warnf(
+		"Dropping '%s' for '%s@%s': the send ring stayed full for %d retries; the peer is not draining fast enough, raise connection_ring.send_slot_count or slow the producer",
+		info.name,
+		actor_name,
+		node_name,
+		RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES,
+		location = loc,
+	)
 	return .NETWORK_RING_FULL
 }
 
-send_unreliable :: #force_inline proc(to: PID, content: $T) -> Send_Error {
+send_unreliable :: #force_inline proc(
+	to: PID,
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	if is_local_pid(to) {
 		return send_message(to, content)
 	}
 	v := content
-	return send_unreliable_remote_impl(to, &v, get_validated_message_info_ptr(T))
+	return send_unreliable_remote_impl(to, &v, get_validated_message_info_ptr(T), loc)
 }
 
 send_unreliable_remote_impl :: proc(
 	to: PID,
 	data: rawptr,
 	info: ^Message_Type_Info,
+	loc := #caller_location,
 ) -> Send_Error {
 	_, node_id := unpack_pid(to)
 
@@ -333,5 +424,5 @@ send_unreliable_remote_impl :: proc(
 		}
 	}
 
-	return send_remote_impl(to, data, info, .NORMAL)
+	return send_remote_impl(to, data, info, .NORMAL, loc)
 }

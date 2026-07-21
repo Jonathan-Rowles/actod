@@ -1,6 +1,7 @@
 package actod
 
 import "base:intrinsics"
+import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:sync"
@@ -90,6 +91,7 @@ send_to_actor_impl :: proc(
 	info: ^Message_Type_Info,
 	priority: Message_Priority,
 	$class: Msg_Class,
+	loc := #caller_location,
 ) -> Send_Error {
 	when class == .User {
 		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
@@ -121,19 +123,25 @@ send_to_actor_impl :: proc(
 	} else {
 		alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info)
 		if alloc_err != .OK {
-			return report_alloc_error(alloc_err, attempted_size, &actor.pool, to)
+			return report_alloc_error(alloc_err, attempted_size, &actor.pool, to, loc)
 		}
 	}
 
 	when class == .System {
 		if !mpsc_push(&actor.system_mailbox, msg) {
-			log.panicf("Couldn't send system message to %v", to)
+			panic_at(
+				loc,
+				"system mailbox of %s is full (%d slots), cannot deliver %v",
+				actor_origin(to),
+				SYSTEM_MAILBOX_SIZE,
+				tid,
+			)
 		}
 		wake_actor(actor)
 		handle_set_message_stats(msg.from, to)
 		return .OK
 	} else {
-		result := push_to_mailbox(actor, msg, to, int(priority))
+		result := push_to_mailbox(actor, msg, to, int(priority), loc)
 		if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
 			free_message(&actor.pool, msg.content)
 		}
@@ -150,6 +158,7 @@ send_message_impl :: proc(
 	info: ^Message_Type_Info,
 	priority: Message_Priority,
 	$class: Msg_Class,
+	loc := #caller_location,
 ) -> Send_Error {
 	if to == 0 {
 		return .ACTOR_NOT_FOUND
@@ -162,7 +171,7 @@ send_message_impl :: proc(
 	}
 
 	if !is_local_pid(to) {
-		return send_remote_impl(to, data, info, priority)
+		return send_remote_impl(to, data, info, priority, loc)
 	}
 
 	actor_ptr, home_worker, ok := get_relaxed_loc(&global_registry, to)
@@ -180,12 +189,33 @@ send_message_impl :: proc(
 			info,
 			priority,
 			class,
+			loc,
 		)
 	}
 
 	reclaim_pin()
 	defer reclaim_unpin()
-	return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, priority, class)
+	return send_to_actor_impl(
+		to,
+		cast(^Actor(int))actor_ptr,
+		data,
+		size,
+		tid,
+		info,
+		priority,
+		class,
+		loc,
+	)
+}
+
+@(private)
+log_send_outside_actor :: proc(
+	send_proc: string,
+	tid: typeid,
+	loc: runtime.Source_Code_Location,
+) {
+	context.logger = diagnostic_logger(context.logger)
+	log.errorf("%s(%v) failed: must be called from inside an actor", send_proc, tid, location = loc)
 }
 
 @(private)
@@ -195,12 +225,17 @@ send_self_impl :: proc(
 	tid: typeid,
 	info: ^Message_Type_Info,
 	$class: Msg_Class,
+	loc := #caller_location,
 ) -> Send_Error {
+	if current_actor_context == nil {
+		log_send_outside_actor("send_self", tid, loc)
+		return .ACTOR_NOT_FOUND
+	}
 	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
-	return send_to_actor_impl(actor.pid, actor, data, size, tid, info, .NORMAL, class)
+	return send_to_actor_impl(actor.pid, actor, data, size, tid, info, .NORMAL, class, loc)
 }
 
 @(private)
@@ -210,16 +245,47 @@ send_message_to_parent_impl :: proc(
 	tid: typeid,
 	info: ^Message_Type_Info,
 	$class: Msg_Class,
+	loc := #caller_location,
 ) -> Send_Error {
+	if current_actor_context == nil {
+		log_send_outside_actor("send_message_to_parent", tid, loc)
+		return .ACTOR_NOT_FOUND
+	}
 	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
-	parent_actor, got_parent := get_actor_from_pointer(get(&global_registry, actor.parent))
-	if !got_parent {
+	if actor.parent == 0 {
+		log.errorf(
+			"send_message_to_parent(%v) failed: actor '%s' has no parent (it was spawned without one)",
+			tid,
+			actor.name,
+			location = loc,
+		)
 		return .ACTOR_NOT_FOUND
 	}
-	return send_to_actor_impl(actor.parent, parent_actor, data, size, tid, info, .NORMAL, class)
+	parent_actor, got_parent := get_actor_from_pointer(get(&global_registry, actor.parent))
+	if !got_parent {
+		log.errorf(
+			"send_message_to_parent(%v) failed: parent %v of actor '%s' is no longer alive",
+			tid,
+			actor.parent,
+			actor.name,
+			location = loc,
+		)
+		return .ACTOR_NOT_FOUND
+	}
+	return send_to_actor_impl(
+		actor.parent,
+		parent_actor,
+		data,
+		size,
+		tid,
+		info,
+		.NORMAL,
+		class,
+		loc,
+	)
 }
 
 @(private)
@@ -229,7 +295,12 @@ send_message_to_children_impl :: proc(
 	tid: typeid,
 	info: ^Message_Type_Info,
 	$class: Msg_Class,
+	loc := #caller_location,
 ) -> Send_Error {
+	if current_actor_context == nil {
+		log_send_outside_actor("send_message_to_children", tid, loc)
+		return .ACTOR_NOT_FOUND
+	}
 	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
 	if !ok {
 		return .ACTOR_NOT_FOUND
@@ -237,9 +308,26 @@ send_message_to_children_impl :: proc(
 	for child_pid in actor.children {
 		child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
 		if !child_ok {
+			log.errorf(
+				"send_message_to_children(%v) stopped: child %v of actor '%s' is no longer alive",
+				tid,
+				child_pid,
+				actor.name,
+				location = loc,
+			)
 			return .ACTOR_NOT_FOUND
 		}
-		err := send_to_actor_impl(child_pid, child_actor, data, size, tid, info, .NORMAL, class)
+		err := send_to_actor_impl(
+			child_pid,
+			child_actor,
+			data,
+			size,
+			tid,
+			info,
+			.NORMAL,
+			class,
+			loc,
+		)
 		if err != .OK {
 			return err
 		}

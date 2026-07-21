@@ -64,9 +64,13 @@ init_pid_map :: proc(m: ^PID_Map($T, $HT), initial_capacity: int, allocator := c
 }
 
 @(private)
-try_grow_registry :: proc(m: ^PID_Map($T, $HT)) -> bool {
+try_grow_registry :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> bool {
 	if !SYSTEM_CONFIG.allow_registry_growth {
-		log.errorf("Registry full (capacity=%d) and growth is disabled", m.capacity)
+		log.errorf(
+			"actor registry is full (capacity=%d) and allow_registry_growth is disabled. Raise actor_registry_size in make_node_config() or enable growth",
+			m.capacity,
+			location = loc,
+		)
 		return false
 	}
 
@@ -144,6 +148,7 @@ add :: proc(
 	data: T,
 	name: string = "",
 	actor_type: Actor_Type = 0,
+	loc := #caller_location,
 ) -> (
 	HT,
 	bool,
@@ -202,7 +207,7 @@ add :: proc(
 		}
 
 		if current_items >= m.capacity {
-			if !try_grow_registry(m) {
+			if !try_grow_registry(m, loc) {
 				return {}, false
 			}
 			continue
@@ -862,10 +867,12 @@ register_node :: proc(
 	name: string,
 	address: net.Endpoint,
 	transport: Transport_Strategy,
+	loc := #caller_location,
 ) -> (
 	Node_ID,
 	bool,
 ) {
+	context.logger = diagnostic_logger(context.logger)
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
 
@@ -874,6 +881,13 @@ register_node :: proc(
 	}
 
 	if existing_id, exists := NODE.node_name_to_id[name]; exists {
+		log.warnf(
+			"register_node('%s'): already registered as node %d, updating its address to %v and keeping the existing id",
+			name,
+			existing_id,
+			address,
+			location = loc,
+		)
 		NODE.node_registry[existing_id].address = address
 		NODE.node_registry[existing_id].transport = transport
 		return existing_id, false
@@ -882,6 +896,12 @@ register_node :: proc(
 	for {
 		node_id := sync.atomic_load(&global_next_node_id)
 		if node_id >= MAX_NODES {
+			log.errorf(
+				"register_node('%s') failed: this node already knows the maximum of %d peers",
+				name,
+				MAX_NODES,
+				location = loc,
+			)
 			return 0, false
 		}
 		if _, ok := sync.atomic_compare_exchange_strong(

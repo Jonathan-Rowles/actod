@@ -186,7 +186,7 @@ parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, pro
 						append(
 							&info.params,
 							Param_Info {
-								name = ident_name(name_expr),
+								name = param_name(name_expr),
 								type_str = type_str,
 								default_expr = default_str,
 								is_poly = is_poly,
@@ -301,6 +301,13 @@ needs_hot_api_entry :: proc(p: Proc_Info) -> bool {
 
 api_field_name :: proc(p: Proc_Info) -> string {
 	return p.name
+}
+
+split_trailing_loc :: proc(params: []Param_Info) -> (leading: []Param_Info, loc: Maybe(Param_Info)) {
+	if len(params) > 0 && params[len(params) - 1].name == "loc" {
+		return params[:len(params) - 1], params[len(params) - 1]
+	}
+	return params, nil
 }
 
 host_func_name :: proc(p: Proc_Info) -> string {
@@ -628,9 +635,9 @@ emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {
 
 	fmt.sbprint(sb, "(")
 
-	param_count := 0
-	for param in p.params {
-		if param_count > 0 do fmt.sbprint(sb, ", ")
+	leading_params, trailing_loc := split_trailing_loc(p.params[:])
+
+	emit_shim_param :: proc(sb: ^strings.Builder, p: Proc_Info, param: Param_Info) {
 		if param.name != "" {
 			fmt.sbprintf(sb, "%s: ", param.name)
 		}
@@ -640,12 +647,24 @@ emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {
 		if default_val != "" {
 			fmt.sbprintf(sb, " = %s", default_val)
 		}
+	}
+
+	param_count := 0
+	for param in leading_params {
+		if param_count > 0 do fmt.sbprint(sb, ", ")
+		emit_shim_param(sb, p, param)
 		param_count += 1
 	}
 
 	for extra in p.extra_params {
 		if param_count > 0 do fmt.sbprint(sb, ", ")
 		fmt.sbprint(sb, extra)
+		param_count += 1
+	}
+
+	if loc_param, has_loc := trailing_loc.?; has_loc {
+		if param_count > 0 do fmt.sbprint(sb, ", ")
+		emit_shim_param(sb, p, loc_param)
 		param_count += 1
 	}
 
@@ -677,8 +696,10 @@ emit_auto_bridge_body :: proc(sb: ^strings.Builder, p: Proc_Info) {
 		fmt.sbprintf(sb, "\thot_api.%s(", p.name)
 	}
 
+	leading_params, trailing_loc := split_trailing_loc(p.params[:])
+
 	param_count := 0
-	for param in p.params {
+	for param in leading_params {
 		if param_count > 0 do fmt.sbprint(sb, ", ")
 		fmt.sbprint(sb, param.name)
 		param_count += 1
@@ -690,6 +711,12 @@ emit_auto_bridge_body :: proc(sb: ^strings.Builder, p: Proc_Info) {
 		if colon_idx > 0 {
 			fmt.sbprint(sb, strings.trim_space(extra[:colon_idx]))
 		}
+		param_count += 1
+	}
+
+	if loc_param, has_loc := trailing_loc.?; has_loc {
+		if param_count > 0 do fmt.sbprint(sb, ", ")
+		fmt.sbprint(sb, loc_param.name)
 		param_count += 1
 	}
 
@@ -730,6 +757,7 @@ SPAWN_RAW_FIELD :: `	spawn_raw:                proc(
 		behaviour: Raw_Spawn_Behaviour,
 		opts: Actor_Config,
 		parent_pid: PID,
+		loc: runtime.Source_Code_Location,
 	) -> (
 		PID,
 		bool,
@@ -742,6 +770,7 @@ SPAWN_CHILD_RAW_FIELD :: `	spawn_child_raw:          proc(
 		data_size: int,
 		behaviour: Raw_Spawn_Behaviour,
 		opts: Actor_Config,
+		loc: runtime.Source_Code_Location,
 	) -> (PID, bool),
 `
 
@@ -770,13 +799,15 @@ build_hot_api_struct_text :: proc(procs: []Proc_Info) -> string {
 
 		fmt.sbprint(&sb, "proc(")
 
+		leading_params, trailing_loc := split_trailing_loc(p.params[:])
+
 		total_params := len(p.params) + len(p.extra_params)
 		needs_multiline := total_params > 4
 
 		param_count := 0
 		if needs_multiline {
 			fmt.sbprint(&sb, "\n")
-			for param in p.params {
+			for param in leading_params {
 				if param_count > 0 do fmt.sbprint(&sb, ",\n")
 				type_str := resolve_type(param.type_str)
 				fmt.sbprintf(&sb, "\t\t%s: %s", param.name, type_str)
@@ -789,9 +820,14 @@ build_hot_api_struct_text :: proc(procs: []Proc_Info) -> string {
 				fmt.sbprintf(&sb, "\t\t%s", text)
 				param_count += 1
 			}
+			if loc_param, has_loc := trailing_loc.?; has_loc {
+				if param_count > 0 do fmt.sbprint(&sb, ",\n")
+				fmt.sbprintf(&sb, "\t\t%s: %s", loc_param.name, resolve_type(loc_param.type_str))
+				param_count += 1
+			}
 			fmt.sbprint(&sb, ",\n\t)")
 		} else {
-			for param in p.params {
+			for param in leading_params {
 				if param_count > 0 do fmt.sbprint(&sb, ", ")
 				type_str := resolve_type(param.type_str)
 				if param.name != "" {
@@ -806,6 +842,11 @@ build_hot_api_struct_text :: proc(procs: []Proc_Info) -> string {
 				eq_idx := strings.index_byte(extra, '=')
 				text := extra if eq_idx < 0 else strings.trim_space(extra[:eq_idx])
 				fmt.sbprint(&sb, text)
+				param_count += 1
+			}
+			if loc_param, has_loc := trailing_loc.?; has_loc {
+				if param_count > 0 do fmt.sbprint(&sb, ", ")
+				fmt.sbprintf(&sb, "%s: %s", loc_param.name, resolve_type(loc_param.type_str))
 				param_count += 1
 			}
 			fmt.sbprint(&sb, ")")
@@ -961,6 +1002,14 @@ ident_name :: proc(expr: ^ast.Expr) -> string {
 	return ""
 }
 
+param_name :: proc(expr: ^ast.Expr) -> string {
+	if expr == nil do return ""
+	if poly, ok := expr.derived.(^ast.Poly_Type); ok {
+		return fmt.aprintf("$%s", ident_name(poly.type))
+	}
+	return ident_name(expr)
+}
+
 expr_to_string :: proc(expr: ^ast.Expr) -> string {
 	if expr == nil do return ""
 
@@ -992,6 +1041,8 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 		return "proc"
 	case ^ast.Basic_Lit:
 		return e.tok.text
+	case ^ast.Basic_Directive:
+		return fmt.aprintf("#%s", e.name)
 	case ^ast.Typeid_Type:
 		return "typeid"
 	case ^ast.Unary_Expr:

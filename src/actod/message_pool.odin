@@ -1,7 +1,6 @@
 package actod
 
 import "base:intrinsics"
-import "core:log"
 import "core:mem"
 import "core:sync"
 
@@ -94,6 +93,8 @@ Alloc_Error :: enum {
 	OK = 0,
 	SIZE_EXCEEDS_PAGE,
 	POOL_EXHAUSTED,
+	OUT_OF_MEMORY,
+	ALLOC_CONTENDED,
 	MALFORMED_PAYLOAD,
 }
 
@@ -143,7 +144,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 			); ok {
 				ptr, _ := mem.alloc(page_pool.page_size, 1, page_pool.allocator)
 				if ptr == nil {
-					return nil, .POOL_EXHAUSTED
+					return nil, .OUT_OF_MEMORY
 				}
 				page_pool.pages[slot] = ptr
 
@@ -159,11 +160,11 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 		}
 	}
 
-	return nil, .POOL_EXHAUSTED
+	return nil, .ALLOC_CONTENDED
 }
 
 @(private)
-free_message :: proc(page_pool: ^Pool, ptr: rawptr) {
+free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
 	if ptr == nil {
 		return
 	}
@@ -172,7 +173,13 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr) {
 	idx := metadata_ptr[0]
 
 	if idx < 0 || idx >= page_pool.max_pages || page_pool.pages[idx] != ptr {
-		panic("Invalid page pointer in free_page")
+		panic_at(
+			loc,
+			"free_message: invalid page pointer %p, its trailing metadata says page index %d (valid range is 0 to %d), the page was double freed or the message buffer was overrun",
+			ptr,
+			idx,
+			page_pool.max_pages - 1,
+		)
 	}
 
 	for {
@@ -213,7 +220,7 @@ message_free_deferred :: #force_inline proc(buffer: ^Batch_Free_Buffer, ptr: raw
 }
 
 @(private)
-flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer) {
+flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer, loc := #caller_location) {
 	if buffer.count == 0 do return
 
 	pool := buffer.pool
@@ -226,7 +233,14 @@ flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer) {
 		idx := metadata_ptr[0]
 
 		if idx < 0 || idx >= pool.max_pages || pool.pages[idx] != ptr {
-			log.panic("Invalid page pointer in batch free")
+			panic_at(
+				loc,
+				"flush_batch_free: invalid page pointer %p at batch slot %d, its trailing metadata says page index %d (valid range is 0 to %d), the page was double freed or the message buffer was overrun",
+				ptr,
+				i,
+				idx,
+				pool.max_pages - 1,
+			)
 		}
 
 		for {

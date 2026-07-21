@@ -78,7 +78,7 @@ get_auth_password :: proc() -> string {
 	return ""
 }
 
-init_network :: proc(local_node_id: Node_ID, node_name: string) {
+init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_location) {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	local_addr: net.Endpoint
 	if SYSTEM_CONFIG.network.port > 0 {
@@ -106,13 +106,18 @@ init_network :: proc(local_node_id: Node_ID, node_name: string) {
 	}
 
 	if NODE.network_listener_thread != nil {
-		log.warn("network listener already running")
+		log.warnf(
+			"Network listener is already running on port %d; node_init was called twice without a matching shutdown",
+			SYSTEM_CONFIG.network.port,
+			location = loc,
+		)
 		return
 	}
 
 	Listener_Context :: struct {
 		port:   int,
 		logger: runtime.Logger,
+		loc:    runtime.Source_Code_Location,
 	}
 
 
@@ -128,7 +133,12 @@ init_network :: proc(local_node_id: Node_ID, node_name: string) {
 
 		listen_sock, err := net.listen_tcp(endpoint)
 		if err != nil {
-			log.errorf("Failed to listen on port %d: %v", listener_ctx.port, err)
+			log.errorf(
+				"Failed to listen on port %d: %v; another process may already hold it, change port in make_network_config",
+				listener_ctx.port,
+				err,
+				location = listener_ctx.loc,
+			)
 			return
 		}
 		defer net.close(listen_sock)
@@ -173,6 +183,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string) {
 	ctx := new(Listener_Context)
 	ctx.port = SYSTEM_CONFIG.network.port
 	ctx.logger = context.logger
+	ctx.loc = SYSTEM_CONFIG.loc
 
 	NODE.network_listener_thread = thread.create(listener_proc)
 	if NODE.network_listener_thread != nil {
@@ -180,7 +191,11 @@ init_network :: proc(local_node_id: Node_ID, node_name: string) {
 		thread.start(NODE.network_listener_thread)
 	} else {
 		free(ctx)
-		log.error("Failed to start network listener")
+		log.errorf(
+			"Failed to create the network listener thread for port %d; this node will not accept incoming connections",
+			SYSTEM_CONFIG.network.port,
+			location = loc,
+		)
 	}
 }
 
@@ -393,9 +408,9 @@ deliver_broadcast_locally :: proc(
 	return true
 }
 
-send_remote :: #force_inline proc(to: PID, content: $T) -> Send_Error {
+send_remote :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
 	v := content
-	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), .NORMAL)
+	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), .NORMAL, loc)
 }
 
 get_or_create_connection :: proc(node_id: Node_ID) -> PID {
@@ -460,6 +475,10 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		parent_pid = NODE.pid,
 	)
 	if !spawn_ok {
+		log.errorf(
+			"Failed to spawn the connection actor for node '%s'; the actor registry may be full",
+			node_info.node_name,
+		)
 		return 0
 	}
 
@@ -614,9 +633,16 @@ send_remote_by_name :: #force_inline proc(
 	node_name: string,
 	actor_name: string,
 	content: $T,
+	loc := #caller_location,
 ) -> Send_Error {
 	v := content
-	return send_remote_by_name_impl(node_name, actor_name, &v, get_validated_message_info_ptr(T))
+	return send_remote_by_name_impl(
+		node_name,
+		actor_name,
+		&v,
+		get_validated_message_info_ptr(T),
+		loc,
+	)
 }
 
 MAX_PENDING_SPAWNS :: 64
@@ -642,21 +668,30 @@ spawn_remote :: proc(
 	target_node: string,
 	parent_pid: PID = 0,
 	timeout: time.Duration = SPAWN_REMOTE_TIMEOUT,
+	loc := #caller_location,
 ) -> (
 	PID,
 	bool,
 ) {
+	context.logger = diagnostic_logger(context.logger)
 	_, registered := get_spawn_func_by_hash(fnv1a_hash(spawn_func_name))
 	if !registered {
 		log.errorf(
-			"Spawn function '%s' is not registered locally, it likely won't exist on the remote node either",
+			"Spawn function '%s' is not registered locally, it likely won't exist on node '%s' either; register it with the same name on both nodes",
 			spawn_func_name,
+			target_node,
+			location = loc,
 		)
 	}
 
 	node_id, ok := get_node_by_name(target_node)
 	if !ok {
-		log.errorf("Unknown target node: %s", target_node)
+		log.errorf(
+			"Cannot spawn '%s' remotely: node '%s' is not known; check the spelling and register it with register_node first",
+			actor_name,
+			target_node,
+			location = loc,
+		)
 		return 0, false
 	}
 
@@ -676,7 +711,13 @@ spawn_remote :: proc(
 		}
 	}
 	if slot_idx == -1 {
-		log.error("Too many pending remote spawn requests")
+		log.errorf(
+			"Cannot spawn '%s' on node '%s': all %d remote spawn slots are in flight; wait for outstanding spawn_remote calls to finish",
+			actor_name,
+			target_node,
+			MAX_PENDING_SPAWNS,
+			location = loc,
+		)
 		return 0, false
 	}
 
@@ -694,15 +735,24 @@ spawn_remote :: proc(
 	ring := ensure_ring_for_node(node_id)
 	if ring == nil {
 		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
+		log.errorf(
+			"Cannot spawn '%s' on node '%s': no connection to that node could be established; check it is running and reachable",
+			actor_name,
+			target_node,
+			location = loc,
+		)
 		return 0, false
 	}
 	send_lifecycle_message(ring, request)
 
 	if !sync.atomic_sema_wait_with_timeout(&pending.sema, timeout) {
 		log.errorf(
-			"Remote spawn request timed out for '%s' on node '%s'",
+			"Remote spawn of '%s' via '%s' on node '%s' timed out after %v; the node may be unreachable or not draining its ring",
+			actor_name,
 			spawn_func_name,
 			target_node,
+			timeout,
+			location = loc,
 		)
 		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		return 0, false
@@ -712,7 +762,14 @@ spawn_remote :: proc(
 	sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 
 	if !response.success {
-		log.errorf("Remote spawn failed on node '%s': %s", target_node, response.error_msg)
+		log.errorf(
+			"Remote spawn of '%s' via '%s' failed on node '%s': %s",
+			actor_name,
+			spawn_func_name,
+			target_node,
+			response.error_msg,
+			location = loc,
+		)
 		return 0, false
 	}
 

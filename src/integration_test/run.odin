@@ -58,6 +58,10 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_self_termination_reasons", test_proc = test_self_termination_reasons},
 	{name = "test_transient_restart_policy", test_proc = test_transient_restart_policy},
 	{name = "test_rest_for_one_strategy", test_proc = test_rest_for_one_strategy},
+	{
+		name = "test_remove_child_then_restart_all",
+		test_proc = test_remove_child_then_restart_all,
+	},
 	{name = "test_string_handling", test_proc = test_string_handling},
 	{name = "test_byte_slice_handling", test_proc = test_byte_slice_handling},
 	{name = "test_union_message_handling", test_proc = test_union_message_handling},

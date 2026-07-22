@@ -601,19 +601,19 @@ make_node_config :: proc(
 
 @(hot = `compose
 default children = nil
-default spin_strategy = .CPU_RELAX
+default spin_strategy = .WAKE_SEMA
 default logging = {}
-default message_batch = 32
-default page_size = 4096
+default message_batch = 64
+default page_size = 65536
 default supervision_strategy = .ONE_FOR_ONE
-default restart_policy = .TEMPORARY
+default restart_policy = .PERMANENT
 default max_restarts = 3
-default restart_window = 60 * time.Second
+default restart_window = 5 * time.Second
 default home_worker = -1
 default affinity = nil
-default coro_stack_size = 16384
+default coro_stack_size = 57344
 default use_dedicated_os_thread = false
-default stack_size_dedicated_os_thread = 1048576
+default stack_size_dedicated_os_thread = 131072
 return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 `)
 make_actor_config :: proc(

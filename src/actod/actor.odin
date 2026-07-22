@@ -654,7 +654,6 @@ init_message_processing_context :: proc(
 	return Message_Processing_Context {
 		free_buffer = Batch_Free_Buffer {
 			entries = make([]rawptr, FREE_BATCH_SIZE, allocator),
-			sizes = make([]int, FREE_BATCH_SIZE, allocator),
 			count = 0,
 			pool = &actor.pool,
 		},
@@ -807,7 +806,7 @@ process_user_mailboxes :: #force_inline proc(
 				actor.handle_message(actor.data, msg.from, ctx.data)
 				track_message_received(msg.from)
 			}
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content, ctx.header.size)
+			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
 		}
 		flush_batch_free(&ctx.free_buffer)
 		if sync.atomic_load(&actor.state) != .RUNNING do return false
@@ -833,7 +832,7 @@ process_user_mailboxes :: #force_inline proc(
 				actor.handle_message(actor.data, msg.from, ctx.data)
 				track_message_received(msg.from)
 			}
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content, ctx.header.size)
+			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
 		}
 
 		if batch_count > 0 do flush_batch_free(&ctx.free_buffer)

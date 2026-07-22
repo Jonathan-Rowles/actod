@@ -169,17 +169,15 @@ test_batch_free :: proc(t: ^testing.T) {
 
 	buffer: Batch_Free_Buffer
 	buffer.entries = make([]rawptr, FREE_BATCH_SIZE)
-	buffer.sizes = make([]int, FREE_BATCH_SIZE)
 	buffer.pool = &pool
 	defer delete(buffer.entries)
-	defer delete(buffer.sizes)
 
 	size := 512
 	for i in 0 ..< FREE_BATCH_SIZE - 1 {
 		ptr, _ := message_alloc(&pool, size)
 		testing.expect(t, ptr != nil, fmt.tprintf("Allocation %d should succeed", i))
 		if ptr != nil {
-			message_free_deferred(&buffer, ptr, size)
+			message_free_deferred(&buffer, ptr)
 		}
 	}
 
@@ -188,7 +186,7 @@ test_batch_free :: proc(t: ^testing.T) {
 	ptr, _ := message_alloc(&pool, size)
 	testing.expect(t, ptr != nil, "Final allocation should succeed")
 	if ptr != nil {
-		message_free_deferred(&buffer, ptr, size)
+		message_free_deferred(&buffer, ptr)
 	}
 
 	testing.expect(t, buffer.count == 0, "Buffer should be flushed")

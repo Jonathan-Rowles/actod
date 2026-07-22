@@ -98,7 +98,6 @@ make_network_config :: proc(
 System_Config :: struct {
 	actor_registry_size:   int,
 	allow_registry_growth: bool,
-	messages_to_register:  []typeid,
 	enable_observer:       bool,
 	observer_interval:     time.Duration, // Collection interval, 0 for manual only
 	network:               Network_Config,
@@ -113,14 +112,13 @@ System_Config :: struct {
 SYSTEM_CONFIG := System_Config {
 	actor_registry_size = 256, // Default: 16K actors (power-of-2)
 	allow_registry_growth = true, // Enable auto-growth
-	messages_to_register = []typeid{},
 	enable_observer = false,
 	observer_interval = 0,
 	network = DEFAULT_NETWORK_CONFIG,
 	blocking_child = nil,
 	actor_config = Actor_Config {
 		children = nil,
-		page_size = mem.Kilobyte * 64,
+		page_size = DEFAULT_PAGE_SIZE,
 		spin_strategy = .WAKE_SEMA,
 		message_batch = BATCH_SIZE,
 		logging = Log_Config {

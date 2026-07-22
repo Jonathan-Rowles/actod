@@ -47,6 +47,11 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_reclaim_churn_under_termination,
 		worker_count = 4,
 	},
+	{
+		name = "test_system_mailbox_full_returns_error",
+		test_proc = test_system_mailbox_full_returns_error,
+		worker_count = 2,
+	},
 
 	// Supervisor hierarchy tests
 	{name = "test_supervisor_child_lifecycle", test_proc = test_supervisor_child_lifecycle},

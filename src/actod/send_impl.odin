@@ -129,13 +129,17 @@ send_to_actor_impl :: proc(
 
 	when class == .System {
 		if !mpsc_push(&actor.system_mailbox, msg) {
-			panic_at(
-				loc,
-				"system mailbox of %s is full (%d slots), cannot deliver %v",
+			log.errorf(
+				"system mailbox of %s is full (%d slots), dropping %v, the receiver is not draining",
 				actor_origin(to),
 				SYSTEM_MAILBOX_SIZE,
 				tid,
+				location = loc,
 			)
+			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+				free_message(&actor.pool, msg.content)
+			}
+			return .RECEIVER_BACKLOGGED
 		}
 		wake_actor(actor)
 		handle_set_message_stats(msg.from, to)

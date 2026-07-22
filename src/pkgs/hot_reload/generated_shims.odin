@@ -231,7 +231,6 @@ Supervision_Strategy :: enum {
 System_Config :: struct {
 	actor_registry_size:   int,
 	allow_registry_growth: bool,
-	messages_to_register:  []typeid,
 	enable_observer:       bool,
 	observer_interval:     time.Duration,
 	network:               Network_Config,
@@ -721,7 +720,7 @@ make_node_config :: proc(actor_registry_size: int = 0, allow_registry_growth: bo
 	return hot_api.make_node_config(actor_registry_size, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, loc)
 }
 
-make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .CPU_RELAX, logging: Log_Config = {}, message_batch: int = 32, page_size: int = 4096, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .TEMPORARY, max_restarts: int = 3, restart_window: time.Duration = 60 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 16384, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 1048576, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
+make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, message_batch: int = 64, page_size: int = 65536, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
 	return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 }
 

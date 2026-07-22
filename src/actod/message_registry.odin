@@ -122,6 +122,8 @@ Temp_Variant_Info :: struct {
 }
 
 register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location) {
+	assert_message_fits_page(T)
+
 	context = runtime.default_context()
 	registry_ensure_init(&g_message_registry, loc)
 
@@ -322,6 +324,8 @@ get_validated_message_info_ptr :: #force_inline proc(
 	$T: typeid,
 	loc := #caller_location,
 ) -> ^Message_Type_Info {
+	assert_message_fits_page(T)
+
 	@(static) _cached: ^Message_Type_Info
 	@(static) _sentinel: Message_Type_Info
 

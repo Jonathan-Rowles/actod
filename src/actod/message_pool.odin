@@ -7,6 +7,9 @@ import "core:sync"
 INLINE_MESSAGE_SIZE :: 32
 INLINE_NEEDS_FIXUP :: rawptr(uintptr(1)) // sentinel: inline message with string/slice pointers
 MAX_ALLOC_RETRIES :: 1000
+DEFAULT_PAGE_SIZE :: mem.Kilobyte * 64
+PAGE_METADATA_SIZE :: size_of([2]int)
+MAX_STATIC_MESSAGE_SIZE :: #config(ACTOD_MAX_MESSAGE_SIZE, DEFAULT_PAGE_SIZE - PAGE_METADATA_SIZE)
 MAX_POOL_PAGES ::
 	(MAILBOX_PRIORITY_COUNT * DEFAULT_MAIL_BOX_SIZE) + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE
 
@@ -44,6 +47,15 @@ Type_Header :: struct {
 }
 
 TYPE_HEADER_SIZE :: size_of(Type_Header)
+
+assert_message_fits_page :: #force_inline proc "contextless" ($T: typeid) {
+	#assert(
+		((TYPE_HEADER_SIZE + size_of(T) + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) *
+			CACHE_LINE_SIZE <=
+		MAX_STATIC_MESSAGE_SIZE,
+		"message type is larger than a message pool page can ever hold, shrink it or raise -define:ACTOD_MAX_MESSAGE_SIZE and actor_config.page_size to match",
+	)
+}
 
 @(private)
 Pool_Entry :: struct {
@@ -126,7 +138,6 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 					uintptr(page_pool.page_size) -
 					size_of([2]int))
 				metadata_ptr[0] = page_index
-				metadata_ptr[1] = size
 				return ptr, .OK
 			}
 		} else if diff < 0 {
@@ -144,6 +155,13 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 			); ok {
 				ptr, _ := mem.alloc(page_pool.page_size, 1, page_pool.allocator)
 				if ptr == nil {
+					sync.atomic_compare_exchange_strong_explicit(
+						&page_pool.allocated_count,
+						slot + 1,
+						slot,
+						.Release,
+						.Relaxed,
+					)
 					return nil, .OUT_OF_MEMORY
 				}
 				page_pool.pages[slot] = ptr
@@ -152,7 +170,6 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 					uintptr(page_pool.page_size) -
 					size_of([2]int))
 				metadata_ptr[0] = slot
-				metadata_ptr[1] = size
 				return ptr, .OK
 			}
 		} else {
@@ -207,11 +224,10 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
 }
 
 @(private)
-message_free_deferred :: #force_inline proc(buffer: ^Batch_Free_Buffer, ptr: rawptr, size: int) {
+message_free_deferred :: #force_inline proc(buffer: ^Batch_Free_Buffer, ptr: rawptr) {
 	if ptr == nil do return
 
 	buffer.entries[buffer.count] = ptr
-	buffer.sizes[buffer.count] = size
 	buffer.count += 1
 
 	if buffer.count >= FREE_BATCH_SIZE {
@@ -273,7 +289,6 @@ flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer, loc := #calle
 @(private)
 Batch_Free_Buffer :: struct {
 	entries: []rawptr,
-	sizes:   []int,
 	count:   int,
 	pool:    ^Pool,
 }

@@ -10,9 +10,6 @@ Message_Size :: enum {
 	LARGE  = 1024, // 1 KB
 	XLARGE = 4096, // 4 KB
 	HUGE   = 32768, // 32 KB
-	MEGA   = 65536, // 64 KB
-	MEGA2  = 131072, // 128 KB
-	MEGA4  = 262144, // 256 KB
 }
 
 Empty_Message :: struct {}
@@ -39,18 +36,6 @@ XLarge_Message :: struct {
 
 Huge_Message :: struct {
 	data: [32768]byte,
-}
-
-Mega_Message :: struct {
-	data: [65536]byte,
-}
-
-Mega2_Message :: struct {
-	data: [131072]byte,
-}
-
-Mega4_Message :: struct {
-	data: [262144]byte,
 }
 
 Start_Test_Message :: struct {
@@ -124,12 +109,6 @@ size_name :: proc(size: Message_Size) -> string {
 		return "4KB"
 	case .HUGE:
 		return "32KB"
-	case .MEGA:
-		return "64KB"
-	case .MEGA2:
-		return "128KB"
-	case .MEGA4:
-		return "256KB"
 	}
 	return "?"
 }
@@ -150,12 +129,6 @@ size_bytes :: proc(size: Message_Size) -> int {
 		return 4096
 	case .HUGE:
 		return 32768
-	case .MEGA:
-		return 65536
-	case .MEGA2:
-		return 131072
-	case .MEGA4:
-		return 262144
 	}
 	return 0
 }
@@ -169,9 +142,6 @@ register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Large_Message)
 	actod.register_message_type(XLarge_Message)
 	actod.register_message_type(Huge_Message)
-	actod.register_message_type(Mega_Message)
-	actod.register_message_type(Mega2_Message)
-	actod.register_message_type(Mega4_Message)
 	actod.register_message_type(Start_Test_Message)
 	actod.register_message_type(Ready_Message)
 	actod.register_message_type(Get_PID_Request)

@@ -220,12 +220,6 @@ handle_start_test :: proc(msg: shared.Start_Test_Message) {
 			actors[i] = spawn_benchmark_actor(shared.XLarge_Message, i)
 		case .HUGE:
 			actors[i] = spawn_benchmark_actor(shared.Huge_Message, i)
-		case .MEGA:
-			actors[i] = spawn_benchmark_actor(shared.Mega_Message, i)
-		case .MEGA2:
-			actors[i] = spawn_benchmark_actor(shared.Mega2_Message, i)
-		case .MEGA4:
-			actors[i] = spawn_benchmark_actor(shared.Mega4_Message, i)
 		}
 	}
 

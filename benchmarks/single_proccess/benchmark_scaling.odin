@@ -364,12 +364,6 @@ run_benchmark_for_size :: proc(
 		return run_benchmark(shared.XLarge_Message, config)
 	case .HUGE:
 		return run_benchmark(shared.Huge_Message, config)
-	case .MEGA:
-		return run_benchmark(shared.Mega_Message, config)
-	case .MEGA2:
-		return run_benchmark(shared.Mega2_Message, config)
-	case .MEGA4:
-		return run_benchmark(shared.Mega4_Message, config)
 	}
 	return {}
 }

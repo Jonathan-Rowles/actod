@@ -340,7 +340,9 @@ send_to_node_mailbox :: #force_inline proc(
 			result,
 			location = loc,
 		)
-		free_message(&actor.pool, msg.content)
+		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+			free_message(&actor.pool, msg.content)
+		}
 		return false
 	}
 	return true

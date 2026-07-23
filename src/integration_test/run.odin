@@ -382,6 +382,8 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 
 	wait_for_node()
 
+	context.logger = actod.get_node_log_ctx()
+
 	t := testing.T{}
 	entry.test_proc(&t)
 	failed := testing.failed(&t)

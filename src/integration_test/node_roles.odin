@@ -13,7 +13,6 @@ import "network/shared"
 
 log_level :: log.Level.Fatal
 
-
 run_node_role :: proc(command: string) {
 	switch command {
 	case "send_once":

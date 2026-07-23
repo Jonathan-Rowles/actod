@@ -464,14 +464,14 @@ spawn_child :: proc(
 		}
 	}
 
-	self_pid := get_self_pid()
-	if self_pid == 0 {
+	if current_actor_context == nil {
 		panic_at(
 			loc,
 			"spawn_child('%s'): must be called from inside an actor. Use spawn() with an explicit parent_pid outside one",
 			name,
 		)
 	}
+	self_pid := get_self_pid()
 	return spawn(name, data, behaviour, opts, self_pid, loc)
 }
 
@@ -1751,14 +1751,14 @@ get_self_pid :: #force_inline proc() -> PID {
 self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_location) -> bool {
 	when ODIN_TEST {if ti.intercept_self_terminate(ti.Termination_Reason(reason)) do return true}
 
-	pid := get_self_pid()
-	if pid == 0 {
+	if current_actor_context == nil {
 		log.error(
 			"self_terminate failed: must be called from inside an actor",
 			location = loc,
 		)
 		return false
 	}
+	pid := get_self_pid()
 	return terminate_actor(pid, reason, loc)
 }
 
@@ -1798,8 +1798,7 @@ rename_actor :: proc(pid: PID, new_name: string, loc := #caller_location) -> boo
 self_rename :: proc(new_name: string, loc := #caller_location) -> bool {
 	when ODIN_TEST {if ti.intercept_self_rename(new_name) do return true}
 
-	pid := get_self_pid()
-	if pid == 0 {
+	if current_actor_context == nil {
 		log.errorf(
 			"self_rename('%s') failed: must be called from inside an actor",
 			new_name,
@@ -1807,6 +1806,7 @@ self_rename :: proc(new_name: string, loc := #caller_location) -> bool {
 		)
 		return false
 	}
+	pid := get_self_pid()
 	return rename_actor(pid, new_name, loc)
 }
 

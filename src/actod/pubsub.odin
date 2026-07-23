@@ -119,14 +119,14 @@ subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subs
 		return {}, false
 	}
 
-	pid := get_self_pid()
-	if pid == 0 {
+	if current_actor_context == nil {
 		log.warn(
 			"subscribe_type must be called from within an actor, the subscription was not created",
 			location = loc,
 		)
 		return {}, false
 	}
+	pid := get_self_pid()
 
 	if !add_subscriber(actor_type, pid, loc) {
 		return {}, false
@@ -363,14 +363,14 @@ subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscr
 		}
 	}
 
-	pid := get_self_pid()
-	if pid == 0 {
+	if current_actor_context == nil {
 		log.warn(
 			"subscribe_topic must be called from within an actor, the subscription was not created",
 			location = loc,
 		)
 		return {}, false
 	}
+	pid := get_self_pid()
 
 	for {
 		idx := sync.atomic_load_explicit(&topic.count, .Acquire)

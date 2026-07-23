@@ -63,14 +63,30 @@ Supervisor_Test_Data :: struct {
 }
 
 Supervisor_Test_Behaviour :: actod.Actor_Behaviour(Supervisor_Test_Data) {
-	init           = supervisor_test_init,
-	handle_message = supervisor_test_handle_message,
-	terminate      = supervisor_test_terminate,
+	init                = supervisor_test_init,
+	handle_message      = supervisor_test_handle_message,
+	terminate           = supervisor_test_terminate,
+	on_child_terminated = supervisor_test_on_child_terminated,
+}
+
+supervisor_test_on_child_terminated :: proc(
+	data: ^Supervisor_Test_Data,
+	child_pid: actod.PID,
+	reason: actod.Termination_Reason,
+	will_restart: bool,
+) {
+	sync.atomic_store(&g_last_stop_reason, i32(reason))
+	sync.atomic_add(&g_stops_observed, 1)
 }
 
 supervisor_test_init :: proc(data: ^Supervisor_Test_Data) {
 	sync.atomic_add(&global_test_state.actors_spawned, 1)
 }
+
+@(private = "file")
+g_stops_observed: u64
+@(private = "file")
+g_last_stop_reason: i32
 
 supervisor_test_handle_message :: proc(data: ^Supervisor_Test_Data, from: actod.PID, msg: any) {
 	switch m in msg {
@@ -570,10 +586,16 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 
 	time.sleep(100 * time.Millisecond)
 
+	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
+
 	for i in 0 ..< 4 {
 		children := actod.get_children(supervisor_pid)
 		defer delete(children)
 
+		child_expected := i < 3
+		if child_expected && !expectf(t, len(children) > 0, "child missing before crash %d", i + 1) {
+			break
+		}
 		if len(children) > 0 {
 			err := actod.send_message(children[0], "crash")
 			if i < 3 {
@@ -644,6 +666,9 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 		children := actod.get_children(supervisor_pid)
 		defer delete(children)
 
+		if !expectf(t, len(children) > 0, "child missing before crash %d", i + 1) {
+			break
+		}
 		if len(children) > 0 {
 			actod.send_message(children[0], "crash")
 			expect(
@@ -659,6 +684,7 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 	children := actod.get_children(supervisor_pid)
 	defer delete(children)
 
+	expect(t, len(children) > 0, "child missing after window reset")
 	if len(children) > 0 {
 		err := actod.send_message(children[0], "crash")
 		expect(t, err == .OK, "Failed to crash after window")
@@ -1027,15 +1053,43 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 			),
 		)
 		expect(t, ok, "Failed to spawn supervisor")
+		if !ok do continue
 
-		child_pid, add_ok := actod.add_child(supervisor_pid, create_terminating_child)
+		_, add_ok := actod.add_child(supervisor_pid, create_terminating_child)
 		expect(t, add_ok, "Failed to add child")
+		expect(t, wait_for_child_count(supervisor_pid, 1, 1000), "Child should be registered")
 
-		time.sleep(50 * time.Millisecond)
+		children := actod.get_children(supervisor_pid)
+		if !expectf(t, len(children) == 1, "expected 1 child, got %d", len(children)) {
+			delete(children)
+			continue
+		}
+		child_pid := children[0]
+		delete(children)
 
-		actod.send_message(child_pid, "terminate_self")
+		stops_before := sync.atomic_load(&g_stops_observed)
+		send_err := actod.send_message(child_pid, "terminate_self")
+		expect_value(t, send_err, actod.Send_Error.OK)
 
-		time.sleep(100 * time.Millisecond)
+		observed := false
+		for wait_start := time.tick_now(); time.tick_since(wait_start) < 2 * time.Second; {
+			if sync.atomic_load(&g_stops_observed) > stops_before {
+				observed = true
+				break
+			}
+			time.sleep(time.Millisecond)
+		}
+		expectf(t, observed, "supervisor never observed the %v termination", test_reason)
+		if observed {
+			got := actod.Termination_Reason(sync.atomic_load(&g_last_stop_reason))
+			expect_value(t, got, test_reason)
+		}
+
+		expect(
+			t,
+			wait_for_child_count(supervisor_pid, 0, 1000),
+			"TEMPORARY child should be removed after terminating",
+		)
 
 		actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 		time.sleep(50 * time.Millisecond)

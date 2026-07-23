@@ -227,7 +227,7 @@ broadcast_actor_handle_message :: proc(data: ^Broadcast_Actor_Data, from: actod.
 		data.received_count += 1
 		sync.atomic_add(&global_test_state.messages_received, 1)
 
-		for j in 0 ..< len(data.subscribers) {
+		for j in 0 ..< data.sub_count {
 			actod.send_message(data.subscribers[j], m)
 			sync.atomic_add(&global_test_state.messages_sent, 1)
 		}
@@ -495,24 +495,27 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	}
 
-	expected_messages := u64(broadcast_count * (1 + subscriber_count))
+	expected_deliveries := u64(broadcast_count * (1 + subscriber_count))
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		total :=
-			sync.atomic_load(&global_test_state.messages_sent) +
-			sync.atomic_load(&global_test_state.messages_received)
-		if total >= expected_messages {
+		if sync.atomic_load(&global_test_state.messages_received) >= expected_deliveries {
 			break
 		}
 		time.sleep(time.Millisecond)
 	}
 
+	received := sync.atomic_load(&global_test_state.messages_received)
+	expectf(
+		t,
+		received == expected_deliveries,
+		"every broadcast must reach every subscriber, delivered %d of %d",
+		received,
+		expected_deliveries,
+	)
+
 	actod.send_message(broadcaster, actod.Terminate{reason = .NORMAL})
 	for pid in subscribers {
 		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
-
-	sent := sync.atomic_load(&global_test_state.messages_sent)
-	expect(t, sent >= u64(broadcast_count * subscriber_count), "Not all broadcasts sent")
 }
 
 test_concurrent_actor_operations :: proc(t: ^testing.T) {
@@ -740,12 +743,18 @@ test_pool_integration :: proc(t: ^testing.T) {
 		time.sleep(time.Millisecond)
 	}
 
+	received := sync.atomic_load(&global_test_state.messages_received)
+	expectf(
+		t,
+		received == expected_messages,
+		"all pooled messages must be delivered, got %d of %d",
+		received,
+		expected_messages,
+	)
+
 	for pid in actors {
 		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
-
-	errors := sync.atomic_load(&global_test_state.errors_count)
-	expect_value(t, errors, u64(0))
 }
 
 Large_Message :: struct {

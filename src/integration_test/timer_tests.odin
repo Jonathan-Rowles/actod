@@ -96,6 +96,7 @@ test_timer_one_shot :: proc(t: ^testing.T) {
 	time.sleep(50 * time.Millisecond)
 
 	actor, got := actod.get_actor_from_pointer(actod.get(&actod.global_registry, pid))
+	expect(t, got, "timer actor must still be alive")
 	if got {
 		data := cast(^One_Shot_Timer_Data)actor.data
 		expect(t, data.tick_count == 1, "One-shot timer should fire exactly once")
@@ -154,6 +155,7 @@ test_timer_cancel :: proc(t: ^testing.T) {
 	time.sleep(30 * time.Millisecond)
 
 	actor, got := actod.get_actor_from_pointer(actod.get(&actod.global_registry, pid))
+	expect(t, got, "timer actor must still be alive")
 	if got {
 		count_after := (cast(^Cancel_Timer_Data)actor.data).tick_count
 		time.sleep(100 * time.Millisecond)

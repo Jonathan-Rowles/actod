@@ -557,10 +557,13 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	Collector_Data :: struct {
 		response: shared.Network_Test_Response,
 		done:     ^sync.Sema,
+		target:   actod.PID,
 	}
 	Collector_Behaviour :: actod.Actor_Behaviour(Collector_Data) {
 		handle_message = proc(data: ^Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
+			case shared.Network_Test_Request:
+				actod.send_message(data.target, m)
 			case shared.Network_Test_Response:
 				data.response = m
 				sync.sema_post(data.done)
@@ -569,7 +572,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	}
 	collector_pid, col_ok := actod.spawn(
 		"spawn_test_collector",
-		Collector_Data{done = &done},
+		Collector_Data{done = &done, target = pid},
 		Collector_Behaviour,
 	)
 	expect(t, col_ok, "Should spawn collector")
@@ -580,7 +583,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		id      = 42,
 		message = "hello from spawn test",
 	}
-	actod.send_message(pid, req)
+	actod.send_message(collector_pid, req)
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
 	expect(t, success, "Should receive response from spawned actor")
@@ -825,11 +828,14 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 	Pong_Collector_Data :: struct {
 		response: shared.Supervision_Pong,
 		done:     ^sync.Sema,
+		target:   actod.PID,
 	}
 
 	Pong_Collector_Behaviour :: actod.Actor_Behaviour(Pong_Collector_Data) {
 		handle_message = proc(data: ^Pong_Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
+			case shared.Supervision_Ping:
+				actod.send_message(data.target, m)
 			case shared.Supervision_Pong:
 				data.response = m
 				sync.sema_post(data.done)
@@ -839,7 +845,7 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 
 	collector_pid, col_ok := actod.spawn(
 		"pong_collector",
-		Pong_Collector_Data{done = &done},
+		Pong_Collector_Data{done = &done, target = pid},
 		Pong_Collector_Behaviour,
 	)
 	expect(t, col_ok, "Should spawn collector")
@@ -849,8 +855,8 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 	ping := shared.Supervision_Ping {
 		id = 1,
 	}
-	err := actod.send_message(pid, ping)
-	expect(t, err == .OK, "Should send ping to remote actor")
+	err := actod.send_message(collector_pid, ping)
+	expect(t, err == .OK, "Should send ping via the collector")
 
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
 	expect(t, success, "Should receive pong from remote actor")

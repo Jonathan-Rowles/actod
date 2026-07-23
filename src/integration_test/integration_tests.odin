@@ -1593,11 +1593,14 @@ test_union_message_handling :: proc(t: ^testing.T) {
 		ack_count: int,
 		done:      ^sync.Sema,
 		expected:  int,
+		target:    actod.PID,
 	}
 
 	Collector_Behaviour :: actod.Actor_Behaviour(Collector_Data) {
 		handle_message = proc(data: ^Collector_Data, from: actod.PID, msg: any) {
-			switch _ in msg {
+			switch m in msg {
+			case Union_Test_Message:
+				actod.send_message(data.target, m)
 			case Union_Ack:
 				data.ack_count += 1
 				if data.ack_count >= data.expected {
@@ -1616,16 +1619,17 @@ test_union_message_handling :: proc(t: ^testing.T) {
 	collector_data := Collector_Data {
 		done     = &done,
 		expected = expected_messages,
+		target   = union_actor,
 	}
 	collector, col_ok := actod.spawn("union-collector", collector_data, Collector_Behaviour)
 	expect(t, col_ok, "Failed to spawn collector")
 
-	actod.send_message(union_actor, Union_Test_Message(Union_Ping{seq = 1}))
-	actod.send_message(union_actor, Union_Test_Message(Union_Ping{seq = 42}))
+	actod.send_message(collector, Union_Test_Message(Union_Ping{seq = 1}))
+	actod.send_message(collector, Union_Test_Message(Union_Ping{seq = 42}))
 
-	actod.send_message(union_actor, Union_Test_Message(Union_Chat{name = "alice", content = "hi"}))
+	actod.send_message(collector, Union_Test_Message(Union_Chat{name = "alice", content = "hi"}))
 	actod.send_message(
-		union_actor,
+		collector,
 		Union_Test_Message(
 			Union_Chat {
 				name = "bob",
@@ -1633,9 +1637,9 @@ test_union_message_handling :: proc(t: ^testing.T) {
 			},
 		),
 	)
-	actod.send_message(union_actor, Union_Test_Message(Union_Chat{name = "", content = ""}))
+	actod.send_message(collector, Union_Test_Message(Union_Chat{name = "", content = ""}))
 	actod.send_message(
-		union_actor,
+		collector,
 		Union_Test_Message(Union_Chat{name = "unicode 你好", content = "🎭 ñ ü"}),
 	)
 

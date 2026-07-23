@@ -4,7 +4,6 @@ import "../actod"
 import "core:fmt"
 import "core:sync"
 import "core:testing"
-import "core:thread"
 import "core:time"
 
 Topic_Price_Update :: struct {
@@ -86,11 +85,11 @@ test_topic_publish :: proc(t: ^testing.T) {
 
 	actod.send_message(pub_pid, "go")
 
-	for _ in 0 ..< 5000 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= SUBSCRIBER_COUNT {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	final := sync.atomic_load(&received_count)
@@ -238,11 +237,11 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	time.sleep(20 * time.Millisecond)
 
 	actod.send_message(pub_pid, "go")
-	for _ in 0 ..< 5000 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= 1 {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 	expect(t, sync.atomic_load(&received_count) == 1, "Should receive first publish")
 

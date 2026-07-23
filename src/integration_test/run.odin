@@ -65,6 +65,7 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_supervisor_survives_many_child_terminations,
 		worker_count = 2,
 	},
+	{name = "test_wait_helpers_honor_timeout", test_proc = test_wait_helpers_honor_timeout},
 
 	// Supervisor hierarchy tests
 	{name = "test_supervisor_child_lifecycle", test_proc = test_supervisor_child_lifecycle},

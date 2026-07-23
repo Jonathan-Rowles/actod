@@ -13,16 +13,17 @@ INTEGRATION_TEST_ITERATIONS :: 1000
 INTEGRATION_STRESS_ITERATIONS :: 5000
 INTEGRATION_MAX_CONCURRENT_ACTORS :: 50
 INTEGRATION_TEST_TIMEOUT_MS :: 5000
+INTEGRATION_TEST_TIMEOUT :: time.Duration(INTEGRATION_TEST_TIMEOUT_MS) * time.Millisecond
 
 wait_for_node :: proc() {
-	for _ in 0 ..< 1000 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if actod.NODE.started && actod.NODE.pid != 0 {
 			_, ok := actod.get(&actod.global_registry, actod.NODE.pid)
 			if ok {
 				break
 			}
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 }
 
@@ -254,16 +255,14 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 		actors[i] = pid
 	}
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.actors_spawned) == u64(actor_count) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
-	for _ in 0 ..< 100 {
-		thread.yield()
-	}
+	time.sleep(time.Millisecond)
 
 	for idx in 0 ..< len(actors) {
 		msg := Integration_Test_Message {
@@ -277,14 +276,14 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 	}
 
 	expected_messages := u64(actor_count * 2)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		total :=
 			sync.atomic_load(&global_test_state.messages_sent) +
 			sync.atomic_load(&global_test_state.messages_received)
 		if total >= expected_messages {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	for pid in actors {
@@ -293,7 +292,7 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 	}
 
 	expected_terminated := u64(actor_count)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS * 20 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_removed := true
 		for pid in actors {
 			if actod.valid(&actod.global_registry, pid) {
@@ -305,7 +304,7 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 		if all_removed && terminated >= expected_terminated {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	final_terminated := sync.atomic_load(&global_test_state.actors_terminated)
@@ -347,7 +346,7 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 	}
 
 	expected_total := u64(total_messages * 2)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		total :=
 			sync.atomic_load(&global_test_state.messages_sent) +
 			sync.atomic_load(&global_test_state.messages_received)
@@ -356,7 +355,7 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 		}
 
 		for _ in 0 ..< 250 {
-			thread.yield()
+			time.sleep(time.Millisecond)
 		}
 	}
 
@@ -415,18 +414,14 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 		}
 	}
 
-	for _ in 0 ..< 500 {
-		thread.yield()
-	}
+	time.sleep(5 * time.Millisecond)
 
 	for i in 0 ..< pipeline_length - 1 {
 		err := actod.send_message(pipeline_actors[i], pipeline_actors[i + 1])
 		expect(t, err == actod.Send_Error.OK, "Failed to link pipeline actors")
 	}
 
-	for _ in 0 ..< 500 {
-		thread.yield()
-	}
+	time.sleep(5 * time.Millisecond)
 
 	test_messages := 10
 	for _ in 0 ..< test_messages {
@@ -443,13 +438,12 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 	}
 
 	expected_returns := u64(test_messages)
-	for i in 0 ..< INTEGRATION_TEST_ITERATIONS * 5 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		received := sync.atomic_load(&global_test_state.messages_received)
 		if received >= expected_returns {
 			break
 		}
-		if i % 100 == 0 {}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	for pid in pipeline_actors {
@@ -502,14 +496,14 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 	}
 
 	expected_messages := u64(broadcast_count * (1 + subscriber_count))
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		total :=
 			sync.atomic_load(&global_test_state.messages_sent) +
 			sync.atomic_load(&global_test_state.messages_received)
 		if total >= expected_messages {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	actod.send_message(broadcaster, actod.Terminate{reason = .NORMAL})
@@ -558,7 +552,7 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 		}
 
 		expected_terminated := u64((cycle + 1) * actors_per_cycle)
-		for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+		for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 			all_removed := true
 			for pid in actors {
 				if actod.valid(&actod.global_registry, pid) {
@@ -570,22 +564,20 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 			if all_removed && terminated >= expected_terminated {
 				break
 			}
-			thread.yield()
+			time.sleep(time.Millisecond)
 		}
 
 		delete(actors)
 	}
 
 	expected_spawned := u64(cycles * actors_per_cycle)
-	for wait_i in 0 ..< INTEGRATION_TEST_ITERATIONS * 20 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		spawned := sync.atomic_load(&global_test_state.actors_spawned)
 		terminated := sync.atomic_load(&global_test_state.actors_terminated)
 		if spawned >= expected_spawned && terminated >= expected_spawned {
 			break
 		}
-		if wait_i % 1000 == 0 && wait_i > 0 {
-		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	spawned := sync.atomic_load(&global_test_state.actors_spawned)
@@ -690,11 +682,11 @@ test_stress_message_throughput :: proc(t: ^testing.T) {
 	sync.wait_group_wait(&wg)
 
 	expected_messages := u64(actor_count * messages_per_actor)
-	for _ in 0 ..< INTEGRATION_STRESS_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_messages {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	for pid in actors {
@@ -741,11 +733,11 @@ test_pool_integration :: proc(t: ^testing.T) {
 	}
 
 	expected_messages := u64(actor_count * messages_per_actor)
-	for _ in 0 ..< INTEGRATION_STRESS_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_messages {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	for pid in actors {
@@ -805,11 +797,11 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 	}
 
 	expected_messages := u64(actor_count * messages_per_actor)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_messages {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	initial_registry_count := actod.num_used(&actod.global_registry)
@@ -818,15 +810,15 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		current_count := actod.num_used(&actod.global_registry)
 		if current_count == initial_registry_count - actor_count {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS * 20 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_invalid := true
 		for pid in actors {
 			if actod.valid(&actod.global_registry, pid) {
@@ -837,7 +829,7 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 		if all_invalid {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	for pid in actors {
@@ -879,12 +871,12 @@ test_registry_consistency :: proc(t: ^testing.T) {
 		}
 		append(&actors, pid)
 
-		for _ in 0 ..< 100 {
+		for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 			after_spawn := actod.num_used(&actod.global_registry)
 			if after_spawn > initial_count {
 				break
 			}
-			thread.yield()
+			time.sleep(time.Millisecond)
 		}
 
 		after_spawn := actod.num_used(&actod.global_registry)
@@ -903,18 +895,18 @@ test_registry_consistency :: proc(t: ^testing.T) {
 	}
 
 	expected_messages := u64(len(actors) * 2)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_messages {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	for pid in actors {
 		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_terminated := true
 		for pid in actors {
 			if actod.valid(&actod.global_registry, pid) {
@@ -925,14 +917,14 @@ test_registry_consistency :: proc(t: ^testing.T) {
 		if all_terminated {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.actors_terminated) >= u64(iterations) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	errors := sync.atomic_load(&global_test_state.errors_count)
@@ -1033,11 +1025,11 @@ test_string_handling :: proc(t: ^testing.T) {
 	}
 
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= u64(len(test_messages)) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 
@@ -1111,11 +1103,11 @@ test_string_handling :: proc(t: ^testing.T) {
 
 
 	expected_total := u64(len(test_messages) + 2 + sender_count * 10)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS * 2 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_total {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 
@@ -1238,11 +1230,11 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	}
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= u64(len(test_messages)) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	complex_msg := Complex_Byte_Slice_Message {
@@ -1313,11 +1305,11 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 	}
 
 	expected_total := u64(len(test_messages) + 2 + sender_count * 10)
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS * 2 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_total {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	actod.send_message(byte_actor, actod.Terminate{reason = .NORMAL})
@@ -1651,11 +1643,11 @@ test_union_message_handling :: proc(t: ^testing.T) {
 	actod.terminate_actor(union_actor)
 	actod.terminate_actor(collector)
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, union_actor) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 }
 
@@ -1743,7 +1735,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 		actod.terminate_actor(contention_pids[i])
 	}
 
-	for _ in 0 ..< INTEGRATION_STRESS_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_done := true
 		for i in 0 ..< CONTENTION_ACTOR_COUNT {
 			if actod.valid(&actod.global_registry, contention_pids[i]) {
@@ -1752,7 +1744,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 			}
 		}
 		if all_done do break
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 }
 
@@ -1855,11 +1847,11 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 
 	actod.send_message(pub_pid, "publish")
 
-	for _ in 0 ..< 5000 {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= PUBSUB_SUBSCRIBER_COUNT {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	final_received := sync.atomic_load(&received_count)
@@ -1876,11 +1868,11 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 	}
 	actod.terminate_actor(pub_pid)
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, pub_pid) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 }
 
@@ -1912,11 +1904,11 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 
 	actod.terminate_actor(sub_pid)
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, sub_pid) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 
 	time.sleep(50 * time.Millisecond)
@@ -1940,10 +1932,10 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 
 	actod.terminate_actor(pub_pid)
 
-	for _ in 0 ..< INTEGRATION_TEST_ITERATIONS {
+	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, pub_pid) {
 			break
 		}
-		thread.yield()
+		time.sleep(time.Millisecond)
 	}
 }

@@ -106,7 +106,7 @@ wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
 		time.sleep(1 * time.Millisecond)
 	}
 
-	for time.diff(deadline, time.now()) > 0 {
+	for time.diff(time.now(), deadline) > 0 {
 		if condition() {
 			return true
 		}
@@ -131,7 +131,7 @@ wait_for_actor_state :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 		time.sleep(2 * time.Millisecond)
 	}
 
-	for time.diff(deadline, time.now()) > 0 {
+	for time.diff(time.now(), deadline) > 0 {
 		if _, ok := actod.get(&actod.global_registry, pid); ok {
 			return true
 		}
@@ -162,7 +162,7 @@ wait_for_child_count :: proc(parent: actod.PID, expected: int, timeout_ms: int) 
 		time.sleep(2 * time.Millisecond)
 	}
 
-	for time.diff(deadline, time.now()) > 0 {
+	for time.diff(time.now(), deadline) > 0 {
 		children := actod.get_children(parent)
 		defer delete(children)
 		if len(children) == expected {
@@ -189,7 +189,7 @@ wait_for_actor_invalid :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 		time.sleep(2 * time.Millisecond)
 	}
 
-	for time.diff(deadline, time.now()) > 0 {
+	for time.diff(time.now(), deadline) > 0 {
 		if !actod.valid(&actod.global_registry, pid) {
 			return true
 		}
@@ -228,7 +228,7 @@ wait_for_child_pid_change :: proc(
 		time.sleep(2 * time.Millisecond)
 	}
 
-	for time.diff(deadline, time.now()) > 0 {
+	for time.diff(time.now(), deadline) > 0 {
 		children := actod.get_children(parent)
 		defer delete(children)
 		if len(children) > index && children[index] != old_pid {

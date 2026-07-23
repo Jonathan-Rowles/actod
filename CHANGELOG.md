@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.3.0] - 2026-07-23
+
+Wire protocol v2 to v3 (breaking). Every node in a mesh must run the same
+version; a v3 node refuses an older node's handshake.
+
+### Added
+- Node-to-node encryption. Noise NNpsk0 handshake, PSK derived from
+  `auth_password` (Argon2id). Enable with `enable_encryption`.
+- UDP lane for fire-and-forget sends: `send_unreliable`, `udp_port`.
+  AEAD-authenticated (ChaCha20-Poly1305) with a replay window.
+- Cross-node supervision. A remote child restarts on its origin node per the
+  supervision strategy, `on_child_terminated` fires for it, and
+  `terminate_actor` on a remote PID actually terminates the remote actor.
+- `register_node(..., connect := false)`. `connect = true` dials the peer now;
+  otherwise links form lazily on first send. Node and actor discovery then
+  propagate transitively across the graph.
+- Compile-time rejection of message types too large for a pool page, naming the
+  offending type.
+
+### Changed
+- Transport rewrite: NODE-owned connection rings that buffer while
+  disconnected. The per-connection message pool is gone.
+- Wire v3 carries a SYSTEM message class (so `Actor_Stopped` / `Terminate`
+  reach the system mailbox across nodes); remote-spawn PIDs and parents are
+  re-packed into the caller's node namespace.
+- Off-actor `self_terminate`, `self_rename`, `spawn_child`, `subscribe_type`
+  and `subscribe_topic` now fail loudly instead of silently doing nothing.
+- A full system mailbox returns `.RECEIVER_BACKLOGGED` instead of panicking; a
+  child's termination notice retries under a one second deadline.
+- User-facing errors report the caller's source location.
+
+### Fixed
+- Use-after-free in the registry lookup path under termination churn, and a
+  lost wakeup on the ready-queue handoff.
+- Per-child message-pool leak that wedged a supervisor once its pool hit the
+  page cap.
+- SIGSEGV enqueuing a var-field system message on a full node mailbox.
+- Remote spawn: PID returned in the wrong node namespace (sends failed
+  `ACTOR_NOT_FOUND`), untranslated parent PID, cross-thread read of the
+  response error string, a stale-response race, and a pool slot lost on
+  allocation failure.
+- Registry snapshots stamped a zero TTL, blocking transitive discovery.
+- Off-actor `get_self_pid()` returned an unroutable non-zero sentinel.
+- Hot reload: generated-shim config defaults diverged from runtime defaults; a
+  backlogged actor was evicted from future reloads.
+
+### Known limitations
+- Every node in a mesh must run the same wire version; there is no negotiation.
+- Any authenticated peer is fully trusted: with the shared password it can
+  message or terminate any actor by handle. No per-actor or per-node
+  authorization.
+- The default network config is permissive (empty `auth_password` disables
+  authentication and binds all interfaces). Set a password for anything beyond
+  a trusted LAN.
+- Topics are local only (type-based subscriptions are cross-node, topic-based
+  are not).
+- Cross-node config changes are not supported.
+- Maps and dynamic arrays are excluded from message payloads by design.
+
+[0.3.0]: https://github.com/Jonathan-Rowles/actod/releases/tag/v0.3.0
+
 ## [0.2.1] - 2026-06-22
 
 ### Fixed

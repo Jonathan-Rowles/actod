@@ -30,6 +30,7 @@ hr_build_test_module :: proc(name: string) -> (so_path: string, tmp_dir: string,
 
 	result := hot_reload.compile_module(src, out)
 	if !result.ok {
+		fmt.eprintf("compile_module(%s) failed: %s\n", src, result.error_msg)
 		return "", tmp, false
 	}
 	return out, tmp, true

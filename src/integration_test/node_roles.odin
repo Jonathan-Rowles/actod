@@ -210,14 +210,25 @@ run_send_burst :: proc() {
 				msg := shared.make_two_node_message(i, msg_content, "BurstSenderNode")
 				delete(msg_content)
 
-				err: actod.Send_Error
-				if data.use_udp {
-					err = actod.send_unreliable(target_pid, msg)
-				} else {
-					err = actod.send_to(data.target_actor, data.target_node, msg)
+				sent := false
+				for _ in 0 ..< 500 {
+					err: actod.Send_Error
+					if data.use_udp {
+						err = actod.send_unreliable(target_pid, msg)
+					} else {
+						err = actod.send_to(data.target_actor, data.target_node, msg)
+					}
+					if err == .OK {
+						sent = true
+						break
+					}
+					if err != .NETWORK_RING_FULL {
+						fmt.printf("Failed to send message %d: %v\n", i, err)
+						break
+					}
+					time.sleep(2 * time.Millisecond)
 				}
-				if err != .OK {
-					fmt.printf("Failed to send message %d: %v\n", i, err)
+				if !sent {
 					break
 				}
 

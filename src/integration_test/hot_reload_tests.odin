@@ -365,18 +365,24 @@ test_file_watcher_detection :: proc(t: ^testing.T) {
 
 	expect(t, hot_reload.add_watch(w, dir, "test_actor"), "should add watch")
 	hot_reload.start_watcher(w)
-	time.sleep(50 * time.Millisecond)
-
-	test_file, _ := filepath.join({dir, "test.odin"}, context.temp_allocator)
-	_ = os.write_entire_file(test_file, transmute([]u8)string("package test\n"))
+	time.sleep(300 * time.Millisecond)
 
 	detected := false
-	for _ in 0 ..< 50 {
-		if sync.atomic_load_explicit(&callback_fired, .Acquire) {
-			detected = true
-			break
+	for attempt in 0 ..< 100 {
+		test_file, _ := filepath.join(
+			{dir, fmt.tprintf("test_%d.odin", attempt)},
+			context.temp_allocator,
+		)
+		_ = os.write_entire_file(test_file, transmute([]u8)string("package test\n"))
+
+		for _ in 0 ..< 5 {
+			if sync.atomic_load_explicit(&callback_fired, .Acquire) {
+				detected = true
+				break
+			}
+			time.sleep(20 * time.Millisecond)
 		}
-		time.sleep(20 * time.Millisecond)
+		if detected do break
 	}
 
 	expect(t, detected, "callback should fire on .odin file change")

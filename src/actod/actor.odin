@@ -777,6 +777,8 @@ process_system_mailbox :: #force_no_inline proc(
 			swap_behaviour(actor, v.generation)
 		}
 
+		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do free_message(&actor.pool, msg.content)
+
 		track_message_received(msg.from)
 	}
 

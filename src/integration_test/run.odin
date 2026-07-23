@@ -52,6 +52,11 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_system_mailbox_full_returns_error,
 		worker_count = 2,
 	},
+	{
+		name = "test_supervisor_survives_many_child_terminations",
+		test_proc = test_supervisor_survives_many_child_terminations,
+		worker_count = 2,
+	},
 
 	// Supervisor hierarchy tests
 	{name = "test_supervisor_child_lifecycle", test_proc = test_supervisor_child_lifecycle},

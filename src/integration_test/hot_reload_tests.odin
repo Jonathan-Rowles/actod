@@ -22,7 +22,10 @@ hr_build_counter: u64
 hr_build_test_module :: proc(name: string) -> (so_path: string, tmp_dir: string, ok: bool) {
 	uid := sync.atomic_add(&hr_build_counter, 1)
 	sys_tmp, _ := os.temp_directory(context.temp_allocator)
-	tmp, _ := filepath.join({sys_tmp, fmt.tprintf("actod_hr_integration_%d", uid)}, context.temp_allocator)
+	tmp, _ := filepath.join(
+		{sys_tmp, fmt.tprintf("actod_hr_integration_%d_%d", os.get_pid(), uid)},
+		context.temp_allocator,
+	)
 	os.make_directory(tmp)
 
 	src, _ := filepath.join({HR_TEST_SRC_DIR, name}, context.temp_allocator)
@@ -79,9 +82,14 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 	expect(t, spawned, "Failed to spawn counter actor")
 	if !spawned do return
 
+	mod: ^hot_reload.Hot_Module
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
+		if mod != nil {
+			delete_key(&actod.hot_module_table, 1)
+			hot_reload.unload_module(mod)
+		}
 	}
 
 	time.sleep(10 * time.Millisecond)
@@ -99,7 +107,8 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 	if !built do return
 
 	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
-	mod, load_err := hot_reload.load_module(
+	load_err: hot_reload.Load_Error
+	mod, load_err = hot_reload.load_module(
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
@@ -107,10 +116,7 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
 	if mod == nil do return
-	defer hot_reload.unload_module(mod)
-
 	actod.hot_module_table[1] = mod
-	defer delete_key(&actod.hot_module_table, 1)
 
 	reload_err := actod.send_reload_behaviour(pid, 1)
 	expect(t, reload_err == .OK, "Failed to send reload")
@@ -134,9 +140,14 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 	expect(t, spawned, "Failed to spawn counter actor")
 	if !spawned do return
 
+	mod: ^hot_reload.Hot_Module
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
+		if mod != nil {
+			delete_key(&actod.hot_module_table, 2)
+			hot_reload.unload_module(mod)
+		}
 	}
 
 	time.sleep(10 * time.Millisecond)
@@ -154,7 +165,8 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 	}
 
 	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
-	mod, load_err := hot_reload.load_module(
+	load_err: hot_reload.Load_Error
+	mod, load_err = hot_reload.load_module(
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
@@ -162,10 +174,7 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
 	if mod == nil do return
-	defer hot_reload.unload_module(mod)
-
 	actod.hot_module_table[2] = mod
-	defer delete_key(&actod.hot_module_table, 2)
 
 	actod.send_reload_behaviour(pid, 2)
 	time.sleep(20 * time.Millisecond)
@@ -183,9 +192,14 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 	expect(t, spawned, "Failed to spawn")
 	if !spawned do return
 
+	mod: ^hot_reload.Hot_Module
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
+		if mod != nil {
+			delete_key(&actod.hot_module_table, 3)
+			hot_reload.unload_module(mod)
+		}
 	}
 
 	time.sleep(10 * time.Millisecond)
@@ -205,7 +219,8 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 	}
 
 	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
-	mod, load_err := hot_reload.load_module(
+	load_err: hot_reload.Load_Error
+	mod, load_err = hot_reload.load_module(
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
@@ -213,10 +228,7 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
 	if mod == nil do return
-	defer hot_reload.unload_module(mod)
-
 	actod.hot_module_table[3] = mod
-	defer delete_key(&actod.hot_module_table, 3)
 
 	actod.send_reload_behaviour(pid, 3)
 	time.sleep(20 * time.Millisecond)
@@ -234,9 +246,19 @@ test_rollback :: proc(t: ^testing.T) {
 	expect(t, spawned, "Failed to spawn")
 	if !spawned do return
 
+	v2_mod: ^hot_reload.Hot_Module
+	v1_mod: ^hot_reload.Hot_Module
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
+		if v2_mod != nil {
+			delete_key(&actod.hot_module_table, 5)
+			hot_reload.unload_module(v2_mod)
+		}
+		if v1_mod != nil {
+			delete_key(&actod.hot_module_table, 4)
+			hot_reload.unload_module(v1_mod)
+		}
 	}
 
 	time.sleep(10 * time.Millisecond)
@@ -257,7 +279,8 @@ test_rollback :: proc(t: ^testing.T) {
 
 	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
 
-	v1_mod, v1_err := hot_reload.load_module(
+	v1_err: hot_reload.Load_Error
+	v1_mod, v1_err = hot_reload.load_module(
 		v1_path,
 		specs,
 		size_of(HR_Counter_State),
@@ -265,9 +288,9 @@ test_rollback :: proc(t: ^testing.T) {
 	)
 	expect_value(t, v1_err.kind, hot_reload.Load_Error_Kind.None)
 	if v1_mod == nil do return
-	defer hot_reload.unload_module(v1_mod)
 
-	v2_mod, v2_err := hot_reload.load_module(
+	v2_err: hot_reload.Load_Error
+	v2_mod, v2_err = hot_reload.load_module(
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
@@ -275,12 +298,9 @@ test_rollback :: proc(t: ^testing.T) {
 	)
 	expect_value(t, v2_err.kind, hot_reload.Load_Error_Kind.None)
 	if v2_mod == nil do return
-	defer hot_reload.unload_module(v2_mod)
 
 	actod.hot_module_table[4] = v1_mod
 	actod.hot_module_table[5] = v2_mod
-	defer delete_key(&actod.hot_module_table, 4)
-	defer delete_key(&actod.hot_module_table, 5)
 
 	for _ in 0 ..< 2 {
 		actod.send_message(pid, "tick")
@@ -407,9 +427,14 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 	expect(t, spawned, "Failed to spawn counter actor")
 	if !spawned do return
 
+	mod: ^hot_reload.Hot_Module
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
+		if mod != nil {
+			delete_key(&actod.hot_module_table, 100)
+			hot_reload.unload_module(mod)
+		}
 	}
 
 	time.sleep(10 * time.Millisecond)
@@ -458,7 +483,8 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 	}
 
 	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
-	mod, load_err := hot_reload.load_module(
+	load_err: hot_reload.Load_Error
+	mod, load_err = hot_reload.load_module(
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
@@ -471,10 +497,7 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 		expect(t, false, "Failed to load module")
 		return
 	}
-	defer hot_reload.unload_module(mod)
-
 	actod.hot_module_table[100] = mod
-	defer delete_key(&actod.hot_module_table, 100)
 
 	actod.send_reload_behaviour(pid, 100)
 	time.sleep(50 * time.Millisecond)
@@ -488,7 +511,7 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 	expect(t, count_before > 0, "should have processed messages")
 
 	actod.send_message(pid, "tick")
-	time.sleep(20 * time.Millisecond)
+	expect(t, hr_wait_for_count(pid, count_before + 10), "post-reload tick should add 10")
 
 	count_after, ok2 := hr_read_count(pid)
 	expect(t, ok2, "should read count after")

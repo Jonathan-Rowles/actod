@@ -175,7 +175,11 @@ send_message_impl :: proc(
 	}
 
 	if !is_local_pid(to) {
-		return send_remote_impl(to, data, info, priority, loc)
+		sys_flags: Network_Message_Flags
+		when class == .System {
+			sys_flags = {.SYSTEM}
+		}
+		return send_remote_impl(to, data, info, priority, sys_flags, loc)
 	}
 
 	actor_ptr, home_worker, ok := get_relaxed_loc(&global_registry, to)

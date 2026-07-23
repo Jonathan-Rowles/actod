@@ -17,6 +17,7 @@ Network_Message_Flag :: enum u16 {
 	PRIORITY_HIGH   = 4,
 	PRIORITY_LOW    = 5,
 	BROADCAST       = 6,
+	SYSTEM          = 7,
 }
 
 Parsed_Network_Header :: struct {

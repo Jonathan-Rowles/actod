@@ -369,6 +369,11 @@ deliver_to_target :: #force_inline proc(
 	}
 
 	from_pid := pack_pid(from_handle, remote_node_id)
+
+	if .SYSTEM in flags {
+		return send_system_from_payload(to_pid, from_pid, payload, type_info) == .OK
+	}
+
 	result := send_from_payload(to_pid, from_pid, payload, type_info, flags_to_priority(flags))
 	return result == .OK
 }
@@ -410,7 +415,7 @@ deliver_broadcast_locally :: proc(
 
 send_remote :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
 	v := content
-	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), .NORMAL, loc)
+	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), .NORMAL, {}, loc)
 }
 
 get_or_create_connection :: proc(node_id: Node_ID) -> PID {

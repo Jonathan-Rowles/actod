@@ -288,6 +288,7 @@ send_remote_impl :: proc(
 	data: rawptr,
 	info: ^Message_Type_Info,
 	priority: Message_Priority,
+	base_flags: Network_Message_Flags = {},
 	loc := #caller_location,
 ) -> Send_Error {
 	_, node_id := unpack_pid(to)
@@ -304,7 +305,7 @@ send_remote_impl :: proc(
 		return .NODE_DISCONNECTED
 	}
 
-	p_flags := priority_to_flags(priority)
+	p_flags := priority_to_flags(priority) | base_flags
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		result := send_to_connection_ring_impl(ring, to, data, info, p_flags, loc)
 		if result != .NETWORK_RING_FULL {
@@ -424,5 +425,5 @@ send_unreliable_remote_impl :: proc(
 		}
 	}
 
-	return send_remote_impl(to, data, info, .NORMAL, loc)
+	return send_remote_impl(to, data, info, .NORMAL, {}, loc)
 }

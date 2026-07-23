@@ -764,7 +764,9 @@ process_system_mailbox :: #force_no_inline proc(
 			return false
 
 		case Actor_Stopped:
-			handle_child_termination(actor, v)
+			stopped := v
+			stopped.child_pid = msg.from
+			handle_child_termination(actor, stopped)
 		case Remove_Child:
 			handle_remove_child(actor, v)
 		case Add_Child:
@@ -1555,10 +1557,12 @@ terminate_actor :: proc(
 	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if ti.intercept_terminate_actor(u64(to), ti.Termination_Reason(reason)) do return true}
 
-	// TODO: shutdown remote actor here
 	if !is_local_pid(to) {
-		remove_remote(&global_registry, to)
-		return true
+		err := send_message(to, Terminate{reason = reason}, loc = loc)
+		if err == .NODE_DISCONNECTED || err == .ACTOR_NOT_FOUND {
+			return true
+		}
+		return err == .OK
 	}
 
 	is_system_op := reason == .SHUTDOWN
@@ -2148,6 +2152,48 @@ send_from_payload :: #force_inline proc(
 	return result
 }
 
+send_system_from_payload :: #force_inline proc(
+	to_pid: PID,
+	from_pid: PID,
+	payload: []byte,
+	info: ^Message_Type_Info,
+) -> Send_Error {
+	actor, ok := get_actor_from_pointer(get(&global_registry, to_pid))
+	if !ok {
+		return .ACTOR_NOT_FOUND
+	}
+
+	current_state := sync.atomic_load(&actor.state)
+	if current_state == .TERMINATED ||
+	   current_state == .THREAD_STOPPED ||
+	   current_state == .STOPPING {
+		return .ACTOR_NOT_FOUND
+	}
+
+	msg: Message
+	msg.from = from_pid
+
+	alloc_err, attempted_size := create_message_from_payload(&msg, &actor.pool, payload, info)
+	if alloc_err != .OK {
+		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
+	}
+
+	if !mpsc_push(&actor.system_mailbox, msg) {
+		log.errorf(
+			"system mailbox of %s is full, dropping a remote %v",
+			actor_origin(to_pid),
+			info.name,
+		)
+		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+			free_message(&actor.pool, msg.content)
+		}
+		return .RECEIVER_BACKLOGGED
+	}
+
+	wake_actor(actor)
+	return .OK
+}
+
 @(private)
 remove_child_from_supervisor :: proc(actor: ^Actor($T), child_pid: PID, child_index: int) {
 	actual_index := child_index
@@ -2230,19 +2276,21 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 			}
 		}
 
-		child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
-		if !child_ok {
-			log.errorf("Cannot adopt child %d - actor not found", child_pid)
-			return
-		}
+		if is_local_pid(child_pid) {
+			child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
+			if !child_ok {
+				log.errorf("Cannot adopt child %d - actor not found", child_pid)
+				return
+			}
 
-		set_parent_msg := Set_Parent {
-			new_parent = actor.pid,
-			spawn_func = msg.spawn_func,
-		}
-		if send(child_pid, set_parent_msg, child_actor) != .OK {
-			log.errorf("Failed to send Set_Parent message to child %d", child_pid)
-			return
+			set_parent_msg := Set_Parent {
+				new_parent = actor.pid,
+				spawn_func = msg.spawn_func,
+			}
+			if send(child_pid, set_parent_msg, child_actor) != .OK {
+				log.errorf("Failed to send Set_Parent message to child %d", child_pid)
+				return
+			}
 		}
 
 		append(&actor.children, child_pid)
@@ -2252,6 +2300,10 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 		if !ok {
 			log.errorf("Failed to spawn child for parent %d", actor.pid)
 			return
+		}
+
+		if !is_local_pid(child_pid) {
+			append(&actor.children, child_pid)
 		}
 	}
 
@@ -2483,11 +2535,10 @@ restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
 	new_pid: PID
 	ok: bool
 
-	if restart_info.node_id == 0 || restart_info.node_id == current_node_id {
-		// Local child - use existing SPAWN proc
-		new_pid, ok = actor.opts.children[child_index]("", actor.pid)
-	} else {
-		// Remote child - use spawn_remote with behaviour registry
+	remote_child := restart_info.node_id != 0 && restart_info.node_id != current_node_id
+
+	if remote_child && restart_info.spawn_func_name_hash != 0 {
+		// Adopted remote child with no local spawn closure: respawn by registered name.
 		node_name, name_ok := get_node_name(restart_info.node_id)
 		if !name_ok {
 			log.errorf("Cannot restart child - unknown node %d", restart_info.node_id)
@@ -2501,6 +2552,9 @@ restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
 		}
 
 		new_pid, ok = spawn_remote(spawn_func_name, get_actor_name(old_pid), node_name, actor.pid)
+	} else {
+		// Local child, or a remote child added via a SPAWN closure that spawns it remotely.
+		new_pid, ok = actor.opts.children[child_index]("", actor.pid)
 	}
 
 	if !ok {

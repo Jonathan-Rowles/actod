@@ -867,12 +867,40 @@ register_node :: proc(
 	name: string,
 	address: net.Endpoint,
 	transport: Transport_Strategy,
+	connect: bool = false,
 	loc := #caller_location,
 ) -> (
 	Node_ID,
 	bool,
 ) {
 	context.logger = diagnostic_logger(context.logger)
+
+	node_id, newly_registered := register_node_entry(name, address, transport, loc)
+
+	if connect && node_id != 0 {
+		if ensure_ring_for_node(node_id) == nil {
+			log.warnf(
+				"register_node('%s'): a connection to %v could not be started yet, it will be retried automatically",
+				name,
+				address,
+				location = loc,
+			)
+		}
+	}
+
+	return node_id, newly_registered
+}
+
+@(private)
+register_node_entry :: proc(
+	name: string,
+	address: net.Endpoint,
+	transport: Transport_Strategy,
+	loc := #caller_location,
+) -> (
+	Node_ID,
+	bool,
+) {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
 

@@ -332,7 +332,13 @@ Hot_API :: struct {
 	subscribe_topic:           proc(topic: ^Topic, loc: runtime.Source_Code_Location) -> (Topic_Subscription, bool),
 	unsubscribe_topic:         proc(sub: Topic_Subscription, loc: runtime.Source_Code_Location) -> bool,
 	publish:                   proc(topic: ^Topic, msg: any, loc: runtime.Source_Code_Location),
-	register_node:             proc(name: string, address: net.Endpoint, transport: Transport_Strategy, loc: runtime.Source_Code_Location) -> (Node_ID, bool),
+	register_node:             proc(
+		name: string,
+		address: net.Endpoint,
+		transport: Transport_Strategy,
+		connect: bool,
+		loc: runtime.Source_Code_Location,
+	) -> (Node_ID, bool),
 	register_spawn_func:       proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location) -> bool,
 	get_node_info:             proc(node_id: Node_ID) -> (Node_Info, bool),
 	get_node_by_name:          proc(name: string) -> (Node_ID, bool),
@@ -640,8 +646,8 @@ publish :: proc(topic: ^Topic, msg: $T, loc: runtime.Source_Code_Location = #cal
 	hot_api.publish(topic, msg, loc)
 }
 
-register_node :: proc(name: string, address: net.Endpoint, transport: Transport_Strategy, loc: runtime.Source_Code_Location = #caller_location) -> (Node_ID, bool) {
-	return hot_api.register_node(name, address, transport, loc)
+register_node :: proc(name: string, address: net.Endpoint, transport: Transport_Strategy, connect: bool = false, loc: runtime.Source_Code_Location = #caller_location) -> (Node_ID, bool) {
+	return hot_api.register_node(name, address, transport, connect, loc)
 }
 
 register_spawn_func :: proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {

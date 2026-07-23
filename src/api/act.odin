@@ -445,12 +445,13 @@ register_node :: proc(
 	name: string,
 	address: net.Endpoint,
 	transport: Transport_Strategy,
+	connect: bool = false,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> (
 	Node_ID,
 	bool,
 ) {
-	return actod.register_node(name, address, transport, loc)
+	return actod.register_node(name, address, transport, connect, loc)
 }
 
 // Register a named spawn function for remote spawning and spawn_by_name.

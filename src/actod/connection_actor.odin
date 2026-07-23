@@ -264,7 +264,11 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 initiate_connection :: proc(data: ^Connection_Actor_Data) -> bool {
 	sock, err := net.dial_tcp(data.address)
 	if err != nil {
-		log.errorf("Failed to connect to node %d: %v", data.node_id, err)
+		log.warnf(
+			"Failed to connect to node %d: %v, a reconnect is scheduled",
+			data.node_id,
+			err,
+		)
 		return false
 	}
 
@@ -1632,23 +1636,43 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 
 		pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
 
-		if !is_local_pid(pid) {
-			continue
-		}
-
 		if pid == NODE.pid || pid == OBSERVER_PID {
 			continue
 		}
 
+		actor_name := get_actor_name(pid)
+		origin_name := NODE.name
+		origin_port := u16(local_info.address.port)
+		origin_ip := ipv4_to_u32(local_info.address.address)
+		ttl: u8 = DEFAULT_BROADCAST_TTL
+
+		if !is_local_pid(pid) {
+			origin_id := get_node_id(pid)
+			if origin_id == data.node_id {
+				continue
+			}
+			origin_info, origin_ok := get_node_info(origin_id)
+			if !origin_ok || origin_info.node_name == "" {
+				continue
+			}
+			origin_name = origin_info.node_name
+			origin_port = u16(origin_info.address.port)
+			origin_ip = ipv4_to_u32(origin_info.address.address)
+			ttl = DEFAULT_BROADCAST_TTL - 1
+			if at := strings.index_byte(actor_name, '@'); at >= 0 {
+				actor_name = actor_name[:at]
+			}
+		}
+
 		msg := Actor_Spawned_Broadcast {
 			pid              = pid,
-			name             = get_actor_name(pid),
+			name             = actor_name,
 			actor_type       = get_pid_actor_type(pid),
 			parent_pid       = get_actor_parent(pid),
-			ttl              = DEFAULT_BROADCAST_TTL,
-			source_node_name = NODE.name,
-			source_port      = u16(local_info.address.port),
-			source_ip        = ipv4_to_u32(local_info.address.address),
+			ttl              = ttl,
+			source_node_name = origin_name,
+			source_port      = origin_port,
+			source_ip        = origin_ip,
 		}
 
 		buf: [512]byte

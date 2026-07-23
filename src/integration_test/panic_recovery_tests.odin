@@ -40,7 +40,7 @@ test_actor_panic_recovery :: proc(t: ^testing.T) {
 		Panic_Actor_Behaviour,
 		actod.make_actor_config(),
 	)
-	testing.expect(t, panic_ok, "Failed to spawn panic actor")
+	expect(t, panic_ok, "Failed to spawn panic actor")
 
 	echo_pid, echo_ok := actod.spawn(
 		"echo-actor",
@@ -48,24 +48,24 @@ test_actor_panic_recovery :: proc(t: ^testing.T) {
 		Panic_Actor_Behaviour,
 		actod.make_actor_config(),
 	)
-	testing.expect(t, echo_ok, "Failed to spawn echo actor")
+	expect(t, echo_ok, "Failed to spawn echo actor")
 
 	err := actod.send_message(panic_pid, "panic")
-	testing.expect(t, err == .OK, "Failed to send panic message")
+	expect(t, err == .OK, "Failed to send panic message")
 
-	testing.expect(
+	expect(
 		t,
 		wait_for_actor_invalid(panic_pid, 1000),
 		"Panicked actor should be removed from registry",
 	)
 
-	testing.expect(
+	expect(
 		t,
 		actod.valid(&actod.global_registry, echo_pid),
 		"Echo actor should still be alive",
 	)
 	err2 := actod.send_message(echo_pid, "ping")
-	testing.expect(t, err2 == .OK, "Echo actor should still accept messages")
+	expect(t, err2 == .OK, "Echo actor should still accept messages")
 
 	actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(echo_pid, 500)
@@ -97,22 +97,22 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 1000), "Child should be spawned")
+	expect(t, ok, "Failed to spawn supervisor")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 1000), "Child should be spawned")
 
 	children := actod.get_children(supervisor_pid)
 	old_child := children[0]
 	delete(children)
 
 	err := actod.send_message(old_child, "panic")
-	testing.expect(t, err == .OK, "Failed to send panic to child")
+	expect(t, err == .OK, "Failed to send panic to child")
 
 	new_pid, restarted := wait_for_child_pid_change(supervisor_pid, old_child, 0, 2000)
-	testing.expect(t, restarted, "Child should be restarted after panic")
-	testing.expect(t, new_pid != old_child, "Restarted child should have new PID")
+	expect(t, restarted, "Child should be restarted after panic")
+	expect(t, new_pid != old_child, "Restarted child should have new PID")
 
 	err2 := actod.send_message(new_pid, "ping")
-	testing.expect(t, err2 == .OK, "Restarted child should accept messages")
+	expect(t, err2 == .OK, "Restarted child should accept messages")
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(supervisor_pid, 500)
@@ -127,9 +127,9 @@ test_actor_panic_in_init :: proc(t: ^testing.T) {
 		Panic_Actor_Behaviour,
 		actod.make_actor_config(),
 	)
-	testing.expect(t, panic_ok, "Spawn should succeed even if init panics")
+	expect(t, panic_ok, "Spawn should succeed even if init panics")
 
-	testing.expect(
+	expect(
 		t,
 		wait_for_actor_invalid(panic_pid, 1000),
 		"Init-panicked actor should be removed",
@@ -141,10 +141,10 @@ test_actor_panic_in_init :: proc(t: ^testing.T) {
 		Panic_Actor_Behaviour,
 		actod.make_actor_config(),
 	)
-	testing.expect(t, echo_ok, "Should be able to spawn new actors after init panic")
+	expect(t, echo_ok, "Should be able to spawn new actors after init panic")
 
 	err := actod.send_message(echo_pid, "ping")
-	testing.expect(t, err == .OK, "System should be functional after init panic")
+	expect(t, err == .OK, "System should be functional after init panic")
 
 	actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(echo_pid, 500)

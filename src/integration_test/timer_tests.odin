@@ -40,14 +40,14 @@ test_timer_repeating :: proc(t: ^testing.T) {
 		Repeating_Timer_Data{expected_ticks = 3, done = &done},
 		Repeating_Timer_Behaviour,
 	)
-	testing.expect(t, spawn_ok, "Failed to spawn test actor")
+	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
-	testing.expect(t, success, "Timer should fire at least 3 ticks")
+	expect(t, success, "Timer should fire at least 3 ticks")
 }
 
 One_Shot_Timer_Data :: struct {
@@ -84,21 +84,21 @@ test_timer_one_shot :: proc(t: ^testing.T) {
 		One_Shot_Timer_Data{done = &done},
 		One_Shot_Timer_Behaviour,
 	)
-	testing.expect(t, spawn_ok, "Failed to spawn test actor")
+	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
-	testing.expect(t, success, "One-shot timer should fire once")
+	expect(t, success, "One-shot timer should fire once")
 
 	time.sleep(50 * time.Millisecond)
 
 	actor, got := actod.get_actor_from_pointer(actod.get(&actod.global_registry, pid))
 	if got {
 		data := cast(^One_Shot_Timer_Data)actor.data
-		testing.expect(t, data.tick_count == 1, "One-shot timer should fire exactly once")
+		expect(t, data.tick_count == 1, "One-shot timer should fire exactly once")
 	}
 }
 
@@ -140,14 +140,14 @@ test_timer_cancel :: proc(t: ^testing.T) {
 		Cancel_Timer_Data{first_tick = &first_tick},
 		Cancel_Timer_Behaviour,
 	)
-	testing.expect(t, spawn_ok, "Failed to spawn test actor")
+	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
 	success := sync.sema_wait_with_timeout(&first_tick, 2 * time.Second)
-	testing.expect(t, success, "Timer should fire at least once")
+	expect(t, success, "Timer should fire at least once")
 
 	actod.send_message(pid, "cancel")
 
@@ -158,7 +158,7 @@ test_timer_cancel :: proc(t: ^testing.T) {
 		count_after := (cast(^Cancel_Timer_Data)actor.data).tick_count
 		time.sleep(100 * time.Millisecond)
 		count_later := (cast(^Cancel_Timer_Data)actor.data).tick_count
-		testing.expect(t, count_later - count_after <= 1, "Timer should stop firing after cancel")
+		expect(t, count_later - count_after <= 1, "Timer should stop firing after cancel")
 	}
 }
 
@@ -197,14 +197,14 @@ test_timer_multiple :: proc(t: ^testing.T) {
 		Multi_Timer_Data{done = &done},
 		Multi_Timer_Behaviour,
 	)
-	testing.expect(t, spawn_ok, "Failed to spawn test actor")
+	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
 		actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
-	testing.expect(t, success, "All four one-shot timers should fire")
+	expect(t, success, "All four one-shot timers should fire")
 }
 
 Cleanup_Timer_Data :: struct {
@@ -232,7 +232,7 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 		Cleanup_Timer_Data{},
 		Cleanup_Timer_Behaviour,
 	)
-	testing.expect(t, spawn_ok, "Failed to spawn test actor")
+	expect(t, spawn_ok, "Failed to spawn test actor")
 
 	time.sleep(50 * time.Millisecond)
 
@@ -245,12 +245,12 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 		Repeating_Timer_Data{expected_ticks = 1, done = &done},
 		Repeating_Timer_Behaviour,
 	)
-	testing.expect(t, verify_ok, "Failed to spawn verify actor")
+	expect(t, verify_ok, "Failed to spawn verify actor")
 	defer {
 		actod.terminate_actor(verify_pid)
 		actod.wait_for_pids([]actod.PID{verify_pid})
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
-	testing.expect(t, success, "Timer actor should still work after owner cleanup")
+	expect(t, success, "Timer actor should still work after owner cleanup")
 }

@@ -7,17 +7,12 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 
-// One Actor_Stopped is 40 bytes, so it is pool allocated rather than inlined. If
-// process_system_mailbox forgets to release it, a supervisor burns one page per child
-// termination and wedges permanently once it reaches MAX_POOL_PAGES.
 LEAK_TEST_ROUNDS :: 80
 LEAK_TEST_BATCH :: 8
 
 @(private = "file")
 reaped_by_supervisor: int
 
-// testing.expect only logs in this Odin version, and the integration runner grades a test by its
-// exit code, so a failed expectation is silently reported as a pass.
 @(private = "file")
 fail_hard :: proc(format: string, args: ..any) -> ! {
 	fmt.eprintf(format, ..args)

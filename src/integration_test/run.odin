@@ -33,8 +33,16 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
 	{name = "test_pipeline_pattern", test_proc = test_pipeline_pattern},
 	{name = "test_broadcast_pattern", test_proc = test_broadcast_pattern},
-	{name = "test_concurrent_actor_operations", test_proc = test_concurrent_actor_operations},
-	{name = "test_stress_message_throughput", test_proc = test_stress_message_throughput},
+	{
+		name = "test_concurrent_actor_operations",
+		test_proc = test_concurrent_actor_operations,
+		worker_count = ALL_CORES_WORKERS,
+	},
+	{
+		name = "test_stress_message_throughput",
+		test_proc = test_stress_message_throughput,
+		worker_count = ALL_CORES_WORKERS,
+	},
 	{name = "test_pool_integration", test_proc = test_pool_integration},
 	{
 		name = "test_pool_cleanup_on_actor_termination",
@@ -282,7 +290,11 @@ ALL_TESTS :: []Test_Entry {
 		node_name = "TestNode1",
 		is_networked = true,
 	},
-	{name = "test_node_shutdown_under_load", test_proc = test_node_shutdown_under_load},
+	{
+		name = "test_node_shutdown_under_load",
+		test_proc = test_node_shutdown_under_load,
+		worker_count = ALL_CORES_WORKERS,
+	},
 
 	// Hot reload tests (Phase 1a)
 	{name = "test_hot_reload_basic", test_proc = test_hot_reload_basic},
@@ -293,7 +305,11 @@ ALL_TESTS :: []Test_Entry {
 	// Hot reload tests (Phase 1b, file watcher + dev workflow)
 	{name = "test_file_watcher_detection", test_proc = test_file_watcher_detection},
 	{name = "test_file_watcher_excludes_tmp", test_proc = test_file_watcher_excludes_tmp},
-	{name = "test_hot_reload_under_load", test_proc = test_hot_reload_under_load},
+	{
+		name = "test_hot_reload_under_load",
+		test_proc = test_hot_reload_under_load,
+		worker_count = ALL_CORES_WORKERS,
+	},
 }
 
 test_base_port: int
@@ -309,8 +325,27 @@ run_single_test :: proc(test_name: string) -> bool {
 	return false
 }
 
+DEFAULT_TEST_WORKERS :: 4
+ALL_CORES_WORKERS :: -1
+
+resolve_worker_count :: proc(entry: Test_Entry) -> int {
+	switch {
+	case entry.worker_count == ALL_CORES_WORKERS:
+		return 0
+	case entry.worker_count > 0:
+		return entry.worker_count
+	case:
+		return DEFAULT_TEST_WORKERS
+	}
+}
+
+test_worker_weight :: proc(entry: Test_Entry) -> int {
+	resolved := resolve_worker_count(entry)
+	return threads_act.get_cpu_count() if resolved == 0 else resolved
+}
+
 run_test_entry :: proc(entry: Test_Entry) -> bool {
-	port := entry.port if entry.port != 0 else 8080
+	port := entry.port if entry.port != 0 else (8080 if entry.is_networked else 0)
 	node_name := entry.node_name if entry.node_name != "" else entry.name
 
 	if entry.is_networked {
@@ -335,9 +370,7 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 		hot_reload_dev = entry.hot_reload_dev,
 		hot_reload_watch_path = entry.hot_reload_watch_path,
 	)
-	if entry.worker_count > 0 {
-		node_opts.worker_count = entry.worker_count
-	}
+	node_opts.worker_count = resolve_worker_count(entry)
 
 	actod.node_init(name = node_name, opts = node_opts)
 
@@ -346,6 +379,9 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	t := testing.T{}
 	entry.test_proc(&t)
 	failed := testing.failed(&t)
+	if failed {
+		fmt.eprintf("Test %s: %d failed expectation(s)\n", entry.name, t.error_count)
+	}
 
 	if actod.NODE.started {
 		actod.shutdown_node()
@@ -402,6 +438,8 @@ run_test_in_subprocess :: proc(test_name: string) -> Test_Result {
 	proc_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
 		env     = make_test_env([]string{fmt.tprintf("ACTOD_TEST_RUN=%s", test_name)}),
+		stdout  = os.stdout,
+		stderr  = os.stderr,
 	}
 
 	process, err := os.process_start(proc_desc)
@@ -468,11 +506,24 @@ run_tests_parallel :: proc(t: ^testing.T) {
 		delete(threads)
 	}
 
-	max_concurrent := max(2, threads_act.get_cpu_count() * 2)
-	fmt.printf("Running %d tests in parallel (max %d at a time)...\n", len(tests), max_concurrent)
+	worker_budget := max(threads_act.get_cpu_count(), 2)
+	fmt.printf(
+		"Running %d tests in parallel (worker budget %d)...\n",
+		len(tests),
+		worker_budget,
+	)
 
-	for batch_start := 0; batch_start < len(tests); batch_start += max_concurrent {
-		batch_end := min(batch_start + max_concurrent, len(tests))
+	for batch_start := 0; batch_start < len(tests); {
+		batch_end := batch_start
+		batch_weight := 0
+		for batch_end < len(tests) {
+			weight := test_worker_weight(tests[batch_end])
+			if batch_end > batch_start && batch_weight + weight > worker_budget {
+				break
+			}
+			batch_weight += weight
+			batch_end += 1
+		}
 
 		for i in batch_start ..< batch_end {
 			contexts[i] = Test_Thread_Context {
@@ -487,6 +538,8 @@ run_tests_parallel :: proc(t: ^testing.T) {
 				thread.join(threads[i])
 			}
 		}
+
+		batch_start = batch_end
 	}
 
 	passed := 0

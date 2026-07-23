@@ -27,31 +27,31 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
-	testing.expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
+	expect(t, ok, "Failed to spawn supervisor")
+	expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
-	testing.expect_value(t, len(initial_children), 3)
+	expect_value(t, len(initial_children), 3)
 	if len(initial_children) != 3 {
 		return
 	}
 
 	removed := actod.remove_child(supervisor_pid, initial_children[1])
-	testing.expect(t, removed, "Failed to remove middle child")
-	testing.expect(
+	expect(t, removed, "Failed to remove middle child")
+	expect(
 		t,
 		wait_for_child_count(supervisor_pid, 2, 500),
 		"Supervisor should have 2 children after removal",
 	)
 
 	err := actod.send_message(initial_children[0], "crash")
-	testing.expect(t, err == .OK, "Failed to crash remaining child")
+	expect(t, err == .OK, "Failed to crash remaining child")
 
 	time.sleep(500 * time.Millisecond)
 
 	_, supervisor_alive := actod.get_actor_pid("remove-oob-supervisor")
-	testing.expect(
+	expect(
 		t,
 		supervisor_alive,
 		"Supervisor must survive ONE_FOR_ALL restart after a prior child removal",
@@ -59,7 +59,7 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 
 	survivors := actod.get_children(supervisor_pid)
 	defer delete(survivors)
-	testing.expect_value(t, len(survivors), 2)
+	expect_value(t, len(survivors), 2)
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }

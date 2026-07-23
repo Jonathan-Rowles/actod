@@ -48,13 +48,13 @@ test_topic_publish :: proc(t: ^testing.T) {
 			Topic_Sub_Data{received = &received_count},
 			Topic_Sub_Behaviour,
 		)
-		testing.expect(t, ok, "Should spawn subscriber")
+		expect(t, ok, "Should spawn subscriber")
 		sub_pids[i] = pid
 	}
 
 	time.sleep(50 * time.Millisecond)
 
-	testing.expectf(
+	expectf(
 		t,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == SUBSCRIBER_COUNT,
 		"Should have %d topic subscribers, got %d",
@@ -80,7 +80,7 @@ test_topic_publish :: proc(t: ^testing.T) {
 		Pub_Data{topic = &shared_topic},
 		Pub_Behaviour,
 	)
-	testing.expect(t, pub_ok, "Should spawn publisher")
+	expect(t, pub_ok, "Should spawn publisher")
 
 	time.sleep(20 * time.Millisecond)
 
@@ -94,7 +94,7 @@ test_topic_publish :: proc(t: ^testing.T) {
 	}
 
 	final := sync.atomic_load(&received_count)
-	testing.expectf(
+	expectf(
 		t,
 		final == SUBSCRIBER_COUNT,
 		"All %d subscribers should receive publish, got %d",
@@ -118,11 +118,11 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 		received = &received_count,
 	}
 	sub_pid, sub_ok := actod.spawn("topic_cleanup_sub", sub_data, Topic_Sub_Behaviour)
-	testing.expect(t, sub_ok, "Should spawn subscriber")
+	expect(t, sub_ok, "Should spawn subscriber")
 
 	time.sleep(50 * time.Millisecond)
 
-	testing.expect(
+	expect(
 		t,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == 1,
 		"Should have 1 topic subscriber",
@@ -131,7 +131,7 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 	actod.terminate_actor(sub_pid)
 	actod.wait_for_pids([]actod.PID{sub_pid})
 
-	testing.expectf(
+	expectf(
 		t,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == 0,
 		"Subscriber count should be 0 after termination, got %d",
@@ -156,14 +156,14 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 		Pub_Data{topic = &shared_topic},
 		Pub_Behaviour,
 	)
-	testing.expect(t, pub_ok, "Should spawn publisher")
+	expect(t, pub_ok, "Should spawn publisher")
 
 	time.sleep(20 * time.Millisecond)
 
 	actod.send_message(pub_pid, "go")
 	time.sleep(50 * time.Millisecond)
 
-	testing.expect(
+	expect(
 		t,
 		sync.atomic_load(&received_count) == 0,
 		"No messages should be received after subscriber terminated",
@@ -207,10 +207,10 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		Unsub_Data{received = &received_count},
 		Unsub_Behaviour,
 	)
-	testing.expect(t, sub_ok, "Should spawn subscriber")
+	expect(t, sub_ok, "Should spawn subscriber")
 
 	time.sleep(50 * time.Millisecond)
-	testing.expect(
+	expect(
 		t,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == 1,
 		"Should have 1 subscriber",
@@ -234,7 +234,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		Pub_Data{topic = &shared_topic},
 		Pub_Behaviour,
 	)
-	testing.expect(t, pub_ok, "Should spawn publisher")
+	expect(t, pub_ok, "Should spawn publisher")
 	time.sleep(20 * time.Millisecond)
 
 	actod.send_message(pub_pid, "go")
@@ -244,12 +244,12 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		}
 		thread.yield()
 	}
-	testing.expect(t, sync.atomic_load(&received_count) == 1, "Should receive first publish")
+	expect(t, sync.atomic_load(&received_count) == 1, "Should receive first publish")
 
 	actod.send_message(sub_pid, "unsub")
 	time.sleep(50 * time.Millisecond)
 
-	testing.expectf(
+	expectf(
 		t,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == 0,
 		"Count should be 0 after unsubscribe, got %d",
@@ -259,7 +259,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	actod.send_message(pub_pid, "go")
 	time.sleep(50 * time.Millisecond)
 
-	testing.expectf(
+	expectf(
 		t,
 		sync.atomic_load(&received_count) == 1,
 		"Should still be 1 after unsubscribe, got %d",

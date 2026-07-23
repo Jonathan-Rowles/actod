@@ -26,12 +26,12 @@ test_system_mailbox_full_returns_error :: proc(t: ^testing.T) {
 		System_Backlog_Data{id = 1},
 		System_Backlog_Behaviour,
 	)
-	testing.expect(t, spawned, "Failed to spawn actor")
+	expect(t, spawned, "Failed to spawn actor")
 	if !spawned {
 		return
 	}
 
-	testing.expect(
+	expect(
 		t,
 		actod.send_message(pid, "block") == .OK,
 		"Failed to send the blocking message",
@@ -45,7 +45,7 @@ test_system_mailbox_full_returns_error :: proc(t: ^testing.T) {
 		}
 	}
 
-	testing.expect(
+	expect(
 		t,
 		backlogged > 0,
 		"Overflowing a system mailbox must return RECEIVER_BACKLOGGED, not panic in the sender",
@@ -54,7 +54,7 @@ test_system_mailbox_full_returns_error :: proc(t: ^testing.T) {
 	time.sleep(1200 * time.Millisecond)
 
 	_, alive := actod.get_actor_pid("system-backlog-actor")
-	testing.expect(t, alive, "Actor must survive a system mailbox overflow")
+	expect(t, alive, "Actor must survive a system mailbox overflow")
 
 	actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 }

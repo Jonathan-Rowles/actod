@@ -249,8 +249,8 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("lifecycle-%d", i), data, Lifecycle_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn lifecycle actor")
-		testing.expect(t, pid != 0, "Got zero PID")
+		expect(t, ok, "Failed to spawn lifecycle actor")
+		expect(t, pid != 0, "Got zero PID")
 		actors[i] = pid
 	}
 
@@ -272,7 +272,7 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 			sender  = actod.NODE.pid,
 		}
 		err := actod.send_message(actors[idx], msg)
-		testing.expect(t, err == actod.Send_Error.OK, "Failed to send message")
+		expect(t, err == actod.Send_Error.OK, "Failed to send message")
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	}
 
@@ -289,7 +289,7 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 
 	for pid in actors {
 		err := actod.send_message(pid, actod.Terminate{reason = .NORMAL})
-		testing.expect(t, err == actod.Send_Error.OK, "Failed to send terminate")
+		expect(t, err == actod.Send_Error.OK, "Failed to send terminate")
 	}
 
 	expected_terminated := u64(actor_count)
@@ -310,9 +310,9 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 
 	final_terminated := sync.atomic_load(&global_test_state.actors_terminated)
 
-	testing.expect_value(t, sync.atomic_load(&global_test_state.actors_spawned), u64(actor_count))
-	testing.expect_value(t, final_terminated, u64(actor_count))
-	testing.expect_value(t, sync.atomic_load(&global_test_state.errors_count), u64(0))
+	expect_value(t, sync.atomic_load(&global_test_state.actors_spawned), u64(actor_count))
+	expect_value(t, final_terminated, u64(actor_count))
+	expect_value(t, sync.atomic_load(&global_test_state.errors_count), u64(0))
 }
 
 test_request_reply_pattern :: proc(t: ^testing.T) {
@@ -327,7 +327,7 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("echo-%d", i), data, Echo_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn echo actor")
+		expect(t, ok, "Failed to spawn echo actor")
 		echo_actors[i] = pid
 	}
 
@@ -342,7 +342,7 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 				sender  = actod.NODE.pid,
 			}
 			err := actod.send_message(echo_actors[i], msg)
-			testing.expect(t, err == actod.Send_Error.OK, "Failed to send echo message")
+			expect(t, err == actod.Send_Error.OK, "Failed to send echo message")
 		}
 	}
 
@@ -366,8 +366,8 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 
 	sent := sync.atomic_load(&global_test_state.messages_sent)
 	received := sync.atomic_load(&global_test_state.messages_received)
-	testing.expect(t, sent >= u64(total_messages), "Not enough messages sent")
-	testing.expect(t, received >= u64(total_messages), "Not enough messages received")
+	expect(t, sent >= u64(total_messages), "Not enough messages sent")
+	expect(t, received >= u64(total_messages), "Not enough messages received")
 }
 
 test_pipeline_pattern :: proc(t: ^testing.T) {
@@ -389,7 +389,7 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 
 	origin_data := Origin_Actor_Data{}
 	origin_pid, origin_ok := actod.spawn("pipeline-origin", origin_data, Origin_Actor_Behaviour)
-	testing.expect(t, origin_ok, "Failed to spawn origin actor")
+	expect(t, origin_ok, "Failed to spawn origin actor")
 
 	pipeline_length := 5
 	pipeline_actors := make([]actod.PID, pipeline_length)
@@ -400,14 +400,14 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("pipeline-%d", i), data, Pipeline_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn pipeline actor")
+		expect(t, ok, "Failed to spawn pipeline actor")
 		pipeline_actors[i] = pid
 	}
 
 	for i in 0 ..< pipeline_length {
 		pid := pipeline_actors[i]
 		valid := actod.valid(&actod.global_registry, pid)
-		testing.expect(t, valid, fmt.tprintf("Pipeline actor %d (PID %v) not valid", i, pid))
+		expect(t, valid, fmt.tprintf("Pipeline actor %d (PID %v) not valid", i, pid))
 
 		err := actod.send_message(pid, "test")
 		if err != actod.Send_Error.OK {
@@ -421,7 +421,7 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 
 	for i in 0 ..< pipeline_length - 1 {
 		err := actod.send_message(pipeline_actors[i], pipeline_actors[i + 1])
-		testing.expect(t, err == actod.Send_Error.OK, "Failed to link pipeline actors")
+		expect(t, err == actod.Send_Error.OK, "Failed to link pipeline actors")
 	}
 
 	for _ in 0 ..< 500 {
@@ -438,7 +438,7 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 		}
 
 		err := actod.send_message(pipeline_actors[0], msg)
-		testing.expect(t, err == actod.Send_Error.OK, "Failed to send pipeline message")
+		expect(t, err == actod.Send_Error.OK, "Failed to send pipeline message")
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	}
 
@@ -459,7 +459,7 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 
 	received := sync.atomic_load(&global_test_state.messages_received)
 	_ = sync.atomic_load(&global_test_state.messages_sent)
-	testing.expect(t, received >= expected_returns, "Pipeline didn't process all messages")
+	expect(t, received >= expected_returns, "Pipeline didn't process all messages")
 }
 
 test_broadcast_pattern :: proc(t: ^testing.T) {
@@ -470,7 +470,7 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 		id = 0,
 	}
 	broadcaster, ok := actod.spawn("broadcaster", broadcaster_data, Broadcast_Actor_Behaviour)
-	testing.expect(t, ok, "Failed to spawn broadcaster")
+	expect(t, ok, "Failed to spawn broadcaster")
 
 	subscriber_count := 10
 	subscribers := make([]actod.PID, subscriber_count)
@@ -481,11 +481,11 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, sub_ok := actod.spawn(fmt.tprintf("subscriber-%d", i), data, Echo_Actor_Behaviour)
-		testing.expect(t, sub_ok, "Failed to spawn subscriber")
+		expect(t, sub_ok, "Failed to spawn subscriber")
 		subscribers[i] = pid
 
 		err := actod.send_message(broadcaster, pid)
-		testing.expect(t, err == actod.Send_Error.OK, "Failed to subscribe")
+		expect(t, err == actod.Send_Error.OK, "Failed to subscribe")
 	}
 
 	broadcast_count := 5
@@ -497,7 +497,7 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 		}
 
 		err := actod.send_message(broadcaster, msg)
-		testing.expect(t, err == actod.Send_Error.OK, "Failed to send broadcast")
+		expect(t, err == actod.Send_Error.OK, "Failed to send broadcast")
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	}
 
@@ -518,7 +518,7 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 	}
 
 	sent := sync.atomic_load(&global_test_state.messages_sent)
-	testing.expect(t, sent >= u64(broadcast_count * subscriber_count), "Not all broadcasts sent")
+	expect(t, sent >= u64(broadcast_count * subscriber_count), "Not all broadcasts sent")
 }
 
 test_concurrent_actor_operations :: proc(t: ^testing.T) {
@@ -540,7 +540,7 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 				data,
 				Lifecycle_Actor_Behaviour,
 			)
-			testing.expect(t, ok, "Failed to spawn in rapid cycle")
+			expect(t, ok, "Failed to spawn in rapid cycle")
 			actors[i] = pid
 		}
 
@@ -600,8 +600,8 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 			registry_count,
 		)
 	}
-	testing.expect_value(t, spawned, expected_spawned)
-	testing.expect_value(t, terminated, expected_spawned)
+	expect_value(t, spawned, expected_spawned)
+	expect_value(t, terminated, expected_spawned)
 }
 
 test_stress_message_throughput :: proc(t: ^testing.T) {
@@ -618,7 +618,7 @@ test_stress_message_throughput :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("stress-%d", i), data, Echo_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn stress actor")
+		expect(t, ok, "Failed to spawn stress actor")
 		actors[i] = pid
 	}
 
@@ -703,8 +703,8 @@ test_stress_message_throughput :: proc(t: ^testing.T) {
 
 	sent := sync.atomic_load(&global_test_state.messages_sent)
 	received := sync.atomic_load(&global_test_state.messages_received)
-	testing.expect(t, sent >= expected_messages, "Not enough messages sent in stress test")
-	testing.expect(t, received >= expected_messages, "Not enough messages received in stress test")
+	expect(t, sent >= expected_messages, "Not enough messages sent in stress test")
+	expect(t, received >= expected_messages, "Not enough messages received in stress test")
 }
 
 test_pool_integration :: proc(t: ^testing.T) {
@@ -721,7 +721,7 @@ test_pool_integration :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("pool-test-%d", i), data, Echo_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn pool test actor")
+		expect(t, ok, "Failed to spawn pool test actor")
 		actors[i] = pid
 	}
 
@@ -753,7 +753,7 @@ test_pool_integration :: proc(t: ^testing.T) {
 	}
 
 	errors := sync.atomic_load(&global_test_state.errors_count)
-	testing.expect_value(t, errors, u64(0))
+	expect_value(t, errors, u64(0))
 }
 
 Large_Message :: struct {
@@ -787,7 +787,7 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("pool-cleanup-%d", i), data, Pool_Test_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn pool test actor")
+		expect(t, ok, "Failed to spawn pool test actor")
 		actors[i] = pid
 	}
 
@@ -841,7 +841,7 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 	}
 
 	for pid in actors {
-		testing.expect(
+		expect(
 			t,
 			!actod.valid(&actod.global_registry, pid),
 			"Actor still valid after termination",
@@ -849,10 +849,10 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 	}
 
 	final_count := actod.num_used(&actod.global_registry)
-	testing.expect_value(t, final_count, initial_registry_count - actor_count)
+	expect_value(t, final_count, initial_registry_count - actor_count)
 
-	testing.expect_value(t, sync.atomic_load(&global_test_state.messages_sent), expected_messages)
-	testing.expect_value(
+	expect_value(t, sync.atomic_load(&global_test_state.messages_sent), expected_messages)
+	expect_value(
 		t,
 		sync.atomic_load(&global_test_state.messages_received),
 		expected_messages,
@@ -873,7 +873,7 @@ test_registry_consistency :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn(fmt.tprintf("registry-test-%d", i), data, Lifecycle_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn registry test actor")
+		expect(t, ok, "Failed to spawn registry test actor")
 		if !ok {
 			continue
 		}
@@ -888,9 +888,9 @@ test_registry_consistency :: proc(t: ^testing.T) {
 		}
 
 		after_spawn := actod.num_used(&actod.global_registry)
-		testing.expect(t, after_spawn > initial_count, "Registry not updated after spawn")
+		expect(t, after_spawn > initial_count, "Registry not updated after spawn")
 
-		testing.expect(t, actod.valid(&actod.global_registry, pid), "Actor not valid after spawn")
+		expect(t, actod.valid(&actod.global_registry, pid), "Actor not valid after spawn")
 	}
 
 	for i in 0 ..< len(actors) {
@@ -936,7 +936,7 @@ test_registry_consistency :: proc(t: ^testing.T) {
 	}
 
 	errors := sync.atomic_load(&global_test_state.errors_count)
-	testing.expect_value(t, errors, u64(0))
+	expect_value(t, errors, u64(0))
 }
 
 
@@ -1002,7 +1002,7 @@ test_string_handling :: proc(t: ^testing.T) {
 
 	actor_data := String_Actor_Data{}
 	string_actor, ok := actod.spawn("string-test-actor", actor_data, String_Actor_Behaviour)
-	testing.expect(t, ok, "Failed to spawn string test actor")
+	expect(t, ok, "Failed to spawn string test actor")
 
 
 	test_messages := []String_Test_Message {
@@ -1024,7 +1024,7 @@ test_string_handling :: proc(t: ^testing.T) {
 
 	for msg in test_messages {
 		err := actod.send_message(string_actor, msg)
-		testing.expect(
+		expect(
 			t,
 			err == actod.Send_Error.OK,
 			fmt.tprintf("Failed to send message %d", msg.id),
@@ -1050,7 +1050,7 @@ test_string_handling :: proc(t: ^testing.T) {
 	}
 
 	err := actod.send_message(string_actor, complex_msg)
-	testing.expect(t, err == actod.Send_Error.OK, "Failed to send complex message")
+	expect(t, err == actod.Send_Error.OK, "Failed to send complex message")
 
 
 	mixed_msg := Mixed_Message {
@@ -1065,7 +1065,7 @@ test_string_handling :: proc(t: ^testing.T) {
 	}
 
 	err2 := actod.send_message(string_actor, mixed_msg)
-	testing.expect(t, err2 == actod.Send_Error.OK, "Failed to send mixed message")
+	expect(t, err2 == actod.Send_Error.OK, "Failed to send mixed message")
 
 
 	sender_count := 5
@@ -1105,7 +1105,7 @@ test_string_handling :: proc(t: ^testing.T) {
 			target = string_actor,
 		}
 		pid, sender_ok := actod.spawn(fmt.tprintf("sender-%d", i), sender_data, Sender_Behaviour)
-		testing.expect(t, sender_ok, "Failed to spawn sender")
+		expect(t, sender_ok, "Failed to spawn sender")
 		senders[i] = pid
 	}
 
@@ -1126,7 +1126,7 @@ test_string_handling :: proc(t: ^testing.T) {
 
 
 	received := sync.atomic_load(&global_test_state.messages_received)
-	testing.expect(
+	expect(
 		t,
 		received >= expected_total,
 		fmt.tprintf("Not all string messages received: %d < %d", received, expected_total),
@@ -1193,7 +1193,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 
 	actor_data := Byte_Slice_Actor_Data{}
 	byte_actor, ok := actod.spawn("byte-slice-test-actor", actor_data, Byte_Slice_Actor_Behaviour)
-	testing.expect(t, ok, "Failed to spawn byte slice test actor")
+	expect(t, ok, "Failed to spawn byte slice test actor")
 
 	test_messages := []Byte_Slice_Test_Message {
 		{
@@ -1230,7 +1230,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 
 	for msg in test_messages {
 		err := actod.send_message(byte_actor, msg)
-		testing.expect(
+		expect(
 			t,
 			err == actod.Send_Error.OK,
 			fmt.tprintf("Failed to send message %d", msg.id),
@@ -1253,7 +1253,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 	}
 
 	err := actod.send_message(byte_actor, complex_msg)
-	testing.expect(t, err == actod.Send_Error.OK, "Failed to send complex byte slice message")
+	expect(t, err == actod.Send_Error.OK, "Failed to send complex byte slice message")
 
 	mixed_msg := Mixed_Byte_Slice_Message {
 		id    = 42,
@@ -1267,7 +1267,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 	}
 
 	err2 := actod.send_message(byte_actor, mixed_msg)
-	testing.expect(t, err2 == actod.Send_Error.OK, "Failed to send mixed byte slice message")
+	expect(t, err2 == actod.Send_Error.OK, "Failed to send mixed byte slice message")
 
 	sender_count := 5
 	senders := make([]actod.PID, sender_count)
@@ -1308,7 +1308,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 			sender_data,
 			Byte_Sender_Behaviour,
 		)
-		testing.expect(t, sender_ok, "Failed to spawn byte sender")
+		expect(t, sender_ok, "Failed to spawn byte sender")
 		senders[i] = pid
 	}
 
@@ -1326,7 +1326,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 	}
 
 	received := sync.atomic_load(&global_test_state.messages_received)
-	testing.expect(
+	expect(
 		t,
 		received >= expected_total,
 		fmt.tprintf("Not all byte slice messages received: %d < %d", received, expected_total),
@@ -1389,7 +1389,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 			id = i,
 		}
 		pid, ok := actod.spawn("active", data, Active_Actor_Behaviour)
-		testing.expect(t, ok, "Failed to spawn active actor")
+		expect(t, ok, "Failed to spawn active actor")
 		actors[i] = pid
 	}
 
@@ -1481,11 +1481,11 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 	}
 
 	initial_registry_count := actod.num_used(&actod.global_registry)
-	testing.expect(t, int(initial_registry_count) > actor_count, "Registry should have actors")
+	expect(t, int(initial_registry_count) > actor_count, "Registry should have actors")
 	messages_before_shutdown := sync.atomic_load(&global_test_state.messages_received)
 
 	node_pid := actod.NODE.pid
-	testing.expect(t, node_pid != 0, "Node PID should not be 0 before shutdown")
+	expect(t, node_pid != 0, "Node PID should not be 0 before shutdown")
 
 	actod.shutdown_node()
 
@@ -1499,31 +1499,31 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 	sync.atomic_store(&stop_senders, true)
 	sync.wait_group_wait(&wg)
 
-	testing.expect_value(t, actod.NODE.pid, actod.PID(0))
-	testing.expect(
+	expect_value(t, actod.NODE.pid, actod.PID(0))
+	expect(
 		t,
 		actod.NODE.started == false,
 		"Node should not be marked as started after shutdown",
 	)
 
 	final_registry_count := actod.num_used(&actod.global_registry)
-	testing.expect_value(t, final_registry_count, 0)
+	expect_value(t, final_registry_count, 0)
 
 	for pid in actors {
-		testing.expect(
+		expect(
 			t,
 			!actod.valid(&actod.global_registry, pid),
 			"Actor should not be valid after shutdown",
 		)
 	}
 
-	testing.expect(
+	expect(
 		t,
 		!actod.valid(&actod.global_registry, node_pid),
 		"Node actor should not be valid after shutdown",
 	)
 
-	testing.expect(
+	expect(
 		t,
 		messages_before_shutdown > 0,
 		"Should have processed messages before shutdown",
@@ -1610,14 +1610,14 @@ test_union_message_handling :: proc(t: ^testing.T) {
 	expected_messages := 6
 
 	union_actor, ok := actod.spawn("union-test-actor", Union_Actor_Data{}, Union_Actor_Behaviour)
-	testing.expect(t, ok, "Failed to spawn union test actor")
+	expect(t, ok, "Failed to spawn union test actor")
 
 	collector_data := Collector_Data {
 		done     = &done,
 		expected = expected_messages,
 	}
 	collector, col_ok := actod.spawn("union-collector", collector_data, Collector_Behaviour)
-	testing.expect(t, col_ok, "Failed to spawn collector")
+	expect(t, col_ok, "Failed to spawn collector")
 
 	actod.send_message(union_actor, Union_Test_Message(Union_Ping{seq = 1}))
 	actod.send_message(union_actor, Union_Test_Message(Union_Ping{seq = 42}))
@@ -1639,10 +1639,10 @@ test_union_message_handling :: proc(t: ^testing.T) {
 	)
 
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
-	testing.expect(t, success, "Timed out waiting for union messages")
+	expect(t, success, "Timed out waiting for union messages")
 
 	received := sync.atomic_load(&global_test_state.messages_received)
-	testing.expect(
+	expect(
 		t,
 		received >= u64(expected_messages),
 		fmt.tprintf("Not all union messages received: %d < %d", received, expected_messages),
@@ -1694,7 +1694,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 			Contention_Actor_Data{idx = i},
 			Contention_Actor_Behaviour,
 		)
-		testing.expect(t, ok, "Failed to spawn contention actor")
+		expect(t, ok, "Failed to spawn contention actor")
 		contention_pids[i] = pid
 	}
 
@@ -1721,14 +1721,14 @@ test_worker_contention :: proc(t: ^testing.T) {
 
 	fairness := f64(min_recv) / f64(max_recv) if max_recv > 0 else 0.0
 
-	testing.expectf(
+	expectf(
 		t,
 		starved == 0,
 		"Starved actors: %d of %d received zero messages",
 		starved,
 		CONTENTION_ACTOR_COUNT,
 	)
-	testing.expectf(
+	expectf(
 		t,
 		fairness >= CONTENTION_MIN_FAIRNESS,
 		"Fairness ratio %.3f below %.1f threshold (min=%d, max=%d)",
@@ -1737,7 +1737,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 		min_recv,
 		max_recv,
 	)
-	testing.expectf(t, total > 0, "No messages processed at all")
+	expectf(t, total > 0, "No messages processed at all")
 
 	for i in 0 ..< CONTENTION_ACTOR_COUNT {
 		actod.terminate_actor(contention_pids[i])
@@ -1822,7 +1822,7 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 	pub_behaviour.actor_type = PUBSUB_PUBLISHER_TYPE
 
 	pub_pid, pub_ok := actod.spawn("pubsub_publisher", Pubsub_Publisher_Data{}, pub_behaviour)
-	testing.expect(t, pub_ok, "Should spawn publisher")
+	expect(t, pub_ok, "Should spawn publisher")
 
 	time.sleep(20 * time.Millisecond)
 
@@ -1838,14 +1838,14 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 			sub_data,
 			Pubsub_Subscriber_Behaviour,
 		)
-		testing.expect(t, ok, "Should spawn subscriber")
+		expect(t, ok, "Should spawn subscriber")
 		sub_pids[i] = pid
 	}
 
 	time.sleep(50 * time.Millisecond)
 
 	sub_count := actod.get_subscriber_count(PUBSUB_PUBLISHER_TYPE)
-	testing.expectf(
+	expectf(
 		t,
 		sub_count == PUBSUB_SUBSCRIBER_COUNT,
 		"Should have %d subscribers, got %d",
@@ -1863,7 +1863,7 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 	}
 
 	final_received := sync.atomic_load(&received_count)
-	testing.expectf(
+	expectf(
 		t,
 		final_received == PUBSUB_SUBSCRIBER_COUNT,
 		"All %d subscribers should receive broadcast, got %d",
@@ -1891,7 +1891,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	pub_behaviour.actor_type = PUBSUB_PUBLISHER_TYPE
 
 	pub_pid, pub_ok := actod.spawn("pubsub_cleanup_pub", Pubsub_Publisher_Data{}, pub_behaviour)
-	testing.expect(t, pub_ok, "Should spawn publisher")
+	expect(t, pub_ok, "Should spawn publisher")
 
 	time.sleep(20 * time.Millisecond)
 
@@ -1900,11 +1900,11 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 		received = &received_count,
 	}
 	sub_pid, sub_ok := actod.spawn("pubsub_cleanup_sub", sub_data, Pubsub_Subscriber_Behaviour)
-	testing.expect(t, sub_ok, "Should spawn subscriber")
+	expect(t, sub_ok, "Should spawn subscriber")
 
 	time.sleep(50 * time.Millisecond)
 
-	testing.expect(
+	expect(
 		t,
 		actod.get_subscriber_count(PUBSUB_PUBLISHER_TYPE) >= 1,
 		"Should have at least 1 subscriber",
@@ -1922,7 +1922,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	time.sleep(50 * time.Millisecond)
 
 	count_after := actod.get_subscriber_count(PUBSUB_PUBLISHER_TYPE)
-	testing.expectf(
+	expectf(
 		t,
 		count_after == 0,
 		"Subscriber count should be 0 after termination, got %d",
@@ -1932,7 +1932,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	actod.send_message(pub_pid, "publish")
 	time.sleep(50 * time.Millisecond)
 
-	testing.expect(
+	expect(
 		t,
 		sync.atomic_load(&received_count) == 0,
 		"No messages should be received after subscriber terminated",

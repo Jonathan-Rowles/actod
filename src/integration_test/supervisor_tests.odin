@@ -243,7 +243,7 @@ wait_for_child_pid_change :: proc(
 verify_child_count :: proc(t: ^testing.T, parent: actod.PID, expected: int) {
 	children := actod.get_children(parent)
 	defer delete(children)
-	testing.expect_value(t, len(children), expected)
+	expect_value(t, len(children), expected)
 }
 
 create_crash_child :: proc(parent: actod.PID) -> actod.SPAWN {
@@ -340,9 +340,9 @@ test_supervisor_child_lifecycle :: proc(t: ^testing.T) {
 			restart_window = 1 * time.Second,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
 
 	verify_child_count(t, supervisor_pid, 3)
 
@@ -351,21 +351,21 @@ test_supervisor_child_lifecycle :: proc(t: ^testing.T) {
 
 	for child_pid in children {
 		err := actod.send_message(child_pid, "ping")
-		testing.expect(t, err == .OK, "Failed to send ping")
+		expect(t, err == .OK, "Failed to send ping")
 	}
 
 	if len(children) > 0 {
 		old_child := children[0]
 		err := actod.send_message(old_child, "crash")
-		testing.expect(t, err == .OK, "Failed to send crash message")
+		expect(t, err == .OK, "Failed to send crash message")
 
 		new_pid, success := wait_for_child_pid_change(supervisor_pid, old_child, 0, 500)
-		testing.expect(t, success, "Child should have restarted with new PID")
+		expect(t, success, "Child should have restarted with new PID")
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
 
-		testing.expect_value(t, len(new_children), 3)
+		expect_value(t, len(new_children), 3)
 
 		found_old := false
 		for pid in new_children {
@@ -374,8 +374,8 @@ test_supervisor_child_lifecycle :: proc(t: ^testing.T) {
 				break
 			}
 		}
-		testing.expect(t, !found_old, "Old child PID should not exist")
-		testing.expect(t, new_pid != old_child, "Child should have new PID after restart")
+		expect(t, !found_old, "Old child PID should not exist")
+		expect(t, new_pid != old_child, "Child should have new PID after restart")
 	}
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
@@ -405,29 +405,29 @@ test_one_for_one_strategy :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
-	testing.expect_value(t, len(initial_children), 3)
+	expect_value(t, len(initial_children), 3)
 
 	if len(initial_children) >= 2 {
 		old_middle := initial_children[1]
 		err := actod.send_message(old_middle, "crash")
-		testing.expect(t, err == .OK, "Failed to crash child")
+		expect(t, err == .OK, "Failed to crash child")
 
 		new_middle, success := wait_for_child_pid_change(supervisor_pid, old_middle, 1, 500)
-		testing.expect(t, success, "Middle child should restart")
+		expect(t, success, "Middle child should restart")
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
 
-		testing.expect_value(t, len(new_children), 3)
-		testing.expect_value(t, new_children[0], initial_children[0])
-		testing.expect(t, new_middle != old_middle, "Middle child should have new PID")
-		testing.expect_value(t, new_children[2], initial_children[2])
+		expect_value(t, len(new_children), 3)
+		expect_value(t, new_children[0], initial_children[0])
+		expect(t, new_middle != old_middle, "Middle child should have new PID")
+		expect_value(t, new_children[2], initial_children[2])
 	}
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
@@ -457,26 +457,26 @@ test_one_for_all_strategy :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
-	testing.expect_value(t, len(initial_children), 3)
+	expect_value(t, len(initial_children), 3)
 
 	if len(initial_children) > 0 {
 		err := actod.send_message(initial_children[0], "crash")
-		testing.expect(t, err == .OK, "Failed to crash child")
+		expect(t, err == .OK, "Failed to crash child")
 
 		time.sleep(300 * time.Millisecond)
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
 
-		testing.expect_value(t, len(new_children), 3)
+		expect_value(t, len(new_children), 3)
 		for new_pid, i in new_children {
-			testing.expect(
+			expect(
 				t,
 				new_pid != initial_children[i],
 				fmt.tprintf("Child %d should have new PID", i),
@@ -511,28 +511,28 @@ test_rest_for_one_strategy :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 5, 500), "Children should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 5, 500), "Children should be spawned")
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
-	testing.expect_value(t, len(initial_children), 5)
+	expect_value(t, len(initial_children), 5)
 
 	if len(initial_children) >= 3 {
 		err := actod.send_message(initial_children[1], "crash")
-		testing.expect(t, err == .OK, "Failed to crash child")
+		expect(t, err == .OK, "Failed to crash child")
 
 		time.sleep(300 * time.Millisecond)
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
 
-		testing.expect_value(t, len(new_children), 5)
-		testing.expect_value(t, new_children[0], initial_children[0])
+		expect_value(t, len(new_children), 5)
+		expect_value(t, new_children[0], initial_children[0])
 
 		for i in 1 ..< 5 {
-			testing.expect(
+			expect(
 				t,
 				new_children[i] != initial_children[i],
 				fmt.tprintf("Child %d should have new PID", i),
@@ -566,7 +566,7 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 			restart_window = 1 * time.Second,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 
@@ -577,7 +577,7 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 		if len(children) > 0 {
 			err := actod.send_message(children[0], "crash")
 			if i < 3 {
-				testing.expect(
+				expect(
 					t,
 					err == .OK,
 					fmt.tprintf("Failed to crash child attempt %d", i + 1),
@@ -586,18 +586,18 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 
 				new_children := actod.get_children(supervisor_pid)
 				defer delete(new_children)
-				testing.expect_value(t, len(new_children), 1)
+				expect_value(t, len(new_children), 1)
 			} else {
 				time.sleep(100 * time.Millisecond)
 
 				final_children := actod.get_children(supervisor_pid)
 				defer delete(final_children)
-				testing.expect_value(t, len(final_children), 0)
+				expect_value(t, len(final_children), 0)
 			}
 		}
 	}
 
-	testing.expect(
+	expect(
 		t,
 		actod.valid(&actod.global_registry, supervisor_pid),
 		"Supervisor should still be running",
@@ -636,9 +636,9 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 			restart_window = 200 * time.Millisecond,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
 
 	for i in 0 ..< 2 {
 		children := actod.get_children(supervisor_pid)
@@ -646,7 +646,7 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 
 		if len(children) > 0 {
 			actod.send_message(children[0], "crash")
-			testing.expect(
+			expect(
 				t,
 				wait_for_child_count(supervisor_pid, 1, 200),
 				fmt.tprintf("Child should restart on attempt %d", i + 1),
@@ -661,14 +661,14 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 
 	if len(children) > 0 {
 		err := actod.send_message(children[0], "crash")
-		testing.expect(t, err == .OK, "Failed to crash after window")
+		expect(t, err == .OK, "Failed to crash after window")
 
 		restarted := wait_for_child_count(supervisor_pid, 1, 500)
-		testing.expect(t, restarted, "Child should restart after window reset")
+		expect(t, restarted, "Child should restart after window reset")
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
-		testing.expect_value(t, len(new_children), 1)
+		expect_value(t, len(new_children), 1)
 	}
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
@@ -703,9 +703,9 @@ test_permanent_restart_policy :: proc(t: ^testing.T) {
 			max_restarts = 10,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
 
 	test_reasons := []actod.Termination_Reason{.NORMAL, .ABNORMAL, .INTERNAL_ERROR}
 
@@ -716,14 +716,14 @@ test_permanent_restart_policy :: proc(t: ^testing.T) {
 		if len(children) > 0 {
 			old_child := children[0]
 			err := actod.send_message(old_child, actod.Terminate{reason = reason})
-			testing.expect(t, err == .OK, "Failed to terminate child")
+			expect(t, err == .OK, "Failed to terminate child")
 
 			_, success := wait_for_child_pid_change(supervisor_pid, old_child, 0, 500)
-			testing.expect(t, success, fmt.tprintf("Child should restart for reason %v", reason))
+			expect(t, success, fmt.tprintf("Child should restart for reason %v", reason))
 
 			new_children := actod.get_children(supervisor_pid)
 			defer delete(new_children)
-			testing.expect_value(t, len(new_children), 1)
+			expect_value(t, len(new_children), 1)
 		}
 	}
 
@@ -765,9 +765,9 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 			max_restarts = 10,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
 
 	children := actod.get_children(supervisor_pid)
 	defer delete(children)
@@ -775,14 +775,14 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 	if len(children) > 0 {
 		old_child := children[0]
 		err := actod.send_message(old_child, actod.Terminate{reason = .NORMAL})
-		testing.expect(t, err == .OK, "Failed to terminate normally")
+		expect(t, err == .OK, "Failed to terminate normally")
 
 		no_child := wait_for_child_count(supervisor_pid, 0, 300)
-		testing.expect(t, no_child, "TRANSIENT child should NOT restart on NORMAL termination")
+		expect(t, no_child, "TRANSIENT child should NOT restart on NORMAL termination")
 	}
 
 	actod.add_child(supervisor_pid, create_transient_child(0))
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 500), "New child should be added")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "New child should be added")
 
 	children2 := actod.get_children(supervisor_pid)
 	defer delete(children2)
@@ -797,11 +797,11 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 		actod.send_message(old_child, actod.Terminate{reason = .ABNORMAL})
 
 		_, success := wait_for_child_pid_change(supervisor_pid, old_child, 0, 500)
-		testing.expect(t, success, "TRANSIENT child should restart on ABNORMAL termination")
+		expect(t, success, "TRANSIENT child should restart on ABNORMAL termination")
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
-		testing.expect_value(t, len(new_children), 1)
+		expect_value(t, len(new_children), 1)
 	}
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
@@ -837,29 +837,29 @@ test_add_child_dynamically :: proc(t: ^testing.T) {
 			restart_policy = .PERMANENT,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 	verify_child_count(t, supervisor_pid, 2)
 
 	_, add_ok := actod.add_child(supervisor_pid, create_crash_child(0))
-	testing.expect(t, add_ok, "Failed to add child dynamically")
+	expect(t, add_ok, "Failed to add child dynamically")
 
 	count_ok := wait_for_child_count(supervisor_pid, 3, 500)
-	testing.expect(t, count_ok, "Child count did not increase to 3 within timeout")
+	expect(t, count_ok, "Child count did not increase to 3 within timeout")
 	verify_child_count(t, supervisor_pid, 3)
 
 	new_children := actod.get_children(supervisor_pid)
 	defer delete(new_children)
-	testing.expect_value(t, len(new_children), 3)
+	expect_value(t, len(new_children), 3)
 
 	new_child_pid := new_children[2]
 
 	err := actod.send_message(new_child_pid, "ping")
-	testing.expect(t, err == .OK, "Failed to send to new child")
+	expect(t, err == .OK, "Failed to send to new child")
 
 	err = actod.send_message(new_child_pid, "crash")
-	testing.expect(t, err == .OK, "Failed to crash new child")
+	expect(t, err == .OK, "Failed to crash new child")
 
 	time.sleep(150 * time.Millisecond)
 	verify_child_count(t, supervisor_pid, 3)
@@ -890,7 +890,7 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 			restart_policy = .PERMANENT,
 		),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 	verify_child_count(t, supervisor_pid, 3)
@@ -902,10 +902,10 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 		middle_child := children[1]
 
 		remove_ok := actod.remove_child(supervisor_pid, middle_child)
-		testing.expect(t, remove_ok, "Failed to remove child")
+		expect(t, remove_ok, "Failed to remove child")
 
 		count_ok := wait_for_child_count(supervisor_pid, 2, 500)
-		testing.expect(t, count_ok, "Child count did not reduce to 2 within timeout")
+		expect(t, count_ok, "Child count did not reduce to 2 within timeout")
 
 		verify_child_count(t, supervisor_pid, 2)
 
@@ -916,7 +916,7 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 			time.sleep(10 * time.Millisecond)
 		}
 
-		testing.expect(
+		expect(
 			t,
 			!actod.valid(&actod.global_registry, middle_child),
 			"Removed child should be invalid",
@@ -927,7 +927,7 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 
 		for child_pid in new_children {
 			err := actod.send_message(child_pid, "ping")
-			testing.expect(t, err == .OK, "Remaining children should still work")
+			expect(t, err == .OK, "Remaining children should still work")
 		}
 	}
 
@@ -946,7 +946,7 @@ test_adopt_existing_actor :: proc(t: ^testing.T) {
 		Supervisor_Test_Behaviour,
 		actod.make_actor_config(supervision_strategy = .ONE_FOR_ONE, restart_policy = .PERMANENT),
 	)
-	testing.expect(t, ok, "Failed to spawn supervisor")
+	expect(t, ok, "Failed to spawn supervisor")
 
 	orphan_data := Crash_Test_Data {
 		id           = 100,
@@ -960,7 +960,7 @@ test_adopt_existing_actor :: proc(t: ^testing.T) {
 		actod.make_actor_config(),
 		0,
 	)
-	testing.expect(t, orphan_ok, "Failed to spawn orphan actor")
+	expect(t, orphan_ok, "Failed to spawn orphan actor")
 
 	time.sleep(50 * time.Millisecond)
 
@@ -979,25 +979,25 @@ test_adopt_existing_actor :: proc(t: ^testing.T) {
 	}
 
 	_, adopt_ok := actod.add_child_existing(supervisor_pid, orphan_pid, orphan_spawn)
-	testing.expect(t, adopt_ok, "Failed to adopt orphan actor")
+	expect(t, adopt_ok, "Failed to adopt orphan actor")
 
 	count_ok := wait_for_child_count(supervisor_pid, 1, 500)
-	testing.expect(t, count_ok, "Supervisor did not adopt child within timeout")
+	expect(t, count_ok, "Supervisor did not adopt child within timeout")
 
 	children := actod.get_children(supervisor_pid)
 	defer delete(children)
-	testing.expect_value(t, len(children), 1)
-	testing.expect_value(t, children[0], orphan_pid)
+	expect_value(t, len(children), 1)
+	expect_value(t, children[0], orphan_pid)
 
 	err := actod.send_message(orphan_pid, "crash")
-	testing.expect(t, err == .OK, "Failed to crash adopted child")
+	expect(t, err == .OK, "Failed to crash adopted child")
 
 	time.sleep(200 * time.Millisecond)
 
 	new_children := actod.get_children(supervisor_pid)
 	defer delete(new_children)
-	testing.expect_value(t, len(new_children), 1)
-	testing.expect(
+	expect_value(t, len(new_children), 1)
+	expect(
 		t,
 		new_children[0] != orphan_pid,
 		"Adopted child should have new PID after restart",
@@ -1026,10 +1026,10 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 				restart_policy = .TEMPORARY,
 			),
 		)
-		testing.expect(t, ok, "Failed to spawn supervisor")
+		expect(t, ok, "Failed to spawn supervisor")
 
 		child_pid, add_ok := actod.add_child(supervisor_pid, create_terminating_child)
-		testing.expect(t, add_ok, "Failed to add child")
+		expect(t, add_ok, "Failed to add child")
 
 		time.sleep(50 * time.Millisecond)
 

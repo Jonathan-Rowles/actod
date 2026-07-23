@@ -156,12 +156,12 @@ test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
 		thread.destroy(externals[i])
 	}
 
-	testing.expect(
+	expect(
 		t,
 		sync.atomic_load(&reclaim_total_sent) > 0,
 		"churn should have sent messages",
 	)
-	testing.expect(
+	expect(
 		t,
 		sync.atomic_load(&reclaim_total_terminations) > 0,
 		"churn should have terminated actors",

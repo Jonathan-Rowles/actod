@@ -97,7 +97,7 @@ test_distributed_communication :: proc(t: ^testing.T) {
 		done           = &received,
 	}
 	_, ok := actod.spawn("dist_receiver", receiver_data, Distributed_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -118,7 +118,7 @@ test_distributed_communication :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&received, 3 * time.Second)
-	testing.expect(t, success, "Failed to receive message from remote node")
+	expect(t, success, "Failed to receive message from remote node")
 
 	_ = os.process_kill(remote_process)
 	_, _ = os.process_wait(remote_process)
@@ -131,7 +131,7 @@ test_distributed_wrong_password_rejected :: proc(t: ^testing.T) {
 		done           = &received,
 	}
 	_, ok := actod.spawn("dist_receiver", receiver_data, Distributed_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -152,7 +152,7 @@ test_distributed_wrong_password_rejected :: proc(t: ^testing.T) {
 	}
 
 	delivered := sync.sema_wait_with_timeout(&received, 2 * time.Second)
-	testing.expect(t, !delivered, "Message from a wrong-password peer must be rejected")
+	expect(t, !delivered, "Message from a wrong-password peer must be rejected")
 
 	_ = os.process_kill(remote_process)
 	_, _ = os.process_wait(remote_process)
@@ -181,7 +181,7 @@ test_distributed_network_message_routing :: proc(t: ^testing.T) {
 		done = &received,
 	}
 	_, ok := actod.spawn("origin_actor", origin_data, Origin_Behaviour)
-	testing.expect(t, ok, "Failed to spawn origin actor")
+	expect(t, ok, "Failed to spawn origin actor")
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -240,17 +240,17 @@ test_distributed_network_message_routing :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg2 := actod.register_node("RelayNode2", node2_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg2, "Failed to register Node2")
+	expect(t, reg2, "Failed to register Node2")
 
 	msg := shared.Network_Test_Request {
 		id      = 1,
 		message = "Hello from network routing test",
 	}
 	err := actod.send_message_name("relay_actor@RelayNode2", msg)
-	testing.expect(t, err == .OK, "Failed to send to relay node")
+	expect(t, err == .OK, "Failed to send to relay node")
 
 	success := sync.sema_wait_with_timeout(&received, 3 * time.Second)
-	testing.expect(t, success, "Failed to receive message back through network relay")
+	expect(t, success, "Failed to receive message back through network relay")
 }
 
 test_distributed_concurrent_network_messages :: proc(t: ^testing.T) {
@@ -290,7 +290,7 @@ test_distributed_concurrent_network_messages :: proc(t: ^testing.T) {
 	}
 
 	_, ok := actod.spawn("burst_receiver", test_data, Concurrent_Test_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -317,7 +317,7 @@ test_distributed_concurrent_network_messages :: proc(t: ^testing.T) {
 
 	timeout := time.Duration(max(5, message_count / 100) * int(time.Second))
 	success := sync.sema_wait_with_timeout(&done, timeout)
-	testing.expect(
+	expect(
 		t,
 		success,
 		fmt.tprintf("Failed to receive all %d messages in %v", message_count, timeout),
@@ -350,7 +350,7 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 	}
 
 	_, ok := actod.spawn("lifecycle_test_actor", test_data, Lifecycle_Test_Behaviour)
-	testing.expect(t, ok, "Failed to spawn test actor")
+	expect(t, ok, "Failed to spawn test actor")
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -373,7 +373,7 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 
 	remote_process, remote_err := os.process_start(remote_desc)
 	if remote_err != nil {
-		testing.expect(t, false, "Failed to start remote node")
+		expect(t, false, "Failed to start remote node")
 		return
 	}
 	defer {
@@ -388,7 +388,7 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("LifecycleNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(200 * time.Millisecond)
 
@@ -398,12 +398,12 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 			message = fmt.tprintf("Lifecycle test message %d", i),
 		}
 		err := actod.send_message_name("lifecycle_echo@LifecycleNode", msg)
-		testing.expect(t, err == .OK, fmt.tprintf("Failed to send message %d", i))
+		expect(t, err == .OK, fmt.tprintf("Failed to send message %d", i))
 		time.sleep(100 * time.Millisecond)
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
-	testing.expect(t, success, "Failed to receive all responses")
+	expect(t, success, "Failed to receive all responses")
 }
 
 test_lifecycle_broadcast :: proc(t: ^testing.T) {
@@ -423,7 +423,7 @@ test_lifecycle_broadcast :: proc(t: ^testing.T) {
 
 	remote_process, remote_err := os.process_start(remote_desc)
 	if remote_err != nil {
-		testing.expect(t, false, "Failed to start remote broadcast node")
+		expect(t, false, "Failed to start remote broadcast node")
 		return
 	}
 	defer {
@@ -435,13 +435,13 @@ test_lifecycle_broadcast :: proc(t: ^testing.T) {
 	for _ in 0 ..< 30 {
 		pid, ok := actod.get_actor_pid("broadcast_test_actor@BroadcastNode")
 		if ok && pid != 0 {
-			testing.expect(t, !actod.is_local_pid(pid), "Broadcast actor should be a remote PID")
+			expect(t, !actod.is_local_pid(pid), "Broadcast actor should be a remote PID")
 			found = true
 			break
 		}
 		time.sleep(100 * time.Millisecond)
 	}
-	testing.expect(t, found, "Remote actor should appear via lifecycle broadcast within 5 seconds")
+	expect(t, found, "Remote actor should appear via lifecycle broadcast within 5 seconds")
 }
 
 test_registry_exchange :: proc(t: ^testing.T) {
@@ -461,7 +461,7 @@ test_registry_exchange :: proc(t: ^testing.T) {
 
 	remote_process, remote_err := os.process_start(remote_desc)
 	if remote_err != nil {
-		testing.expect(t, false, "Failed to start remote registry exchange node")
+		expect(t, false, "Failed to start remote registry exchange node")
 		return
 	}
 	defer {
@@ -475,14 +475,14 @@ test_registry_exchange :: proc(t: ^testing.T) {
 		if !found_actor_1 {
 			pid1, ok1 := actod.get_actor_pid("pre_existing_actor_1@RegistryNode")
 			if ok1 && pid1 != 0 {
-				testing.expect(t, !actod.is_local_pid(pid1), "Actor 1 should be a remote PID")
+				expect(t, !actod.is_local_pid(pid1), "Actor 1 should be a remote PID")
 				found_actor_1 = true
 			}
 		}
 		if !found_actor_2 {
 			pid2, ok2 := actod.get_actor_pid("pre_existing_actor_2@RegistryNode")
 			if ok2 && pid2 != 0 {
-				testing.expect(t, !actod.is_local_pid(pid2), "Actor 2 should be a remote PID")
+				expect(t, !actod.is_local_pid(pid2), "Actor 2 should be a remote PID")
 				found_actor_2 = true
 			}
 		}
@@ -492,12 +492,12 @@ test_registry_exchange :: proc(t: ^testing.T) {
 		time.sleep(100 * time.Millisecond)
 	}
 
-	testing.expect(
+	expect(
 		t,
 		found_actor_1,
 		"Pre-existing actor 1 should appear via registry snapshot within 5 seconds",
 	)
-	testing.expect(
+	expect(
 		t,
 		found_actor_2,
 		"Pre-existing actor 2 should appear via registry snapshot within 5 seconds",
@@ -535,19 +535,19 @@ spawn_test_worker :: proc(name: string, parent_pid: actod.PID) -> (actod.PID, bo
 
 test_spawn_by_name :: proc(t: ^testing.T) {
 	SPAWN_TEST_TYPE, type_ok := actod.register_actor_type("spawn_test_worker")
-	testing.expect(t, type_ok, "Should register actor type")
+	expect(t, type_ok, "Should register actor type")
 
 	reg_ok := actod.register_spawn_func("spawn_test_worker", spawn_test_worker)
-	testing.expect(t, reg_ok, "Should register spawn function")
+	expect(t, reg_ok, "Should register spawn function")
 
 	pid, spawn_ok := actod.spawn_by_name("spawn_test_worker", "test_worker_1")
-	testing.expect(t, spawn_ok, "spawn_by_name should succeed")
-	testing.expect(t, pid != 0, "PID should not be zero")
+	expect(t, spawn_ok, "spawn_by_name should succeed")
+	expect(t, pid != 0, "PID should not be zero")
 
 	time.sleep(50 * time.Millisecond)
 
 	pid_type := actod.get_pid_actor_type(pid)
-	testing.expect(
+	expect(
 		t,
 		pid_type == SPAWN_TEST_TYPE,
 		fmt.tprintf("Actor type in PID should be %d, got %d", SPAWN_TEST_TYPE, pid_type),
@@ -572,7 +572,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		Collector_Data{done = &done},
 		Collector_Behaviour,
 	)
-	testing.expect(t, col_ok, "Should spawn collector")
+	expect(t, col_ok, "Should spawn collector")
 
 	time.sleep(50 * time.Millisecond)
 
@@ -583,7 +583,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	actod.send_message(pid, req)
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
-	testing.expect(t, success, "Should receive response from spawned actor")
+	expect(t, success, "Should receive response from spawned actor")
 
 	parent_pid := collector_pid
 	child_pid, child_ok := actod.spawn_by_name(
@@ -591,12 +591,12 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		"test_worker_child",
 		parent_pid,
 	)
-	testing.expect(t, child_ok, "spawn_by_name with parent should succeed")
+	expect(t, child_ok, "spawn_by_name with parent should succeed")
 
 	time.sleep(50 * time.Millisecond)
 
 	actual_parent := actod.get_actor_parent(child_pid)
-	testing.expect(
+	expect(
 		t,
 		actual_parent == parent_pid,
 		fmt.tprintf("Parent PID should be %v, got %v", parent_pid, actual_parent),
@@ -604,14 +604,14 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 
 	hash := actod.get_spawn_func_hash("spawn_test_worker")
 	func_from_hash, hash_found := actod.get_spawn_func_by_hash(hash)
-	testing.expect(t, hash_found, "Should find spawn function by hash")
-	testing.expect(t, func_from_hash != nil, "Function from hash should not be nil")
+	expect(t, hash_found, "Should find spawn function by hash")
+	expect(t, func_from_hash != nil, "Function from hash should not be nil")
 
 	hash_pid, hash_ok := func_from_hash("test_worker_from_hash", 0)
-	testing.expect(t, hash_ok, "Spawning via hash-resolved function should succeed")
+	expect(t, hash_ok, "Spawning via hash-resolved function should succeed")
 
 	hash_pid_type := actod.get_pid_actor_type(hash_pid)
-	testing.expect(
+	expect(
 		t,
 		hash_pid_type == SPAWN_TEST_TYPE,
 		"Actor spawned via hash should have correct type",
@@ -659,7 +659,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	}
 
 	_, ok := actod.spawn("reconnect_test_actor", test_data, Reconnect_Test_Behaviour)
-	testing.expect(t, ok, "Failed to spawn test actor")
+	expect(t, ok, "Failed to spawn test actor")
 
 	reconnect_port := test_base_port + 1
 	reconnect_base := test_base_port
@@ -691,7 +691,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	}
 
 	remote_process, start_ok := start_remote(reconnect_port, reconnect_base)
-	testing.expect(t, start_ok, "Failed to start remote node")
+	expect(t, start_ok, "Failed to start remote node")
 
 	time.sleep(200 * time.Millisecond)
 
@@ -700,7 +700,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 		port    = reconnect_port,
 	}
 	_, reg_ok := actod.register_node("ReconnectNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(200 * time.Millisecond)
 
@@ -710,12 +710,12 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 			message = fmt.tprintf("Phase 1 message %d", i),
 		}
 		err := actod.send_message_name("lifecycle_echo@ReconnectNode", msg)
-		testing.expect(t, err == .OK, fmt.tprintf("Failed to send phase 1 message %d", i))
+		expect(t, err == .OK, fmt.tprintf("Failed to send phase 1 message %d", i))
 		time.sleep(100 * time.Millisecond)
 	}
 
 	phase1_success := sync.sema_wait_with_timeout(&phase1_done, 3 * time.Second)
-	testing.expect(t, phase1_success, "Failed to complete phase 1")
+	expect(t, phase1_success, "Failed to complete phase 1")
 
 	_ = os.process_kill(remote_process)
 	_, _ = os.process_wait(remote_process)
@@ -723,7 +723,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	time.sleep(200 * time.Millisecond)
 
 	remote_process2, restart_ok := start_remote(reconnect_port, reconnect_base)
-	testing.expect(t, restart_ok, "Failed to restart remote node")
+	expect(t, restart_ok, "Failed to restart remote node")
 	defer {
 		_ = os.process_kill(remote_process2)
 		_, _ = os.process_wait(remote_process2)
@@ -741,12 +741,12 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 			time.sleep(200 * time.Millisecond)
 			err = actod.send_message_name("lifecycle_echo@ReconnectNode", msg)
 		}
-		testing.expect(t, err == .OK, fmt.tprintf("Failed to send phase 2 message %d: %v", i, err))
+		expect(t, err == .OK, fmt.tprintf("Failed to send phase 2 message %d: %v", i, err))
 		time.sleep(100 * time.Millisecond)
 	}
 
 	phase2_success := sync.sema_wait_with_timeout(&phase2_done, 5 * time.Second)
-	testing.expect(t, phase2_success, "Failed to complete phase 2 - reconnection may have failed")
+	expect(t, phase2_success, "Failed to complete phase 2 - reconnection may have failed")
 }
 
 
@@ -798,7 +798,7 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -811,14 +811,14 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
 	pid, spawn_ok := actod.spawn_remote("supervision_worker", "remote-worker-1", "SupervisionNode")
-	testing.expect(t, spawn_ok, "spawn_remote should succeed")
-	testing.expect(t, pid != 0, "Remote PID should not be zero")
-	testing.expect(t, !actod.is_local_pid(pid), "Remote PID should not be local")
+	expect(t, spawn_ok, "spawn_remote should succeed")
+	expect(t, pid != 0, "Remote PID should not be zero")
+	expect(t, !actod.is_local_pid(pid), "Remote PID should not be local")
 
 	done := sync.Sema{}
 
@@ -842,7 +842,7 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 		Pong_Collector_Data{done = &done},
 		Pong_Collector_Behaviour,
 	)
-	testing.expect(t, col_ok, "Should spawn collector")
+	expect(t, col_ok, "Should spawn collector")
 
 	time.sleep(50 * time.Millisecond)
 
@@ -850,10 +850,10 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 		id = 1,
 	}
 	err := actod.send_message(pid, ping)
-	testing.expect(t, err == .OK, "Should send ping to remote actor")
+	expect(t, err == .OK, "Should send ping to remote actor")
 
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
-	testing.expect(t, success, "Should receive pong from remote actor")
+	expect(t, success, "Should receive pong from remote actor")
 
 	actod.terminate_actor(collector_pid)
 }
@@ -862,7 +862,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -875,7 +875,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
@@ -903,7 +903,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 		Observer_Data{done = &done},
 		Observer_Behaviour,
 	)
-	testing.expect(t, obs_ok, "Should spawn observer")
+	expect(t, obs_ok, "Should spawn observer")
 
 	time.sleep(50 * time.Millisecond)
 
@@ -913,8 +913,8 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 		"SupervisionNode",
 		observer_pid,
 	)
-	testing.expect(t, spawn_ok, "spawn_remote should succeed")
-	testing.expect(t, child_pid != 0, "Child PID should not be zero")
+	expect(t, spawn_ok, "spawn_remote should succeed")
+	expect(t, child_pid != 0, "Child PID should not be zero")
 
 	time.sleep(200 * time.Millisecond)
 
@@ -922,10 +922,10 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 		reason = .INTERNAL_ERROR,
 	}
 	err := actod.send_message(child_pid, crash_cmd)
-	testing.expect(t, err == .OK, "Should send crash command to remote child")
+	expect(t, err == .OK, "Should send crash command to remote child")
 
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
-	testing.expect(t, success, "Observer should receive Actor_Stopped from remote child")
+	expect(t, success, "Observer should receive Actor_Stopped from remote child")
 
 	actod.terminate_actor(observer_pid)
 }
@@ -937,7 +937,7 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 	sync.atomic_store(&g_remote_child_counter, 0)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -950,7 +950,7 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
@@ -967,28 +967,28 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, sup_ok, "Failed to spawn supervisor")
+	expect(t, sup_ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 
 	child_pid, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
-	testing.expect(t, add_ok, "Should add remote child")
-	testing.expect(t, child_pid != 0, "Child PID should not be zero")
-	testing.expect(t, !actod.is_local_pid(child_pid), "Child should be remote")
+	expect(t, add_ok, "Should add remote child")
+	expect(t, child_pid != 0, "Child PID should not be zero")
+	expect(t, !actod.is_local_pid(child_pid), "Child should be remote")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
 
 	time.sleep(200 * time.Millisecond)
 	crash_cmd := shared.Supervision_Crash_Command {
 		reason = .INTERNAL_ERROR,
 	}
 	err := actod.send_message(child_pid, crash_cmd)
-	testing.expect(t, err == .OK, "Should send crash to remote child")
+	expect(t, err == .OK, "Should send crash to remote child")
 
 	new_pid, changed := wait_for_child_pid_change(supervisor_pid, child_pid, 0, 5000)
-	testing.expect(t, changed, "Remote child should be restarted with new PID")
-	testing.expect(t, new_pid != child_pid, "New PID should differ from old")
-	testing.expect(t, !actod.is_local_pid(new_pid), "Restarted child should still be remote")
+	expect(t, changed, "Remote child should be restarted with new PID")
+	expect(t, new_pid != child_pid, "New PID should differ from old")
+	expect(t, !actod.is_local_pid(new_pid), "Restarted child should still be remote")
 
 	verify_child_count(t, supervisor_pid, 1)
 
@@ -1003,7 +1003,7 @@ test_remote_one_for_all_restart :: proc(t: ^testing.T) {
 	sync.atomic_store(&g_remote_child_counter, 0)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -1016,7 +1016,7 @@ test_remote_one_for_all_restart :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
@@ -1033,41 +1033,41 @@ test_remote_one_for_all_restart :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, sup_ok, "Failed to spawn supervisor")
+	expect(t, sup_ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 
 	for _ in 0 ..< 3 {
 		_, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
-		testing.expect(t, add_ok, "Should add remote child")
+		expect(t, add_ok, "Should add remote child")
 	}
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 3, 3000), "Should have 3 children")
+	expect(t, wait_for_child_count(supervisor_pid, 3, 3000), "Should have 3 children")
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
-	testing.expect_value(t, len(initial_children), 3)
+	expect_value(t, len(initial_children), 3)
 
 	if len(initial_children) > 0 {
 		crash_cmd := shared.Supervision_Crash_Command {
 			reason = .INTERNAL_ERROR,
 		}
 		err := actod.send_message(initial_children[0], crash_cmd)
-		testing.expect(t, err == .OK, "Should crash first child")
+		expect(t, err == .OK, "Should crash first child")
 
 		time.sleep(1 * time.Second)
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
 
-		testing.expect_value(t, len(new_children), 3)
+		expect_value(t, len(new_children), 3)
 		for new_pid, i in new_children {
-			testing.expect(
+			expect(
 				t,
 				new_pid != initial_children[i],
 				fmt.tprintf("Child %d should have new PID", i),
 			)
-			testing.expect(
+			expect(
 				t,
 				!actod.is_local_pid(new_pid),
 				fmt.tprintf("Child %d should be remote", i),
@@ -1086,7 +1086,7 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 	sync.atomic_store(&g_remote_child_counter, 0)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -1099,7 +1099,7 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
@@ -1116,44 +1116,44 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, sup_ok, "Failed to spawn supervisor")
+	expect(t, sup_ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 
 	for _ in 0 ..< 4 {
 		_, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
-		testing.expect(t, add_ok, "Should add remote child")
+		expect(t, add_ok, "Should add remote child")
 	}
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 4, 3000), "Should have 4 children")
+	expect(t, wait_for_child_count(supervisor_pid, 4, 3000), "Should have 4 children")
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
-	testing.expect_value(t, len(initial_children), 4)
+	expect_value(t, len(initial_children), 4)
 
 	if len(initial_children) >= 3 {
 		crash_cmd := shared.Supervision_Crash_Command {
 			reason = .INTERNAL_ERROR,
 		}
 		err := actod.send_message(initial_children[1], crash_cmd)
-		testing.expect(t, err == .OK, "Should crash second child")
+		expect(t, err == .OK, "Should crash second child")
 
 		time.sleep(1 * time.Second)
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
 
-		testing.expect_value(t, len(new_children), 4)
+		expect_value(t, len(new_children), 4)
 
-		testing.expect_value(t, new_children[0], initial_children[0])
+		expect_value(t, new_children[0], initial_children[0])
 
 		for i in 1 ..< 4 {
-			testing.expect(
+			expect(
 				t,
 				new_children[i] != initial_children[i],
 				fmt.tprintf("Child %d should have new PID", i),
 			)
-			testing.expect(
+			expect(
 				t,
 				!actod.is_local_pid(new_children[i]),
 				fmt.tprintf("Child %d should be remote", i),
@@ -1169,7 +1169,7 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -1182,7 +1182,7 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
@@ -1199,7 +1199,7 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 			max_restarts = 5,
 		),
 	)
-	testing.expect(t, sup_ok, "Failed to spawn supervisor")
+	expect(t, sup_ok, "Failed to spawn supervisor")
 
 	time.sleep(100 * time.Millisecond)
 
@@ -1209,9 +1209,9 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		"SupervisionNode",
 		supervisor_pid,
 	)
-	testing.expect(t, spawn_ok, "spawn_remote should succeed")
-	testing.expect(t, remote_pid != 0, "Remote PID should not be zero")
-	testing.expect(t, !actod.is_local_pid(remote_pid), "Child should be remote")
+	expect(t, spawn_ok, "spawn_remote should succeed")
+	expect(t, remote_pid != 0, "Remote PID should not be zero")
+	expect(t, !actod.is_local_pid(remote_pid), "Child should be remote")
 
 	spawn_hash := actod.get_spawn_func_hash("supervision_worker")
 
@@ -1221,15 +1221,15 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		local_supervision_worker_stub,
 		spawn_hash,
 	)
-	testing.expect(t, adopt_ok, "Should adopt remote child")
+	expect(t, adopt_ok, "Should adopt remote child")
 
-	testing.expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
+	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
 
 	children := actod.get_children(supervisor_pid)
 	defer delete(children)
-	testing.expect_value(t, len(children), 1)
+	expect_value(t, len(children), 1)
 	if len(children) > 0 {
-		testing.expect_value(t, children[0], remote_pid)
+		expect_value(t, children[0], remote_pid)
 	}
 
 	time.sleep(200 * time.Millisecond)
@@ -1237,12 +1237,12 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		reason = .INTERNAL_ERROR,
 	}
 	err := actod.send_message(remote_pid, crash_cmd)
-	testing.expect(t, err == .OK, "Should send crash to remote child")
+	expect(t, err == .OK, "Should send crash to remote child")
 
 	new_pid, changed := wait_for_child_pid_change(supervisor_pid, remote_pid, 0, 5000)
-	testing.expect(t, changed, "Remote child should be restarted with new PID")
-	testing.expect(t, new_pid != remote_pid, "New PID should differ from old")
-	testing.expect(t, !actod.is_local_pid(new_pid), "Restarted child should still be remote")
+	expect(t, changed, "Remote child should be restarted with new PID")
+	expect(t, new_pid != remote_pid, "New PID should differ from old")
+	expect(t, !actod.is_local_pid(new_pid), "Restarted child should still be remote")
 
 	verify_child_count(t, supervisor_pid, 1)
 
@@ -1254,7 +1254,7 @@ test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {
 	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	testing.expect(t, start_ok, "Failed to start supervision server")
+	expect(t, start_ok, "Failed to start supervision server")
 	defer {
 		_ = os.process_kill(remote_process)
 		_, _ = os.process_wait(remote_process)
@@ -1267,7 +1267,7 @@ test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register remote node")
+	expect(t, reg_ok, "Failed to register remote node")
 
 	time.sleep(300 * time.Millisecond)
 
@@ -1276,8 +1276,8 @@ test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {
 		"should-fail-actor",
 		"SupervisionNode",
 	)
-	testing.expect(t, !spawn_ok, "spawn_remote with invalid func name should fail")
-	testing.expect_value(t, pid, actod.PID(0))
+	expect(t, !spawn_ok, "spawn_remote with invalid func name should fail")
+	expect_value(t, pid, actod.PID(0))
 }
 
 test_remote_spawn_timeout :: proc(t: ^testing.T) {
@@ -1286,7 +1286,7 @@ test_remote_spawn_timeout :: proc(t: ^testing.T) {
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("DeadNode", dead_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register dead node")
+	expect(t, reg_ok, "Failed to register dead node")
 
 	pid, spawn_ok := actod.spawn_remote(
 		"supervision_worker",
@@ -1294,8 +1294,8 @@ test_remote_spawn_timeout :: proc(t: ^testing.T) {
 		"DeadNode",
 		timeout = 500 * time.Millisecond,
 	)
-	testing.expect(t, !spawn_ok, "spawn_remote to dead node should fail (timeout)")
-	testing.expect_value(t, pid, actod.PID(0))
+	expect(t, !spawn_ok, "spawn_remote to dead node should fail (timeout)")
+	expect_value(t, pid, actod.PID(0))
 }
 
 test_mesh_discovery :: proc(t: ^testing.T) {
@@ -1316,7 +1316,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 
 	node_b_process, node_b_err := os.process_start(node_b_desc)
 	if node_b_err != nil {
-		testing.expect(t, false, "Failed to start MeshNodeB")
+		expect(t, false, "Failed to start MeshNodeB")
 		return
 	}
 	defer {
@@ -1341,7 +1341,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 
 	node_c_process, node_c_err := os.process_start(node_c_desc)
 	if node_c_err != nil {
-		testing.expect(t, false, "Failed to start MeshNodeC")
+		expect(t, false, "Failed to start MeshNodeC")
 		return
 	}
 	defer {
@@ -1356,21 +1356,21 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		port    = node_b_port,
 	}
 	_, reg_ok := actod.register_node("MeshNodeB", node_b_addr, .TCP_Custom_Protocol)
-	testing.expect(t, reg_ok, "Failed to register MeshNodeB")
+	expect(t, reg_ok, "Failed to register MeshNodeB")
 
 	found := false
 	mesh_actor_pid: actod.PID
 	for _ in 0 ..< 30 {
 		pid, ok := actod.get_actor_pid("mesh_actor@MeshNodeC")
 		if ok && pid != 0 {
-			testing.expect(t, !actod.is_local_pid(pid), "mesh_actor should be a remote PID")
+			expect(t, !actod.is_local_pid(pid), "mesh_actor should be a remote PID")
 			mesh_actor_pid = pid
 			found = true
 			break
 		}
 		time.sleep(100 * time.Millisecond)
 	}
-	testing.expect(
+	expect(
 		t,
 		found,
 		"Actor on MeshNodeC should be discovered by TestNode1 via MeshNodeB forwarding within 8 seconds",
@@ -1402,7 +1402,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		Mesh_Collector_Data{done = &done},
 		Mesh_Collector_Behaviour,
 	)
-	testing.expect(t, col_ok, "Should spawn mesh collector")
+	expect(t, col_ok, "Should spawn mesh collector")
 
 	time.sleep(50 * time.Millisecond)
 
@@ -1411,10 +1411,10 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		message = "hello from mesh test",
 	}
 	send_err := actod.send_message(mesh_actor_pid, req)
-	testing.expect(t, send_err == .OK, "Should send message to mesh-discovered actor on MeshNodeC")
+	expect(t, send_err == .OK, "Should send message to mesh-discovered actor on MeshNodeC")
 
 	got_response := sync.sema_wait_with_timeout(&done, 3 * time.Second)
-	testing.expect(
+	expect(
 		t,
 		got_response,
 		"Should receive response from MeshNodeC's mesh_actor via lazy connection",
@@ -1435,7 +1435,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		}
 		time.sleep(100 * time.Millisecond)
 	}
-	testing.expect(
+	expect(
 		t,
 		removed,
 		"mesh_actor@MeshNodeC should be removed from A's registry after C disconnects from B",
@@ -1478,7 +1478,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 		},
 		Ack_Collector_Behaviour,
 	)
-	testing.expect(t, col_ok, "Should spawn ack collector")
+	expect(t, col_ok, "Should spawn ack collector")
 
 	Pubsub_Bcast_Publisher_Data :: struct {}
 
@@ -1499,7 +1499,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 		Pubsub_Bcast_Publisher_Data{},
 		pub_behaviour,
 	)
-	testing.expect(t, pub_ok, "Should spawn publisher")
+	expect(t, pub_ok, "Should spawn publisher")
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -1517,7 +1517,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 
 	remote_process, remote_err := os.process_start(remote_desc)
 	if remote_err != nil {
-		testing.expect(t, false, "Failed to start remote pubsub node")
+		expect(t, false, "Failed to start remote pubsub node")
 		return
 	}
 	defer {
@@ -1534,7 +1534,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 	}
 
 	sub_count := actod.get_subscriber_count(PUBSUB_BROADCAST_PUBLISHER_TYPE)
-	testing.expectf(
+	expectf(
 		t,
 		sub_count >= PUBSUB_BROADCAST_SUBSCRIBER_COUNT,
 		"Should have %d subscribers, got %d",
@@ -1545,7 +1545,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 	actod.send_message(pub_pid, "publish")
 
 	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
-	testing.expectf(
+	expectf(
 		t,
 		success,
 		"All %d remote subscribers should ACK, got %d",
@@ -1606,7 +1606,7 @@ test_distributed_union_messages :: proc(t: ^testing.T) {
 		expected  = expected_acks,
 	}
 	_, ok := actod.spawn("union_receiver", receiver_data, Union_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn union receiver actor")
+	expect(t, ok, "Failed to spawn union receiver actor")
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -1631,7 +1631,7 @@ test_distributed_union_messages :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
-	testing.expectf(
+	expectf(
 		t,
 		success,
 		"Timed out waiting for distributed union messages, got %d/%d",
@@ -1698,7 +1698,7 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 		expected_checksum = expected_checksum,
 	}
 	_, ok := actod.spawn("bytes_receiver", receiver_data, Bytes_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn bytes receiver actor")
+	expect(t, ok, "Failed to spawn bytes receiver actor")
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -1723,7 +1723,7 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
-	testing.expectf(
+	expectf(
 		t,
 		success,
 		"Timed out waiting for distributed byte slice messages, got %d/%d",
@@ -1731,7 +1731,7 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 		expected_acks,
 	)
 
-	testing.expectf(
+	expectf(
 		t,
 		sync.atomic_load(&intact_count) == expected_acks,
 		"Every cross-node []u8 payload should arrive byte-for-byte intact, got %d/%d",
@@ -1769,7 +1769,7 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 		done     = &done,
 	}
 	_, ok := actod.spawn("secure_receiver", receiver_data, Count_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -1797,7 +1797,7 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 10 * time.Second)
-	testing.expect(t, success, "Did not receive all messages over the encrypted connection")
+	expect(t, success, "Did not receive all messages over the encrypted connection")
 
 	adopted_rings: u32 = 0
 	if node_id, found := actod.get_node_by_name("BurstSenderNode"); found {
@@ -1806,7 +1806,7 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 			fmt.printf("[test] pool rings toward sender: %d\n", adopted_rings)
 		}
 	}
-	testing.expect(t, adopted_rings >= 2, "Sender scale-up should have added pool rings here")
+	expect(t, adopted_rings >= 2, "Sender scale-up should have added pool rings here")
 }
 
 test_encryption_mismatch_rejected :: proc(t: ^testing.T) {
@@ -1816,7 +1816,7 @@ test_encryption_mismatch_rejected :: proc(t: ^testing.T) {
 		done     = &done,
 	}
 	_, ok := actod.spawn("mismatch_receiver", receiver_data, Count_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -1842,7 +1842,7 @@ test_encryption_mismatch_rejected :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
-	testing.expect(
+	expect(
 		t,
 		!success,
 		"Message must not be delivered between encrypted and plaintext nodes",
@@ -1858,7 +1858,7 @@ test_udp_send_unreliable :: proc(t: ^testing.T) {
 		done     = &done,
 	}
 	_, ok := actod.spawn("udp_receiver", receiver_data, Count_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
@@ -1887,7 +1887,7 @@ test_udp_send_unreliable :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 15 * time.Second)
-	testing.expect(t, success, "Did not receive enough messages over the encrypted UDP lane")
+	expect(t, success, "Did not receive enough messages over the encrypted UDP lane")
 }
 
 test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
@@ -1898,7 +1898,7 @@ test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
 		done     = &done,
 	}
 	_, ok := actod.spawn("fallback_receiver", receiver_data, Count_Receiver_Behaviour)
-	testing.expect(t, ok, "Failed to spawn receiver actor")
+	expect(t, ok, "Failed to spawn receiver actor")
 
 	// This node has no UDP port, so the sender's send_unreliable must fall
 	// back to TCP and deliver every message.
@@ -1928,5 +1928,5 @@ test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, 10 * time.Second)
-	testing.expect(t, success, "send_unreliable must fall back to TCP when the peer has no UDP lane")
+	expect(t, success, "send_unreliable must fall back to TCP when the peer has no UDP lane")
 }

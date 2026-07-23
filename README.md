@@ -8,7 +8,7 @@ Actors run as coroutines on a fixed worker pool: no thread-per-actor overhead. M
 
 See [docs](docs/00_getting-started.md) for the full reference.
 
-> **v0.1**, API may change before v1. Tested on Linux x86_64, macOS Apple Silicon, and Windows x86_64.
+> **v0.3**, API may change before v1. Tested on Linux x86_64, macOS Apple Silicon, and Windows x86_64.
 
 ## Performance
 
@@ -43,8 +43,8 @@ Vendor actod into your project, pinned to a release tag. Submodule recommended:
 
 ```bash
 git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod
-cd vendor/actod && git checkout v0.1.1 && cd -
-git commit -am "Vendor actod v0.1.1"
+cd vendor/actod && git checkout v0.3.0 && cd -
+git commit -am "Vendor actod v0.3.0"
 ```
 
 Build with a collection flag pointing at the vendored repo:

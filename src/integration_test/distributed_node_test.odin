@@ -1361,8 +1361,13 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		address = net.IP4_Loopback,
 		port    = node_b_port,
 	}
-	_, reg_ok := actod.register_node("MeshNodeB", node_b_addr, .TCP_Custom_Protocol)
-	expect(t, reg_ok, "Failed to register MeshNodeB")
+	node_b_id, _ := actod.register_node(
+		"MeshNodeB",
+		node_b_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
+	expect(t, node_b_id != 0, "Failed to register MeshNodeB")
 
 	found := false
 	mesh_actor_pid: actod.PID
@@ -1391,11 +1396,14 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	Mesh_Collector_Data :: struct {
 		response: shared.Network_Test_Response,
 		done:     ^sync.Sema,
+		target:   actod.PID,
 	}
 
 	Mesh_Collector_Behaviour :: actod.Actor_Behaviour(Mesh_Collector_Data) {
 		handle_message = proc(data: ^Mesh_Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
+			case shared.Network_Test_Request:
+				actod.send_message(data.target, m)
 			case shared.Network_Test_Response:
 				data.response = m
 				sync.sema_post(data.done)
@@ -1405,7 +1413,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 
 	collector_pid, col_ok := actod.spawn(
 		"mesh_collector",
-		Mesh_Collector_Data{done = &done},
+		Mesh_Collector_Data{done = &done, target = mesh_actor_pid},
 		Mesh_Collector_Behaviour,
 	)
 	expect(t, col_ok, "Should spawn mesh collector")
@@ -1416,7 +1424,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		id      = 99,
 		message = "hello from mesh test",
 	}
-	send_err := actod.send_message(mesh_actor_pid, req)
+	send_err := actod.send_message(collector_pid, req)
 	expect(t, send_err == .OK, "Should send message to mesh-discovered actor on MeshNodeC")
 
 	got_response := sync.sema_wait_with_timeout(&done, 3 * time.Second)

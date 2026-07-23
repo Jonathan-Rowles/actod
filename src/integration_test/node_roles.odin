@@ -701,7 +701,7 @@ run_lifecycle_broadcast :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	time.sleep(250 * time.Millisecond)
 
@@ -798,7 +798,7 @@ run_registry_exchange :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	fmt.println("READY")
 
@@ -924,7 +924,7 @@ run_mesh_middle :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	fmt.println("READY")
 
@@ -973,7 +973,7 @@ run_mesh_leaf :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	time.sleep(250 * time.Millisecond)
 

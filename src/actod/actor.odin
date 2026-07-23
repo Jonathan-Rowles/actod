@@ -1038,12 +1038,36 @@ notify_parent_of_termination :: proc(actor: ^Actor($T)) {
 		child_index = -1,
 	}
 
-	if err := send_message(actor.parent, msg); err != .OK {
-		log.warnf(
-			"Failed to notify parent %d about child %d termination: %v",
+	backoff := 1 * time.Microsecond
+	max_backoff := 10 * time.Millisecond
+	last_err := Send_Error.OK
+
+	for retry_start := time.tick_now(); true; {
+		last_err = send_message(actor.parent, msg)
+		if last_err == .OK || last_err == .ACTOR_NOT_FOUND {
+			break
+		}
+		if time.tick_since(retry_start) > time.Second {
+			break
+		}
+
+		co := coro.running()
+		if co != nil {
+			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
+			handle.wants_reschedule = true
+			coro.yield(co)
+		} else {
+			time.sleep(backoff)
+		}
+		backoff = min(backoff * 2, max_backoff)
+	}
+
+	if last_err != .OK && last_err != .ACTOR_NOT_FOUND {
+		log.errorf(
+			"Failed to notify parent %d about child %d termination after retries: %v",
 			actor.parent,
 			actor.pid,
-			err,
+			last_err,
 		)
 	}
 	notify_node_of_termination(actor)

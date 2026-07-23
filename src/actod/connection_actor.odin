@@ -1563,7 +1563,13 @@ handle_remote_spawn_request :: proc(from_node: Node_ID, payload: []byte) {
 		return
 	}
 
-	pid, ok := spawn_func(msg.actor_name, msg.parent_pid)
+	parent_pid := msg.parent_pid
+	if parent_pid != 0 {
+		parent_handle, _ := unpack_pid(parent_pid)
+		parent_pid = pack_pid(parent_handle, from_node)
+	}
+
+	pid, ok := spawn_func(msg.actor_name, parent_pid)
 
 	send_spawn_response(
 		from_node,
@@ -1639,7 +1645,7 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 			name             = get_actor_name(pid),
 			actor_type       = get_pid_actor_type(pid),
 			parent_pid       = get_actor_parent(pid),
-			ttl              = 0,
+			ttl              = DEFAULT_BROADCAST_TTL,
 			source_node_name = NODE.name,
 			source_port      = u16(local_info.address.port),
 			source_ip        = ipv4_to_u32(local_info.address.address),
@@ -1655,6 +1661,11 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 			"",
 		)
 		if msg_len == 0 {
+			log.warnf(
+				"Registry snapshot entry for '%s' does not fit the %d byte wire buffer, the peer will not learn this actor",
+				msg.name,
+				len(buf),
+			)
 			continue
 		}
 

@@ -650,9 +650,11 @@ SPAWN_REMOTE_TIMEOUT :: 5 * time.Second
 
 @(private)
 Pending_Spawn :: struct {
-	sema:     sync.Atomic_Sema,
-	response: Remote_Spawn_Response,
-	active:   bool,
+	sema:      sync.Atomic_Sema,
+	response:  Remote_Spawn_Response,
+	error_buf: [256]u8,
+	error_len: int,
+	active:    bool,
 }
 
 @(private)
@@ -722,8 +724,11 @@ spawn_remote :: proc(
 	}
 
 	pending := &g_pending_spawns[slot_idx]
+	for sync.atomic_sema_wait_with_timeout(&pending.sema, time.Microsecond) {
+	}
 	pending.active = true
 	pending.response = {}
+	pending.error_len = 0
 
 	request := Remote_Spawn_Request {
 		request_id           = request_id,
@@ -759,7 +764,19 @@ spawn_remote :: proc(
 	}
 
 	response := pending.response
-	sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
+
+	if response.request_id != request_id {
+		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
+		log.errorf(
+			"Remote spawn of '%s' on node '%s' received a stale response (request %d, got %d), treating as failed",
+			actor_name,
+			target_node,
+			request_id,
+			response.request_id,
+			location = loc,
+		)
+		return 0, false
+	}
 
 	if !response.success {
 		log.errorf(
@@ -767,20 +784,29 @@ spawn_remote :: proc(
 			actor_name,
 			spawn_func_name,
 			target_node,
-			response.error_msg,
+			string(pending.error_buf[:pending.error_len]),
 			location = loc,
 		)
+		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		return 0, false
 	}
 
-	return response.pid, true
+	sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
+
+	remote_handle, _ := unpack_pid(response.pid)
+	return pack_pid(remote_handle, node_id), true
 }
 
 @(private)
 resolve_spawn_request :: proc(response: Remote_Spawn_Response) {
 	for i in 0 ..< MAX_PENDING_SPAWNS {
 		if sync.atomic_load_explicit(&g_pending_spawn_ids[i], .Acquire) == response.request_id {
-			g_pending_spawns[i].response = response
+			stored := response
+			n := min(len(response.error_msg), len(g_pending_spawns[i].error_buf))
+			copy(g_pending_spawns[i].error_buf[:n], transmute([]u8)response.error_msg[:n])
+			g_pending_spawns[i].error_len = n
+			stored.error_msg = ""
+			g_pending_spawns[i].response = stored
 			sync.atomic_sema_post(&g_pending_spawns[i].sema)
 			return
 		}

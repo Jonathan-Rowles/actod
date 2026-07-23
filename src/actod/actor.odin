@@ -260,15 +260,17 @@ spawn :: proc(
 	}
 
 	if parent_pid > 0 {
-		_, ok := get(&global_registry, parent_pid)
+		if is_local_pid(parent_pid) {
+			_, ok := get(&global_registry, parent_pid)
 
-		if !ok {
-			panic_at(
-				loc,
-				"spawn('%s'): parent_pid %v is not a live actor (never spawned, or already terminated)",
-				name,
-				parent_pid,
-			)
+			if !ok {
+				panic_at(
+					loc,
+					"spawn('%s'): parent_pid %v is not a live actor (never spawned, or already terminated)",
+					name,
+					parent_pid,
+				)
+			}
 		}
 
 		actor.parent = parent_pid

@@ -9,6 +9,6 @@ handle_message :: proc(data: ^shared.Counter_State, from: PID, content: any) {
 }
 
 @(export)
-hot_handle_message := handle_message
+hot_handle_message :: proc "c" () -> rawptr {return rawptr(handle_message)}
 @(export)
-hot_state_size :: proc() -> int {return size_of(shared.Counter_State)}
+hot_state_size :: proc "c" () -> int {return size_of(shared.Counter_State)}

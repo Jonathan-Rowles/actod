@@ -11,5 +11,7 @@ handle_message :: proc(data: ^Big_State, from: PID, content: any) {
 	data.count += 1
 }
 
-@(export) hot_handle_message := handle_message
-@(export) hot_state_size :: proc() -> int { return size_of(Big_State) }
+@(export)
+hot_handle_message :: proc "c" () -> rawptr {return rawptr(handle_message)}
+@(export)
+hot_state_size :: proc "c" () -> int {return size_of(Big_State)}

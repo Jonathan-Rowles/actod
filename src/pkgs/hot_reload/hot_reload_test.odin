@@ -137,6 +137,101 @@ test_compile_module_failure :: proc(t: ^testing.T) {
 	testing.expect(t, len(result.error_msg) > 0, "should have error message")
 }
 
+Mock_Counter_State :: struct {
+	count: i32,
+}
+
+Mock_Handle_Message :: proc(data: ^Mock_Counter_State, from: u64, content: any)
+
+@(private)
+compile_load_and_invoke :: proc(
+	t: ^testing.T,
+	mock_name: string,
+	generation: u32,
+	loc := #caller_location,
+) -> ^Hot_Module {
+	uid := sync.atomic_add(&test_build_counter, 1)
+	tmp, _ := os.temp_directory(context.temp_allocator)
+	tmp_dir, _ := filepath.join(
+		{tmp, fmt.tprintf("actod_hr_abi_%d_%d", os.get_pid(), uid)},
+		context.temp_allocator,
+	)
+	os.make_directory(tmp_dir)
+	defer os.remove_all(tmp_dir)
+
+	src_path, _ := filepath.join({TEST_SRC_DIR, mock_name}, context.temp_allocator)
+	out, _ := filepath.join(
+		{tmp_dir, fmt.tprintf("%s%s", mock_name, SHARED_LIB_EXT)},
+		context.temp_allocator,
+	)
+
+	result := compile_module(src_path, out)
+	if !testing.expectf(t, result.ok, "compile_module(%s) failed: %s", src_path, result.error_msg) {
+		return nil
+	}
+
+	specs := []Symbol_Spec{{name = "handle_message", required = true}}
+	mod, err := load_module(out, specs, size_of(Mock_Counter_State), generation = generation)
+	testing.expect_value(t, err.kind, Load_Error_Kind.None, loc = loc)
+	if mod == nil {
+		return nil
+	}
+
+	handler_ptr: rawptr
+	for sym in mod.symbols {
+		if sym.name == "handle_message" {
+			handler_ptr = sym.ptr
+		}
+	}
+	if !testing.expect(t, handler_ptr != nil, "handle_message must resolve", loc = loc) {
+		unload_module(mod)
+		return nil
+	}
+
+	state := Mock_Counter_State{}
+	handler := cast(Mock_Handle_Message)handler_ptr
+	handler(&state, 0, nil)
+	handler(&state, 0, nil)
+	testing.expectf(
+		t,
+		state.count == 2 || state.count == 20,
+		"invoking the resolved handler twice must mutate state, got count=%d",
+		state.count,
+		loc = loc,
+	)
+	return mod
+}
+
+@(test)
+test_load_and_invoke_counter_v1 :: proc(t: ^testing.T) {
+	mod := compile_load_and_invoke(t, "counter_v1", 1)
+	if mod == nil do return
+	defer unload_module(mod)
+
+	state := Mock_Counter_State{}
+	handler: Mock_Handle_Message
+	for sym in mod.symbols {
+		if sym.name == "handle_message" do handler = cast(Mock_Handle_Message)sym.ptr
+	}
+	handler(&state, 0, nil)
+	testing.expect_value(t, state.count, i32(1))
+}
+
+@(test)
+test_load_and_invoke_counter_v2 :: proc(t: ^testing.T) {
+	mod := compile_load_and_invoke(t, "counter_v2", 2)
+	if mod == nil do return
+	defer unload_module(mod)
+
+	state := Mock_Counter_State{}
+	handler: Mock_Handle_Message
+	for sym in mod.symbols {
+		if sym.name == "handle_message" do handler = cast(Mock_Handle_Message)sym.ptr
+	}
+	handler(&state, 0, nil)
+	testing.expect_value(t, state.count, i32(10))
+}
+
 @(test)
 test_error_message_none :: proc(t: ^testing.T) {
 	msg := load_error_message(Load_Error{})

@@ -66,9 +66,12 @@ load_error_message :: proc(err: Load_Error) -> string {
 	case .Missing_Required_Symbol:
 		return fmt.tprintf(
 			"HOT RELOAD ERROR: Required symbol '%s' not found in '%s'\n" +
-			"  The shared library must export '%s' (via @(export) or generated hot_exports.odin).",
+			"  The shared library must export '%s' as a getter: " +
+			"@(export) %s :: proc \"c\" () -> rawptr {{return rawptr(your_proc)}} " +
+			"(generated hot_exports.odin emits this form).",
 			err.symbol_name,
 			err.module_path,
+			err.symbol_name,
 			err.symbol_name,
 		)
 	case .State_Size_Mismatch:

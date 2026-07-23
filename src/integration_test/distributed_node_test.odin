@@ -888,19 +888,20 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	done := sync.Sema{}
 
 	Observer_Data :: struct {
-		stopped_msg: actod.Actor_Stopped,
-		received:    bool,
-		done:        ^sync.Sema,
+		observed_reason: actod.Termination_Reason,
+		done:            ^sync.Sema,
 	}
 
 	Observer_Behaviour :: actod.Actor_Behaviour(Observer_Data) {
-		handle_message = proc(data: ^Observer_Data, from: actod.PID, msg: any) {
-			switch m in msg {
-			case actod.Actor_Stopped:
-				data.stopped_msg = m
-				data.received = true
-				sync.sema_post(data.done)
-			}
+		handle_message = proc(data: ^Observer_Data, from: actod.PID, msg: any) {},
+		on_child_terminated = proc(
+			data: ^Observer_Data,
+			child_pid: actod.PID,
+			reason: actod.Termination_Reason,
+			will_restart: bool,
+		) {
+			data.observed_reason = reason
+			sync.sema_post(data.done)
 		},
 	}
 
@@ -908,6 +909,10 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 		"crash_observer",
 		Observer_Data{done = &done},
 		Observer_Behaviour,
+		actod.make_actor_config(
+			supervision_strategy = .ONE_FOR_ONE,
+			restart_policy = .TEMPORARY,
+		),
 	)
 	expect(t, obs_ok, "Should spawn observer")
 
@@ -922,6 +927,16 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	expect(t, spawn_ok, "spawn_remote should succeed")
 	expect(t, child_pid != 0, "Child PID should not be zero")
 
+	spawn_hash := actod.get_spawn_func_hash("supervision_worker")
+	_, adopt_ok := actod.add_child_existing(
+		observer_pid,
+		child_pid,
+		local_supervision_worker_stub,
+		spawn_hash,
+	)
+	expect(t, adopt_ok, "Observer should adopt the remote child")
+	expect(t, wait_for_child_count(observer_pid, 1, 2000), "Observer should have 1 child")
+
 	time.sleep(200 * time.Millisecond)
 
 	crash_cmd := shared.Supervision_Crash_Command {
@@ -931,7 +946,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	expect(t, err == .OK, "Should send crash command to remote child")
 
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
-	expect(t, success, "Observer should receive Actor_Stopped from remote child")
+	expect(t, success, "Observer should observe child termination via on_child_terminated")
 
 	actod.terminate_actor(observer_pid)
 }
@@ -977,12 +992,19 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 
 	time.sleep(100 * time.Millisecond)
 
-	child_pid, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
+	_, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
 	expect(t, add_ok, "Should add remote child")
-	expect(t, child_pid != 0, "Child PID should not be zero")
-	expect(t, !actod.is_local_pid(child_pid), "Child should be remote")
 
 	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
+
+	children := actod.get_children(supervisor_pid)
+	defer delete(children)
+	if !expect(t, len(children) == 1, "Should have exactly one child") {
+		return
+	}
+	child_pid := children[0]
+	expect(t, child_pid != 0, "Child PID should not be zero")
+	expect(t, !actod.is_local_pid(child_pid), "Child should be remote")
 
 	time.sleep(200 * time.Millisecond)
 	crash_cmd := shared.Supervision_Crash_Command {

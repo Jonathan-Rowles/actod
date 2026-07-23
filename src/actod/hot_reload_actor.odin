@@ -1437,6 +1437,13 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 				err := send_reload_behaviour(pid, actor_gen)
 				if err == .OK {
 					append(&live_pids, pid)
+				} else if err == .RECEIVER_BACKLOGGED {
+					log.warnf(
+						"hot reload: actor %v missed generation %d because its system mailbox is full, it stays eligible for the next reload",
+						pid,
+						actor_gen,
+					)
+					append(&live_pids, pid)
 				}
 			}
 		}

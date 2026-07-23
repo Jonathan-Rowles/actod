@@ -29,4 +29,4 @@ jobs:
         run: odin version
 
       - name: Run tests
-        run: make test
+        run: make test TEST_FLAGS="-define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1"

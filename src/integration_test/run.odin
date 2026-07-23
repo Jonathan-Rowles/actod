@@ -515,6 +515,9 @@ run_tests_parallel :: proc(t: ^testing.T) {
 	}
 
 	worker_budget := max(threads_act.get_cpu_count(), 2)
+	when #config(ODIN_TEST_THREADS, 0) == 1 {
+		worker_budget = 1
+	}
 	fmt.printf(
 		"Running %d tests in parallel (worker budget %d)...\n",
 		len(tests),

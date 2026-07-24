@@ -16,23 +16,18 @@ import "core:strings"
 import "core:sync"
 
 @(private)
-send_message_any :: proc(
-	to: PID,
-	content: any,
-	priority: Message_Priority = .NORMAL,
-	loc := #caller_location,
-) -> Send_Error {
+send_message_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
 	@(static) sentinel: Message_Type_Info
 	info, ok := get_type_info_ptr(content.id, loc)
 	if !ok do info = &sentinel
 	size := type_info_of(content.id).size
-	return send_message_impl(to, content.data, size, content.id, info, priority, .User, loc)
+	return send_message_impl(to, content.data, size, content.id, info, .User, loc)
 }
 
 @(private)
 send_unreliable_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
 	if is_local_pid(to) {
-		return send_message_any(to, content, .NORMAL, loc)
+		return send_message_any(to, content, loc)
 	}
 	@(static) sentinel: Message_Type_Info
 	info, ok := get_type_info_ptr(content.id, loc)
@@ -61,7 +56,7 @@ broadcast_any :: proc(content: any, loc := #caller_location) {
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
 		if pid != 0 && pid != self_pid {
-			send_message_any(pid, content, .NORMAL, loc)
+			send_message_any(pid, content, loc)
 		}
 	}
 }
@@ -78,7 +73,7 @@ publish_any :: proc(topic: ^Topic, content: any, loc := #caller_location) {
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
 		if pid != 0 && pid != self_pid {
-			send_message_any(pid, content, .NORMAL, loc)
+			send_message_any(pid, content, loc)
 		}
 	}
 }
@@ -203,9 +198,7 @@ spawn_from_raw :: proc(
 	}
 
 	init_mpsc(&actor.system_mailbox)
-	for i in 0 ..< MAILBOX_PRIORITY_COUNT {
-		init_mpsc(&actor.mailbox[i])
-	}
+	init_mpsc(&actor.mailbox)
 
 	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {

@@ -14,10 +14,8 @@ Network_Message_Flag :: enum u16 {
 	BY_NAME         = 1,
 	CONTROL         = 2,
 	LIFECYCLE_EVENT = 3,
-	PRIORITY_HIGH   = 4,
-	PRIORITY_LOW    = 5,
-	BROADCAST       = 6,
-	SYSTEM          = 7,
+	BROADCAST       = 4,
+	SYSTEM          = 5,
 }
 
 Parsed_Network_Header :: struct {

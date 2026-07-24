@@ -287,7 +287,6 @@ send_remote_impl :: proc(
 	to: PID,
 	data: rawptr,
 	info: ^Message_Type_Info,
-	priority: Message_Priority,
 	base_flags: Network_Message_Flags = {},
 	loc := #caller_location,
 ) -> Send_Error {
@@ -305,9 +304,8 @@ send_remote_impl :: proc(
 		return .NODE_DISCONNECTED
 	}
 
-	p_flags := priority_to_flags(priority) | base_flags
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		result := send_to_connection_ring_impl(ring, to, data, info, p_flags, loc)
+		result := send_to_connection_ring_impl(ring, to, data, info, base_flags, loc)
 		if result != .NETWORK_RING_FULL {
 			return result
 		}
@@ -359,9 +357,8 @@ send_remote_by_name_impl :: proc(
 		return .NODE_DISCONNECTED
 	}
 
-	p_flags := priority_to_flags(.NORMAL)
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, p_flags, loc)
+		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, {}, loc)
 		if result != .NETWORK_RING_FULL {
 			return result
 		}
@@ -416,7 +413,7 @@ send_unreliable_remote_impl :: proc(
 				info,
 				to_handle,
 				from_handle,
-				priority_to_flags(.NORMAL),
+				{},
 				"",
 			)
 			if msg_len != 0 && udp_try_send(node_id, buf[:msg_len]) {
@@ -425,5 +422,5 @@ send_unreliable_remote_impl :: proc(
 		}
 	}
 
-	return send_remote_impl(to, data, info, .NORMAL, {}, loc)
+	return send_remote_impl(to, data, info, {}, loc)
 }

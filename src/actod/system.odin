@@ -332,7 +332,7 @@ send_to_node_mailbox :: #force_inline proc(
 		return false
 	}
 
-	result := push_to_mailbox(actor, msg, NODE.pid, 1, loc)
+	result := push_to_mailbox(actor, msg, NODE.pid, loc)
 	if result != .OK {
 		log.errorf(
 			"cannot deliver %v to the node actor: %v",

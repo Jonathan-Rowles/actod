@@ -1,5 +1,45 @@
 # Changelog
 
+## [Unreleased]
+
+Wire protocol v3 to v4 (breaking): the priority flag bits are gone from the
+wire format.
+
+### Removed
+- Priority mailboxes. `Message_Priority` and the `priority` argument to
+  `send_message` are gone; each actor now has a single 512-slot mailbox plus
+  the system mailbox. Nothing ever sent at non-default priority, and the
+  system mailbox already covers urgent control traffic.
+
+### Fixed
+- Per-sender FIFO ordering. The overflow path could park a message in a
+  different priority ring and the drain serviced rings in priority order, so
+  one send during one full-ring burst was silently delivered early. With a
+  single mailbox the reorder is unrepresentable; a mailbox that stays full
+  returns `RECEIVER_BACKLOGGED` after the retry budget instead of succeeding
+  out of order.
+- A same-worker send that found the target's local buffer full could spill
+  into the MPSC mailbox, letting later local sends overtake it. Overflowing
+  local sends now yield and retry the local buffer, then return
+  `RECEIVER_BACKLOGGED`; they never switch queues.
+- Coroutine senders no longer reset their retry budget on a full mailbox, so
+  a stuck receiver can no longer block its senders forever.
+
+### Changed
+- Default mailbox capacity is 512 slots (was 3 rings of 128).
+- `Actor_Stats.mailbox_sizes: [3]int` is now `mailbox_size: int`.
+
+### Performance
+- Single-producer paths are faster: 1:1 throughput +9%, same-worker +7-14%,
+  16:8 mesh +54% (fewer rings to check per drain and resume).
+- Many-producers-to-one-consumer small-message throughput roughly halved
+  (4:1 32B 18.8M to 10.0M msgs/s, 32:1 and 64:1 to ~40% of old). The old
+  overflow hop striped flooding producers across three `write_index` cache
+  lines; a single ring serializes their CAS. If a workload ever needs hot
+  fan-in, the intended fix is sender-hash mailbox sharding, which preserves
+  per-sender FIFO because a sender always maps to the same shard. Priority
+  rings are not coming back.
+
 ## [0.3.0] - 2026-07-23
 
 Wire protocol v2 to v3 (breaking). Every node in a mesh must run the same

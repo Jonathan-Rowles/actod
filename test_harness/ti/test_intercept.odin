@@ -16,12 +16,6 @@ Send_Error :: enum {
 	NODE_DISCONNECTED,
 }
 
-Message_Priority :: enum u8 {
-	HIGH   = 0,
-	NORMAL = 1,
-	LOW    = 2,
-}
-
 Termination_Reason :: enum {
 	NORMAL,
 	ABNORMAL,
@@ -52,10 +46,9 @@ Test_Intercept :: struct {
 }
 
 Captured_Send :: struct {
-	to:       u64,
-	data:     rawptr,
-	type_id:  typeid,
-	priority: Message_Priority,
+	to:      u64,
+	data:    rawptr,
+	type_id: typeid,
 }
 
 Captured_Publish :: struct {
@@ -99,23 +92,13 @@ Captured_Topic_Subscribe :: struct {
 	topic: rawptr,
 }
 
-intercept_send_message :: proc(
-	to: u64,
-	content: $T,
-	priority: Message_Priority = .NORMAL,
-) -> (
-	Send_Error,
-	bool,
-) {
+intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
 	if test_intercept == nil do return {}, false
 	val := content
 	ptr, _ := mem.alloc(size_of(T))
 	clone := cast(^T)ptr
 	clone^ = val
-	append(
-		test_intercept.send_capture,
-		Captured_Send{to = to, data = clone, type_id = T, priority = priority},
-	)
+	append(test_intercept.send_capture, Captured_Send{to = to, data = clone, type_id = T})
 	return .OK, true
 }
 

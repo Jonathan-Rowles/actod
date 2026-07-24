@@ -127,7 +127,7 @@ act.send_message(remote_pid, Work_Item{})
 
 `send_message` returns `.OK` once the message is accepted into the target node's send buffer, which can happen even while that node is disconnected (it buffers and delivers on reconnect). `.OK` does not mean "delivered" or "peer reachable." See [Networking](docs/10_network.md).
 
-**Priority mailboxes.** Three per-actor mailboxes (high, normal, low) plus a dedicated system mailbox processed first. Send at priority with the optional `priority` argument to `send_message` (`.HIGH` / `.NORMAL` / `.LOW`).
+**Mailboxes.** One 512-slot mailbox per actor plus a dedicated system mailbox processed first. Messages from the same sender arrive in send order; a mailbox that stays full returns `RECEIVER_BACKLOGGED` instead of reordering or dropping.
 
 **Pub/sub.** Type-based (global, up to 16384 subscribers) and topic-based (scoped to a struct field, up to 64 subscribers). Cross-node for type-based.
 

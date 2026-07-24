@@ -11,7 +11,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-WIRE_PROTOCOL_VERSION :: 3
+WIRE_PROTOCOL_VERSION :: 4
 HANDSHAKE_TIMEOUT_SECS :: 5
 HANDSHAKE_TIMEOUT :: HANDSHAKE_TIMEOUT_SECS * time.Second
 DUPLICATE_TAKEOVER_TIMEOUT :: 5 * time.Second

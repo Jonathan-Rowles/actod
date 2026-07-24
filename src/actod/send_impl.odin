@@ -89,7 +89,6 @@ send_to_actor_impl :: proc(
 	size: int,
 	tid: typeid,
 	info: ^Message_Type_Info,
-	priority: Message_Priority,
 	$class: Msg_Class,
 	loc := #caller_location,
 ) -> Send_Error {
@@ -145,7 +144,7 @@ send_to_actor_impl :: proc(
 		handle_set_message_stats(msg.from, to)
 		return .OK
 	} else {
-		result := push_to_mailbox(actor, msg, to, int(priority), loc)
+		result := push_to_mailbox(actor, msg, to, loc)
 		if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
 			free_message(&actor.pool, msg.content)
 		}
@@ -160,7 +159,6 @@ send_message_impl :: proc(
 	size: int,
 	tid: typeid,
 	info: ^Message_Type_Info,
-	priority: Message_Priority,
 	$class: Msg_Class,
 	loc := #caller_location,
 ) -> Send_Error {
@@ -179,7 +177,7 @@ send_message_impl :: proc(
 		when class == .System {
 			sys_flags = {.SYSTEM}
 		}
-		return send_remote_impl(to, data, info, priority, sys_flags, loc)
+		return send_remote_impl(to, data, info, sys_flags, loc)
 	}
 
 	actor_ptr, home_worker, ok := get_relaxed_loc(&global_registry, to)
@@ -188,32 +186,12 @@ send_message_impl :: proc(
 	}
 
 	if current_worker != nil && home_worker == i32(current_worker.id) + 1 {
-		return send_to_actor_impl(
-			to,
-			cast(^Actor(int))actor_ptr,
-			data,
-			size,
-			tid,
-			info,
-			priority,
-			class,
-			loc,
-		)
+		return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc)
 	}
 
 	reclaim_pin()
 	defer reclaim_unpin()
-	return send_to_actor_impl(
-		to,
-		cast(^Actor(int))actor_ptr,
-		data,
-		size,
-		tid,
-		info,
-		priority,
-		class,
-		loc,
-	)
+	return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc)
 }
 
 @(private)
@@ -243,7 +221,7 @@ send_self_impl :: proc(
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
-	return send_to_actor_impl(actor.pid, actor, data, size, tid, info, .NORMAL, class, loc)
+	return send_to_actor_impl(actor.pid, actor, data, size, tid, info, class, loc)
 }
 
 @(private)
@@ -283,17 +261,7 @@ send_message_to_parent_impl :: proc(
 		)
 		return .ACTOR_NOT_FOUND
 	}
-	return send_to_actor_impl(
-		actor.parent,
-		parent_actor,
-		data,
-		size,
-		tid,
-		info,
-		.NORMAL,
-		class,
-		loc,
-	)
+	return send_to_actor_impl(actor.parent, parent_actor, data, size, tid, info, class, loc)
 }
 
 @(private)
@@ -325,17 +293,7 @@ send_message_to_children_impl :: proc(
 			)
 			return .ACTOR_NOT_FOUND
 		}
-		err := send_to_actor_impl(
-			child_pid,
-			child_actor,
-			data,
-			size,
-			tid,
-			info,
-			.NORMAL,
-			class,
-			loc,
-		)
+		err := send_to_actor_impl(child_pid, child_actor, data, size, tid, info, class, loc)
 		if err != .OK {
 			return err
 		}

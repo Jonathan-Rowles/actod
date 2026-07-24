@@ -361,7 +361,6 @@ set_timer :: proc(
 	err := send_message(
 		TIMER_PID,
 		Start_Timer{id = id, interval = interval, repeat = repeat},
-		.NORMAL,
 		loc,
 	)
 	if err != .OK {
@@ -401,7 +400,7 @@ cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 		return .ACTOR_NOT_FOUND
 	}
 
-	err := send_message(TIMER_PID, Cancel_Timer{id = id}, .NORMAL, loc)
+	err := send_message(TIMER_PID, Cancel_Timer{id = id}, loc)
 	if err != .OK {
 		log.errorf(
 			"cancel_timer failed: could not reach the timer actor (%v), timer id=%d was not cancelled and may still fire",

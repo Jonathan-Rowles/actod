@@ -141,10 +141,9 @@ rename_actor :: proc(
 send_message :: proc(
 	to: PID,
 	content: $T,
-	priority: Message_Priority = .NORMAL,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Send_Error {
-	return actod.send_message(to, content, priority, loc)
+	return actod.send_message(to, content, loc)
 }
 
 // Fire-and-forget send over the UDP lane when the target node has one:
@@ -162,7 +161,7 @@ send_unreliable :: proc(
 @(hot = `compose
 pid, found := hot_api.get_actor_pid(to)
 if !found do return .ACTOR_NOT_FOUND
-return hot_api.send_message(pid, content, .NORMAL, loc)
+return hot_api.send_message(pid, content, loc)
 `)
 send_message_name :: proc(
 	to: string,
@@ -197,7 +196,7 @@ send_to :: proc(
 
 // Send a message to self. Must be called from within an actor.
 @(hot = `compose
-return hot_api.send_message(hot_api.get_self_pid(), content, .NORMAL, loc)
+return hot_api.send_message(hot_api.get_self_pid(), content, loc)
 `)
 send_self :: proc(
 	content: $T,
@@ -210,7 +209,7 @@ send_self :: proc(
 @(hot = `compose
 parent := hot_api.get_parent_pid()
 if parent == 0 do return .ACTOR_NOT_FOUND
-return hot_api.send_message(parent, content, .NORMAL, loc)
+return hot_api.send_message(parent, content, loc)
 `)
 send_message_to_parent :: proc(
 	content: $T,
@@ -222,7 +221,7 @@ send_message_to_parent :: proc(
 // Send a message to all children. Must be called from within an actor.
 @(hot = `compose
 for child in hot_api.get_children(hot_api.get_self_pid()) {
-	err := hot_api.send_message(child, content, .NORMAL, loc)
+	err := hot_api.send_message(child, content, loc)
 	if err != .OK do return err
 }
 return .OK
@@ -719,7 +718,6 @@ SPAWN :: actod.SPAWN
 Actor_Behaviour :: actod.Actor_Behaviour
 Actor_State :: actod.Actor_State
 Send_Error :: actod.Send_Error
-Message_Priority :: actod.Message_Priority
 Termination_Reason :: actod.Termination_Reason
 ACTOR_TYPE_UNTYPED :: actod.ACTOR_TYPE_UNTYPED
 

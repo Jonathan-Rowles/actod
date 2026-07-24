@@ -248,7 +248,7 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 	from_handle, _ := unpack_pid(get_self_pid())
 	broadcast_handle := transmute(Handle)actor_type_hash
 
-	p_flags := priority_to_flags(.NORMAL)
+	p_flags := Network_Message_Flags{}
 
 	ring := ensure_ring_for_node(node_id)
 	if ring == nil {

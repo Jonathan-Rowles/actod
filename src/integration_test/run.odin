@@ -61,6 +61,11 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_mailbox_overflow_preserves_send_order",
+		test_proc = test_mailbox_overflow_preserves_send_order,
+		worker_count = 2,
+	},
+	{
 		name = "test_supervisor_survives_many_child_terminations",
 		test_proc = test_supervisor_survives_many_child_terminations,
 		worker_count = 2,

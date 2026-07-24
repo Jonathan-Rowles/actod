@@ -21,7 +21,7 @@ Hot_API :: struct {
 	) -> (PID, bool),
 	terminate_actor:           proc(to: PID, reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
 	rename_actor:              proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location) -> bool,
-	send_message:              proc(to: PID, content: any, priority: Message_Priority, loc: runtime.Source_Code_Location) -> Send_Error,
+	send_message:              proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
 	send_unreliable:           proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
 	get_self_pid:              proc() -> PID,
 	get_self_name:             proc() -> string,

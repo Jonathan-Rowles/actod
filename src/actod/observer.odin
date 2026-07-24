@@ -60,7 +60,7 @@ Actor_Stats :: struct {
 	messages_sent:       u64,
 	received_from:       map[PID]u64, // PID -> count
 	sent_to:             map[PID]u64, // PID -> count
-	mailbox_sizes:       [3]int,
+	mailbox_size:        int,
 	system_mailbox_size: int,
 	state:               Actor_State,
 	start_time:          time.Time,
@@ -446,10 +446,8 @@ stop_observer :: proc() {
 
 		a, actor_ok := get_actor_from_pointer(a_ptr, true)
 		if actor_ok && a != nil {
-			for priority in 0 ..< MAILBOX_PRIORITY_COUNT {
-				for mpsc_size(&a.mailbox[priority]) > 0 {
-					intrinsics.cpu_relax()
-				}
+			for mpsc_size(&a.mailbox) > 0 {
+				intrinsics.cpu_relax()
 			}
 		} else {
 			log.warnf(

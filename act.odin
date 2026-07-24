@@ -108,10 +108,9 @@ rename_actor :: proc(
 send_message :: proc(
 	to: PID,
 	content: $T,
-	priority: Message_Priority = .NORMAL,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Send_Error {
-	return actod.send_message(to, content, priority, loc)
+	return actod.send_message(to, content, loc)
 }
 
 // Fire-and-forget send over the UDP lane when the target node has one:
@@ -627,7 +626,6 @@ SPAWN :: actod.SPAWN
 Actor_Behaviour :: actod.Actor_Behaviour
 Actor_State :: actod.Actor_State
 Send_Error :: actod.Send_Error
-Message_Priority :: actod.Message_Priority
 Termination_Reason :: actod.Termination_Reason
 ACTOR_TYPE_UNTYPED :: actod.ACTOR_TYPE_UNTYPED
 

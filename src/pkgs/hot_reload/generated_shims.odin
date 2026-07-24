@@ -70,7 +70,7 @@ Actor_Stats :: struct {
 	messages_sent:       u64,
 	received_from:       map[PID]u64,
 	sent_to:             map[PID]u64,
-	mailbox_sizes:       [3]int,
+	mailbox_size:        int,
 	system_mailbox_size: int,
 	state:               Actor_State,
 	start_time:          time.Time,
@@ -139,12 +139,6 @@ Message_Flow_Entry :: struct {
 	from_pid: PID,
 	to_pid:   PID,
 	count:    u64,
-}
-
-Message_Priority :: enum u8 {
-	HIGH   = 0,
-	NORMAL = 1,
-	LOW    = 2,
 }
 
 Network_Config :: struct {
@@ -295,7 +289,7 @@ Hot_API :: struct {
 	) -> (PID, bool),
 	terminate_actor:           proc(to: PID, reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
 	rename_actor:              proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location) -> bool,
-	send_message:              proc(to: PID, content: any, priority: Message_Priority, loc: runtime.Source_Code_Location) -> Send_Error,
+	send_message:              proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
 	send_unreliable:           proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
 	get_self_pid:              proc() -> PID,
 	get_self_name:             proc() -> string,
@@ -494,8 +488,8 @@ rename_actor :: proc(pid: PID, new_name: string, loc: runtime.Source_Code_Locati
 	return hot_api.rename_actor(pid, new_name, loc)
 }
 
-send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
-	return hot_api.send_message(to, content, priority, loc)
+send_message :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+	return hot_api.send_message(to, content, loc)
 }
 
 send_unreliable :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
@@ -505,22 +499,22 @@ send_unreliable :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location 
 send_message_name :: proc(to: string, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	pid, found := hot_api.get_actor_pid(to)
 	if !found do return .ACTOR_NOT_FOUND
-	return hot_api.send_message(pid, content, .NORMAL, loc)
+	return hot_api.send_message(pid, content, loc)
 }
 
 send_self :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
-	return hot_api.send_message(hot_api.get_self_pid(), content, .NORMAL, loc)
+	return hot_api.send_message(hot_api.get_self_pid(), content, loc)
 }
 
 send_message_to_parent :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	parent := hot_api.get_parent_pid()
 	if parent == 0 do return .ACTOR_NOT_FOUND
-	return hot_api.send_message(parent, content, .NORMAL, loc)
+	return hot_api.send_message(parent, content, loc)
 }
 
 send_message_to_children :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	for child in hot_api.get_children(hot_api.get_self_pid()) {
-		err := hot_api.send_message(child, content, .NORMAL, loc)
+		err := hot_api.send_message(child, content, loc)
 		if err != .OK do return err
 	}
 	return .OK

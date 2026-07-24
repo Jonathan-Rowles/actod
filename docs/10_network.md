@@ -206,7 +206,7 @@ spawn_remote :: proc(
 ) -> (PID, bool)
 
 // Transparent messaging
-send_message :: proc(to: PID, content: $T, priority: Message_Priority = .NORMAL) -> Send_Error // routes automatically
+send_message :: proc(to: PID, content: $T) -> Send_Error // routes automatically
 send_unreliable :: proc(to: PID, content: $T) -> Send_Error // UDP lane, falls back to TCP
 send_message_name :: proc(to: string, content: $T) -> Send_Error // "actor@node" format
 send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Error

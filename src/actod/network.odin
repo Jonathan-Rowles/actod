@@ -374,7 +374,7 @@ deliver_to_target :: #force_inline proc(
 		return send_system_from_payload(to_pid, from_pid, payload, type_info) == .OK
 	}
 
-	result := send_from_payload(to_pid, from_pid, payload, type_info, flags_to_priority(flags))
+	result := send_from_payload(to_pid, from_pid, payload, type_info)
 	return result == .OK
 }
 
@@ -400,13 +400,12 @@ deliver_broadcast_locally :: proc(
 	}
 
 	from_pid := pack_pid(from_handle, remote_node_id)
-	priority := flags_to_priority(flags)
 	list := &type_subscribers[local_type]
 
 	for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
 		if pid != 0 {
-			send_from_payload(pid, from_pid, payload, type_info, priority)
+			send_from_payload(pid, from_pid, payload, type_info)
 		}
 	}
 
@@ -415,7 +414,7 @@ deliver_broadcast_locally :: proc(
 
 send_remote :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
 	v := content
-	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), .NORMAL, {}, loc)
+	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), {}, loc)
 }
 
 get_or_create_connection :: proc(node_id: Node_ID) -> PID {

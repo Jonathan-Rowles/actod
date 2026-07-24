@@ -15,11 +15,10 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-MAILBOX_PRIORITY_COUNT :: 3
-DEFAULT_MAIL_BOX_SIZE :: 128
+DEFAULT_MAIL_BOX_SIZE :: 512
 MAX_SEND_RETRIES :: 1000
 SEND_RETRY_DELAY :: 1 * time.Microsecond
-BATCH_SIZE :: DEFAULT_MAIL_BOX_SIZE / 2
+BATCH_SIZE :: 64
 FREE_BATCH_SIZE :: BATCH_SIZE
 SPAWN :: proc(name: string, parent_pid: PID) -> (PID, bool)
 
@@ -44,12 +43,6 @@ Send_Error :: enum {
 	NETWORK_RING_FULL, // Ring buffer backpressure
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
-}
-
-Message_Priority :: enum u8 {
-	HIGH   = 0,
-	NORMAL = 1,
-	LOW    = 2,
 }
 
 Supervision_Strategy :: enum {
@@ -93,7 +86,7 @@ Actor_Behaviour :: struct($T: typeid) {
 	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID),
 }
 
-ACTOR_MAILBOX :: [MAILBOX_PRIORITY_COUNT]MPSC_Queue(Message, DEFAULT_MAIL_BOX_SIZE)
+ACTOR_MAILBOX :: MPSC_Queue(Message, DEFAULT_MAIL_BOX_SIZE)
 
 Restart_Info :: struct {
 	count:                int,
@@ -277,9 +270,7 @@ spawn :: proc(
 	}
 
 	init_mpsc(&actor.system_mailbox)
-	for i in 0 ..< MAILBOX_PRIORITY_COUNT {
-		init_mpsc(&actor.mailbox[i])
-	}
+	init_mpsc(&actor.mailbox)
 
 	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
@@ -718,10 +709,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 @(private)
 mailbox_has_messages :: #force_inline proc(actor: ^Actor($T)) -> bool {
 	if actor.local_read != actor.local_write do return true
-	for priority in 0 ..< MAILBOX_PRIORITY_COUNT {
-		if mpsc_size(&actor.mailbox[priority]) > 0 do return true
-	}
-	return false
+	return mpsc_size(&actor.mailbox) > 0
 }
 
 @(private)
@@ -819,34 +807,28 @@ process_user_mailboxes :: #force_inline proc(
 	}
 
 	// thread safe
-	for priority in 0 ..< MAILBOX_PRIORITY_COUNT {
-		batch_count := mpsc_pop_batch(
-			&actor.mailbox[priority],
-			ctx.message_batch[0:ctx.batch_size],
-		)
+	batch_count := mpsc_pop_batch(&actor.mailbox, ctx.message_batch[0:ctx.batch_size])
+	if batch_count == 0 do return true
 
-		if batch_count == 0 do continue
+	is_running := sync.atomic_load(&actor.state) == .RUNNING
 
-		is_running := sync.atomic_load(&actor.state) == .RUNNING
+	for i in 0 ..< batch_count {
+		msg := &ctx.message_batch[i]
 
-		for i in 0 ..< batch_count {
-			msg := &ctx.message_batch[i]
+		reconstruct_msg(msg, &ctx.data, &ctx.header)
 
-			reconstruct_msg(msg, &ctx.data, &ctx.header)
-
-			if !ctx.is_node || is_running {
-				actor.handle_message(actor.data, msg.from, ctx.data)
-				track_message_received(msg.from)
-			}
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
+		if !ctx.is_node || is_running {
+			actor.handle_message(actor.data, msg.from, ctx.data)
+			track_message_received(msg.from)
 		}
-
-		if batch_count > 0 do flush_batch_free(&ctx.free_buffer)
-
-		track_max_mailbox_size(&actor.mailbox)
-
-		if sync.atomic_load(&actor.state) != .RUNNING do return false
+		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
 	}
+
+	flush_batch_free(&ctx.free_buffer)
+
+	track_max_mailbox_size(&actor.mailbox)
+
+	if sync.atomic_load(&actor.state) != .RUNNING do return false
 
 	return true
 }
@@ -856,10 +838,7 @@ wait_for_messages_if_idle :: #force_inline proc(
 	actor: ^Actor($T),
 	ctx: ^Message_Processing_Context,
 ) {
-	if mpsc_size(&actor.mailbox[0]) == 0 &&
-	   mpsc_size(&actor.mailbox[1]) == 0 &&
-	   mpsc_size(&actor.mailbox[2]) == 0 &&
-	   mpsc_size(&actor.system_mailbox) == 0 {
+	if mpsc_size(&actor.mailbox) == 0 && mpsc_size(&actor.system_mailbox) == 0 {
 		#partial switch actor.opts.spin_strategy {
 		case .WAKE_SEMA:
 			sync.atomic_sema_wait(&actor.wake_sema)
@@ -971,9 +950,7 @@ notify_termination :: proc(actor: ^Actor($T)) {
 		termination_reason = actor.termination_reason,
 	}
 
-	for _, i in actor.mailbox {
-		final_stats.mailbox_sizes[i] = mpsc_size(&actor.mailbox[i])
-	}
+	final_stats.mailbox_size = mpsc_size(&actor.mailbox)
 	final_stats.system_mailbox_size = mpsc_size(&actor.system_mailbox)
 
 	saved_allocator := context.allocator
@@ -1173,14 +1150,14 @@ send_self :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Er
 	}
 }
 
-send_message :: #force_inline proc(to: PID, content: $T, priority: Message_Priority = .NORMAL, loc := #caller_location) -> Send_Error {
-	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content, ti.Message_Priority(priority)); ok do return Send_Error(r)}
+send_message :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
+	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .System, loc)
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .System, loc)
 	} else {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, priority, .User, loc)
+		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .User, loc)
 	}
 }
 
@@ -1223,7 +1200,7 @@ send_message_name :: proc(to: string, content: $T, loc := #caller_location) -> S
 		)
 		return .ACTOR_NOT_FOUND
 	}
-	return send_message(local_pid, content, .NORMAL, loc)
+	return send_message(local_pid, content, loc)
 }
 
 // Send by name with a local PID cache. Resolves name→PID on first call, then
@@ -1277,7 +1254,7 @@ send_by_name_cached :: proc(to: string, content: $T, loc := #caller_location) ->
 		}
 	}
 
-	err := send_message(pid, content, .NORMAL, loc)
+	err := send_message(pid, content, loc)
 
 	if err == .ACTOR_NOT_FOUND {
 		resolved, found := get_actor_pid(to)
@@ -1295,7 +1272,7 @@ send_by_name_cached :: proc(to: string, content: $T, loc := #caller_location) ->
 			cache[cache_idx].pid = pid
 		}
 
-		err = send_message(pid, content, .NORMAL, loc)
+		err = send_message(pid, content, loc)
 	}
 
 	return err
@@ -1347,47 +1324,50 @@ send_message_to_parent :: #force_inline proc(content: $T, loc := #caller_locatio
 }
 
 @(private)
-priority_to_flags :: #force_inline proc(p: Message_Priority) -> Network_Message_Flags {
-	switch p {
-	case .HIGH:
-		return {.PRIORITY_HIGH}
-	case .LOW:
-		return {.PRIORITY_LOW}
-	case .NORMAL:
-		return {}
-	}
-	return {}
-}
-
-@(private)
-flags_to_priority :: #force_inline proc(flags: Network_Message_Flags) -> int {
-	if .PRIORITY_HIGH in flags do return 0
-	if .PRIORITY_LOW in flags do return 2
-	return 1
-}
-
-@(private)
-yield_and_retry_local :: #force_no_inline proc(actor: ^Actor(int), msg: Message, to: PID) -> bool {
+retry_local_send :: #force_no_inline proc(
+	actor: ^Actor(int),
+	msg: Message,
+	to: PID,
+	loc := #caller_location,
+) -> Send_Error {
 	co := coro.running()
-	if co == nil do return false
+	if co == nil {
+		log.errorf(
+			"send to %s failed: local mailbox is full and the sender cannot yield, receiver is not draining",
+			actor_origin(to),
+			location = loc,
+		)
+		return .RECEIVER_BACKLOGGED
+	}
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-	handle.wants_reschedule = true
-	coro.yield(co)
-	fresh, ok := get_relaxed(&global_registry, to)
-	if !ok || fresh == nil {
-		return false
-	}
-	target := cast(^Actor(int))fresh
-	if target.local_write - target.local_read < LOCAL_MAILBOX_SIZE {
-		target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
-		target.local_write += 1
-		if !sync.atomic_load_explicit(&target.pool_handle.in_ready_queue, .Relaxed) {
-			wake_actor(target)
+	for attempt := 0; attempt < MAX_SEND_RETRIES; attempt += 1 {
+		handle.wants_reschedule = true
+		coro.yield(co)
+		fresh, ok := get_relaxed(&global_registry, to)
+		if !ok || fresh == nil {
+			return .ACTOR_NOT_FOUND
 		}
-		handle_set_message_stats(msg.from, to)
-		return true
+		target := cast(^Actor(int))fresh
+		if target.local_write - target.local_read < LOCAL_MAILBOX_SIZE {
+			target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
+			target.local_write += 1
+			if !sync.atomic_load_explicit(&target.pool_handle.in_ready_queue, .Relaxed) {
+				wake_actor(target)
+			}
+			handle_set_message_stats(msg.from, to)
+			return .OK
+		}
+		if sync.atomic_load(&NODE.shutting_down) {
+			return .SYSTEM_SHUTTING_DOWN
+		}
 	}
-	return false
+	log.errorf(
+		"send to %s failed: local mailbox still full after %d retries, receiver is not draining",
+		actor_origin(to),
+		MAX_SEND_RETRIES,
+		location = loc,
+	)
+	return .RECEIVER_BACKLOGGED
 }
 
 @(private)
@@ -1395,10 +1375,10 @@ push_to_mailbox :: #force_inline proc(
 	actor: ^Actor(int),
 	msg: Message,
 	to: PID,
-	priority: int = 1,
 	loc := #caller_location,
 ) -> Send_Error {
-	// Local if on same worker
+	// Local if on same worker. A sender's messages must never split between
+	// local_buf and the MPSC: local drains first, so a split reorders them.
 	if current_worker != nil &&
 	   actor.pool_handle != nil &&
 	   actor.pool_handle.home_worker == current_worker {
@@ -1411,35 +1391,26 @@ push_to_mailbox :: #force_inline proc(
 			handle_set_message_stats(msg.from, to)
 			return .OK
 		}
-
-		if yield_and_retry_local(actor, msg, to) {
-			return .OK
-		}
+		return retry_local_send(actor, msg, to, loc)
 	}
 
-	if mpsc_try_push(&actor.mailbox[priority], msg) {
+	if mpsc_try_push(&actor.mailbox, msg) {
 		wake_actor(actor)
 		handle_set_message_stats(msg.from, to)
 		return .OK
 	}
 
 	co := coro.running()
-	retries := MAX_SEND_RETRIES
-	for attempt := 0; attempt < retries; attempt += 1 {
-		for _, i in actor.mailbox {
-			if mpsc_try_push(&actor.mailbox[i], msg) {
-				wake_actor(actor)
-				handle_set_message_stats(msg.from, to)
-				return .OK
-			}
+	for attempt := 0; attempt < MAX_SEND_RETRIES; attempt += 1 {
+		if mpsc_try_push(&actor.mailbox, msg) {
+			wake_actor(actor)
+			handle_set_message_stats(msg.from, to)
+			return .OK
 		}
 		if sync.atomic_load(&NODE.shutting_down) {
 			return .SYSTEM_SHUTTING_DOWN
 		}
 		if co != nil {
-			if attempt >= retries - 1 {
-				attempt = 0
-			}
 			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 			handle.wants_reschedule = true
 			coro.yield(co)
@@ -1449,9 +1420,8 @@ push_to_mailbox :: #force_inline proc(
 	}
 
 	log.errorf(
-		"send to %s failed: all %d priority mailboxes still full after %d retries, receiver is not draining",
+		"send to %s failed: mailbox still full after %d retries, receiver is not draining",
 		actor_origin(to),
-		MAILBOX_PRIORITY_COUNT,
 		MAX_SEND_RETRIES,
 		location = loc,
 	)
@@ -1523,29 +1493,9 @@ send :: #force_inline proc(
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
 	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_to_actor_impl(
-			to,
-			actor,
-			&v,
-			size_of(T),
-			typeid_of(T),
-			info,
-			.NORMAL,
-			.System,
-			loc,
-		)
+		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .System, loc)
 	} else {
-		return send_to_actor_impl(
-			to,
-			actor,
-			&v,
-			size_of(T),
-			typeid_of(T),
-			info,
-			.NORMAL,
-			.User,
-			loc,
-		)
+		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .User, loc)
 	}
 }
 
@@ -2124,7 +2074,6 @@ send_from_payload :: #force_inline proc(
 	from_pid: PID,
 	payload: []byte,
 	info: ^Message_Type_Info,
-	priority: int = 1,
 ) -> Send_Error {
 	actor, ok := get_actor_from_pointer(get(&global_registry, to_pid))
 	if !ok {
@@ -2144,7 +2093,7 @@ send_from_payload :: #force_inline proc(
 		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
 	}
 
-	result := push_to_mailbox(actor, msg, to_pid, priority)
+	result := push_to_mailbox(actor, msg, to_pid)
 	if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
 		free_message(&actor.pool, msg.content)
 	}
@@ -2597,11 +2546,7 @@ track_message_received :: proc(from: PID) {
 @(private)
 track_max_mailbox_size :: proc(mailbox: ^ACTOR_MAILBOX) {
 	if SYSTEM_CONFIG.enable_observer {
-		current_size := 0
-		for priority in 0 ..< MAILBOX_PRIORITY_COUNT {
-			current_size += mpsc_size(&mailbox[priority])
-		}
-
+		current_size := mpsc_size(mailbox)
 		if current_size > current_actor_context.stats.max_mailbox_size {
 			current_actor_context.stats.max_mailbox_size = current_size
 		}
@@ -2627,9 +2572,7 @@ collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 		stats.last_update = time.now()
 		stats.max_mailbox_size = current_actor_context.stats.max_mailbox_size
 
-		for _, j in actor.mailbox {
-			stats.mailbox_sizes[j] = mpsc_size(&actor.mailbox[j])
-		}
+		stats.mailbox_size = mpsc_size(&actor.mailbox)
 		stats.system_mailbox_size = mpsc_size(&actor.system_mailbox)
 
 		saved_allocator := context.allocator

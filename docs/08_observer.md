@@ -59,7 +59,7 @@ Per actor:
 - `messages_received`, `messages_sent`
 - `received_from: map[PID]u64`: per-sender breakdown
 - `sent_to: map[PID]u64`: per-recipient breakdown
-- `mailbox_sizes: [3]int`: per priority level
+- `mailbox_size: int`
 - `system_mailbox_size`
 - `state`, `start_time`, `uptime`
 - `max_mailbox_size`

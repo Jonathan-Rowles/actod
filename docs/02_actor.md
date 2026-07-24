@@ -114,10 +114,6 @@ act.send_to("worker", "nodeA", MyMessage{value = 42})
 act.send_self(MyMessage{value = 42})
 act.send_message_to_parent(MyMessage{value = 42})
 act.send_message_to_children(MyMessage{value = 42})
-
-// Priority sends (priority defaults to .NORMAL)
-act.send_message(target_pid, Urgent{}, .HIGH)    // mailbox[0], processed first
-act.send_message(target_pid, Background{}, .LOW) // mailbox[2], processed last
 ```
 
 All send functions return `Send_Error`:
@@ -136,27 +132,11 @@ Send_Error :: enum {
 }
 ```
 
-### Batch Priority
+## Mailboxes
 
-Pass the priority per call; there is no stateful priority mode:
-
-```odin
-for target in targets {
-    act.send_message(target, msg, .HIGH)
-}
-```
-
-## Priority Mailboxes
-
-Each actor has three priority mailboxes (HIGH, NORMAL, LOW) plus a system mailbox.
-
-```odin
-Message_Priority :: enum u8 {
-    HIGH   = 0,
-    NORMAL = 1,  // default
-    LOW    = 2,
-}
-```
+Each actor has a single 512-slot mailbox plus a dedicated system mailbox. Messages
+from the same sender are delivered in send order. A mailbox that stays full returns
+`RECEIVER_BACKLOGGED` instead of reordering or dropping.
 
 System messages (terminate, supervision) use the dedicated system mailbox and are always processed first.
 

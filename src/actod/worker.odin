@@ -201,8 +201,6 @@ worker_loop :: proc(worker: ^Worker) {
 has_pending_messages :: #force_inline proc(handle: ^Pooled_Actor_Handle) -> bool {
 	actor := cast(^Actor(int))handle.actor_ptr
 	if actor.local_read != actor.local_write do return true
-	for i in 0 ..< MAILBOX_PRIORITY_COUNT {
-		if mpsc_size(&handle.mailbox[i]) > 0 do return true
-	}
+	if mpsc_size(handle.mailbox) > 0 do return true
 	return mpsc_size(handle.system_mailbox) > 0
 }

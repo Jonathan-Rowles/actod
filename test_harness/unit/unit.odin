@@ -22,6 +22,7 @@ Test_Harness :: struct($T: typeid) {
 	subscribe_capture:       [dynamic]ti.Captured_Subscribe,
 	topic_subscribe_capture: [dynamic]ti.Captured_Topic_Subscribe,
 	children_pids:           [dynamic]u64,
+	dead_pids:               map[u64]bool,
 }
 
 create :: proc(data: $T, behaviour: actod.Actor_Behaviour(T)) -> Test_Harness(T) {
@@ -56,6 +57,7 @@ destroy :: proc(h: ^Test_Harness($T)) {
 	delete(h.subscribe_capture)
 	delete(h.topic_subscribe_capture)
 	delete(h.children_pids)
+	delete(h.dead_pids)
 	free(h.data)
 }
 
@@ -71,6 +73,7 @@ install_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.subscribe_capture = &h.subscribe_capture
 	h.intercept.topic_subscribe_capture = &h.topic_subscribe_capture
 	h.intercept.children_pids = &h.children_pids
+	h.intercept.dead_pids = &h.dead_pids
 	ti.test_intercept = &h.intercept
 }
 
@@ -102,6 +105,10 @@ terminate :: proc(h: ^Test_Harness($T)) {
 
 register_pid :: proc(h: ^Test_Harness($T), name: string, pid: actod.PID) {
 	h.pid_registry[name] = u64(pid)
+}
+
+kill_pid :: proc(h: ^Test_Harness($T), pid: actod.PID) {
+	h.dead_pids[u64(pid)] = true
 }
 
 get_state :: proc(h: ^Test_Harness($T)) -> ^T {

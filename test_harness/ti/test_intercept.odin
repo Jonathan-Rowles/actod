@@ -43,6 +43,7 @@ Test_Intercept :: struct {
 	children_pids:           ^[dynamic]u64,
 	next_spawn_pid:          u64,
 	virtual_now:             time.Time,
+	dead_pids:               ^map[u64]bool,
 }
 
 Captured_Send :: struct {
@@ -94,6 +95,9 @@ Captured_Topic_Subscribe :: struct {
 
 intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
 	if test_intercept == nil do return {}, false
+	if test_intercept.dead_pids != nil && to in test_intercept.dead_pids^ {
+		return .ACTOR_NOT_FOUND, true
+	}
 	val := content
 	ptr, _ := mem.alloc(size_of(T))
 	clone := cast(^T)ptr

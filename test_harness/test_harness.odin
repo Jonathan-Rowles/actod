@@ -60,6 +60,10 @@ register_pid :: proc(h: ^Test_Harness($T), name: string, pid: actod.PID) {
 	unit.register_pid(h, name, pid)
 }
 
+kill_pid :: proc(h: ^Test_Harness($T), pid: actod.PID) {
+	unit.kill_pid(h, pid)
+}
+
 // Add a child PID for send_message_to_children.
 add_child :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 	unit.add_child(h, pid)

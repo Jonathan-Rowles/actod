@@ -134,9 +134,27 @@ Send_Error :: enum {
 
 ## Mailboxes
 
-Each actor has a single 512-slot mailbox plus a dedicated system mailbox. Messages
-from the same sender are delivered in send order. A mailbox that stays full returns
-`RECEIVER_BACKLOGGED` instead of reordering or dropping.
+Each actor has a single mailbox plus a dedicated system mailbox. Messages from the
+same sender are delivered in send order. A full mailbox blocks the sender (coroutine
+senders yield, dedicated threads sleep) for as long as the receiver keeps draining;
+`RECEIVER_BACKLOGGED` is returned only after the receiver has made no progress for
+`-define:ACTOD_SEND_STALL_TIMEOUT_MS` (default 100), never as a reorder or a silent
+drop.
+
+Mailbox capacity is a compile-time constant, fixed for the actor's lifetime: the
+mailbox never grows, shrinks, or reallocates.
+
+```odin
+// Global default: 512 slots, overridable at build time.
+// odin build . -define:ACTOD_MAILBOX_SIZE=1024
+
+// Per actor: pass a compile-time power of two to spawn_sized.
+pid, ok := act.spawn_sized("ingest", Ingest{}, ingest_behaviour, 4096)
+pid, ok = act.spawn_child_sized("burst-worker", Worker{}, worker_behaviour, 2048)
+```
+
+The per-actor message pool scales with the mailbox: an actor that can queue N
+messages can also hold N non-inline payloads in flight.
 
 System messages (terminate, supervision) use the dedicated system mailbox and are always processed first.
 

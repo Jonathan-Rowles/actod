@@ -5,40 +5,72 @@
 Wire protocol v3 to v4 (breaking): the priority flag bits are gone from the
 wire format.
 
+### Added
+- Per-actor compile-time mailbox capacity. `act.spawn_sized` and
+  `act.spawn_child_sized` take a `$MAILBOX_SIZE` power-of-two constant
+  (`act.spawn_sized("name", data, behaviour, 4096)`); the global default is
+  `-define:ACTOD_MAILBOX_SIZE=N` (512). Capacity is fixed at build time and
+  never grows, shrinks, or reallocates while the actor is alive. In
+  `hot_reload_dev` builds, actors spawned through the compose shim use the
+  default capacity.
+- The per-actor message pool page cap scales with the mailbox capacity
+  (mailbox + system mailbox + local buffer), so a large mailbox can hold a
+  full load of non-inline payloads in flight.
+
 ### Removed
 - Priority mailboxes. `Message_Priority` and the `priority` argument to
-  `send_message` are gone; each actor now has a single 512-slot mailbox plus
-  the system mailbox. Nothing ever sent at non-default priority, and the
-  system mailbox already covers urgent control traffic.
+  `send_message` are gone; each actor now has a single mailbox plus the
+  system mailbox. Nothing ever sent at non-default priority, and the system
+  mailbox already covers urgent control traffic.
 
 ### Fixed
 - Per-sender FIFO ordering. The overflow path could park a message in a
   different priority ring and the drain serviced rings in priority order, so
   one send during one full-ring burst was silently delivered early. With a
-  single mailbox the reorder is unrepresentable; a mailbox that stays full
-  returns `RECEIVER_BACKLOGGED` after the retry budget instead of succeeding
-  out of order.
+  single mailbox the reorder is unrepresentable.
 - A same-worker send that found the target's local buffer full could spill
   into the MPSC mailbox, letting later local sends overtake it. Overflowing
-  local sends now yield and retry the local buffer, then return
-  `RECEIVER_BACKLOGGED`; they never switch queues.
-- Coroutine senders no longer reset their retry budget on a full mailbox, so
-  a stuck receiver can no longer block its senders forever.
+  local sends now yield and retry the local buffer; they never switch queues.
+- A mailbox push that lost the claim race to another producer was treated as
+  "mailbox full": the sender took a scheduler round trip per lost race and,
+  after exhausting the retry budget, dropped the message with
+  `RECEIVER_BACKLOGGED` even though the mailbox had free slots. One benchmark
+  run dropped 25k messages this way. Pushes now spin through contention and
+  report full only when the ring is actually full.
+- `RECEIVER_BACKLOGGED` now means "the receiver is stuck", not "the receiver
+  is busy". Senders watch the receiver's read index and keep waiting
+  (coroutines yield, dedicated threads sleep) for as long as it advances; a
+  send fails only after the receiver has made no progress for a sustained
+  window (`-define:ACTOD_SEND_STALL_TIMEOUT_MS`, default 100). The window is
+  wall-clock, not an attempt count: a thousand yield-retries can complete in
+  under a millisecond, which dropped messages whenever the OS descheduled a
+  healthy receiver. The same backpressure now also covers pool-backed
+  messages (>32 B) whose page pool is at its cap, which previously failed
+  with no retry at all. Sustained overload blocks senders instead of
+  dropping messages; a deadlocked or dead receiver still fails in ~100 ms.
 
 ### Changed
 - Default mailbox capacity is 512 slots (was 3 rings of 128).
 - `Actor_Stats.mailbox_sizes: [3]int` is now `mailbox_size: int`.
+- Benchmark flood receivers spawn via `spawn_sized(4096)` (senders and
+  RPC-style actors keep the default); under fan-in overload the larger
+  mailbox keeps producers on the fast push path instead of parking, which
+  is worth +20-125% on the overload rows and shows the intended use of
+  per-actor capacity. The run header records both sizes.
 
 ### Performance
 - Single-producer paths are faster: 1:1 throughput +9%, same-worker +7-14%,
   16:8 mesh +54% (fewer rings to check per drain and resume).
-- Many-producers-to-one-consumer small-message throughput roughly halved
-  (4:1 32B 18.8M to 10.0M msgs/s, 32:1 and 64:1 to ~40% of old). The old
-  overflow hop striped flooding producers across three `write_index` cache
-  lines; a single ring serializes their CAS. If a workload ever needs hot
-  fan-in, the intended fix is sender-hash mailbox sharding, which preserves
-  per-sender FIFO because a sender always maps to the same shard. Priority
-  rings are not coming back.
+- The fan-in collapse and message drops from the initial single-mailbox
+  rework are fixed. A full single-process benchmark run went from 25,542
+  dropped sends to zero; 20:1 empty fan-in went from 4.2M msgs/s with 1,452
+  drops to 5.6M with none. Saturating tests previously overstated throughput
+  by dropping: the benchmark divides messages sent by a window in which
+  thousands were never delivered, so honest backpressure reads lower there
+  while delivering every message.
+- Dedicated-thread senders that hit a full mailbox spin-poll the index gap
+  for room before falling back to sleeping, keeping a flooded consumer fed
+  (saturation queue delay p50 833 ns, p99 2.8 us, all classified Light).
 
 ## [0.3.0] - 2026-07-23
 

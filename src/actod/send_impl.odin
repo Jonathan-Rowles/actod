@@ -1,10 +1,12 @@
 package actod
 
+import "../pkgs/coro"
 import "base:intrinsics"
 import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:sync"
+import "core:time"
 
 Msg_Class :: enum u8 {
 	User,
@@ -82,6 +84,146 @@ create_message_impl :: proc(
 }
 
 @(private)
+release_undelivered :: #force_inline proc(target: ^Actor(int), msg: ^Message, msg_ready: bool) {
+	if msg_ready && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+		free_message(&target.pool, msg.content)
+	}
+}
+
+@(private)
+send_user_backpressure :: #force_no_inline proc(
+	to: PID,
+	msg: ^Message,
+	msg_ready: bool,
+	data: rawptr,
+	size: int,
+	tid: typeid,
+	info: ^Message_Type_Info,
+	loc := #caller_location,
+) -> Send_Error {
+	entered_pinned := tls_reclaim_depth > 0
+	if entered_pinned do reclaim_unpin()
+
+	result := send_user_backpressure_loop(to, msg, msg_ready, data, size, tid, info, loc)
+
+	if entered_pinned do reclaim_pin()
+	return result
+}
+
+@(private)
+send_user_backpressure_loop :: proc(
+	to: PID,
+	msg: ^Message,
+	initial_msg_ready: bool,
+	data: rawptr,
+	size: int,
+	tid: typeid,
+	info: ^Message_Type_Info,
+	loc := #caller_location,
+) -> Send_Error {
+	co := coro.running()
+	msg_ready := initial_msg_ready
+	observed_read: u64
+	observed_frees: u64
+	have_observation := false
+	stall_start := time.tick_now()
+
+	for {
+		if co != nil {
+			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
+			handle.wants_reschedule = true
+			coro.yield(co)
+		} else {
+			time.sleep(SEND_RETRY_DELAY)
+		}
+
+		reclaim_pin()
+		fresh, ok := get_relaxed(&global_registry, to)
+		if !ok || fresh == nil {
+			reclaim_unpin()
+			return .ACTOR_NOT_FOUND
+		}
+		target := cast(^Actor(int))fresh
+		state := sync.atomic_load(&target.state)
+		if state != .RUNNING && state != .IDLE && state != .INIT {
+			release_undelivered(target, msg, msg_ready)
+			reclaim_unpin()
+			return .ACTOR_NOT_FOUND
+		}
+
+		current_read := sync.atomic_load_explicit(&target.mailbox.read_index, .Relaxed)
+		current_frees := sync.atomic_load_explicit(&target.pool.write_index, .Relaxed)
+
+		if !msg_ready {
+			pool_allocs := sync.atomic_load_explicit(&target.pool.read_index, .Relaxed)
+			pool_has_room :=
+				current_frees != pool_allocs ||
+				sync.atomic_load_explicit(&target.pool.allocated_count, .Relaxed) <
+					target.pool.max_pages
+			if pool_has_room {
+				alloc_err, attempted_size := create_message_impl(
+					msg,
+					&target.pool,
+					data,
+					size,
+					tid,
+					info,
+				)
+				if alloc_err == .OK {
+					msg_ready = true
+				} else if alloc_err != .POOL_EXHAUSTED && alloc_err != .ALLOC_CONTENDED {
+					err := report_alloc_error(alloc_err, attempted_size, &target.pool, to, loc)
+					reclaim_unpin()
+					return err
+				}
+			}
+		}
+
+		if msg_ready {
+			write_idx := sync.atomic_load_explicit(&target.mailbox.write_index, .Relaxed)
+			spin_budget := THREAD_SEND_SPIN_TRIES if co == nil else 1
+			for spin := 0; spin < spin_budget; spin += 1 {
+				if write_idx - current_read <= target.mailbox.mask &&
+				   mpsc_push(&target.mailbox, msg^) {
+					wake_actor(target)
+					handle_set_message_stats(msg.from, to)
+					reclaim_unpin()
+					return .OK
+				}
+				intrinsics.cpu_relax()
+				write_idx = sync.atomic_load_explicit(&target.mailbox.write_index, .Relaxed)
+				current_read = sync.atomic_load_explicit(&target.mailbox.read_index, .Relaxed)
+			}
+		}
+
+		if sync.atomic_load(&NODE.shutting_down) {
+			release_undelivered(target, msg, msg_ready)
+			reclaim_unpin()
+			return .SYSTEM_SHUTTING_DOWN
+		}
+
+		if !have_observation || current_read != observed_read || current_frees != observed_frees {
+			observed_read = current_read
+			observed_frees = current_frees
+			have_observation = true
+			stall_start = time.tick_now()
+		} else if time.tick_since(stall_start) > SEND_STALL_TIMEOUT {
+			release_undelivered(target, msg, msg_ready)
+			reclaim_unpin()
+			log.errorf(
+				"send to %s failed: receiver made no progress for %v, its mailbox or message pool is still full",
+				actor_origin(to),
+				SEND_STALL_TIMEOUT,
+				location = loc,
+			)
+			return .RECEIVER_BACKLOGGED
+		}
+
+		reclaim_unpin()
+	}
+}
+
+@(private)
 send_to_actor_impl :: proc(
 	to: PID,
 	actor: ^Actor(int),
@@ -121,6 +263,11 @@ send_to_actor_impl :: proc(
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
 	} else {
 		alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info)
+		when class == .User {
+			if alloc_err == .POOL_EXHAUSTED || alloc_err == .ALLOC_CONTENDED {
+				return send_user_backpressure(to, &msg, false, data, size, tid, info, loc)
+			}
+		}
 		if alloc_err != .OK {
 			return report_alloc_error(alloc_err, attempted_size, &actor.pool, to, loc)
 		}
@@ -144,11 +291,7 @@ send_to_actor_impl :: proc(
 		handle_set_message_stats(msg.from, to)
 		return .OK
 	} else {
-		result := push_to_mailbox(actor, msg, to, loc)
-		if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
-			free_message(&actor.pool, msg.content)
-		}
-		return result
+		return push_to_mailbox(actor, msg, to, loc)
 	}
 }
 

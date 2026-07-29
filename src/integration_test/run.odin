@@ -66,6 +66,11 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_spawn_sized_mailbox",
+		test_proc = test_spawn_sized_mailbox,
+		worker_count = 2,
+	},
+	{
 		name = "test_supervisor_survives_many_child_terminations",
 		test_proc = test_supervisor_survives_many_child_terminations,
 		worker_count = 2,

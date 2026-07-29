@@ -197,8 +197,26 @@ spawn_from_raw :: proc(
 		actor.parent = parent_pid
 	}
 
+	mailbox_entries, mailbox_alloc_err := make(
+		[]Entry(Message),
+		DEFAULT_MAIL_BOX_SIZE,
+		actor.allocator,
+	)
+	if mailbox_alloc_err != nil {
+		log.errorf(
+			"spawn('%s') failed: could not allocate a %d-slot mailbox from the actor arena: %v",
+			name,
+			DEFAULT_MAIL_BOX_SIZE,
+			mailbox_alloc_err,
+			location = loc,
+		)
+		vmem.arena_destroy(&actor.arena)
+		free(actor, actor_system_allocator)
+		return 0, false
+	}
 	init_mpsc(&actor.system_mailbox)
-	init_mpsc(&actor.mailbox)
+	init_mpsc_external(&actor.mailbox, mailbox_entries)
+	init_pool(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(DEFAULT_MAIL_BOX_SIZE))
 
 	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {

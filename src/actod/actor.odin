@@ -15,9 +15,14 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-DEFAULT_MAIL_BOX_SIZE :: 512
-MAX_SEND_RETRIES :: 1000
+DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 512)
+#assert(
+	DEFAULT_MAIL_BOX_SIZE > 0 && (DEFAULT_MAIL_BOX_SIZE & (DEFAULT_MAIL_BOX_SIZE - 1)) == 0,
+	"-define:ACTOD_MAILBOX_SIZE must be a power of two",
+)
 SEND_RETRY_DELAY :: 1 * time.Microsecond
+SEND_STALL_TIMEOUT :: #config(ACTOD_SEND_STALL_TIMEOUT_MS, 100) * time.Millisecond
+THREAD_SEND_SPIN_TRIES :: 4096
 BATCH_SIZE :: 64
 FREE_BATCH_SIZE :: BATCH_SIZE
 SPAWN :: proc(name: string, parent_pid: PID) -> (PID, bool)
@@ -86,7 +91,7 @@ Actor_Behaviour :: struct($T: typeid) {
 	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID),
 }
 
-ACTOR_MAILBOX :: MPSC_Queue(Message, DEFAULT_MAIL_BOX_SIZE)
+ACTOR_MAILBOX :: MPSC_Queue(Message, 0)
 
 Restart_Info :: struct {
 	count:                int,
@@ -153,10 +158,46 @@ Actor_Context :: struct {
 	},
 }
 
-spawn :: proc(
+spawn :: proc {
+	spawn_default,
+	spawn_sized,
+}
+
+spawn_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
+	opts := SYSTEM_CONFIG.actor_config,
+	parent_pid: PID = 0,
+	loc := #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return spawn_impl(name, data, behaviour, DEFAULT_MAIL_BOX_SIZE, opts, parent_pid, loc)
+}
+
+spawn_sized :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	$MAILBOX_SIZE: int,
+	opts := SYSTEM_CONFIG.actor_config,
+	parent_pid: PID = 0,
+	loc := #caller_location,
+) -> (
+	PID,
+	bool,
+) where MAILBOX_SIZE > 0, (MAILBOX_SIZE & (MAILBOX_SIZE - 1)) == 0 {
+	return spawn_impl(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
+}
+
+@(private)
+spawn_impl :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	mailbox_size: int,
 	opts := SYSTEM_CONFIG.actor_config,
 	parent_pid: PID = 0,
 	loc := #caller_location,
@@ -269,8 +310,28 @@ spawn :: proc(
 		actor.parent = parent_pid
 	}
 
+	assert(
+		mailbox_size > 0 && (mailbox_size & (mailbox_size - 1)) == 0,
+		"mailbox size must be a power of two",
+		loc,
+	)
+	mailbox_entries, mailbox_alloc_err := make([]Entry(Message), mailbox_size, actor.allocator)
+	if mailbox_alloc_err != nil {
+		log.errorf(
+			"spawn('%s') failed: could not allocate a %d-slot mailbox (%d B) from the actor arena: %v",
+			name,
+			mailbox_size,
+			mailbox_size * size_of(Entry(Message)),
+			mailbox_alloc_err,
+			location = loc,
+		)
+		vmem.arena_destroy(&actor.arena)
+		free(actor, actor_system_allocator)
+		return 0, false
+	}
 	init_mpsc(&actor.system_mailbox)
-	init_mpsc(&actor.mailbox)
+	init_mpsc_external(&actor.mailbox, mailbox_entries)
+	init_pool(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(mailbox_size))
 
 	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
@@ -441,7 +502,12 @@ spawn :: proc(
 	return actor.pid, true
 }
 
-spawn_child :: proc(
+spawn_child :: proc {
+	spawn_child_default,
+	spawn_child_sized,
+}
+
+spawn_child_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
@@ -465,7 +531,35 @@ spawn_child :: proc(
 		)
 	}
 	self_pid := get_self_pid()
-	return spawn(name, data, behaviour, opts, self_pid, loc)
+	return spawn_impl(name, data, behaviour, DEFAULT_MAIL_BOX_SIZE, opts, self_pid, loc)
+}
+
+spawn_child_sized :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	$MAILBOX_SIZE: int,
+	opts := SYSTEM_CONFIG.actor_config,
+	loc := #caller_location,
+) -> (
+	PID,
+	bool,
+) where MAILBOX_SIZE > 0, (MAILBOX_SIZE & (MAILBOX_SIZE - 1)) == 0 {
+	when ODIN_TEST {
+		if pid, ok := ti.intercept_spawn_child(name, T); ok {
+			return PID(pid), true
+		}
+	}
+
+	if current_actor_context == nil {
+		panic_at(
+			loc,
+			"spawn_child('%s'): must be called from inside an actor. Use spawn() with an explicit parent_pid outside one",
+			name,
+		)
+	}
+	self_pid := get_self_pid()
+	return spawn_impl(name, data, behaviour, MAILBOX_SIZE, opts, self_pid, loc)
 }
 
 @(private)
@@ -591,7 +685,6 @@ setup_actor_runtime :: proc(actor: ^Actor($T)) -> (log.Logger, ^Actor_Context) {
 	if actor.pid == 0 do log.panic("Actor started with PID 0!")
 
 	context.allocator = actor.allocator
-	init_pool(&actor.pool, actor.allocator, actor.opts.page_size)
 
 	return setup_actor_context(actor.pid, actor.name, actor.opts.logging, actor.allocator)
 }
@@ -1332,6 +1425,8 @@ retry_local_send :: #force_no_inline proc(
 ) -> Send_Error {
 	co := coro.running()
 	if co == nil {
+		msg := msg
+		release_undelivered(actor, &msg, true)
 		log.errorf(
 			"send to %s failed: local mailbox is full and the sender cannot yield, receiver is not draining",
 			actor_origin(to),
@@ -1339,15 +1434,44 @@ retry_local_send :: #force_no_inline proc(
 		)
 		return .RECEIVER_BACKLOGGED
 	}
+
+	entered_pinned := tls_reclaim_depth > 0
+	if entered_pinned do reclaim_unpin()
+
+	result := retry_local_send_loop(co, msg, to, actor.local_read, loc)
+
+	if entered_pinned do reclaim_pin()
+	return result
+}
+
+@(private)
+retry_local_send_loop :: proc(
+	co: ^coro.Coro,
+	msg: Message,
+	to: PID,
+	initial_read: u64,
+	loc := #caller_location,
+) -> Send_Error {
+	msg := msg
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-	for attempt := 0; attempt < MAX_SEND_RETRIES; attempt += 1 {
+	observed_read := initial_read
+	stall_start := time.tick_now()
+	for {
 		handle.wants_reschedule = true
 		coro.yield(co)
+		reclaim_pin()
 		fresh, ok := get_relaxed(&global_registry, to)
 		if !ok || fresh == nil {
+			reclaim_unpin()
 			return .ACTOR_NOT_FOUND
 		}
 		target := cast(^Actor(int))fresh
+		state := sync.atomic_load(&target.state)
+		if state != .RUNNING && state != .IDLE && state != .INIT {
+			release_undelivered(target, &msg, true)
+			reclaim_unpin()
+			return .ACTOR_NOT_FOUND
+		}
 		if target.local_write - target.local_read < LOCAL_MAILBOX_SIZE {
 			target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
 			target.local_write += 1
@@ -1355,19 +1479,30 @@ retry_local_send :: #force_no_inline proc(
 				wake_actor(target)
 			}
 			handle_set_message_stats(msg.from, to)
+			reclaim_unpin()
 			return .OK
 		}
 		if sync.atomic_load(&NODE.shutting_down) {
+			release_undelivered(target, &msg, true)
+			reclaim_unpin()
 			return .SYSTEM_SHUTTING_DOWN
 		}
+		if target.local_read != observed_read {
+			observed_read = target.local_read
+			stall_start = time.tick_now()
+		} else if time.tick_since(stall_start) > SEND_STALL_TIMEOUT {
+			release_undelivered(target, &msg, true)
+			reclaim_unpin()
+			log.errorf(
+				"send to %s failed: local mailbox still full after %v with the receiver making no progress",
+				actor_origin(to),
+				SEND_STALL_TIMEOUT,
+				location = loc,
+			)
+			return .RECEIVER_BACKLOGGED
+		}
+		reclaim_unpin()
 	}
-	log.errorf(
-		"send to %s failed: local mailbox still full after %d retries, receiver is not draining",
-		actor_origin(to),
-		MAX_SEND_RETRIES,
-		location = loc,
-	)
-	return .RECEIVER_BACKLOGGED
 }
 
 @(private)
@@ -1394,38 +1529,14 @@ push_to_mailbox :: #force_inline proc(
 		return retry_local_send(actor, msg, to, loc)
 	}
 
-	if mpsc_try_push(&actor.mailbox, msg) {
+	if mpsc_push(&actor.mailbox, msg) {
 		wake_actor(actor)
 		handle_set_message_stats(msg.from, to)
 		return .OK
 	}
 
-	co := coro.running()
-	for attempt := 0; attempt < MAX_SEND_RETRIES; attempt += 1 {
-		if mpsc_try_push(&actor.mailbox, msg) {
-			wake_actor(actor)
-			handle_set_message_stats(msg.from, to)
-			return .OK
-		}
-		if sync.atomic_load(&NODE.shutting_down) {
-			return .SYSTEM_SHUTTING_DOWN
-		}
-		if co != nil {
-			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-			handle.wants_reschedule = true
-			coro.yield(co)
-		} else {
-			time.sleep(SEND_RETRY_DELAY)
-		}
-	}
-
-	log.errorf(
-		"send to %s failed: mailbox still full after %d retries, receiver is not draining",
-		actor_origin(to),
-		MAX_SEND_RETRIES,
-		location = loc,
-	)
-	return .RECEIVER_BACKLOGGED
+	blocked_msg := msg
+	return send_user_backpressure(to, &blocked_msg, true, nil, 0, nil, nil, loc)
 }
 
 @(private)
@@ -2093,12 +2204,7 @@ send_from_payload :: #force_inline proc(
 		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
 	}
 
-	result := push_to_mailbox(actor, msg, to_pid)
-	if result != .OK && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
-		free_message(&actor.pool, msg.content)
-	}
-
-	return result
+	return push_to_mailbox(actor, msg, to_pid)
 }
 
 send_system_from_payload :: #force_inline proc(

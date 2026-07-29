@@ -127,7 +127,7 @@ act.send_message(remote_pid, Work_Item{})
 
 `send_message` returns `.OK` once the message is accepted into the target node's send buffer, which can happen even while that node is disconnected (it buffers and delivers on reconnect). `.OK` does not mean "delivered" or "peer reachable." See [Networking](docs/10_network.md).
 
-**Mailboxes.** One 512-slot mailbox per actor plus a dedicated system mailbox processed first. Messages from the same sender arrive in send order; a mailbox that stays full returns `RECEIVER_BACKLOGGED` instead of reordering or dropping.
+**Mailboxes.** One mailbox per actor plus a dedicated system mailbox processed first. Capacity is a compile-time constant (512 by default, `-define:ACTOD_MAILBOX_SIZE=N` globally or `act.spawn_sized("name", data, behaviour, N)` per actor) and never changes at runtime. Messages from the same sender arrive in send order; a full mailbox blocks the sender while the receiver drains and returns `RECEIVER_BACKLOGGED` only when the receiver makes no progress. Never reorders, never silently drops.
 
 **Pub/sub.** Type-based (global, up to 16384 subscribers) and topic-based (scoped to a struct field, up to 64 subscribers). Cross-node for type-based.
 

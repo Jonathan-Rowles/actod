@@ -10,6 +10,8 @@ import "core:time"
 
 Start_Benchmark_Send :: struct {}
 
+RECEIVER_MAILBOX_SIZE :: 4096
+
 @(init)
 register_benchmark_messages :: proc "contextless" () {
 	actod.register_message_type(Start_Benchmark_Send)
@@ -142,7 +144,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 		data := shared.Benchmark_Actor_Data {
 			id = i,
 		}
-		pid, ok := actod.spawn(name, data, receiver_behaviour, actor_config)
+		pid, ok := actod.spawn_sized(name, data, receiver_behaviour, RECEIVER_MAILBOX_SIZE, actor_config)
 		if !ok do panic("Failed to spawn receiver")
 		actors[i] = pid
 	}

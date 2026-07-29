@@ -68,10 +68,11 @@ run_local_throughput :: proc(
 	receiver_config := actod.make_actor_config(
 		logging = actod.make_log_config(enable_file = false, level = .Warning),
 	)
-	receiver, ok_r := actod.spawn(
+	receiver, ok_r := actod.spawn_sized(
 		"flood_receiver",
 		Flood_Receiver_Data{},
 		receiver_behaviour,
+		RECEIVER_MAILBOX_SIZE,
 		receiver_config,
 	)
 	if !ok_r do panic("Failed to spawn receiver")

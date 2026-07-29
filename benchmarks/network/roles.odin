@@ -172,10 +172,11 @@ spawn_benchmark_actor :: proc($T: typeid, id: int) -> actod.PID {
 
 	behaviour := create_network_benchmark_behaviour(T)
 
-	pid, ok := actod.spawn(
+	pid, ok := actod.spawn_sized(
 		name,
 		data,
 		behaviour,
+		4096,
 		actod.make_actor_config(
 			spin_strategy = .CPU_RELAX,
 			logging = actod.make_log_config(level = .Error),

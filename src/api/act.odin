@@ -58,6 +58,27 @@ spawn :: proc(
 	return actod.spawn(name, data, behaviour, opts, parent_pid, loc)
 }
 
+// Like spawn, but with a compile-time mailbox capacity for this actor.
+// MAILBOX_SIZE must be a power of two. The capacity is fixed at build time and
+// never grows or shrinks while the actor is alive. In hot_reload_dev builds
+// these actors are spawned directly (no compose shim).
+@(hot = "skip")
+@(require_results)
+spawn_sized :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	$MAILBOX_SIZE: int,
+	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	parent_pid: PID = 0,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_sized(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
+}
+
 // Spawn a child actor with the current actor as parent. Must be called from within an actor.
 @(hot = `compose
 default opts = {}
@@ -86,6 +107,25 @@ spawn_child :: proc(
 	bool,
 ) {
 	return actod.spawn_child(name, data, behaviour, opts, loc)
+}
+
+// Like spawn_child, but with a compile-time mailbox capacity for this actor.
+// MAILBOX_SIZE must be a power of two. The capacity is fixed at build time and
+// never grows or shrinks while the actor is alive.
+@(hot = "skip")
+@(require_results)
+spawn_child_sized :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	$MAILBOX_SIZE: int,
+	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_child_sized(name, data, behaviour, MAILBOX_SIZE, opts, loc)
 }
 
 // Spawn an actor using a name registered via register_spawn_func.

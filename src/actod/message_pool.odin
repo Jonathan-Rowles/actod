@@ -10,26 +10,10 @@ MAX_ALLOC_RETRIES :: 1000
 DEFAULT_PAGE_SIZE :: mem.Kilobyte * 64
 PAGE_METADATA_SIZE :: size_of([2]int)
 MAX_STATIC_MESSAGE_SIZE :: #config(ACTOD_MAX_MESSAGE_SIZE, DEFAULT_PAGE_SIZE - PAGE_METADATA_SIZE)
-MAX_POOL_PAGES :: DEFAULT_MAIL_BOX_SIZE + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE
-
 @(private)
-_PRV0 :: MAX_POOL_PAGES - 1
-@(private)
-_PRV1 :: _PRV0 | (_PRV0 >> 1)
-@(private)
-_PRV2 :: _PRV1 | (_PRV1 >> 2)
-@(private)
-_PRV3 :: _PRV2 | (_PRV2 >> 4)
-@(private)
-_PRV4 :: _PRV3 | (_PRV3 >> 8)
-@(private)
-_PRV5 :: _PRV4 | (_PRV4 >> 16)
-@(private)
-_PRV6 :: _PRV5 | (_PRV5 >> 32)
-POOL_RING_SIZE :: _PRV6 + 1
-POOL_RING_MASK :: u64(POOL_RING_SIZE - 1)
-#assert(POOL_RING_SIZE >= MAX_POOL_PAGES)
-#assert((POOL_RING_SIZE & (POOL_RING_SIZE - 1)) == 0)
+pool_max_pages :: proc(mailbox_capacity: int) -> int {
+	return mailbox_capacity + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE
+}
 
 @(private)
 Message :: struct {
@@ -70,7 +54,8 @@ Pool :: struct {
 	_pad2:           [CACHE_LINE_SIZE - size_of(u64)]byte,
 	allocated_count: int,
 	_pad3:           [CACHE_LINE_SIZE - size_of(int)]byte,
-	ring:            ^[POOL_RING_SIZE]Pool_Entry,
+	ring:            [^]Pool_Entry,
+	ring_mask:       u64,
 	pages:           []rawptr,
 	page_size:       int,
 	max_pages:       int,
@@ -82,14 +67,18 @@ init_pool :: proc(
 	pool: ^Pool,
 	allocator: mem.Allocator,
 	page_size: int = SYSTEM_CONFIG.actor_config.page_size,
+	max_pages: int = DEFAULT_MAIL_BOX_SIZE + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE,
 ) {
-	pool.page_size = page_size
-	pool.max_pages = MAX_POOL_PAGES
-	pool.allocator = allocator
-	pool.pages = make([]rawptr, MAX_POOL_PAGES, allocator)
-	pool.ring = new([POOL_RING_SIZE]Pool_Entry, allocator)
+	ring_size := next_power_of_two(max_pages)
 
-	for i in 0 ..< POOL_RING_SIZE {
+	pool.page_size = page_size
+	pool.max_pages = max_pages
+	pool.allocator = allocator
+	pool.pages = make([]rawptr, max_pages, allocator)
+	pool.ring = raw_data(make([]Pool_Entry, ring_size, allocator))
+	pool.ring_mask = u64(ring_size - 1)
+
+	for i in 0 ..< ring_size {
 		pool.ring[i].sequence = u64(i)
 		pool.ring[i].page_index = -1
 	}
@@ -117,7 +106,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 
 	for attempt := 0; attempt < MAX_ALLOC_RETRIES; attempt += 1 {
 		pos := sync.atomic_load_explicit(&page_pool.read_index, .Relaxed)
-		entry := &page_pool.ring[pos & POOL_RING_MASK]
+		entry := &page_pool.ring[pos & page_pool.ring_mask]
 		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
 		diff := i64(seq) - i64(pos + 1)
 
@@ -130,7 +119,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 				.Relaxed,
 			); ok {
 				page_index := entry.page_index
-				sync.atomic_store_explicit(&entry.sequence, pos + POOL_RING_SIZE, .Release)
+				sync.atomic_store_explicit(&entry.sequence, pos + page_pool.ring_mask + 1, .Release)
 
 				ptr := page_pool.pages[page_index]
 				metadata_ptr := cast(^[2]int)(uintptr(ptr) +
@@ -200,7 +189,7 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
 
 	for {
 		pos := sync.atomic_load_explicit(&page_pool.write_index, .Relaxed)
-		entry := &page_pool.ring[pos & POOL_RING_MASK]
+		entry := &page_pool.ring[pos & page_pool.ring_mask]
 		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
 		diff := i64(seq) - i64(pos)
 
@@ -260,7 +249,7 @@ flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer, loc := #calle
 
 		for {
 			pos := sync.atomic_load_explicit(&pool.write_index, .Relaxed)
-			entry := &pool.ring[pos & POOL_RING_MASK]
+			entry := &pool.ring[pos & pool.ring_mask]
 			seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
 			diff := i64(seq) - i64(pos)
 

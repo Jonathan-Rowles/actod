@@ -219,7 +219,7 @@ spawn_latency_actor :: proc() -> actod.PID {
 		logging = actod.make_log_config(enable_file = false, level = .Warning),
 	)
 
-	pid, ok := actod.spawn("latency_actor", data, behaviour, actor_config)
+	pid, ok := actod.spawn_sized("latency_actor", data, behaviour, RECEIVER_MAILBOX_SIZE, actor_config)
 	if !ok {
 		panic("Failed to spawn latency actor")
 	}

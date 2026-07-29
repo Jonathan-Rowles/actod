@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:c"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 
 foreign import core_services "system:CoreServices.framework"
 
@@ -110,13 +111,23 @@ create_watcher :: proc(
 	return w, true
 }
 
+DARWIN_PATH_MAX :: 1024
+
+resolve_symlinks :: proc(path: string) -> string {
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	buf: [DARWIN_PATH_MAX]c.char
+	resolved := posix.realpath(cpath, raw_data(buf[:]))
+	if resolved == nil do return path
+	return strings.clone(string(resolved))
+}
+
 add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> bool {
 	if watcher.watch_count >= MAX_WATCHES do return false
 
 	if is_tmp_watch_path(path) do return true
 
 	watcher.watches[watcher.watch_count] = Watch_Entry {
-		path       = path,
+		path       = resolve_symlinks(path),
 		actor_name = actor_name,
 	}
 	watcher.watch_count += 1

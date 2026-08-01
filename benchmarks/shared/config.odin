@@ -40,12 +40,6 @@ Benchmark_Result :: struct {
 	err_other:                u64,
 	throughput:               f64,
 	bandwidth:                f64,
-	latency_ns:               f64,
-}
-
-Size_Baseline :: struct {
-	throughput: f64,
-	latency_ns: f64,
 }
 
 Network_Config :: struct {

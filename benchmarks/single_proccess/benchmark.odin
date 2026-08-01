@@ -9,12 +9,14 @@ import "core:sync"
 import "core:time"
 
 Start_Benchmark_Send :: struct {}
+Go_Benchmark_Send :: struct {}
 
 RECEIVER_MAILBOX_SIZE :: 4096
 
 @(init)
 register_benchmark_messages :: proc "contextless" () {
 	actod.register_message_type(Start_Benchmark_Send)
+	actod.register_message_type(Go_Benchmark_Send)
 }
 
 global_benchmark_state: shared.Benchmark_State
@@ -71,6 +73,7 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 
 				sync.sema_post(data.warmup_sema)
 
+			case Go_Benchmark_Send:
 				local_count: u64 = 0
 				for i in 0 ..< data.messages_to_send {
 					v: T
@@ -192,7 +195,20 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 		sync.sema_wait(&warmup_sema)
 	}
 
+	drained := sync.atomic_load(&global_benchmark_state.receive_count)
+	for {
+		time.sleep(1 * time.Millisecond)
+		now_drained := sync.atomic_load(&global_benchmark_state.receive_count)
+		if now_drained == drained do break
+		drained = now_drained
+	}
+	sync.atomic_store(&global_benchmark_state.receive_count, 0)
+
 	start_ns := time.tick_now()._nsec
+
+	for i in 0 ..< config.sender_count {
+		actod.send_message(senders[i], Go_Benchmark_Send{})
+	}
 
 	for _ in 0 ..< config.sender_count {
 		sync.sema_wait(&done_sema)
@@ -230,7 +246,6 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	duration_sec := f64(elapsed_ns) / 1e9
 	throughput := f64(final_received) / duration_sec
 	bandwidth := (f64(final_received) * f64(size_of(T))) / (1024 * 1024) / duration_sec
-	latency_ns := (duration_sec * 1e9) / f64(final_received)
 
 	return shared.Benchmark_Result {
 		config = config,
@@ -239,7 +254,6 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 		messages_received = final_received,
 		throughput = throughput,
 		bandwidth = bandwidth,
-		latency_ns = latency_ns,
 		err_actor_not_found = sync.atomic_load(&global_benchmark_state.err_actor_not_found),
 		err_receiver_backlogged = sync.atomic_load(
 			&global_benchmark_state.err_receiver_backlogged,

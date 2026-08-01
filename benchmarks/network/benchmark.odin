@@ -307,8 +307,6 @@ run_network_benchmark :: proc(
 		(f64(stats.messages_received) * f64(shared.size_bytes(config.message_size))) /
 		(1024 * 1024) /
 		duration_sec
-	latency_ns := (duration_sec * 1e9) / f64(stats.messages_received)
-
 	return shared.Benchmark_Result {
 		config = shared.Benchmark_Config {
 			message_size = config.message_size,
@@ -331,7 +329,6 @@ run_network_benchmark :: proc(
 		err_other = stats.err_other,
 		throughput = throughput,
 		bandwidth = bandwidth,
-		latency_ns = latency_ns,
 	}
 }
 

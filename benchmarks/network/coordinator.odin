@@ -127,10 +127,10 @@ run_benchmark_tests :: proc() {
 
 	fmt.printf("\n=== ACTOD Network Benchmark (%d cores) ===\n\n", cpu_count)
 	fmt.println(
-		"Test                 │ Category │  Msgs/sec │    MB/s │ Latency │ Errors",
+		"Test                 │ Category │  Msgs/sec │    MB/s │ Errors",
 	)
 	fmt.println(
-		"─────────────────────┼──────────┼───────────┼─────────┼─────────┼────────",
+		"─────────────────────┼──────────┼───────────┼─────────┼────────",
 	)
 
 	configs := generate_network_scaling_configs(cpu_count)
@@ -184,12 +184,11 @@ run_benchmark_tests :: proc() {
 		}
 
 		fmt.printf(
-			"  %-18s │ %-8s │ %7sM  │ %7s │ %5sns │ %s\n",
+			"  %-18s │ %-8s │ %7sM  │ %7s │ %s\n",
 			config.description,
 			cat_name,
 			fmt.tprintf("%.2f", result.throughput / 1_000_000),
 			fmt.tprintf("%.1f", bandwidth),
-			fmt.tprintf("%.0f", result.latency_ns),
 			error_str,
 		)
 

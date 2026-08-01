@@ -166,7 +166,7 @@ generate_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Config {
 		shared.Scaling_Config {
 			actor_count = 2,
 			sender_count = 2,
-			message_count = base_messages / 2,
+			message_count = base_messages * 2,
 			message_size = .Empty,
 			description = "2:2 Ping-Pong",
 			category = .CONTENTION,

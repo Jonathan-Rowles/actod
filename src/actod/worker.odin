@@ -130,6 +130,8 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 	current_actor_context = handle.actor_ctx
 	current_actor_file_logger = handle.file_logger
 
+	reclaim_pin()
+
 	coro.resume_top_level(handle.co)
 
 	if coro.status(handle.co) == .Dead {
@@ -154,6 +156,10 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 				mpsc_push(&worker.ready_queue, rawptr(handle))
 			}
 		}
+	}
+
+	if tls_reclaim_depth > 0 {
+		reclaim_unpin()
 	}
 }
 
@@ -201,6 +207,6 @@ worker_loop :: proc(worker: ^Worker) {
 has_pending_messages :: #force_inline proc(handle: ^Pooled_Actor_Handle) -> bool {
 	actor := cast(^Actor(int))handle.actor_ptr
 	if actor.local_read != actor.local_write do return true
-	if mpsc_size(handle.mailbox) > 0 do return true
-	return mpsc_size(handle.system_mailbox) > 0
+	if !mpsc_is_empty(handle.mailbox) do return true
+	return !mpsc_is_empty(handle.system_mailbox)
 }

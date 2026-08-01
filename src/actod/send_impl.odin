@@ -189,7 +189,7 @@ send_user_backpressure_loop :: proc(
 			write_idx := sync.atomic_load_explicit(&target.mailbox.write_index, .Relaxed)
 			spin_budget := THREAD_SEND_SPIN_TRIES if co == nil else 1
 			for spin := 0; spin < spin_budget; spin += 1 {
-				if write_idx - current_read <= target.mailbox.mask &&
+				if write_idx - current_read <= target.mailbox.w_mask &&
 				   mpsc_push(&target.mailbox, msg^) {
 					wake_actor(target)
 					handle_set_message_stats(msg.from, to)

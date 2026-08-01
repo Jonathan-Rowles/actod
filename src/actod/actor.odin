@@ -810,7 +810,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 @(private)
 mailbox_has_messages :: #force_inline proc(actor: ^Actor($T)) -> bool {
 	if actor.local_read != actor.local_write do return true
-	return mpsc_size(&actor.mailbox) > 0
+	return !mpsc_is_empty(&actor.mailbox)
 }
 
 @(private)
@@ -818,7 +818,7 @@ process_system_mailbox :: #force_no_inline proc(
 	actor: ^Actor($T),
 	ctx: ^Message_Processing_Context,
 ) -> bool {
-	if mpsc_size(&actor.system_mailbox) == 0 do return true
+	if mpsc_is_empty(&actor.system_mailbox) do return true
 	batch_count := mpsc_pop_batch(&actor.system_mailbox, ctx.message_batch[0:ctx.batch_size])
 
 	for i in 0 ..< batch_count {
@@ -1548,7 +1548,7 @@ push_to_mailbox :: #force_inline proc(
 }
 
 @(private)
-report_alloc_error :: #force_inline proc(
+report_alloc_error :: #force_no_inline proc(
 	err: Alloc_Error,
 	attempted_size: int,
 	pool: ^Pool,

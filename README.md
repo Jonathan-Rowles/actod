@@ -14,26 +14,29 @@ See [docs](docs/00_getting-started.md) for the full reference.
 
 | Test | Category | Apple M4 Air (10c) | Linux x86 (16c) |
 |------|----------|---------------|-----------------|
-| 1:1 32B | Base | 84M msgs/sec | 61M msgs/sec |
-| 1:1 1KB | Base | 20M msgs/sec | 20M msgs/sec |
-| 4x 32B parallel | Parallel | 236M msgs/sec | 234M msgs/sec |
-| 4:1 32KB fan-in | Fan-in | 2.3M msgs/sec (70 GB/s) | 2.9M msgs/sec (89 GB/s) |
-| 2:2 Ping-Pong | Contention | 42M msgs/sec | 46M msgs/sec |
+| 1:1 32B | Base | 84M msgs/sec | 63M msgs/sec |
+| 1:1 1KB | Base | 20M msgs/sec | 18M msgs/sec |
+| 1:1 32B cross-worker | Base | - | 38M msgs/sec |
+| 4x 32B parallel | Parallel | 236M msgs/sec | 249M msgs/sec |
+| 4:1 32KB fan-in | Fan-in | 2.3M msgs/sec (70 GB/s) | 2.6M msgs/sec (79 GB/s) |
+| 2:2 Ping-Pong | Contention | 42M msgs/sec | 72M msgs/sec |
 
 ### Round-Trip Latency (Ping-Pong)
 
 | Size | p50 (M4 / x86) | p99 (M4 / x86) |
 |------|-----------------|-----------------|
-| 32B | 167ns / 300ns | 292ns / 464ns |
-| 4KB | 542ns / 420ns | 917ns / 560ns |
+| 32B | 167ns / 238ns | 292ns / 598ns |
+| 4KB | 542ns / 356ns | 917ns / 1.2µs |
+
+x86 p99 varies 0.5-2µs between runs; p50 is stable within ±1%.
 
 ### Network (TCP loopback)
 
 | Test | Apple M4 Air (10c) | Linux x86 (16c) |
 |------|---------------|-----------------|
-| 1:1 32B | 18.87M msgs/sec | 5.16M msgs/sec |
-| 1:1 256B | 12.35M msgs/sec | 4.83M msgs/sec |
-| 1:1 1KB | 4.81M msgs/sec | 2.14M msgs/sec |
+| 1:1 32B | 18.87M msgs/sec | 10.06M msgs/sec |
+| 1:1 256B | 12.35M msgs/sec | 5.01M msgs/sec |
+| 1:1 1KB | 4.81M msgs/sec | 2.22M msgs/sec |
 
 ## Usage
 
@@ -199,7 +202,7 @@ act.make_actor_config(
 )
 ```
 
-**Worker affinity.** Actors on the same worker communicate ~3x faster. Use `affinity` to co-locate actors that talk to each other:
+**Worker affinity.** Actors on the same worker communicate up to ~2x faster for small messages. Use `affinity` to co-locate actors that talk to each other:
 
 ```odin
 receiver, _ := act.spawn("receiver", Receiver{}, receiver_behaviour)

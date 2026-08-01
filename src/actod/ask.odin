@@ -107,13 +107,29 @@ remove_ask_timer_registration :: proc(ctx: ^Actor_Context, timer_id: u32) {
 }
 
 @(private)
-deliver_user_message :: proc(actor: ^Actor($T), msg: ^Message, data: any) {
+deliver_user_message :: #force_inline proc(actor: ^Actor($T), msg: ^Message, data: any) {
 	ctx := current_actor_context
 	if ctx == nil {
 		actor.handle_message(actor.data, msg.from, data)
 		return
 	}
 
+	token, _ := message_ask_token(msg)
+	if token == 0 && !ctx.ask_dirty && len(ctx.timer_asks) == 0 {
+		actor.handle_message(actor.data, msg.from, data)
+		return
+	}
+
+	deliver_user_message_ask(actor, msg, data, ctx)
+}
+
+@(private)
+deliver_user_message_ask :: #force_no_inline proc(
+	actor: ^Actor($T),
+	msg: ^Message,
+	data: any,
+	ctx: ^Actor_Context,
+) {
 	if ctx.ask_dirty {
 		ctx.current_ask_token = 0
 		ctx.current_ask_from = 0

@@ -6,7 +6,7 @@ What a send result promises, and what it never promises. Every send proc returns
 
 - `.OK` means **accepted**, never processed. Locally: the message is in the receiver's mailbox. Remotely: the message is in this node's send buffer; the peer may not even be connected.
 - **Per-sender FIFO, always.** Messages from one sender to one receiver arrive in send order. Overload never reorders and never silently drops; a send either lands in order or returns an error.
-- If you need to know a message was **processed**, have the receiver reply. Nothing else in the runtime tells you.
+- If you need to know a message was **processed**, have the receiver reply. Nothing else in the runtime tells you. The built-in [`ask`/`reply` pair](02_actor.md#ask--reply) does exactly this, with a correlation token and a timeout.
 
 ## Send_Error Reference
 
@@ -21,6 +21,7 @@ What a send result promises, and what it never promises. Every send proc returns
 | `NETWORK_RING_FULL` | This node's send buffer for the peer is full | With backoff; the peer is not draining |
 | `NODE_NOT_FOUND` | Target node id is not registered on this node | After `register_node` |
 | `NODE_DISCONNECTED` | Peer is known but the message could not be buffered | With backoff; normally the buffer absorbs disconnects |
+| `NOT_ASKED` | `reply()` when the current message is not an ask, or `ask()` outside an actor | No, caller bug |
 
 ## Local Sends
 

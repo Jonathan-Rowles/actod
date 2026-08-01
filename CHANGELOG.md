@@ -3,9 +3,21 @@
 ## [Unreleased]
 
 Wire protocol v3 to v4 (breaking): the priority flag bits are gone from the
-wire format.
+wire format, and user messages can carry an 8-byte ask correlation token
+after the header (ASK_TOKEN flag).
 
 ### Added
+- `ask`/`reply` request-response. `act.ask(pid, msg, timeout)` sends with a
+  correlation token and returns an `Ask_Token`; the reply arrives as a normal
+  message (`act.replying_to()` identifies it) or `Ask_Timeout{token}` is
+  delivered instead after the timeout (default 5s, driven by the timer actor).
+  `act.reply(msg)` answers the ask currently being handled and returns the new
+  `Send_Error.NOT_ASKED` when the current message is not an ask. A reply that
+  arrives after its timeout is dropped; the requester never sees both. Works
+  cross-node. Ask and reply messages always use the message pool, never the
+  inline path, so the `Message` struct stays one cache line per mailbox slot
+  (the token overlays the unused inline area). Like other generic send
+  helpers, `ask`/`reply` are not callable from hot-reloaded modules.
 - Per-actor compile-time mailbox capacity. `act.spawn_sized` and
   `act.spawn_child_sized` take a `$MAILBOX_SIZE` power-of-two constant
   (`act.spawn_sized("name", data, behaviour, 4096)`); the global default is

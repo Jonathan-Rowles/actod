@@ -133,8 +133,48 @@ Send_Error :: enum {
     NETWORK_RING_FULL,
     NODE_NOT_FOUND,
     NODE_DISCONNECTED,
+    NOT_ASKED,           // reply() without a pending ask, or ask() outside an actor
 }
 ```
+
+## Ask / Reply
+
+`ask` sends a request carrying a correlation token; the reply arrives later as a normal message. There is no blocking call: the actor keeps processing its mailbox, and actor state carries any per-request context.
+
+```odin
+// Requester
+handle_message = proc(d: ^Trader, from: act.PID, msg: any) {
+    switch m in msg {
+    case Do_Trade:
+        token, err := act.ask(d.pricer, Quote{symbol = m.symbol}, 500 * time.Millisecond)
+        if err == .OK {
+            d.pending[token] = m.symbol
+        }
+    case Price:
+        token, _ := act.replying_to()
+        symbol := d.pending[token]
+        delete_key(&d.pending, token)
+        execute(d, symbol, m.value)
+    case act.Ask_Timeout:
+        delete_key(&d.pending, m.token)
+    }
+}
+
+// Responder
+handle_message = proc(d: ^Pricer, from: act.PID, msg: any) {
+    switch m in msg {
+    case Quote:
+        _ = act.reply(Price{value = lookup(d, m.symbol)})
+    }
+}
+```
+
+- The reply arrives raw: match its type in the switch, then `replying_to()` returns the token when the current message answers one of this actor's asks.
+- If no reply lands within the timeout (default 5s), `Ask_Timeout{token}` is delivered instead. A reply arriving after the timeout is dropped; the requester never sees both.
+- `reply` targets the sender of the ask currently being handled and returns `NOT_ASKED` when the current message is not an ask. Replying is optional: an unanswered ask just times out.
+- Works across nodes: the token rides the wire and the reply routes back to the asking PID.
+- Ask and reply messages always use the message pool, never the inline fast path.
+- Like other generic send helpers, `ask` and `reply` are not callable from hot-reloaded modules.
 
 ## Mailboxes
 

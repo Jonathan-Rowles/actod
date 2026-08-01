@@ -715,3 +715,128 @@ test_probability_with_remaining :: proc(t: ^testing.T) {
 	c := get_state(&s, "counter", counter_state)
 	testing.expect_value(t, c.count, 97) // 100 - 3 = 97 delivered
 }
+
+Quote :: struct {
+	symbol: string,
+}
+
+Price :: struct {
+	value: int,
+}
+
+pricer_state :: struct {
+	quotes:    int,
+	stay_mute: bool,
+}
+
+pricer_behaviour := actod.Actor_Behaviour(pricer_state) {
+	handle_message = handle_pricer,
+}
+
+handle_pricer :: proc(s: ^pricer_state, from: actod.PID, msg: any) {
+	switch v in msg {
+	case Quote:
+		s.quotes += 1
+		if s.stay_mute {
+			return
+		}
+		actod.reply(Price{value = len(v.symbol) * 10})
+	}
+}
+
+trader_state :: struct {
+	pricer:        actod.PID,
+	token:         actod.Ask_Token,
+	price:         int,
+	matched_token: bool,
+	timed_out:     int,
+	replies:       int,
+}
+
+trader_behaviour := actod.Actor_Behaviour(trader_state) {
+	handle_message = handle_trader,
+}
+
+handle_trader :: proc(s: ^trader_state, from: actod.PID, msg: any) {
+	switch v in msg {
+	case Ping:
+		s.token, _ = actod.ask(s.pricer, Quote{symbol = "abcd"}, 2 * time.Second)
+	case Price:
+		token, is_reply := actod.replying_to()
+		s.matched_token = is_reply && token == s.token
+		s.price = v.value
+		s.replies += 1
+	case actod.Ask_Timeout:
+		s.timed_out += 1
+	}
+}
+
+@(test)
+test_ask_reply_round_trip :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	pricer_pid := spawn(&s, "pricer", pricer_state{}, pricer_behaviour)
+	spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	init_all(&s)
+
+	send(&s, "trader", Ping{})
+	run_until_idle(&s)
+
+	tr := get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.price, 40)
+	testing.expect(t, tr.matched_token, "reply must carry the ask token")
+	testing.expect_value(t, tr.timed_out, 0)
+}
+
+@(test)
+test_ask_times_out_when_nobody_replies :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	pricer_pid := spawn(&s, "pricer", pricer_state{stay_mute = true}, pricer_behaviour)
+	spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	init_all(&s)
+
+	send(&s, "trader", Ping{})
+	run_until_idle(&s)
+
+	tr := get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.timed_out, 0)
+
+	advance_time(&s, 3 * time.Second)
+	run_until_idle(&s)
+
+	tr = get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.timed_out, 1)
+	testing.expect_value(t, tr.replies, 0)
+}
+
+@(test)
+test_late_reply_is_dropped_after_timeout :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	pricer_pid := spawn(&s, "pricer", pricer_state{}, pricer_behaviour)
+	spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	init_all(&s)
+
+	add_fault(
+		&s,
+		Fault_Rule {
+			match = Fault_Match{to_name = "pricer", msg_type = typeid_of(Quote)},
+			action = .Delay,
+			delay_steps = 4,
+			remaining = 1,
+		},
+	)
+
+	send(&s, "trader", Ping{})
+	run_until_idle(&s)
+	advance_time(&s, 3 * time.Second)
+	run_until_idle(&s)
+
+	tr := get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.timed_out, 1)
+	testing.expect_value(t, tr.replies, 0)
+}

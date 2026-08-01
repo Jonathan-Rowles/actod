@@ -209,4 +209,4 @@ handle_message = proc(d: ^My_Data, from: act.PID, msg: any) {
 If you use `time.now()` directly, virtual time won't work and your tests will depend on real elapsed time.
 
 ---
-[< Actor Registry](12_actor-registry.md)
+[< Actor Registry](12_actor-registry.md) | [Delivery Semantics >](14_delivery-semantics.md)

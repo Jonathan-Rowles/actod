@@ -84,7 +84,7 @@ act.node_init("nodeA", opts = act.make_node_config(
 ))
 
 // elsewhere, from within an actor
-act.send_unreliable(remote_pid, Telemetry{...})
+_ = act.send_unreliable(remote_pid, Telemetry{...})
 ```
 
 `send_unreliable` transparently falls back to the reliable TCP path when UDP cannot be used: for local PIDs, for messages too large for a single datagram, or for peers that have no UDP lane. A UDP send that is attempted but lost in the network is *not* retried and reports `.OK`.
@@ -98,15 +98,15 @@ Notes:
 
 ```odin
 // Transparent, same API as local
-act.send_message(remote_pid, MyMessage{data = 42})
+err := act.send_message(remote_pid, MyMessage{data = 42})
 
 // Or by name
-act.send_message_name("worker@nodeA", MyMessage{data = 42})
+err = act.send_message_name("worker@nodeA", MyMessage{data = 42})
 ```
 
 The PID encodes the node ID in the upper 16 bits. `send_message` checks `is_local_pid(to)` and routes to the connection ring automatically.
 
-**`.OK` means buffered, not delivered.** For a remote send, `send_message` returns `.OK` as soon as the message is accepted into that node's per-node send buffer. The buffer keeps filling even while the peer is disconnected, and its contents are flushed when the connection (re)establishes. So `.OK` does *not* mean the message was delivered, or even that the peer is currently reachable. There is no "is this node connected?" helper yet; design for messages that may sit buffered until a peer comes back. A remote send only returns an error (for example `.NODE_DISCONNECTED` or `.NETWORK_RING_FULL`) when it cannot even be buffered.
+**`.OK` means buffered, not delivered.** For a remote send, `send_message` returns `.OK` as soon as the message is accepted into that node's per-node send buffer. The buffer keeps filling even while the peer is disconnected, and its contents are flushed when the connection (re)establishes. So `.OK` does *not* mean the message was delivered, or even that the peer is currently reachable. There is no "is this node connected?" helper yet; design for messages that may sit buffered until a peer comes back. A remote send only returns an error (for example `.NODE_DISCONNECTED` or `.NETWORK_RING_FULL`) when it cannot even be buffered. The full local/remote send contract is in [Delivery Semantics](14_delivery-semantics.md).
 
 **Important:** Remote message types must be identical across nodes, same struct, same package, same registration. See [Message Registration: Cross-Node Messages](03_message-registration.md#cross-node-messages).
 
@@ -123,7 +123,7 @@ remote_pid, ok := act.spawn_remote(
 )
 
 // Send to it, same API
-act.send_message(remote_pid, Work_Item{...})
+_ = act.send_message(remote_pid, Work_Item{...})
 ```
 
 `spawn_remote` sends a request to the target node, which calls the registered spawn function and returns the new PID. The calling node creates a remote proxy in its local registry.

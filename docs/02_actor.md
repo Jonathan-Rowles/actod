@@ -88,32 +88,36 @@ Only `handle_message` is required. All callbacks receive a pointer to the actor'
 ## Sending Messages
 
 ```odin
-act.send_message(target_pid, MyMessage{value = 42})
+if err := act.send_message(target_pid, MyMessage{value = 42}); err != .OK {
+    log.errorf("send failed: %v", err)
+}
 ```
 
 Messages are copied into the receiver's memory. The receiver owns the copy. Any struct can be a message. Complex types with pointers (maps, dynamic arrays) are not allowed.
+
+Every send proc is `@(require_results)`: the compiler rejects a bare call, so handle the `Send_Error` or discard it deliberately with `_ =`. See [Delivery Semantics](14_delivery-semantics.md) for what each result promises.
 
 ### Send Variants
 
 ```odin
 // By PID (most common)
-act.send_message(target_pid, MyMessage{value = 42})
+err := act.send_message(target_pid, MyMessage{value = 42})
 
 // By name (local or remote with "actor@node" format)
-act.send_message_name("worker", MyMessage{value = 42})
-act.send_message_name("worker@nodeA", MyMessage{value = 42})
+err = act.send_message_name("worker", MyMessage{value = 42})
+err = act.send_message_name("worker@nodeA", MyMessage{value = 42})
 
 // By name with PID cache, skips lookup on repeated sends to the same name.
 // Auto-refreshes if the actor restarts with a new PID.
-act.send_by_name_cached("worker", MyMessage{value = 42})
+err = act.send_by_name_cached("worker", MyMessage{value = 42})
 
 // Explicit remote: actor name + node name
-act.send_to("worker", "nodeA", MyMessage{value = 42})
+err = act.send_to("worker", "nodeA", MyMessage{value = 42})
 
 // Convenience, must be called from within an actor
-act.send_self(MyMessage{value = 42})
-act.send_message_to_parent(MyMessage{value = 42})
-act.send_message_to_children(MyMessage{value = 42})
+err = act.send_self(MyMessage{value = 42})
+err = act.send_message_to_parent(MyMessage{value = 42})
+err = act.send_message_to_children(MyMessage{value = 42})
 ```
 
 All send functions return `Send_Error`:

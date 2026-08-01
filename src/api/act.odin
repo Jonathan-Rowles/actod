@@ -178,6 +178,7 @@ rename_actor :: proc(
 }
 
 // Send a message to an actor by PID. Routes to local or remote transparently.
+@(require_results)
 send_message :: proc(
 	to: PID,
 	content: $T,
@@ -189,6 +190,7 @@ send_message :: proc(
 // Fire-and-forget send over the UDP lane when the target node has one:
 // at-most-once, unordered, silently lossy. Falls back to the reliable TCP
 // path for local PIDs, oversized messages, or peers without a UDP lane.
+@(require_results)
 send_unreliable :: proc(
 	to: PID,
 	content: $T,
@@ -203,6 +205,7 @@ pid, found := hot_api.get_actor_pid(to)
 if !found do return .ACTOR_NOT_FOUND
 return hot_api.send_message(pid, content, loc)
 `)
+@(require_results)
 send_message_name :: proc(
 	to: string,
 	content: $T,
@@ -215,6 +218,7 @@ send_message_name :: proc(
 // sends to the same name skip the lookup. If the actor restarts (new PID), the cache
 // auto-refreshes. Local actors only. Linear scan, best for a small number of target names.
 @(hot = "skip")
+@(require_results)
 send_by_name_cached :: proc(
 	to: string,
 	content: $T,
@@ -225,6 +229,7 @@ send_by_name_cached :: proc(
 
 // Send a message to a remote actor with explicit node and actor names.
 @(hot = "skip")
+@(require_results)
 send_to :: proc(
 	actor_name: string,
 	node_name: string,
@@ -238,6 +243,7 @@ send_to :: proc(
 @(hot = `compose
 return hot_api.send_message(hot_api.get_self_pid(), content, loc)
 `)
+@(require_results)
 send_self :: proc(
 	content: $T,
 	loc: runtime.Source_Code_Location = #caller_location,
@@ -251,6 +257,7 @@ parent := hot_api.get_parent_pid()
 if parent == 0 do return .ACTOR_NOT_FOUND
 return hot_api.send_message(parent, content, loc)
 `)
+@(require_results)
 send_message_to_parent :: proc(
 	content: $T,
 	loc: runtime.Source_Code_Location = #caller_location,
@@ -266,6 +273,7 @@ for child in hot_api.get_children(hot_api.get_self_pid()) {
 }
 return .OK
 `)
+@(require_results)
 send_message_to_children :: proc(
 	content: $T,
 	loc: runtime.Source_Code_Location = #caller_location,

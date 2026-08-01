@@ -30,9 +30,9 @@ responder_handle_message :: proc(d: ^Responder, from: act.PID, msg: any) {
 		d.received += 1
 		reply := fmt.tprintf("pong #%d", m.seq) // <- change this reply string
 		log.infof("ping %d -> responding", m.seq) // <- change this log message
-		act.send_message(from, messages.Pong{seq = m.seq, message = reply})
+		_ = act.send_message(from, messages.Pong{seq = m.seq, message = reply})
 	case act.Timer_Tick:
 		log.infof("status: %d pings received", d.received) // <- change this log message
-		act.send_message(from, messages.Status_Report{sent = 0, received = d.received})
+		_ = act.send_message(from, messages.Status_Report{sent = 0, received = d.received})
 	}
 }

@@ -143,6 +143,7 @@ rename_actor :: proc(
 }
 
 // Send a message to an actor by PID. Routes to local or remote transparently.
+@(require_results)
 send_message :: proc(
 	to: PID,
 	content: $T,
@@ -154,6 +155,7 @@ send_message :: proc(
 // Fire-and-forget send over the UDP lane when the target node has one:
 // at-most-once, unordered, silently lossy. Falls back to the reliable TCP
 // path for local PIDs, oversized messages, or peers without a UDP lane.
+@(require_results)
 send_unreliable :: proc(
 	to: PID,
 	content: $T,
@@ -163,6 +165,7 @@ send_unreliable :: proc(
 }
 
 // Send a message by name. Use "actor@node" for remote actors.
+@(require_results)
 send_message_name :: proc(
 	to: string,
 	content: $T,
@@ -174,6 +177,7 @@ send_message_name :: proc(
 // Send by name with a local PID cache. Caches the name->PID resolution so repeated
 // sends to the same name skip the lookup. If the actor restarts (new PID), the cache
 // auto-refreshes. Local actors only. Linear scan, best for a small number of target names.
+@(require_results)
 send_by_name_cached :: proc(
 	to: string,
 	content: $T,
@@ -183,6 +187,7 @@ send_by_name_cached :: proc(
 }
 
 // Send a message to a remote actor with explicit node and actor names.
+@(require_results)
 send_to :: proc(
 	actor_name: string,
 	node_name: string,
@@ -193,6 +198,7 @@ send_to :: proc(
 }
 
 // Send a message to self. Must be called from within an actor.
+@(require_results)
 send_self :: proc(
 	content: $T,
 	loc: runtime.Source_Code_Location = #caller_location,
@@ -201,6 +207,7 @@ send_self :: proc(
 }
 
 // Send a message to the parent. Must be called from within an actor.
+@(require_results)
 send_message_to_parent :: proc(
 	content: $T,
 	loc: runtime.Source_Code_Location = #caller_location,
@@ -209,6 +216,7 @@ send_message_to_parent :: proc(
 }
 
 // Send a message to all children. Must be called from within an actor.
+@(require_results)
 send_message_to_children :: proc(
 	content: $T,
 	loc: runtime.Source_Code_Location = #caller_location,

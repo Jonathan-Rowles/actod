@@ -31,7 +31,7 @@ sender_handle_message :: proc(d: ^Sender, from: act.PID, msg: any) {
 	case act.Timer_Tick:
 		d.seq += 1
 		log.infof("sending ping %d", d.seq) // <- change this log message
-		act.send_message(d.target, messages.Ping{seq = d.seq})
+		_ = act.send_message(d.target, messages.Ping{seq = d.seq})
 	case messages.Pong:
 		log.infof("got pong %d: %s", m.seq, m.message) // <- change this log message
 	}

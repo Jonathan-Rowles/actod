@@ -17,6 +17,13 @@ wire format.
   (mailbox + system mailbox + local buffer), so a large mailbox can hold a
   full load of non-inline payloads in flight.
 
+### Changed
+- All send procs (`send_message`, `send_unreliable`, `send_message_name`,
+  `send_by_name_cached`, `send_to`, `send_self`, `send_message_to_parent`,
+  `send_message_to_children`) are now `@(require_results)`. Discarding a
+  `Send_Error` silently is no longer possible; write `_ = act.send_message(...)`
+  to ignore one deliberately. Spawns and lookups already carried the attribute.
+
 ### Removed
 - Priority mailboxes. `Message_Priority` and the `priority` argument to
   `send_message` are gone; each actor now has a single mailbox plus the

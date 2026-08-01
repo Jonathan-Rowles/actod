@@ -95,6 +95,12 @@ Actor_Stats_Entry :: struct {
 
 Actor_Type :: distinct u8
 
+Ask_Timeout :: struct {
+	token: Ask_Token,
+}
+
+Ask_Token :: distinct u64
+
 Connection_Ring_Config :: struct {
 	send_slot_count:               u32,
 	send_slot_size:                u32,
@@ -198,6 +204,7 @@ Send_Error :: enum {
 	NETWORK_RING_FULL,
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
+	NOT_ASKED,
 }
 
 Stats_Response :: struct {
@@ -291,6 +298,7 @@ Hot_API :: struct {
 	rename_actor:              proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location) -> bool,
 	send_message:              proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
 	send_unreliable:           proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
+	replying_to:               proc() -> (Ask_Token, bool),
 	get_self_pid:              proc() -> PID,
 	get_self_name:             proc() -> string,
 	get_parent_pid:            proc() -> PID,
@@ -518,6 +526,10 @@ send_message_to_children :: proc(content: $T, loc: runtime.Source_Code_Location 
 		if err != .OK do return err
 	}
 	return .OK
+}
+
+replying_to :: proc() -> (Ask_Token, bool) {
+	return hot_api.replying_to()
 }
 
 register_message_type :: proc "contextless"($T: typeid, loc: runtime.Source_Code_Location = #caller_location) {

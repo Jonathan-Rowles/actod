@@ -21,12 +21,13 @@ create_message_impl :: proc(
 	size: int,
 	tid: typeid,
 	info: ^Message_Type_Info,
+	token: u64 = 0,
 ) -> (
 	Alloc_Error,
 	int,
 ) {
 	if info.flags == {} {
-		if size <= INLINE_MESSAGE_SIZE {
+		if size <= INLINE_MESSAGE_SIZE && token == 0 {
 			msg.inline_type = tid
 			msg.content = nil
 			intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
@@ -49,13 +50,14 @@ create_message_impl :: proc(
 
 		msg.content = buffer
 		msg.inline_type = nil
+		msg.ask_token = token
 		return .OK, 0
 	}
 
 	variable_size := calculate_variable_data_size(data, info)
 	total_message_size := size + variable_size
 
-	if total_message_size <= INLINE_MESSAGE_SIZE {
+	if total_message_size <= INLINE_MESSAGE_SIZE && token == 0 {
 		msg.inline_type = tid
 		msg.content = INLINE_NEEDS_FIXUP
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
@@ -80,6 +82,7 @@ create_message_impl :: proc(
 
 	msg.content = buffer
 	msg.inline_type = nil
+	msg.ask_token = token
 	return .OK, 0
 }
 
@@ -99,12 +102,13 @@ send_user_backpressure :: #force_no_inline proc(
 	size: int,
 	tid: typeid,
 	info: ^Message_Type_Info,
+	token: u64 = 0,
 	loc := #caller_location,
 ) -> Send_Error {
 	entered_pinned := tls_reclaim_depth > 0
 	if entered_pinned do reclaim_unpin()
 
-	result := send_user_backpressure_loop(to, msg, msg_ready, data, size, tid, info, loc)
+	result := send_user_backpressure_loop(to, msg, msg_ready, data, size, tid, info, token, loc)
 
 	if entered_pinned do reclaim_pin()
 	return result
@@ -119,6 +123,7 @@ send_user_backpressure_loop :: proc(
 	size: int,
 	tid: typeid,
 	info: ^Message_Type_Info,
+	token: u64 = 0,
 	loc := #caller_location,
 ) -> Send_Error {
 	co := coro.running()
@@ -168,6 +173,7 @@ send_user_backpressure_loop :: proc(
 					size,
 					tid,
 					info,
+					token,
 				)
 				if alloc_err == .OK {
 					msg_ready = true
@@ -233,6 +239,7 @@ send_to_actor_impl :: proc(
 	info: ^Message_Type_Info,
 	$class: Msg_Class,
 	loc := #caller_location,
+	token: u64 = 0,
 ) -> Send_Error {
 	when class == .User {
 		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
@@ -257,15 +264,15 @@ send_to_actor_impl :: proc(
 	msg: Message
 	msg.from = get_self_pid()
 
-	if info.flags == {} && size <= INLINE_MESSAGE_SIZE {
+	if info.flags == {} && size <= INLINE_MESSAGE_SIZE && token == 0 {
 		msg.inline_type = tid
 		msg.content = nil
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
 	} else {
-		alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info)
+		alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info, token)
 		when class == .User {
 			if alloc_err == .POOL_EXHAUSTED || alloc_err == .ALLOC_CONTENDED {
-				return send_user_backpressure(to, &msg, false, data, size, tid, info, loc)
+				return send_user_backpressure(to, &msg, false, data, size, tid, info, token, loc)
 			}
 		}
 		if alloc_err != .OK {
@@ -304,6 +311,7 @@ send_message_impl :: proc(
 	info: ^Message_Type_Info,
 	$class: Msg_Class,
 	loc := #caller_location,
+	token: u64 = 0,
 ) -> Send_Error {
 	if to == 0 {
 		return .ACTOR_NOT_FOUND
@@ -320,7 +328,7 @@ send_message_impl :: proc(
 		when class == .System {
 			sys_flags = {.SYSTEM}
 		}
-		return send_remote_impl(to, data, info, sys_flags, loc)
+		return send_remote_impl(to, data, info, sys_flags, loc, token)
 	}
 
 	actor_ptr, home_worker, ok := get_relaxed_loc(&global_registry, to)
@@ -329,12 +337,12 @@ send_message_impl :: proc(
 	}
 
 	if current_worker != nil && home_worker == i32(current_worker.id) + 1 {
-		return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc)
+		return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc, token)
 	}
 
 	reclaim_pin()
 	defer reclaim_unpin()
-	return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc)
+	return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc, token)
 }
 
 @(private)

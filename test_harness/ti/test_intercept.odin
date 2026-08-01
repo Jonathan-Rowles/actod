@@ -14,6 +14,7 @@ Send_Error :: enum {
 	NETWORK_RING_FULL, // Ring buffer backpressure
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
+	NOT_ASKED,
 }
 
 Termination_Reason :: enum {

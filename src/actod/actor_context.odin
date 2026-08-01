@@ -192,6 +192,8 @@ setup_actor_context :: proc(
 	actor_ctx.subscriptions = make([dynamic]Subscription, actor_allocator)
 	actor_ctx.topic_subscriptions = make([dynamic]Topic_Subscription, actor_allocator)
 	actor_ctx.timers = make([dynamic]Timer_Registration, actor_allocator)
+	actor_ctx.pending_asks = make(map[u64]u32, actor_allocator)
+	actor_ctx.timer_asks = make(map[u32]u64, actor_allocator)
 	actor_ctx.stats.messages_received = 0
 	actor_ctx.stats.messages_sent = 0
 	actor_ctx.stats.received_list = make([dynamic]PID, actor_allocator)

@@ -48,6 +48,7 @@ Send_Error :: enum {
 	NETWORK_RING_FULL, // Ring buffer backpressure
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
+	NOT_ASKED, // reply() without a pending ask, or ask() outside an actor
 }
 
 Supervision_Strategy :: enum {
@@ -145,6 +146,13 @@ Actor_Context :: struct {
 	subscriptions:       [dynamic]Subscription,
 	topic_subscriptions: [dynamic]Topic_Subscription,
 	timers:              [dynamic]Timer_Registration,
+	pending_asks:        map[u64]u32,
+	timer_asks:          map[u32]u64,
+	next_ask_token:      u64,
+	current_ask_token:   u64,
+	current_ask_from:    PID,
+	current_reply_token: u64,
+	ask_dirty:           bool,
 	stats:               struct {
 		received_list:     [dynamic]PID,
 		sent_list:         [dynamic]PID,
@@ -890,7 +898,7 @@ process_user_mailboxes :: #force_inline proc(
 			msg := &ctx.message_batch[i]
 			reconstruct_msg(msg, &ctx.data, &ctx.header)
 			if !ctx.is_node || is_running {
-				actor.handle_message(actor.data, msg.from, ctx.data)
+				deliver_user_message(actor, msg, ctx.data)
 				track_message_received(msg.from)
 			}
 			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
@@ -911,7 +919,7 @@ process_user_mailboxes :: #force_inline proc(
 		reconstruct_msg(msg, &ctx.data, &ctx.header)
 
 		if !ctx.is_node || is_running {
-			actor.handle_message(actor.data, msg.from, ctx.data)
+			deliver_user_message(actor, msg, ctx.data)
 			track_message_received(msg.from)
 		}
 		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
@@ -1536,7 +1544,7 @@ push_to_mailbox :: #force_inline proc(
 	}
 
 	blocked_msg := msg
-	return send_user_backpressure(to, &blocked_msg, true, nil, 0, nil, nil, loc)
+	return send_user_backpressure(to, &blocked_msg, true, nil, 0, nil, nil, 0, loc)
 }
 
 @(private)
@@ -2015,6 +2023,7 @@ create_message_from_payload :: #force_inline proc(
 	pool: ^Pool,
 	payload: []byte,
 	info: ^Message_Type_Info,
+	token: u64 = 0,
 ) -> (
 	Alloc_Error,
 	int,
@@ -2026,7 +2035,7 @@ create_message_from_payload :: #force_inline proc(
 	}
 
 	if info.flags == {} {
-		if struct_size <= INLINE_MESSAGE_SIZE {
+		if struct_size <= INLINE_MESSAGE_SIZE && token == 0 {
 			msg.inline_type = info.type_id
 			msg.content = nil
 			intrinsics.mem_copy_non_overlapping(
@@ -2054,6 +2063,7 @@ create_message_from_payload :: #force_inline proc(
 
 		msg.content = buffer
 		msg.inline_type = nil
+		msg.ask_token = token
 		return .OK, 0
 	}
 
@@ -2061,7 +2071,7 @@ create_message_from_payload :: #force_inline proc(
 	variable_size := len(payload) - struct_size
 	total_message_size := struct_size + variable_size
 
-	if total_message_size <= INLINE_MESSAGE_SIZE {
+	if total_message_size <= INLINE_MESSAGE_SIZE && token == 0 {
 		msg.inline_type = info.type_id
 		msg.content = INLINE_NEEDS_FIXUP
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], raw_data(payload), struct_size)
@@ -2102,6 +2112,7 @@ create_message_from_payload :: #force_inline proc(
 
 	msg.content = buffer
 	msg.inline_type = nil
+	msg.ask_token = token
 	return .OK, 0
 }
 
@@ -2185,6 +2196,7 @@ send_from_payload :: #force_inline proc(
 	from_pid: PID,
 	payload: []byte,
 	info: ^Message_Type_Info,
+	token: u64 = 0,
 ) -> Send_Error {
 	actor, ok := get_actor_from_pointer(get(&global_registry, to_pid))
 	if !ok {
@@ -2199,7 +2211,7 @@ send_from_payload :: #force_inline proc(
 	msg: Message
 	msg.from = from_pid
 
-	alloc_err, attempted_size := create_message_from_payload(&msg, &actor.pool, payload, info)
+	alloc_err, attempted_size := create_message_from_payload(&msg, &actor.pool, payload, info, token)
 	if alloc_err != .OK {
 		return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
 	}

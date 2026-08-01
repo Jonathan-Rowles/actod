@@ -16,6 +16,7 @@ Network_Message_Flag :: enum u16 {
 	LIFECYCLE_EVENT = 3,
 	BROADCAST       = 4,
 	SYSTEM          = 5,
+	ASK_TOKEN       = 6,
 }
 
 Parsed_Network_Header :: struct {
@@ -23,6 +24,7 @@ Parsed_Network_Header :: struct {
 	from_handle: Handle,
 	to_handle:   Handle,
 	type_hash:   u64,
+	ask_token:   u64,
 	to_name:     string,
 	payload:     []byte,
 }
@@ -53,13 +55,21 @@ parse_network_header :: proc(raw_data: []byte) -> (header: Parsed_Network_Header
 	header.to_handle = (cast(^Handle)&raw_data[18])^
 
 	payload_start := NETWORK_HEADER_SIZE
+	if .ASK_TOKEN in header.flags {
+		if len(raw_data) < payload_start + 8 {
+			return {}, false
+		}
+		header.ask_token = endian.unchecked_get_u64le(raw_data[payload_start:])
+		payload_start += 8
+	}
 	if .BY_NAME in header.flags {
 		to_name_len := int(header.to_handle.idx)
-		payload_start = NETWORK_HEADER_SIZE + to_name_len
+		name_start := payload_start
+		payload_start = name_start + to_name_len
 		if len(raw_data) < payload_start {
 			return {}, false
 		}
-		header.to_name = string(raw_data[NETWORK_HEADER_SIZE:payload_start])
+		header.to_name = string(raw_data[name_start:payload_start])
 	}
 
 	header.payload = raw_data[payload_start:]

@@ -56,5 +56,6 @@ track_send_error :: #force_inline proc(state: ^Benchmark_State, err: actod.Send_
 		sync.atomic_add(&state.err_actor_not_found, 1)
 	case .NODE_DISCONNECTED:
 		sync.atomic_add(&state.err_network, 1)
+	case .NOT_ASKED:
 	}
 }

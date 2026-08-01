@@ -281,6 +281,39 @@ send_message_to_children :: proc(
 	return actod.send_message_to_children(content, loc)
 }
 
+// Send a request with a correlation token. The reply arrives as a normal message
+// (match its type, then check replying_to for the token); Ask_Timeout{token} arrives
+// instead if no reply lands within timeout. Must be called from within an actor.
+@(hot = "skip")
+@(require_results)
+ask :: proc(
+	to: PID,
+	content: $T,
+	timeout: time.Duration = actod.DEFAULT_ASK_TIMEOUT,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Ask_Token,
+	Send_Error,
+) {
+	return actod.ask(to, content, timeout, loc)
+}
+
+// Send content back to the sender of the ask currently being handled, carrying its
+// token. Returns NOT_ASKED when the current message is not an ask. Valid only during
+// handle_message, like the message payload itself.
+@(hot = "skip")
+@(require_results)
+reply :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+	return actod.reply(content, loc)
+}
+
+// If the message currently being handled is a reply to one of this actor's asks,
+// returns its token.
+@(require_results)
+replying_to :: proc() -> (Ask_Token, bool) {
+	return actod.replying_to()
+}
+
 // Register a message type for deep-copy support and network serialization. Use with @(init).
 @(hot = "noop")
 register_message_type :: proc "contextless" (
@@ -358,6 +391,8 @@ unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
 }
 
 Timer_Tick :: actod.Timer_Tick
+Ask_Token :: actod.Ask_Token
+Ask_Timeout :: actod.Ask_Timeout
 
 @(require_results)
 set_timer :: proc(

@@ -1066,6 +1066,7 @@ process_complete_message :: proc(ring: ^Connection_Ring, msg_data: []byte) {
 		header.to_handle,
 		header.to_name,
 		header.payload,
+		header.ask_token,
 	)
 }
 

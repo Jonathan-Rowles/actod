@@ -1184,6 +1184,7 @@ handle_incoming_data :: proc(data: ^Connection_Actor_Data, raw_data: []byte) {
 		header.to_handle,
 		header.to_name,
 		header.payload,
+		header.ask_token,
 	)
 }
 

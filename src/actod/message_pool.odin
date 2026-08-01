@@ -17,10 +17,24 @@ pool_max_pages :: proc(mailbox_capacity: int) -> int {
 
 @(private)
 Message :: struct {
-	from:        PID,
-	content:     rawptr,
-	inline_data: [INLINE_MESSAGE_SIZE]byte,
+	from:    PID,
+	content: rawptr,
+	using payload: struct #raw_union {
+		inline_data: [INLINE_MESSAGE_SIZE]byte,
+		ask_token:   u64,
+	},
 	inline_type: typeid,
+}
+
+ASK_REPLY_BIT :: u64(1) << 63
+
+@(private)
+message_ask_token :: #force_inline proc "contextless" (msg: ^Message) -> (token: u64, is_reply: bool) {
+	if msg.content == nil || msg.content == INLINE_NEEDS_FIXUP {
+		return 0, false
+	}
+	raw := msg.ask_token
+	return raw &~ ASK_REPLY_BIT, raw & ASK_REPLY_BIT != 0
 }
 
 @(private)

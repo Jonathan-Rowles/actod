@@ -338,6 +338,7 @@ deliver_to_target :: #force_inline proc(
 	to_handle: Handle,
 	to_name: string,
 	payload: []byte,
+	token: u64 = 0,
 ) -> bool {
 	if .BROADCAST in flags {
 		return deliver_broadcast_locally(
@@ -374,7 +375,7 @@ deliver_to_target :: #force_inline proc(
 		return send_system_from_payload(to_pid, from_pid, payload, type_info) == .OK
 	}
 
-	result := send_from_payload(to_pid, from_pid, payload, type_info)
+	result := send_from_payload(to_pid, from_pid, payload, type_info, token)
 	return result == .OK
 }
 

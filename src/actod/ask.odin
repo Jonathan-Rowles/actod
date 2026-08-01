@@ -1,5 +1,7 @@
 package actod
 
+import "../../test_harness/ti"
+_ :: ti
 import "core:log"
 import "core:time"
 
@@ -25,6 +27,11 @@ ask :: #force_inline proc(
 	Ask_Token,
 	Send_Error,
 ) {
+	when ODIN_TEST {
+		if token, err, ok := ti.intercept_ask(u64(to), content, timeout); ok {
+			return Ask_Token(token), Send_Error(err)
+		}
+	}
 	ctx := current_actor_context
 	if ctx == nil {
 		log.errorf("ask() must be called from within an actor", location = loc)
@@ -52,6 +59,11 @@ ask :: #force_inline proc(
 }
 
 reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
+	when ODIN_TEST {
+		if err, ok := ti.intercept_reply(content); ok {
+			return Send_Error(err)
+		}
+	}
 	ctx := current_actor_context
 	if ctx == nil || ctx.current_ask_token == 0 {
 		return .NOT_ASKED
@@ -72,6 +84,11 @@ reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error 
 }
 
 replying_to :: proc() -> (Ask_Token, bool) {
+	when ODIN_TEST {
+		if token, replying, ok := ti.intercept_replying_to(); ok {
+			return Ask_Token(token), replying
+		}
+	}
 	ctx := current_actor_context
 	if ctx == nil || ctx.current_reply_token == 0 {
 		return 0, false

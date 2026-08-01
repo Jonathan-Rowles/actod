@@ -45,12 +45,19 @@ Test_Intercept :: struct {
 	next_spawn_pid:          u64,
 	virtual_now:             time.Time,
 	dead_pids:               ^map[u64]bool,
+	next_ask_token:          u64,
+	current_ask_token:       u64,
+	current_ask_from:        u64,
+	current_reply_token:     u64,
 }
 
 Captured_Send :: struct {
-	to:      u64,
-	data:    rawptr,
-	type_id: typeid,
+	to:          u64,
+	data:        rawptr,
+	type_id:     typeid,
+	ask_token:   u64,
+	ask_timeout: time.Duration,
+	is_reply:    bool,
 }
 
 Captured_Publish :: struct {
@@ -105,6 +112,56 @@ intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
 	clone^ = val
 	append(test_intercept.send_capture, Captured_Send{to = to, data = clone, type_id = T})
 	return .OK, true
+}
+
+intercept_ask :: proc(to: u64, content: $T, timeout: time.Duration) -> (u64, Send_Error, bool) {
+	if test_intercept == nil do return 0, {}, false
+	if test_intercept.dead_pids != nil && to in test_intercept.dead_pids^ {
+		return 0, .ACTOR_NOT_FOUND, true
+	}
+	test_intercept.next_ask_token += 1
+	token := test_intercept.next_ask_token
+	val := content
+	ptr, _ := mem.alloc(size_of(T))
+	clone := cast(^T)ptr
+	clone^ = val
+	append(
+		test_intercept.send_capture,
+		Captured_Send {
+			to = to,
+			data = clone,
+			type_id = T,
+			ask_token = token,
+			ask_timeout = timeout,
+		},
+	)
+	return token, .OK, true
+}
+
+intercept_reply :: proc(content: $T) -> (Send_Error, bool) {
+	if test_intercept == nil do return {}, false
+	if test_intercept.current_ask_token == 0 do return .NOT_ASKED, true
+	val := content
+	ptr, _ := mem.alloc(size_of(T))
+	clone := cast(^T)ptr
+	clone^ = val
+	append(
+		test_intercept.send_capture,
+		Captured_Send {
+			to = test_intercept.current_ask_from,
+			data = clone,
+			type_id = T,
+			ask_token = test_intercept.current_ask_token,
+			is_reply = true,
+		},
+	)
+	return .OK, true
+}
+
+intercept_replying_to :: proc() -> (u64, bool, bool) {
+	if test_intercept == nil do return 0, false, false
+	if test_intercept.current_reply_token == 0 do return 0, false, true
+	return test_intercept.current_reply_token, true, true
 }
 
 intercept_send_self :: proc(content: $T) -> (Send_Error, bool) {

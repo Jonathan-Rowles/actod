@@ -46,6 +46,15 @@ Sim :: struct {
 	fault_count:     int,
 	delayed:         [dynamic]Delayed_Message,
 	rng_state:       u64,
+	pending_asks:    [dynamic]Sim_Pending_Ask,
+	next_ask_token:  u64,
+}
+
+Sim_Pending_Ask :: struct {
+	token:     u64,
+	asker_pid: u64,
+	deadline:  time.Time,
+	active:    bool,
 }
 
 Sim_Actor :: struct {
@@ -60,10 +69,12 @@ Sim_Actor :: struct {
 }
 
 Sim_Message :: struct {
-	to:      u64,
-	from:    u64,
-	data:    rawptr,
-	type_id: typeid,
+	to:        u64,
+	from:      u64,
+	data:      rawptr,
+	type_id:   typeid,
+	ask_token: u64,
+	is_reply:  bool,
 }
 
 Sim_Timer :: struct {
@@ -156,6 +167,7 @@ destroy :: proc(s: ^Sim) {
 		if d.msg.data != nil do free(d.msg.data)
 	}
 	delete(s.delayed)
+	delete(s.pending_asks)
 }
 
 drain_queue :: proc(s: ^Sim) {
@@ -221,6 +233,10 @@ install_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.next_timer_id = s.next_timer_id
 	s.intercept.next_spawn_pid = s.next_pid
 	s.intercept.virtual_now = s.clock
+	s.intercept.next_ask_token = s.next_ask_token
+	s.intercept.current_ask_token = 0
+	s.intercept.current_ask_from = 0
+	s.intercept.current_reply_token = 0
 	ti.test_intercept = &s.intercept
 }
 
@@ -229,15 +245,58 @@ uninstall_intercept :: proc() {
 }
 
 enqueue :: proc(s: ^Sim, to, from: u64, data: rawptr, type_id: typeid) {
+	enqueue_ask(s, to, from, data, type_id, 0, false)
+}
+
+enqueue_ask :: proc(
+	s: ^Sim,
+	to, from: u64,
+	data: rawptr,
+	type_id: typeid,
+	ask_token: u64,
+	is_reply: bool,
+) {
 	assert(s.queue_count < MAX_SIM_QUEUE, "sim: message queue full")
 	s.queue[s.queue_tail] = Sim_Message {
-		to      = to,
-		from    = from,
-		data    = data,
-		type_id = type_id,
+		to        = to,
+		from      = from,
+		data      = data,
+		type_id   = type_id,
+		ask_token = ask_token,
+		is_reply  = is_reply,
 	}
 	s.queue_tail = (s.queue_tail + 1) % MAX_SIM_QUEUE
 	s.queue_count += 1
+}
+
+register_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64, timeout: time.Duration) {
+	append(
+		&s.pending_asks,
+		Sim_Pending_Ask {
+			token = token,
+			asker_pid = asker_pid,
+			deadline = time.time_add(s.clock, timeout),
+			active = true,
+		},
+	)
+}
+
+consume_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64) -> bool {
+	for &p in s.pending_asks {
+		if !p.active || p.token != token || p.asker_pid != asker_pid do continue
+		p.active = false
+		return true
+	}
+	return false
+}
+
+fire_expired_asks :: proc(s: ^Sim) {
+	for &p in s.pending_asks {
+		if !p.active do continue
+		if time.diff(p.deadline, s.clock) < 0 do continue
+		p.active = false
+		enqueue_clone(s, p.asker_pid, p.asker_pid, actod.Ask_Timeout{token = actod.Ask_Token(p.token)})
+	}
 }
 
 @(private)
@@ -286,7 +345,20 @@ step :: proc(s: ^Sim) -> bool {
 		return true
 	}
 
+	if msg.is_reply && !consume_pending_ask(s, msg.ask_token, msg.to) {
+		if msg.data != nil do free(msg.data)
+		return true
+	}
+
 	install_intercept(s, actor)
+	if msg.ask_token != 0 {
+		if msg.is_reply {
+			s.intercept.current_reply_token = msg.ask_token
+		} else {
+			s.intercept.current_ask_token = msg.ask_token
+			s.intercept.current_ask_from = msg.from
+		}
+	}
 	content := any {
 		data = msg.data,
 		id   = msg.type_id,
@@ -296,6 +368,7 @@ step :: proc(s: ^Sim) -> bool {
 
 	s.next_timer_id = s.intercept.next_timer_id
 	s.next_pid = s.intercept.next_spawn_pid
+	s.next_ask_token = s.intercept.next_ask_token
 
 	process_captures(s, actor.pid)
 
@@ -311,7 +384,18 @@ run_until_idle :: proc(s: ^Sim) {
 
 process_captures :: proc(s: ^Sim, sender_pid: u64) {
 	for &cap in s.send_capture {
-		enqueue(s, cap.to, sender_pid, cap.data, cap.type_id)
+		enqueue_ask(
+			s,
+			cap.to,
+			sender_pid,
+			cap.data,
+			cap.type_id,
+			cap.ask_token,
+			cap.is_reply,
+		)
+		if cap.ask_token != 0 && !cap.is_reply {
+			register_pending_ask(s, cap.ask_token, sender_pid, cap.ask_timeout)
+		}
 		cap.data = nil // ownership transferred
 	}
 	clear(&s.send_capture)
@@ -454,6 +538,7 @@ advance_time :: proc(s: ^Sim, d: time.Duration) {
 	s.clock = time.time_add(s.clock, d)
 	s.intercept.virtual_now = s.clock
 	fire_expired_timers(s)
+	fire_expired_asks(s)
 }
 
 fire_expired_timers :: proc(s: ^Sim) {

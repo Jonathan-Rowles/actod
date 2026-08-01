@@ -31,6 +31,8 @@ ALL_TESTS :: []Test_Entry {
 	// Core actor tests
 	{name = "test_actor_lifecycle", test_proc = test_actor_lifecycle},
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
+	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
+	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},
 	{name = "test_pipeline_pattern", test_proc = test_pipeline_pattern},
 	{name = "test_broadcast_pattern", test_proc = test_broadcast_pattern},
 	{

@@ -21,7 +21,7 @@ after the header (ASK_TOKEN flag).
 - Per-actor compile-time mailbox capacity. `act.spawn_sized` and
   `act.spawn_child_sized` take a `$MAILBOX_SIZE` power-of-two constant
   (`act.spawn_sized("name", data, behaviour, 4096)`); the global default is
-  `-define:ACTOD_MAILBOX_SIZE=N` (512). Capacity is fixed at build time and
+  `-define:ACTOD_MAILBOX_SIZE=N` (64). Capacity is fixed at build time and
   never grows, shrinks, or reallocates while the actor is alive. In
   `hot_reload_dev` builds, actors spawned through the compose shim use the
   default capacity.
@@ -30,6 +30,20 @@ after the header (ASK_TOKEN flag).
   full load of non-inline payloads in flight.
 
 ### Changed
+- The default mailbox capacity is 64 slots, down from 512
+  (`-define:ACTOD_MAILBOX_SIZE=N` still overrides globally, `spawn_sized` per
+  actor). The old default cost every actor 32KB of mailbox plus ~21KB of pool
+  bookkeeping scaled off it; high-traffic actors should opt into larger
+  mailboxes explicitly.
+- Actor arenas now reserve a computed worst case instead of the 1GB
+  `arena_init_static` default: actor data + mailbox entries + pool
+  bookkeeping + `max_pages * page_size` + local buffer + context, plus
+  `arena_headroom` (new `make_actor_config` knob, default 16MB,
+  `-define:ACTOD_ARENA_HEADROOM=N`) for runtime allocations (children,
+  timers, user code). Roughly 25MB reserved per actor at the new defaults,
+  so the ~130K-actor virtual address space ceiling is gone. Commit starts at
+  64KB instead of 1MB. Arena exhaustion still fails loudly; actors that
+  allocate heavily should raise `arena_headroom`.
 - All send procs (`send_message`, `send_unreliable`, `send_message_name`,
   `send_by_name_cached`, `send_to`, `send_self`, `send_message_to_parent`,
   `send_message_to_children`) are now `@(require_results)`. Discarding a
@@ -43,6 +57,13 @@ after the header (ASK_TOKEN flag).
   mailbox already covers urgent control traffic.
 
 ### Fixed
+- The `act` facade now exposes `spawn` and `spawn_child` as proc groups like
+  the internal package, so `act.spawn("name", data, behaviour, 4096)` selects
+  the sized variant. Previously only `act.spawn_sized`/`act.spawn_child_sized`
+  worked through the facade.
+- A terminate handler that panics during a normal shutdown no longer runs a
+  second time: the panic recovery path now knows teardown already started
+  and skips straight to termination bookkeeping.
 - Local supervision signals are lossless now. `Actor_Stopped` no longer goes
   through the bounded system mailbox, so a supervisor under load can no longer
   miss a child death (lost restart, leaked registry entry).

@@ -1389,7 +1389,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 		data := Active_Actor_Data {
 			id = i,
 		}
-		pid, ok := actod.spawn("active", data, Active_Actor_Behaviour)
+		pid, ok := actod.spawn("active", data, Active_Actor_Behaviour, 512)
 		expect(t, ok, "Failed to spawn active actor")
 		actors[i] = pid
 	}

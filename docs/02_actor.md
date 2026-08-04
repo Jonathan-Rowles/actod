@@ -189,7 +189,7 @@ Mailbox capacity is a compile-time constant, fixed for the actor's lifetime: the
 mailbox never grows, shrinks, or reallocates.
 
 ```odin
-// Global default: 512 slots, overridable at build time.
+// Global default: 64 slots, overridable at build time.
 // odin build . -define:ACTOD_MAILBOX_SIZE=1024
 
 // Per actor: pass a compile-time power of two to spawn_sized.

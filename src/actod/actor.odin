@@ -15,7 +15,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 512)
+DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 64)
 #assert(
 	DEFAULT_MAIL_BOX_SIZE > 0 && (DEFAULT_MAIL_BOX_SIZE & (DEFAULT_MAIL_BOX_SIZE - 1)) == 0,
 	"-define:ACTOD_MAILBOX_SIZE must be a power of two",

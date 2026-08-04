@@ -6,652 +6,57 @@ import "core:net"
 import "core:time"
 import "src/actod"
 
-// Initialize the actor system. Must be called before spawning any actors.
-@(hot = "skip")
-node_init :: proc(
-	name: string,
-	opts: System_Config = actod.SYSTEM_CONFIG,
-	loc: runtime.Source_Code_Location = #caller_location,
-) {
-	actod.node_init(name, opts, loc)
-}
+// Types
 
-// Gracefully shutdown the actor system and terminate all actors.
-@(hot = "skip")
-shutdown_node :: proc(loc: runtime.Source_Code_Location = #caller_location) {
-	actod.shutdown_node(loc)
-}
+// Core
+PID :: actod.PID
+Actor_Ref :: actod.Actor_Ref
+Handle :: actod.Handle
+Actor_Type :: actod.Actor_Type
+SPAWN :: actod.SPAWN
+Actor_Behaviour :: actod.Actor_Behaviour
+Actor_State :: actod.Actor_State
+Send_Error :: actod.Send_Error
+Termination_Reason :: actod.Termination_Reason
+ACTOR_TYPE_UNTYPED :: actod.ACTOR_TYPE_UNTYPED
 
-// Block until SIGINT/SIGTERM received, then shutdown.
-@(hot = "skip")
-await_signal :: proc() {
-	actod.await_signal()
-}
-
-@(hot = `compose
-default opts = {}
-val := data
-raw_beh := Raw_Spawn_Behaviour{
-	handle_message           = rawptr(behaviour.handle_message),
-	init_proc                = rawptr(behaviour.init),
-	terminate_proc           = rawptr(behaviour.terminate),
-	actor_type               = behaviour.actor_type,
-	on_child_started         = rawptr(behaviour.on_child_started),
-	on_child_terminated      = rawptr(behaviour.on_child_terminated),
-	on_child_restarted       = rawptr(behaviour.on_child_restarted),
-	on_max_restarts_exceeded = rawptr(behaviour.on_max_restarts_exceeded),
-}
-return hot_api.spawn_raw(name, &val, size_of(T), raw_beh, opts, parent_pid, loc)
-`)
-@(require_results)
-spawn :: proc(
-	name: string,
-	data: $T,
-	behaviour: Actor_Behaviour(T),
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
-	parent_pid: PID = 0,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.spawn(name, data, behaviour, opts, parent_pid, loc)
-}
-
-// Like spawn, but with a compile-time mailbox capacity for this actor.
-// MAILBOX_SIZE must be a power of two. The capacity is fixed at build time and
-// never grows or shrinks while the actor is alive. In hot_reload_dev builds
-// these actors are spawned directly (no compose shim).
-@(hot = "skip")
-@(require_results)
-spawn_sized :: proc(
-	name: string,
-	data: $T,
-	behaviour: Actor_Behaviour(T),
-	$MAILBOX_SIZE: int,
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
-	parent_pid: PID = 0,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.spawn_sized(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
-}
-
-// Spawn a child actor with the current actor as parent. Must be called from within an actor.
-@(hot = `compose
-default opts = {}
-val := data
-raw_beh := Raw_Spawn_Behaviour{
-	handle_message           = rawptr(behaviour.handle_message),
-	init_proc                = rawptr(behaviour.init),
-	terminate_proc           = rawptr(behaviour.terminate),
-	actor_type               = behaviour.actor_type,
-	on_child_started         = rawptr(behaviour.on_child_started),
-	on_child_terminated      = rawptr(behaviour.on_child_terminated),
-	on_child_restarted       = rawptr(behaviour.on_child_restarted),
-	on_max_restarts_exceeded = rawptr(behaviour.on_max_restarts_exceeded),
-}
-return hot_api.spawn_child_raw(name, &val, size_of(T), raw_beh, opts, loc)
-`)
-@(require_results)
-spawn_child :: proc(
-	name: string,
-	data: $T,
-	behaviour: Actor_Behaviour(T),
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.spawn_child(name, data, behaviour, opts, loc)
-}
-
-// Like spawn_child, but with a compile-time mailbox capacity for this actor.
-// MAILBOX_SIZE must be a power of two. The capacity is fixed at build time and
-// never grows or shrinks while the actor is alive.
-@(hot = "skip")
-@(require_results)
-spawn_child_sized :: proc(
-	name: string,
-	data: $T,
-	behaviour: Actor_Behaviour(T),
-	$MAILBOX_SIZE: int,
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.spawn_child_sized(name, data, behaviour, MAILBOX_SIZE, opts, loc)
-}
-
-// Spawn an actor using a name registered via register_spawn_func.
-@(require_results)
-spawn_by_name :: proc(
-	spawn_func_name: string,
-	actor_name: string,
-	parent_pid: PID = 0,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.spawn_by_name(spawn_func_name, actor_name, parent_pid, loc)
-}
-
-// Spawn an actor on a remote node. Blocks until response or timeout.
-@(require_results)
-@(hot = "skip")
-spawn_remote :: proc(
-	spawn_func_name: string,
-	actor_name: string,
-	target_node: string,
-	parent_pid: PID = 0,
-	timeout: time.Duration = actod.SPAWN_REMOTE_TIMEOUT,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.spawn_remote(spawn_func_name, actor_name, target_node, parent_pid, timeout, loc)
-}
-
-// Terminate an actor by PID.
-terminate_actor :: proc(
-	to: PID,
-	reason: Termination_Reason = .SHUTDOWN,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.terminate_actor(to, reason, loc)
-}
-
-// Rename an actor by PID.
-rename_actor :: proc(
-	pid: PID,
-	new_name: string,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.rename_actor(pid, new_name, loc)
-}
-
-// Send a message to an actor by PID. Routes to local or remote transparently.
-@(require_results)
-send_message :: proc(
-	to: PID,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_message(to, content, loc)
-}
-
-// Fire-and-forget send over the UDP lane when the target node has one:
-// at-most-once, unordered, silently lossy. Falls back to the reliable TCP
-// path for local PIDs, oversized messages, or peers without a UDP lane.
-@(require_results)
-send_unreliable :: proc(
-	to: PID,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_unreliable(to, content, loc)
-}
-
-// Send a message by name. Use "actor@node" for remote actors.
-@(hot = `compose
-pid, found := hot_api.get_actor_pid(to)
-if !found do return .ACTOR_NOT_FOUND
-return hot_api.send_message(pid, content, loc)
-`)
-@(require_results)
-send_message_name :: proc(
-	to: string,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_message_name(to, content, loc)
-}
-
-// Send by name with a local PID cache. Caches the name->PID resolution so repeated
-// sends to the same name skip the lookup. If the actor restarts (new PID), the cache
-// auto-refreshes. Local actors only. Linear scan, best for a small number of target names.
-@(hot = "skip")
-@(require_results)
-send_by_name_cached :: proc(
-	to: string,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_by_name_cached(to, content, loc)
-}
-
-// Send a message to a remote actor with explicit node and actor names.
-@(hot = "skip")
-@(require_results)
-send_to :: proc(
-	actor_name: string,
-	node_name: string,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_to(actor_name, node_name, content, loc)
-}
-
-// Send a message to self. Must be called from within an actor.
-@(hot = `compose
-return hot_api.send_message(hot_api.get_self_pid(), content, loc)
-`)
-@(require_results)
-send_self :: proc(
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_self(content, loc)
-}
-
-// Send a message to the parent. Must be called from within an actor.
-@(hot = `compose
-parent := hot_api.get_parent_pid()
-if parent == 0 do return .ACTOR_NOT_FOUND
-return hot_api.send_message(parent, content, loc)
-`)
-@(require_results)
-send_message_to_parent :: proc(
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_message_to_parent(content, loc)
-}
-
-// Send a message to all children. Must be called from within an actor.
-@(hot = `compose
-for child in hot_api.get_children(hot_api.get_self_pid()) {
-	err := hot_api.send_message(child, content, loc)
-	if err != .OK do return err
-}
-return .OK
-`)
-@(require_results)
-send_message_to_children :: proc(
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_message_to_children(content, loc)
-}
-
-// Send a request with a correlation token. The reply arrives as a normal message
-// (match its type, then check replying_to for the token); Ask_Timeout{token} arrives
-// instead if no reply lands within timeout. Must be called from within an actor.
-@(hot = "skip")
-@(require_results)
-ask :: proc(
-	to: PID,
-	content: $T,
-	timeout: time.Duration = actod.DEFAULT_ASK_TIMEOUT,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	Ask_Token,
-	Send_Error,
-) {
-	return actod.ask(to, content, timeout, loc)
-}
-
-// Send content back to the sender of the ask currently being handled, carrying its
-// token. Returns NOT_ASKED when the current message is not an ask. Valid only during
-// handle_message, like the message payload itself.
-@(hot = "skip")
-@(require_results)
-reply :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
-	return actod.reply(content, loc)
-}
-
-// If the message currently being handled is a reply to one of this actor's asks,
-// returns its token.
-@(require_results)
-replying_to :: proc() -> (Ask_Token, bool) {
-	return actod.replying_to()
-}
-
-// Register a message type for deep-copy support and network serialization. Use with @(init).
-@(hot = "noop")
-register_message_type :: proc "contextless" (
-	$T: typeid,
-	loc: runtime.Source_Code_Location = #caller_location,
-) {
-	actod.register_message_type(T, loc)
-}
-
-get_self_pid :: proc() -> PID {
-	return actod.get_self_pid()
-}
-
-get_self_name :: proc() -> string {
-	return actod.get_self_name()
-}
-
-get_parent_pid :: proc() -> PID {
-	return actod.get_parent_pid()
-}
-
-self_terminate :: proc(
-	reason: Termination_Reason = .NORMAL,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.self_terminate(reason, loc)
-}
-
-self_rename :: proc(
-	new_name: string,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.self_rename(new_name, loc)
-}
-
-// Cooperatively yield from a pooled actor, allowing other actors on the same worker to run.
-// Must be called from within a pooled (non-dedicated-thread) actor.
-// If you need this, reconsider your actor design.
-yield :: proc(loc: runtime.Source_Code_Location = #caller_location) {
-	actod.yield(loc)
-}
-
-// Returns real time in production, virtual time in tests.
-now :: proc() -> time.Time {
-	return actod.now()
-}
-
-@(require_results)
-get_actor_pid :: proc(name: string) -> (PID, bool) {
-	return actod.get_actor_pid(name)
-}
-
-get_actor_name :: proc(pid: PID) -> string {
-	return actod.get_actor_name(pid)
-}
-
-is_local_pid :: proc(pid: PID) -> bool {
-	return actod.is_local_pid(pid)
-}
-
-get_node_id :: proc(pid: PID) -> Node_ID {
-	return actod.get_node_id(pid)
-}
-
-get_pid_actor_type :: proc(pid: PID) -> Actor_Type {
-	return actod.get_pid_actor_type(pid)
-}
-
-pack_pid :: proc(h: Handle, node_id: Node_ID = actod.current_node_id) -> PID {
-	return actod.pack_pid(h, node_id)
-}
-
-unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
-	return actod.unpack_pid(pid)
-}
-
+// Messaging
 Timer_Tick :: actod.Timer_Tick
 Ask_Token :: actod.Ask_Token
 Ask_Timeout :: actod.Ask_Timeout
 
-@(require_results)
-set_timer :: proc(
-	interval: time.Duration,
-	repeat: bool,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	u32,
-	Send_Error,
-) {
-	return actod.set_timer(interval, repeat, loc)
-}
-
-cancel_timer :: proc(
-	id: u32,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.cancel_timer(id, loc)
-}
+// Pub/Sub
+Subscription :: actod.Subscription
+Topic :: actod.Topic
+Topic_Subscription :: actod.Topic_Subscription
 
 // Supervision
+Supervision_Strategy :: actod.Supervision_Strategy
+Restart_Policy :: actod.Restart_Policy
 
-get_children :: proc(parent: PID) -> []PID {
-	return actod.get_children(parent)
-}
+// Configuration
+System_Config :: actod.System_Config
+Actor_Config :: actod.Actor_Config
+Network_Config :: actod.Network_Config
+Log_Config :: actod.Log_Config
+Log_Callback :: actod.Log_Callback
+Log_Flush :: actod.Log_Flush
+Log_Level :: log.Level
+Log_Options :: log.Options
+Spin_Strategy :: actod.SPIN_STRATEGY
 
-// Dynamically spawn and add a new child to a supervisor.
-@(require_results)
-add_child :: proc(
-	parent: PID,
-	child_spawn: SPAWN,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.add_child(parent, child_spawn, loc)
-}
+// Networking
+Node_ID :: actod.Node_ID
+Connection_Ring_Config :: actod.Connection_Ring_Config
+Node_Info :: actod.Node_Info
+Transport_Strategy :: actod.Transport_Strategy
 
-// Adopt an existing actor as a child of a supervisor.
-@(require_results)
-@(hot = "extra_param spawn_func_name_hash: u64 = 0")
-add_child_existing :: proc(
-	parent: PID,
-	existing_child: PID,
-	child_spawn: SPAWN,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.add_child_existing(parent, existing_child, child_spawn, 0, loc)
-}
+// Observer
+Actor_Stats :: actod.Actor_Stats
+Stats_Snapshot :: actod.Stats_Snapshot
+Stats_Response :: actod.Stats_Response
 
-remove_child :: proc(
-	parent: PID,
-	child: PID,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.remove_child(parent, child, loc)
-}
-
-// Register a named actor type. Returns the local Actor_Type ID.
-@(require_results)
-register_actor_type :: proc(name: string) -> (Actor_Type, bool) {
-	return actod.register_actor_type(name)
-}
-
-// Get the string name of a registered actor type.
-@(require_results)
-get_actor_type_name :: proc(actor_type: Actor_Type) -> (string, bool) {
-	return actod.get_actor_type_name(actor_type)
-}
-
-// Subscribe to broadcasts from actors of the given type. Must be called from within an actor.
-// Subscriptions are automatically cleaned up on actor termination.
-@(require_results)
-subscribe_type :: proc(
-	actor_type: Actor_Type,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	Subscription,
-	bool,
-) {
-	return actod.subscribe_type(actor_type, loc)
-}
-
-// Unsubscribe from a previously subscribed actor type.
-@(hot = "host_name pubsub_unsubscribe")
-unsubscribe :: proc(
-	sub: Subscription,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.pubsub_unsubscribe(sub, loc)
-}
-
-// Broadcast a message to all subscribers of the current actor's type.
-// Must be called from within a typed actor (actor_type set on behaviour).
-broadcast :: proc(msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
-	actod.broadcast(msg, loc)
-}
-
-get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
-	return actod.get_subscriber_count(actor_type)
-}
-
-@(require_results)
-subscribe_topic :: proc(
-	topic: ^Topic,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	Topic_Subscription,
-	bool,
-) {
-	return actod.subscribe_topic(topic, loc)
-}
-
-unsubscribe_topic :: proc(
-	sub: Topic_Subscription,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.unsubscribe_topic(sub, loc)
-}
-
-publish :: proc(topic: ^Topic, msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
-	actod.publish(topic, msg, loc)
-}
-
-@(require_results)
-@(hot = "skip")
-register_node :: proc(
-	name: string,
-	address: net.Endpoint,
-	transport: Transport_Strategy,
-	connect: bool = false,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	Node_ID,
-	bool,
-) {
-	return actod.register_node(name, address, transport, connect, loc)
-}
-
-// Register a named spawn function for remote spawning and spawn_by_name.
-register_spawn_func :: proc(
-	name: string,
-	func: SPAWN,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.register_spawn_func(name, func, loc)
-}
-
-@(require_results)
-@(hot = "skip")
-get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
-	return actod.get_node_info(node_id)
-}
-
-@(require_results)
-@(hot = "skip")
-get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
-	return actod.get_node_by_name(name)
-}
-
-@(hot = "skip")
-unregister_node :: proc(node_id: Node_ID) {
-	actod.unregister_node(node_id)
-}
-
-get_local_node_pid :: proc() -> PID {
-	return actod.get_local_node_pid()
-}
-
-get_local_node_name :: proc() -> string {
-	return actod.get_local_node_name()
-}
-
-@(hot = "skip")
-start_observer :: proc(
-	collection_interval: time.Duration = 0,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	return actod.start_observer(collection_interval, loc)
-}
-
-@(hot = "skip")
-stop_observer :: proc() {
-	actod.stop_observer()
-}
-
-@(hot = "skip")
-trigger_stats_collection :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return actod.trigger_stats_collection(loc)
-}
-
-@(hot = "skip")
-request_actor_stats :: proc(
-	actor_pid: PID,
-	requester: PID,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.request_actor_stats(actor_pid, requester, loc)
-}
-
-@(hot = "skip")
-request_all_stats :: proc(
-	requester: PID,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.request_all_stats(requester, loc)
-}
-
-@(hot = "skip")
-set_stats_collection_interval :: proc(
-	interval: time.Duration,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.set_stats_collection_interval(interval, loc)
-}
-
-@(hot = "skip")
-clear_terminated_stats :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return actod.clear_terminated_stats(loc)
-}
-
-// Subscribe to observer stats snapshots. Must be called from within an actor.
-@(require_results)
-@(hot = "skip")
-subscribe_to_stats :: proc(
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	Subscription,
-	bool,
-) {
-	return actod.subscribe_to_stats(loc)
-}
-
-@(hot = "skip")
-unsubscribe_from_stats :: proc(
-	sub: Subscription,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.unsubscribe_from_stats(sub, loc)
-}
-
-set_log_level :: proc(level: Log_Level) {
-	actod.set_log_level(level)
-}
-
-is_log_level_enabled :: proc(level: Log_Level) -> bool {
-	return actod.is_log_level_enabled(level)
-}
-
-get_current_log_config :: proc() -> Log_Config {
-	return actod.get_current_log_config()
-}
+// Configuration builders. All parameters default sensibly; override what you need.
 
 @(hot = "skip")
 make_node_config :: proc(
@@ -792,50 +197,740 @@ make_children :: proc(spawns: ..SPAWN) -> [dynamic]SPAWN {
 	return actod.make_children(..spawns)
 }
 
-// Core
-PID :: actod.PID
-Actor_Ref :: actod.Actor_Ref
-Handle :: actod.Handle
-Actor_Type :: actod.Actor_Type
-SPAWN :: actod.SPAWN
-Actor_Behaviour :: actod.Actor_Behaviour
-Actor_State :: actod.Actor_State
-Send_Error :: actod.Send_Error
-Termination_Reason :: actod.Termination_Reason
-ACTOR_TYPE_UNTYPED :: actod.ACTOR_TYPE_UNTYPED
+// Node lifecycle
 
-// Pub/Sub
-Subscription :: actod.Subscription
-Topic :: actod.Topic
-Topic_Subscription :: actod.Topic_Subscription
+// Initialize the actor system. Must be called before spawning any actors.
+@(hot = "skip")
+node_init :: proc(
+	name: string,
+	opts: System_Config = actod.SYSTEM_CONFIG,
+	loc: runtime.Source_Code_Location = #caller_location,
+) {
+	actod.node_init(name, opts, loc)
+}
+
+// Gracefully shutdown the actor system and terminate all actors.
+@(hot = "skip")
+node_shutdown :: proc(loc: runtime.Source_Code_Location = #caller_location) {
+	actod.node_shutdown(loc)
+}
+
+// Block until SIGINT/SIGTERM received, then shutdown.
+@(hot = "skip")
+await_signal :: proc() {
+	actod.await_signal()
+}
+
+get_local_node_pid :: proc() -> PID {
+	return actod.get_local_node_pid()
+}
+
+get_local_node_name :: proc() -> string {
+	return actod.get_local_node_name()
+}
+
+// Spawning
+
+@(hot = `compose
+default opts = {}
+val := data
+raw_beh := Raw_Spawn_Behaviour{
+	handle_message           = rawptr(behaviour.handle_message),
+	init_proc                = rawptr(behaviour.init),
+	terminate_proc           = rawptr(behaviour.terminate),
+	actor_type               = behaviour.actor_type,
+	on_child_started         = rawptr(behaviour.on_child_started),
+	on_child_terminated      = rawptr(behaviour.on_child_terminated),
+	on_child_restarted       = rawptr(behaviour.on_child_restarted),
+	on_max_restarts_exceeded = rawptr(behaviour.on_max_restarts_exceeded),
+}
+return hot_api.spawn_raw(name, &val, size_of(T), raw_beh, opts, parent_pid, loc)
+`)
+@(require_results)
+spawn :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	parent_pid: PID = 0,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn(name, data, behaviour, opts, parent_pid, loc)
+}
+
+// Like spawn, but with a compile-time mailbox capacity for this actor.
+// MAILBOX_SIZE must be a power of two. The capacity is fixed at build time and
+// never grows or shrinks while the actor is alive. In hot_reload_dev builds
+// these actors are spawned directly (no compose shim).
+@(hot = "skip")
+@(require_results)
+spawn_sized :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	$MAILBOX_SIZE: int,
+	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	parent_pid: PID = 0,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_sized(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
+}
+
+// Spawn a child actor with the current actor as parent. Must be called from within an actor.
+@(hot = `compose
+default opts = {}
+val := data
+raw_beh := Raw_Spawn_Behaviour{
+	handle_message           = rawptr(behaviour.handle_message),
+	init_proc                = rawptr(behaviour.init),
+	terminate_proc           = rawptr(behaviour.terminate),
+	actor_type               = behaviour.actor_type,
+	on_child_started         = rawptr(behaviour.on_child_started),
+	on_child_terminated      = rawptr(behaviour.on_child_terminated),
+	on_child_restarted       = rawptr(behaviour.on_child_restarted),
+	on_max_restarts_exceeded = rawptr(behaviour.on_max_restarts_exceeded),
+}
+return hot_api.spawn_child_raw(name, &val, size_of(T), raw_beh, opts, loc)
+`)
+@(require_results)
+spawn_child :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_child(name, data, behaviour, opts, loc)
+}
+
+// Like spawn_child, but with a compile-time mailbox capacity for this actor.
+// MAILBOX_SIZE must be a power of two. The capacity is fixed at build time and
+// never grows or shrinks while the actor is alive.
+@(hot = "skip")
+@(require_results)
+spawn_child_sized :: proc(
+	name: string,
+	data: $T,
+	behaviour: Actor_Behaviour(T),
+	$MAILBOX_SIZE: int,
+	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_child_sized(name, data, behaviour, MAILBOX_SIZE, opts, loc)
+}
+
+// Register a named spawn function for remote spawning and spawn_by_name.
+@(require_results)
+register_spawn_func :: proc(
+	name: string,
+	func: SPAWN,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.register_spawn_func(name, func, loc)
+}
+
+// Spawn an actor using a name registered via register_spawn_func.
+@(require_results)
+spawn_by_name :: proc(
+	spawn_func_name: string,
+	actor_name: string,
+	parent_pid: PID = 0,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_by_name(spawn_func_name, actor_name, parent_pid, loc)
+}
+
+// Spawn an actor on a remote node. Blocks until response or timeout.
+@(require_results)
+@(hot = "skip")
+spawn_remote :: proc(
+	spawn_func_name: string,
+	actor_name: string,
+	target_node: string,
+	parent_pid: PID = 0,
+	timeout: time.Duration = actod.SPAWN_REMOTE_TIMEOUT,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.spawn_remote(spawn_func_name, actor_name, target_node, parent_pid, timeout, loc)
+}
+
+// Sending messages
+
+// Send a message to an actor by PID. Routes to local or remote transparently.
+@(require_results)
+send_message :: proc(
+	to: PID,
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_message(to, content, loc)
+}
+
+// Send a message by name. Use "actor@node" for remote actors.
+@(hot = `compose
+pid, found := hot_api.get_actor_pid(to)
+if !found do return .ACTOR_NOT_FOUND
+return hot_api.send_message(pid, content, loc)
+`)
+@(require_results)
+send_message_name :: proc(
+	to: string,
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_message_name(to, content, loc)
+}
+
+// One name for both addressing shapes:
+//   send(pid, msg)             by PID
+//   send("actor@node", msg)    by name
+send :: proc {
+	send_message,
+	send_message_name,
+}
+
+// Fire-and-forget send over the UDP lane when the target node has one:
+// at-most-once, unordered, silently lossy. Falls back to the reliable TCP
+// path for local PIDs, oversized messages, or peers without a UDP lane.
+@(require_results)
+send_unreliable :: proc(
+	to: PID,
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_unreliable(to, content, loc)
+}
+
+// Send by name with a local PID cache. Caches the name->PID resolution so repeated
+// sends to the same name skip the lookup. If the actor restarts (new PID), the cache
+// auto-refreshes. Local actors only. Linear scan, best for a small number of target names.
+@(hot = "skip")
+@(require_results)
+send_cached :: proc(
+	to: string,
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_by_name_cached(to, content, loc)
+}
+
+// Send a message to a remote actor with explicit node and actor names.
+@(hot = "skip")
+@(require_results)
+send_to :: proc(
+	actor_name: string,
+	node_name: string,
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_to(actor_name, node_name, content, loc)
+}
+
+// Send a message to self. Must be called from within an actor.
+@(hot = `compose
+return hot_api.send_message(hot_api.get_self_pid(), content, loc)
+`)
+@(require_results)
+send_self :: proc(
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_self(content, loc)
+}
+
+// Send a message to the parent. Must be called from within an actor.
+@(hot = `compose
+parent := hot_api.get_parent_pid()
+if parent == 0 do return .ACTOR_NOT_FOUND
+return hot_api.send_message(parent, content, loc)
+`)
+@(require_results)
+send_parent :: proc(
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_message_to_parent(content, loc)
+}
+
+// Send a message to all children. Must be called from within an actor.
+@(hot = `compose
+for child in hot_api.get_children(hot_api.get_self_pid()) {
+	err := hot_api.send_message(child, content, loc)
+	if err != .OK do return err
+}
+return .OK
+`)
+@(require_results)
+send_children :: proc(
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.send_message_to_children(content, loc)
+}
+
+// Register a message type for deep-copy support and network serialization. Use with @(init).
+@(hot = "noop")
+register_message_type :: proc "contextless" (
+	$T: typeid,
+	loc: runtime.Source_Code_Location = #caller_location,
+) {
+	actod.register_message_type(T, loc)
+}
+
+// Ask / reply
+
+// Send a request with a correlation token. The reply arrives as a normal message
+// (match its type, then check replying_to for the token); Ask_Timeout{token} arrives
+// instead if no reply lands within timeout. Must be called from within an actor.
+@(hot = "skip")
+@(require_results)
+ask :: proc(
+	to: PID,
+	content: $T,
+	timeout: time.Duration = actod.DEFAULT_ASK_TIMEOUT,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Ask_Token,
+	Send_Error,
+) {
+	return actod.ask(to, content, timeout, loc)
+}
+
+// Send content back to the sender of the ask currently being handled, carrying its
+// token. Returns NOT_ASKED when the current message is not an ask. Valid only during
+// handle_message, like the message payload itself.
+@(hot = "skip")
+@(require_results)
+reply :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+	return actod.reply(content, loc)
+}
+
+// If the message currently being handled is a reply to one of this actor's asks,
+// returns its token.
+@(require_results)
+replying_to :: proc() -> (Ask_Token, bool) {
+	return actod.replying_to()
+}
+
+// Actor context. Call from within an actor.
+
+get_self_pid :: proc() -> PID {
+	return actod.get_self_pid()
+}
+
+get_self_name :: proc() -> string {
+	return actod.get_self_name()
+}
+
+get_parent_pid :: proc() -> PID {
+	return actod.get_parent_pid()
+}
+
+self_terminate :: proc(
+	reason: Termination_Reason = .NORMAL,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.self_terminate(reason, loc)
+}
+
+self_rename :: proc(
+	new_name: string,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.self_rename(new_name, loc)
+}
+
+// Cooperatively yield from a pooled actor, allowing other actors on the same worker to run.
+// Must be called from within a pooled (non-dedicated-thread) actor.
+// If you need this, reconsider your actor design.
+yield :: proc(loc: runtime.Source_Code_Location = #caller_location) {
+	actod.yield(loc)
+}
+
+// Returns real time in production, virtual time in tests.
+now :: proc() -> time.Time {
+	return actod.now()
+}
+
+// Timers
+
+// Start a timer for the current actor. Each firing delivers a Timer_Tick{id}
+// message to the actor's mailbox; match on id to distinguish timers. Timers are
+// cleaned up automatically on actor termination.
+@(require_results)
+set_timer :: proc(
+	interval: time.Duration,
+	repeat: bool,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	u32,
+	Send_Error,
+) {
+	return actod.set_timer(interval, repeat, loc)
+}
+
+cancel_timer :: proc(
+	id: u32,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
+	return actod.cancel_timer(id, loc)
+}
+
+// Lookup and control
+
+@(require_results)
+get_actor_pid :: proc(name: string) -> (PID, bool) {
+	return actod.get_actor_pid(name)
+}
+
+get_actor_name :: proc(pid: PID) -> string {
+	return actod.get_actor_name(pid)
+}
+
+is_local_pid :: proc(pid: PID) -> bool {
+	return actod.is_local_pid(pid)
+}
+
+get_node_id :: proc(pid: PID) -> Node_ID {
+	return actod.get_node_id(pid)
+}
+
+@(hot = "host_name get_pid_actor_type")
+get_actor_type :: proc(pid: PID) -> Actor_Type {
+	return actod.get_pid_actor_type(pid)
+}
+
+pack_pid :: proc(h: Handle, node_id: Node_ID = actod.current_node_id) -> PID {
+	return actod.pack_pid(h, node_id)
+}
+
+unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
+	return actod.unpack_pid(pid)
+}
+
+// Terminate an actor by PID. Defaults to reason .SHUTDOWN.
+@(require_results)
+terminate_actor :: proc(
+	to: PID,
+	reason: Termination_Reason = .SHUTDOWN,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.terminate_actor(to, reason, loc)
+}
+
+// One name for both shapes. Note the differing default reasons:
+//   terminate(pid)    another actor, defaults to .SHUTDOWN
+//   terminate()       self, defaults to .NORMAL
+terminate :: proc {
+	terminate_actor,
+	self_terminate,
+}
+
+// Rename an actor by PID.
+@(require_results)
+rename_actor :: proc(
+	pid: PID,
+	new_name: string,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.rename_actor(pid, new_name, loc)
+}
+
+// rename(pid, "name") for another actor, rename("name") for self.
+rename :: proc {
+	rename_actor,
+	self_rename,
+}
 
 // Supervision
-Supervision_Strategy :: actod.Supervision_Strategy
-Restart_Policy :: actod.Restart_Policy
 
-// Configuration
-System_Config :: actod.System_Config
-Actor_Config :: actod.Actor_Config
-Network_Config :: actod.Network_Config
-Log_Config :: actod.Log_Config
-Log_Callback :: actod.Log_Callback
-Log_Flush :: actod.Log_Flush
-Log_Level :: log.Level
-Log_Options :: log.Options
-Spin_Strategy :: actod.SPIN_STRATEGY
+// Returns a copy allocated with context.allocator; the caller owns it.
+get_children :: proc(parent: PID) -> []PID {
+	return actod.get_children(parent)
+}
+
+// Dynamically spawn and add a new child to a supervisor.
+@(require_results)
+add_child :: proc(
+	parent: PID,
+	child_spawn: SPAWN,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.add_child(parent, child_spawn, loc)
+}
+
+// Adopt an existing actor as a child of a supervisor.
+@(require_results)
+@(hot = "extra_param spawn_func_name_hash: u64 = 0")
+adopt_child :: proc(
+	parent: PID,
+	existing_child: PID,
+	child_spawn: SPAWN,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.add_child_existing(parent, existing_child, child_spawn, 0, loc)
+}
+
+@(require_results)
+remove_child :: proc(
+	parent: PID,
+	child: PID,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.remove_child(parent, child, loc)
+}
+
+// Actor types and type-based pub/sub. Global, works cross-node.
+
+// Register a named actor type. Returns the local Actor_Type ID.
+@(require_results)
+register_actor_type :: proc(name: string) -> (Actor_Type, bool) {
+	return actod.register_actor_type(name)
+}
+
+// Get the string name of a registered actor type.
+@(require_results)
+get_actor_type_name :: proc(actor_type: Actor_Type) -> (string, bool) {
+	return actod.get_actor_type_name(actor_type)
+}
+
+// Subscribe to broadcasts from actors of the given type. Must be called from within an actor.
+// Subscriptions are automatically cleaned up on actor termination.
+@(require_results)
+subscribe_type :: proc(
+	actor_type: Actor_Type,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Subscription,
+	bool,
+) {
+	return actod.subscribe_type(actor_type, loc)
+}
+
+// Unsubscribe from a previously subscribed actor type.
+@(hot = "host_name pubsub_unsubscribe")
+@(require_results)
+unsubscribe_type :: proc(
+	sub: Subscription,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.pubsub_unsubscribe(sub, loc)
+}
+
+// Broadcast a message to all subscribers of the current actor's type.
+// Must be called from within a typed actor (actor_type set on behaviour).
+broadcast :: proc(msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
+	actod.broadcast(msg, loc)
+}
+
+get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
+	return actod.get_subscriber_count(actor_type)
+}
+
+// Topics. Scoped pub/sub channels, local node only, max 64 subscribers per topic.
+// Embed a Topic in a domain struct for per-entity channels.
+
+@(require_results)
+subscribe_topic :: proc(
+	topic: ^Topic,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Topic_Subscription,
+	bool,
+) {
+	return actod.subscribe_topic(topic, loc)
+}
+
+@(require_results)
+unsubscribe_topic :: proc(
+	sub: Topic_Subscription,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.unsubscribe_topic(sub, loc)
+}
+
+// Deliver a message to all current subscribers of the topic.
+publish :: proc(topic: ^Topic, msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
+	actod.publish(topic, msg, loc)
+}
+
+// One name per direction, resolved by argument shape:
+//   subscribe(actor_type)    type-based broadcasts
+//   subscribe(&topic)        a topic
+//   subscribe()              observer stats snapshots
+// Unsubscribing takes the subscription value returned by the matching subscribe.
+subscribe :: proc {
+	subscribe_type,
+	subscribe_topic,
+	subscribe_to_stats,
+}
+
+unsubscribe :: proc {
+	unsubscribe_type,
+	unsubscribe_topic,
+}
 
 // Networking
-Node_ID :: actod.Node_ID
-Connection_Ring_Config :: actod.Connection_Ring_Config
-Node_Info :: actod.Node_Info
-Transport_Strategy :: actod.Transport_Strategy
+
+// Register a remote node so actors on it can be addressed. connect=true dials
+// immediately; otherwise the connection is established on first use.
+@(require_results)
+@(hot = "skip")
+register_node :: proc(
+	name: string,
+	address: net.Endpoint,
+	transport: Transport_Strategy,
+	connect: bool = false,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Node_ID,
+	bool,
+) {
+	return actod.register_node(name, address, transport, connect, loc)
+}
+
+@(require_results)
+@(hot = "skip")
+get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
+	return actod.get_node_info(node_id)
+}
+
+@(require_results)
+@(hot = "skip")
+get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
+	return actod.get_node_by_name(name)
+}
+
+@(hot = "skip")
+unregister_node :: proc(node_id: Node_ID) {
+	actod.unregister_node(node_id)
+}
 
 // Observer
-Actor_Stats :: actod.Actor_Stats
-Stats_Snapshot :: actod.Stats_Snapshot
-Stats_Response :: actod.Stats_Response
 
+// Start the stats-collecting observer actor. collection_interval 0 means
+// manual collection only (trigger_stats_collection).
+@(hot = "skip")
+start_observer :: proc(
+	collection_interval: time.Duration = 0,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	return actod.start_observer(collection_interval, loc)
+}
+
+@(hot = "skip")
+stop_observer :: proc() {
+	actod.stop_observer()
+}
+
+@(hot = "skip")
+trigger_stats_collection :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return actod.trigger_stats_collection(loc)
+}
+
+@(hot = "skip")
+request_actor_stats :: proc(
+	actor_pid: PID,
+	requester: PID,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.request_actor_stats(actor_pid, requester, loc)
+}
+
+@(hot = "skip")
+request_all_stats :: proc(
+	requester: PID,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.request_all_stats(requester, loc)
+}
+
+@(hot = "skip")
+set_stats_collection_interval :: proc(
+	interval: time.Duration,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.set_stats_collection_interval(interval, loc)
+}
+
+@(hot = "skip")
+clear_terminated_stats :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return actod.clear_terminated_stats(loc)
+}
+
+// Subscribe to observer stats snapshots. Must be called from within an actor.
+@(require_results)
+@(hot = "skip")
+subscribe_to_stats :: proc(
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Subscription,
+	bool,
+) {
+	return actod.subscribe_to_stats(loc)
+}
+
+@(require_results)
+@(hot = "skip")
+unsubscribe_from_stats :: proc(
+	sub: Subscription,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
+	return actod.unsubscribe_from_stats(sub, loc)
+}
+
+// Logging
+
+set_log_level :: proc(level: Log_Level) {
+	actod.set_log_level(level)
+}
+
+is_log_level_enabled :: proc(level: Log_Level) -> bool {
+	return actod.is_log_level_enabled(level)
+}
+
+get_current_log_config :: proc() -> Log_Config {
+	return actod.get_current_log_config()
+}
+
+// The system-level logger, for logging outside any actor.
 @(hot = "skip")
 get_node_log_ctx :: proc() -> log.Logger {
 	return actod.systemLogger
 }
+
+// Deprecated names, kept for compatibility.
+
+shutdown_node :: node_shutdown
+send_by_name_cached :: send_cached
+send_message_to_parent :: send_parent
+send_message_to_children :: send_children
+get_pid_actor_type :: get_actor_type
+add_child_existing :: adopt_child

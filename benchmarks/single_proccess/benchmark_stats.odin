@@ -5,7 +5,7 @@ import "core:os"
 import "core:slice"
 import "core:strconv"
 
-BENCH_REPEATS := 5
+BENCH_REPEATS := 1
 
 init_bench_repeats :: proc() {
 	if v, ok := os.lookup_env("BENCH_REPEATS", context.allocator); ok {

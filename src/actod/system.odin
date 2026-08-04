@@ -518,6 +518,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	}
 }
 
+node_shutdown :: shutdown_node
+
 shutdown_node :: proc(loc := #caller_location) {
 	context.logger = systemLogger
 	if !NODE.started || NODE.pid == 0 {

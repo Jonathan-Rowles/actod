@@ -1705,6 +1705,8 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (
 	return 0, true
 }
 
+adopt_child :: add_child_existing
+
 // Dynamically adopt an existing actor as a child of a supervisor
 add_child_existing :: proc(
 	parent: PID,

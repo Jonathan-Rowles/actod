@@ -282,83 +282,6 @@ import "core:time"
 import "core:net"
 
 Hot_API :: struct {
-	node_init:                 proc(name: string, opts: System_Config, loc: runtime.Source_Code_Location),
-	shutdown_node:             proc(loc: runtime.Source_Code_Location),
-	await_signal:              proc(),
-	spawn_by_name:             proc(spawn_func_name: string, actor_name: string, parent_pid: PID, loc: runtime.Source_Code_Location) -> (PID, bool),
-	spawn_remote:              proc(
-		spawn_func_name: string,
-		actor_name: string,
-		target_node: string,
-		parent_pid: PID,
-		timeout: time.Duration,
-		loc: runtime.Source_Code_Location,
-	) -> (PID, bool),
-	terminate_actor:           proc(to: PID, reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
-	rename_actor:              proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location) -> bool,
-	send_message:              proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
-	send_unreliable:           proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
-	replying_to:               proc() -> (Ask_Token, bool),
-	get_self_pid:              proc() -> PID,
-	get_self_name:             proc() -> string,
-	get_parent_pid:            proc() -> PID,
-	self_terminate:            proc(reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
-	self_rename:               proc(new_name: string, loc: runtime.Source_Code_Location) -> bool,
-	yield:                     proc(loc: runtime.Source_Code_Location),
-	now:                       proc() -> time.Time,
-	get_actor_pid:             proc(name: string) -> (PID, bool),
-	get_actor_name:            proc(pid: PID) -> string,
-	is_local_pid:              proc(pid: PID) -> bool,
-	get_node_id:               proc(pid: PID) -> Node_ID,
-	get_pid_actor_type:        proc(pid: PID) -> Actor_Type,
-	pack_pid:                  proc(h: Handle, node_id: Node_ID) -> PID,
-	unpack_pid:                proc(pid: PID) -> (Handle, Node_ID),
-	set_timer:                 proc(interval: time.Duration, repeat: bool, loc: runtime.Source_Code_Location) -> (u32, Send_Error),
-	cancel_timer:              proc(id: u32, loc: runtime.Source_Code_Location) -> Send_Error,
-	get_children:              proc(parent: PID) -> []PID,
-	add_child:                 proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Location) -> (PID, bool),
-	add_child_existing:        proc(
-		parent: PID,
-		existing_child: PID,
-		child_spawn: SPAWN,
-		spawn_func_name_hash: u64,
-		loc: runtime.Source_Code_Location,
-	) -> (PID, bool),
-	remove_child:              proc(parent: PID, child: PID, loc: runtime.Source_Code_Location) -> bool,
-	register_actor_type:       proc(name: string) -> (Actor_Type, bool),
-	get_actor_type_name:       proc(actor_type: Actor_Type) -> (string, bool),
-	subscribe_type:            proc(actor_type: Actor_Type, loc: runtime.Source_Code_Location) -> (Subscription, bool),
-	unsubscribe:               proc(sub: Subscription, loc: runtime.Source_Code_Location) -> bool,
-	broadcast:                 proc(msg: any, loc: runtime.Source_Code_Location),
-	get_subscriber_count:      proc(actor_type: Actor_Type) -> u32,
-	subscribe_topic:           proc(topic: ^Topic, loc: runtime.Source_Code_Location) -> (Topic_Subscription, bool),
-	unsubscribe_topic:         proc(sub: Topic_Subscription, loc: runtime.Source_Code_Location) -> bool,
-	publish:                   proc(topic: ^Topic, msg: any, loc: runtime.Source_Code_Location),
-	register_node:             proc(
-		name: string,
-		address: net.Endpoint,
-		transport: Transport_Strategy,
-		connect: bool,
-		loc: runtime.Source_Code_Location,
-	) -> (Node_ID, bool),
-	register_spawn_func:       proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location) -> bool,
-	get_node_info:             proc(node_id: Node_ID) -> (Node_Info, bool),
-	get_node_by_name:          proc(name: string) -> (Node_ID, bool),
-	unregister_node:           proc(node_id: Node_ID),
-	get_local_node_pid:        proc() -> PID,
-	get_local_node_name:       proc() -> string,
-	start_observer:            proc(collection_interval: time.Duration, loc: runtime.Source_Code_Location) -> (PID, bool),
-	stop_observer:             proc(),
-	trigger_stats_collection:  proc(loc: runtime.Source_Code_Location) -> bool,
-	request_actor_stats:       proc(actor_pid: PID, requester: PID, loc: runtime.Source_Code_Location) -> bool,
-	request_all_stats:         proc(requester: PID, loc: runtime.Source_Code_Location) -> bool,
-	set_stats_collection_interval: proc(interval: time.Duration, loc: runtime.Source_Code_Location) -> bool,
-	clear_terminated_stats:    proc(loc: runtime.Source_Code_Location) -> bool,
-	subscribe_to_stats:        proc(loc: runtime.Source_Code_Location) -> (Subscription, bool),
-	unsubscribe_from_stats:    proc(sub: Subscription, loc: runtime.Source_Code_Location) -> bool,
-	set_log_level:             proc(level: log.Level),
-	is_log_level_enabled:      proc(level: log.Level) -> bool,
-	get_current_log_config:    proc() -> Log_Config,
 	make_node_config:          proc(
 		actor_registry_size: int,
 		allow_registry_growth: bool,
@@ -412,6 +335,83 @@ Hot_API :: struct {
 		custom_logger: Log_Callback,
 		custom_flush: Log_Flush,
 	) -> Log_Config,
+	node_init:                 proc(name: string, opts: System_Config, loc: runtime.Source_Code_Location),
+	node_shutdown:             proc(loc: runtime.Source_Code_Location),
+	await_signal:              proc(),
+	get_local_node_pid:        proc() -> PID,
+	get_local_node_name:       proc() -> string,
+	register_spawn_func:       proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location) -> bool,
+	spawn_by_name:             proc(spawn_func_name: string, actor_name: string, parent_pid: PID, loc: runtime.Source_Code_Location) -> (PID, bool),
+	spawn_remote:              proc(
+		spawn_func_name: string,
+		actor_name: string,
+		target_node: string,
+		parent_pid: PID,
+		timeout: time.Duration,
+		loc: runtime.Source_Code_Location,
+	) -> (PID, bool),
+	send_message:              proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
+	send_unreliable:           proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
+	replying_to:               proc() -> (Ask_Token, bool),
+	get_self_pid:              proc() -> PID,
+	get_self_name:             proc() -> string,
+	get_parent_pid:            proc() -> PID,
+	self_terminate:            proc(reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
+	self_rename:               proc(new_name: string, loc: runtime.Source_Code_Location) -> bool,
+	yield:                     proc(loc: runtime.Source_Code_Location),
+	now:                       proc() -> time.Time,
+	set_timer:                 proc(interval: time.Duration, repeat: bool, loc: runtime.Source_Code_Location) -> (u32, Send_Error),
+	cancel_timer:              proc(id: u32, loc: runtime.Source_Code_Location) -> Send_Error,
+	get_actor_pid:             proc(name: string) -> (PID, bool),
+	get_actor_name:            proc(pid: PID) -> string,
+	is_local_pid:              proc(pid: PID) -> bool,
+	get_node_id:               proc(pid: PID) -> Node_ID,
+	get_actor_type:            proc(pid: PID) -> Actor_Type,
+	pack_pid:                  proc(h: Handle, node_id: Node_ID) -> PID,
+	unpack_pid:                proc(pid: PID) -> (Handle, Node_ID),
+	terminate_actor:           proc(to: PID, reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
+	rename_actor:              proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location) -> bool,
+	get_children:              proc(parent: PID) -> []PID,
+	add_child:                 proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Location) -> (PID, bool),
+	adopt_child:               proc(
+		parent: PID,
+		existing_child: PID,
+		child_spawn: SPAWN,
+		spawn_func_name_hash: u64,
+		loc: runtime.Source_Code_Location,
+	) -> (PID, bool),
+	remove_child:              proc(parent: PID, child: PID, loc: runtime.Source_Code_Location) -> bool,
+	register_actor_type:       proc(name: string) -> (Actor_Type, bool),
+	get_actor_type_name:       proc(actor_type: Actor_Type) -> (string, bool),
+	subscribe_type:            proc(actor_type: Actor_Type, loc: runtime.Source_Code_Location) -> (Subscription, bool),
+	unsubscribe_type:          proc(sub: Subscription, loc: runtime.Source_Code_Location) -> bool,
+	broadcast:                 proc(msg: any, loc: runtime.Source_Code_Location),
+	get_subscriber_count:      proc(actor_type: Actor_Type) -> u32,
+	subscribe_topic:           proc(topic: ^Topic, loc: runtime.Source_Code_Location) -> (Topic_Subscription, bool),
+	unsubscribe_topic:         proc(sub: Topic_Subscription, loc: runtime.Source_Code_Location) -> bool,
+	publish:                   proc(topic: ^Topic, msg: any, loc: runtime.Source_Code_Location),
+	register_node:             proc(
+		name: string,
+		address: net.Endpoint,
+		transport: Transport_Strategy,
+		connect: bool,
+		loc: runtime.Source_Code_Location,
+	) -> (Node_ID, bool),
+	get_node_info:             proc(node_id: Node_ID) -> (Node_Info, bool),
+	get_node_by_name:          proc(name: string) -> (Node_ID, bool),
+	unregister_node:           proc(node_id: Node_ID),
+	start_observer:            proc(collection_interval: time.Duration, loc: runtime.Source_Code_Location) -> (PID, bool),
+	stop_observer:             proc(),
+	trigger_stats_collection:  proc(loc: runtime.Source_Code_Location) -> bool,
+	request_actor_stats:       proc(actor_pid: PID, requester: PID, loc: runtime.Source_Code_Location) -> bool,
+	request_all_stats:         proc(requester: PID, loc: runtime.Source_Code_Location) -> bool,
+	set_stats_collection_interval: proc(interval: time.Duration, loc: runtime.Source_Code_Location) -> bool,
+	clear_terminated_stats:    proc(loc: runtime.Source_Code_Location) -> bool,
+	subscribe_to_stats:        proc(loc: runtime.Source_Code_Location) -> (Subscription, bool),
+	unsubscribe_from_stats:    proc(sub: Subscription, loc: runtime.Source_Code_Location) -> bool,
+	set_log_level:             proc(level: log.Level),
+	is_log_level_enabled:      proc(level: log.Level) -> bool,
+	get_current_log_config:    proc() -> Log_Config,
 	get_node_log_ctx:          proc() -> log.Logger,
 	spawn_raw:                proc(
 		name: string,
@@ -438,16 +438,40 @@ Hot_API :: struct {
 @(export)
 hot_api: ^Hot_API
 
+make_node_config :: proc(actor_registry_size: int = 0, allow_registry_growth: bool = false, enable_observer: bool = false, observer_interval: time.Duration = {}, network: Network_Config = {}, actor_config: Actor_Config = {}, blocking_child: SPAWN = {}, worker_count: int = 0, hot_reload_dev: bool = false, hot_reload_watch_path: string = "", loc: runtime.Source_Code_Location = #caller_location) -> System_Config {
+	return hot_api.make_node_config(actor_registry_size, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, loc)
+}
+
+make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, message_batch: int = 64, page_size: int = 65536, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
+	return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
+}
+
+make_network_config :: proc(auth_password: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
+	return hot_api.make_network_config(auth_password, port, udp_port, udp_max_datagram, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
+}
+
+make_log_config :: proc(level: log.Level = {}, console_opts: log.Options = {}, file_opts: log.Options = {}, ident: string = "", enable_file: bool = false, log_path: string = "", custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {
+	return hot_api.make_log_config(level, console_opts, file_opts, ident, enable_file, log_path, custom_logger, custom_flush)
+}
+
 node_init :: proc(name: string, opts: System_Config = {}, loc: runtime.Source_Code_Location = #caller_location) {
 	hot_api.node_init(name, opts, loc)
 }
 
-shutdown_node :: proc(loc: runtime.Source_Code_Location = #caller_location) {
-	hot_api.shutdown_node(loc)
+node_shutdown :: proc(loc: runtime.Source_Code_Location = #caller_location) {
+	hot_api.node_shutdown(loc)
 }
 
 await_signal :: proc() {
 	hot_api.await_signal()
+}
+
+get_local_node_pid :: proc() -> PID {
+	return hot_api.get_local_node_pid()
+}
+
+get_local_node_name :: proc() -> string {
+	return hot_api.get_local_node_name()
 }
 
 spawn :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts: Actor_Config = {}, parent_pid: PID = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
@@ -480,6 +504,10 @@ spawn_child :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts:
 	return hot_api.spawn_child_raw(name, &val, size_of(T), raw_beh, opts, loc)
 }
 
+register_spawn_func :: proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return hot_api.register_spawn_func(name, func, loc)
+}
+
 spawn_by_name :: proc(spawn_func_name: string, actor_name: string, parent_pid: PID = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
 	return hot_api.spawn_by_name(spawn_func_name, actor_name, parent_pid, loc)
 }
@@ -488,20 +516,8 @@ spawn_remote :: proc(spawn_func_name: string, actor_name: string, target_node: s
 	return hot_api.spawn_remote(spawn_func_name, actor_name, target_node, parent_pid, timeout, loc)
 }
 
-terminate_actor :: proc(to: PID, reason: Termination_Reason = .SHUTDOWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.terminate_actor(to, reason, loc)
-}
-
-rename_actor :: proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.rename_actor(pid, new_name, loc)
-}
-
 send_message :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	return hot_api.send_message(to, content, loc)
-}
-
-send_unreliable :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
-	return hot_api.send_unreliable(to, content, loc)
 }
 
 send_message_name :: proc(to: string, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
@@ -510,17 +526,21 @@ send_message_name :: proc(to: string, content: $T, loc: runtime.Source_Code_Loca
 	return hot_api.send_message(pid, content, loc)
 }
 
+send_unreliable :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+	return hot_api.send_unreliable(to, content, loc)
+}
+
 send_self :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	return hot_api.send_message(hot_api.get_self_pid(), content, loc)
 }
 
-send_message_to_parent :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+send_parent :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	parent := hot_api.get_parent_pid()
 	if parent == 0 do return .ACTOR_NOT_FOUND
 	return hot_api.send_message(parent, content, loc)
 }
 
-send_message_to_children :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+send_children :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	for child in hot_api.get_children(hot_api.get_self_pid()) {
 		err := hot_api.send_message(child, content, loc)
 		if err != .OK do return err
@@ -528,12 +548,12 @@ send_message_to_children :: proc(content: $T, loc: runtime.Source_Code_Location 
 	return .OK
 }
 
-replying_to :: proc() -> (Ask_Token, bool) {
-	return hot_api.replying_to()
-}
-
 register_message_type :: proc "contextless"($T: typeid, loc: runtime.Source_Code_Location = #caller_location) {
 	// no-op in hot reload shim, types are registered by the host
+}
+
+replying_to :: proc() -> (Ask_Token, bool) {
+	return hot_api.replying_to()
 }
 
 get_self_pid :: proc() -> PID {
@@ -564,6 +584,14 @@ now :: proc() -> time.Time {
 	return hot_api.now()
 }
 
+set_timer :: proc(interval: time.Duration, repeat: bool, loc: runtime.Source_Code_Location = #caller_location) -> (u32, Send_Error) {
+	return hot_api.set_timer(interval, repeat, loc)
+}
+
+cancel_timer :: proc(id: u32, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+	return hot_api.cancel_timer(id, loc)
+}
+
 get_actor_pid :: proc(name: string) -> (PID, bool) {
 	return hot_api.get_actor_pid(name)
 }
@@ -580,8 +608,8 @@ get_node_id :: proc(pid: PID) -> Node_ID {
 	return hot_api.get_node_id(pid)
 }
 
-get_pid_actor_type :: proc(pid: PID) -> Actor_Type {
-	return hot_api.get_pid_actor_type(pid)
+get_actor_type :: proc(pid: PID) -> Actor_Type {
+	return hot_api.get_actor_type(pid)
 }
 
 pack_pid :: proc(h: Handle, node_id: Node_ID = {}) -> PID {
@@ -592,12 +620,12 @@ unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
 	return hot_api.unpack_pid(pid)
 }
 
-set_timer :: proc(interval: time.Duration, repeat: bool, loc: runtime.Source_Code_Location = #caller_location) -> (u32, Send_Error) {
-	return hot_api.set_timer(interval, repeat, loc)
+terminate_actor :: proc(to: PID, reason: Termination_Reason = .SHUTDOWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return hot_api.terminate_actor(to, reason, loc)
 }
 
-cancel_timer :: proc(id: u32, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
-	return hot_api.cancel_timer(id, loc)
+rename_actor :: proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return hot_api.rename_actor(pid, new_name, loc)
 }
 
 get_children :: proc(parent: PID) -> []PID {
@@ -608,8 +636,8 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Loca
 	return hot_api.add_child(parent, child_spawn, loc)
 }
 
-add_child_existing :: proc(parent: PID, existing_child: PID, child_spawn: SPAWN, spawn_func_name_hash: u64 = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
-	return hot_api.add_child_existing(parent, existing_child, child_spawn, spawn_func_name_hash, loc)
+adopt_child :: proc(parent: PID, existing_child: PID, child_spawn: SPAWN, spawn_func_name_hash: u64 = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
+	return hot_api.adopt_child(parent, existing_child, child_spawn, spawn_func_name_hash, loc)
 }
 
 remove_child :: proc(parent: PID, child: PID, loc: runtime.Source_Code_Location = #caller_location) -> bool {
@@ -628,8 +656,8 @@ subscribe_type :: proc(actor_type: Actor_Type, loc: runtime.Source_Code_Location
 	return hot_api.subscribe_type(actor_type, loc)
 }
 
-unsubscribe :: proc(sub: Subscription, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.unsubscribe(sub, loc)
+unsubscribe_type :: proc(sub: Subscription, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return hot_api.unsubscribe_type(sub, loc)
 }
 
 broadcast :: proc(msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
@@ -656,10 +684,6 @@ register_node :: proc(name: string, address: net.Endpoint, transport: Transport_
 	return hot_api.register_node(name, address, transport, connect, loc)
 }
 
-register_spawn_func :: proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.register_spawn_func(name, func, loc)
-}
-
 get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
 	return hot_api.get_node_info(node_id)
 }
@@ -670,14 +694,6 @@ get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
 
 unregister_node :: proc(node_id: Node_ID) {
 	hot_api.unregister_node(node_id)
-}
-
-get_local_node_pid :: proc() -> PID {
-	return hot_api.get_local_node_pid()
-}
-
-get_local_node_name :: proc() -> string {
-	return hot_api.get_local_node_name()
 }
 
 start_observer :: proc(collection_interval: time.Duration = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
@@ -728,24 +744,34 @@ get_current_log_config :: proc() -> Log_Config {
 	return hot_api.get_current_log_config()
 }
 
-make_node_config :: proc(actor_registry_size: int = 0, allow_registry_growth: bool = false, enable_observer: bool = false, observer_interval: time.Duration = {}, network: Network_Config = {}, actor_config: Actor_Config = {}, blocking_child: SPAWN = {}, worker_count: int = 0, hot_reload_dev: bool = false, hot_reload_watch_path: string = "", loc: runtime.Source_Code_Location = #caller_location) -> System_Config {
-	return hot_api.make_node_config(actor_registry_size, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, loc)
-}
-
-make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, message_batch: int = 64, page_size: int = 65536, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
-	return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
-}
-
-make_network_config :: proc(auth_password: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
-	return hot_api.make_network_config(auth_password, port, udp_port, udp_max_datagram, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
-}
-
-make_log_config :: proc(level: log.Level = {}, console_opts: log.Options = {}, file_opts: log.Options = {}, ident: string = "", enable_file: bool = false, log_path: string = "", custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {
-	return hot_api.make_log_config(level, console_opts, file_opts, ident, enable_file, log_path, custom_logger, custom_flush)
-}
-
 get_node_log_ctx :: proc() -> log.Logger {
 	return hot_api.get_node_log_ctx()
+}
+
+send :: proc {
+	send_message,
+	send_message_name,
+}
+
+terminate :: proc {
+	terminate_actor,
+	self_terminate,
+}
+
+rename :: proc {
+	rename_actor,
+	self_rename,
+}
+
+subscribe :: proc {
+	subscribe_type,
+	subscribe_topic,
+	subscribe_to_stats,
+}
+
+unsubscribe :: proc {
+	unsubscribe_type,
+	unsubscribe_topic,
 }
 
 `

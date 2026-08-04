@@ -91,9 +91,9 @@ main :: proc() {
 		os.exit(1)
 	}
 
-	aliases, procs, raw_src := parse_act_file(API_SOURCE_DIR)
+	aliases, procs, groups, raw_src := parse_act_file(API_SOURCE_DIR)
 	types_shim, discovered_types := build_types_shim("src/actod", aliases[:], procs[:])
-	actod_shim := build_actod_shim(procs[:], aliases[:], discovered_types)
+	actod_shim := build_actod_shim(procs[:], aliases[:], groups[:], discovered_types)
 	hot_api_struct := build_hot_api_struct_text(procs[:])
 	hot_api_init := build_hot_api_init(procs[:])
 
@@ -108,7 +108,7 @@ main :: proc() {
 }
 
 
-parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, procs: [dynamic]Proc_Info, raw_src: string) {
+parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, procs: [dynamic]Proc_Info, groups: [dynamic]string, raw_src: string) {
 	p := parser.default_parser()
 	pkg, parse_ok := parser.parse_package_from_path(source_dir, &p)
 	if !parse_ok || pkg == nil {
@@ -143,6 +143,15 @@ parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, pro
 			field := sel.field.name if sel.field != nil else ""
 			if prefix == "actod" && field != "" {
 				append(&aliases, Type_Alias{name = name, target = field})
+			}
+			continue
+		}
+
+		if _, is_group := v_decl.values[0].derived.(^ast.Proc_Group); is_group {
+			start := decl.pos.offset
+			end := decl.end.offset
+			if start >= 0 && end > start && end <= len(file.src) {
+				append(&groups, string(file.src[start:end]))
 			}
 			continue
 		}
@@ -605,7 +614,7 @@ find_comment_start :: proc(line: string) -> int {
 }
 
 
-build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, discovered_types: map[string]bool) -> string {
+build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []string, discovered_types: map[string]bool) -> string {
 	procs_sb := strings.builder_make()
 	fmt.sbprint(&procs_sb, build_hot_api_struct_text(procs))
 	fmt.sbprint(&procs_sb, "\n@(export)\nhot_api: ^Hot_API\n\n")
@@ -613,6 +622,12 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, discovered_t
 		if p.kind == .Skip && !needs_hot_api_entry(p) do continue
 		emit_shim_proc(&procs_sb, p)
 		fmt.sbprint(&procs_sb, "\n")
+	}
+
+	for group in groups {
+		if shim_has_all_group_members(strings.to_string(procs_sb), group) {
+			fmt.sbprintf(&procs_sb, "%s\n\n", group)
+		}
 	}
 
 	procs_text := strings.to_string(procs_sb)
@@ -624,6 +639,19 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, discovered_t
 	fmt.sbprint(&out, procs_text)
 
 	return strings.to_string(out)
+}
+
+shim_has_all_group_members :: proc(shim_text: string, group: string) -> bool {
+	open := strings.index_byte(group, '{')
+	close := strings.last_index_byte(group, '}')
+	if open < 0 || close <= open do return false
+	for member in strings.split(group[open + 1:close], ",") {
+		name := strings.trim_space(member)
+		if name == "" do continue
+		needle := fmt.tprintf("\n%s :: proc", name)
+		if !strings.contains(shim_text, needle) do return false
+	}
+	return true
 }
 
 emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {

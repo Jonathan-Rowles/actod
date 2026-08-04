@@ -137,6 +137,10 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_crash_runs_terminate_and_reaps_children",
 		test_proc = test_crash_runs_terminate_and_reaps_children,
 	},
+	{
+		name = "test_panic_in_terminate_runs_teardown_once",
+		test_proc = test_panic_in_terminate_runs_teardown_once,
+	},
 
 	// Slower tests
 	{name = "test_restart_limit_within_window", test_proc = test_restart_limit_within_window},

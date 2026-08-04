@@ -685,6 +685,7 @@ actor_loop :: proc(actor: ^Actor($T)) {
 
 	run_message_loop(actor, &ctx)
 
+	actor_ctx.panic_teardown_started = true
 	terminate_children(actor)
 	call_terminate_handler(actor)
 

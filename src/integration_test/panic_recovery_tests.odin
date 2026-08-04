@@ -212,3 +212,41 @@ test_crash_runs_terminate_and_reaps_children :: proc(t: ^testing.T) {
 		"terminate callback must run exactly once on crash",
 	)
 }
+
+panicking_terminate_ran: int
+
+Panicking_Terminate_Behaviour :: actod.Actor_Behaviour(Crash_Teardown_Data) {
+	handle_message = crash_teardown_handle_message,
+	terminate      = panicking_terminate,
+}
+
+panicking_terminate :: proc(data: ^Crash_Teardown_Data) {
+	sync.atomic_add(&panicking_terminate_ran, 1)
+	panic("intentional panic in terminate")
+}
+
+test_panic_in_terminate_runs_teardown_once :: proc(t: ^testing.T) {
+	reset_test_state()
+	sync.atomic_store(&panicking_terminate_ran, 0)
+
+	pid, ok := actod.spawn(
+		"panicking-terminate",
+		Crash_Teardown_Data{id = 1},
+		Panicking_Terminate_Behaviour,
+		actod.make_actor_config(restart_policy = .TEMPORARY),
+	)
+	expect(t, ok, "Failed to spawn actor")
+	if !ok do return
+
+	expect(t, actod.terminate_actor(pid), "Failed to request termination")
+	expect(
+		t,
+		wait_for_actor_invalid(pid, 2000),
+		"Actor should be removed from registry despite terminate panicking",
+	)
+	expect(
+		t,
+		sync.atomic_load(&panicking_terminate_ran) == 1,
+		"terminate callback must run exactly once when it panics during normal shutdown",
+	)
+}

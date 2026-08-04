@@ -25,7 +25,10 @@ test_pool_init :: proc(t: ^testing.T) {
 	init_pool(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
-	testing.expect(t, pool.pages != nil, "Page pool pages should be allocated")
+	testing.expect(t, pool.pages == nil, "Page pool bookkeeping should not be allocated at init")
+
+	testing.expect(t, pool_ensure_ready(&pool), "pool_ensure_ready should succeed")
+	testing.expect(t, pool.pages != nil, "Page pool pages should be allocated after first use")
 	testing.expect(
 		t,
 		len(pool.pages) == pool.max_pages,

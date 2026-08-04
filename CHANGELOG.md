@@ -7,6 +7,10 @@ wire format, and user messages can carry an 8-byte ask correlation token
 after the header (ASK_TOKEN flag).
 
 ### Added
+- `make test-facade` (part of `make test`): compiles `src/facade_check`, a
+  consumer package that instantiates the `act` facade's generic wrappers.
+  Nothing else in the repo compiles `act.odin`, so facade breakage was
+  previously invisible to CI.
 - `ask`/`reply` request-response. `act.ask(pid, msg, timeout)` sends with a
   correlation token and returns an `Ask_Token`; the reply arrives as a normal
   message (`act.replying_to()` identifies it) or `Ask_Timeout{token}` is
@@ -30,6 +34,13 @@ after the header (ASK_TOKEN flag).
   full load of non-inline payloads in flight.
 
 ### Changed
+- The message pool's ring and pages array allocate on the first pooled
+  (>32B) message, and the same-worker local buffer allocates on the first
+  local push, instead of at spawn. Actors that only ever see inline messages
+  never pay for either (~8KB less per idle actor, 46 -> 38KB measured).
+- Backpressure failure logs now include the receiver's mailbox capacity and
+  point at the fix: spawn the receiver with a larger mailbox
+  (`spawn(name, data, behaviour, N)`) or raise `-define:ACTOD_MAILBOX_SIZE`.
 - The default mailbox capacity is 64 slots, down from 512
   (`-define:ACTOD_MAILBOX_SIZE=N` still overrides globally, `spawn_sized` per
   actor). The old default cost every actor 32KB of mailbox plus ~21KB of pool

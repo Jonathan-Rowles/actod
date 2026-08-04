@@ -246,7 +246,6 @@ spawn_from_raw :: proc(
 	actor.started = &started
 
 	if !opts.use_dedicated_os_thread && !opts.blocking && worker_pool.initialized {
-		actor.local_buf = new([LOCAL_MAILBOX_SIZE]Message, actor.allocator)
 		handle := new(Pooled_Actor_Handle, actor.allocator)
 		handle.actor_ptr = actor
 		handle.mailbox = &actor.mailbox

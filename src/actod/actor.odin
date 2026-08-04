@@ -440,7 +440,6 @@ spawn_impl :: proc(
 	actor.started = &started
 
 	if !opts.use_dedicated_os_thread && !opts.blocking && worker_pool.initialized {
-		actor.local_buf = new([LOCAL_MAILBOX_SIZE]Message, actor.allocator)
 		handle := new(Pooled_Actor_Handle, actor.allocator)
 		handle.actor_ptr = actor
 		handle.mailbox = &actor.mailbox
@@ -1590,6 +1589,7 @@ retry_local_send_loop :: proc(
 			return .ACTOR_NOT_FOUND
 		}
 		if target.local_write - target.local_read < LOCAL_MAILBOX_SIZE {
+			ensure_local_buf(target)
 			target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
 			target.local_write += 1
 			if !sync.atomic_load_explicit(&target.pool_handle.in_ready_queue, .Relaxed) {
@@ -1623,6 +1623,13 @@ retry_local_send_loop :: proc(
 }
 
 @(private)
+ensure_local_buf :: #force_inline proc(actor: ^Actor(int)) {
+	if actor.local_buf == nil {
+		actor.local_buf = new([LOCAL_MAILBOX_SIZE]Message, actor.allocator)
+	}
+}
+
+@(private)
 push_to_mailbox :: #force_inline proc(
 	actor: ^Actor(int),
 	msg: Message,
@@ -1635,6 +1642,7 @@ push_to_mailbox :: #force_inline proc(
 	   actor.pool_handle != nil &&
 	   actor.pool_handle.home_worker == current_worker {
 		if actor.local_write - actor.local_read < LOCAL_MAILBOX_SIZE {
+			ensure_local_buf(actor)
 			actor.local_buf[actor.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
 			actor.local_write += 1
 			if !sync.atomic_load_explicit(&actor.pool_handle.in_ready_queue, .Relaxed) {

@@ -61,6 +61,13 @@ Pool_Entry :: struct {
 }
 
 @(private)
+Pool_Init_State :: enum u32 {
+	UNINITIALIZED = 0,
+	INITIALIZING  = 1,
+	READY         = 2,
+}
+
+@(private)
 Pool :: struct {
 	read_index:      u64,
 	_pad1:           [CACHE_LINE_SIZE - size_of(u64)]byte,
@@ -74,6 +81,7 @@ Pool :: struct {
 	page_size:       int,
 	max_pages:       int,
 	allocator:       mem.Allocator,
+	init_state:      Pool_Init_State,
 }
 
 @(private)
@@ -83,23 +91,50 @@ init_pool :: proc(
 	page_size: int = SYSTEM_CONFIG.actor_config.page_size,
 	max_pages: int = DEFAULT_MAIL_BOX_SIZE + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE,
 ) {
-	ring_size := next_power_of_two(max_pages)
-
 	pool.page_size = page_size
 	pool.max_pages = max_pages
 	pool.allocator = allocator
-	pool.pages = make([]rawptr, max_pages, allocator)
-	pool.ring = raw_data(make([]Pool_Entry, ring_size, allocator))
-	pool.ring_mask = u64(ring_size - 1)
-
-	for i in 0 ..< ring_size {
-		pool.ring[i].sequence = u64(i)
-		pool.ring[i].page_index = -1
-	}
 
 	sync.atomic_store_explicit(&pool.read_index, 0, .Release)
 	sync.atomic_store_explicit(&pool.write_index, 0, .Release)
 	sync.atomic_store_explicit(&pool.allocated_count, 0, .Release)
+	sync.atomic_store_explicit(&pool.init_state, .UNINITIALIZED, .Release)
+}
+
+@(private)
+pool_ensure_ready :: proc(pool: ^Pool) -> bool {
+	if sync.atomic_load_explicit(&pool.init_state, .Acquire) == .READY {
+		return true
+	}
+
+	if _, won := sync.atomic_compare_exchange_strong_explicit(
+		&pool.init_state,
+		Pool_Init_State.UNINITIALIZED,
+		Pool_Init_State.INITIALIZING,
+		.Acquire,
+		.Acquire,
+	); won {
+		ring_size := next_power_of_two(pool.max_pages)
+		pool.pages = make([]rawptr, pool.max_pages, pool.allocator)
+		pool.ring = raw_data(make([]Pool_Entry, ring_size, pool.allocator))
+		pool.ring_mask = u64(ring_size - 1)
+
+		for i in 0 ..< ring_size {
+			pool.ring[i].sequence = u64(i)
+			pool.ring[i].page_index = -1
+		}
+
+		sync.atomic_store_explicit(&pool.init_state, Pool_Init_State.READY, .Release)
+		return true
+	}
+
+	for attempt := 0; attempt < MAX_ALLOC_RETRIES; attempt += 1 {
+		if sync.atomic_load_explicit(&pool.init_state, .Acquire) == .READY {
+			return true
+		}
+		intrinsics.cpu_relax()
+	}
+	return false
 }
 
 @(private)
@@ -116,6 +151,10 @@ Alloc_Error :: enum {
 message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 	if size > page_pool.page_size {
 		return nil, .SIZE_EXCEEDS_PAGE
+	}
+
+	if !pool_ensure_ready(page_pool) {
+		return nil, .ALLOC_CONTENDED
 	}
 
 	for attempt := 0; attempt < MAX_ALLOC_RETRIES; attempt += 1 {

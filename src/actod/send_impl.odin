@@ -216,9 +216,10 @@ send_user_backpressure_loop :: proc(
 			release_undelivered(target, msg, msg_ready)
 			reclaim_unpin()
 			log.errorf(
-				"send to %s failed: receiver made no progress for %v, its mailbox or message pool is still full",
+				"send to %s failed: receiver made no progress for %v, its mailbox or message pool is still full (capacity %d). If this receiver is expected to absorb load like this, spawn it with a larger mailbox: spawn(name, data, behaviour, N) or -define:ACTOD_MAILBOX_SIZE=N",
 				actor_origin(to),
 				SEND_STALL_TIMEOUT,
+				target.mailbox.w_mask + 1,
 				location = loc,
 			)
 			return .RECEIVER_BACKLOGGED
@@ -228,9 +229,10 @@ send_user_backpressure_loop :: proc(
 			release_undelivered(target, msg, msg_ready)
 			reclaim_unpin()
 			log.debugf(
-				"send to %s backlogged: could not claim a mailbox slot within %v, the receiver is draining but stays saturated",
+				"send to %s backlogged: could not claim a mailbox slot within %v, the receiver is draining but stays saturated (capacity %d). If this is expected load, spawn the receiver with a larger mailbox: spawn(name, data, behaviour, N) or -define:ACTOD_MAILBOX_SIZE=N",
 				actor_origin(to),
 				SEND_MAX_BLOCK_TIMEOUT,
+				target.mailbox.w_mask + 1,
 				location = loc,
 			)
 			return .RECEIVER_BACKLOGGED

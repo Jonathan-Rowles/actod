@@ -17,7 +17,7 @@ TEST_REGISTRY_SIZE :: 2048
 
 make_test_registry :: proc() -> ^PID_Map(rawptr, PID) {
 	reg := new(PID_Map(rawptr, PID))
-	init_pid_map(reg, TEST_REGISTRY_SIZE, context.allocator)
+	init_pid_map(reg, TEST_REGISTRY_SIZE)
 	return reg
 }
 
@@ -1026,4 +1026,49 @@ add_remote_split_brain_full_scenario_test :: proc(t: ^testing.T) {
 	testing.expect(t, found_pid2 == old_pid || found_pid2 == new_pid, "Should have a valid PID")
 
 	testing.expect(t, num_used(test_registry) == 1, "Should have exactly 1 used slot")
+}
+
+@(test)
+registry_growth_keeps_entries_stable :: proc(t: ^testing.T) {
+	saved_growth := SYSTEM_CONFIG.allow_registry_growth
+	SYSTEM_CONFIG.allow_registry_growth = true
+	defer SYSTEM_CONFIG.allow_registry_growth = saved_growth
+
+	reg := new(PID_Map(rawptr, PID))
+	init_pid_map(reg, 64)
+	defer {
+		destroy(reg)
+		free(reg)
+	}
+
+	initial_capacity := reg.capacity
+	sentinel := rawptr(uintptr(0xBEEF))
+
+	pids: [dynamic]PID
+	defer delete(pids)
+
+	entry_ptr_before := rawptr(&reg.items[1])
+
+	for _ in 0 ..< int(initial_capacity) * 4 {
+		pid, ok := add(reg, sentinel)
+		testing.expect(t, ok, "add should succeed while growth is allowed")
+		append(&pids, pid)
+	}
+
+	testing.expect(
+		t,
+		reg.capacity > initial_capacity,
+		"registry should have grown past its initial capacity",
+	)
+	testing.expect(
+		t,
+		rawptr(&reg.items[1]) == entry_ptr_before,
+		"growth must not move existing entries",
+	)
+
+	for pid in pids {
+		data, ok := get(reg, pid)
+		testing.expect(t, ok, "entry added before or during growth must stay readable")
+		testing.expect(t, data == sentinel, "entry data must survive growth intact")
+	}
 }

@@ -10,6 +10,7 @@ import "core:sync"
 import "core:time"
 
 ACTOR_REGISTRY_SIZE :: 1024
+REGISTRY_MAX_CAPACITY :: 1 << 20
 MAX_NODES :: 256
 NAME_BUCKET_COUNT :: 4096
 NAME_BUCKET_TOMBSTONE :: 0xFFFFFFFF
@@ -25,8 +26,8 @@ PID_Map :: struct($T: typeid, $HT: typeid) {
 	unused_items: []u32,
 	num_unused:   u32,
 	name_buckets: [NAME_BUCKET_COUNT]u32,
-	allocator:    mem.Allocator,
-	arena:        vmem.Arena,
+	items_backing:  []byte,
+	unused_backing: []byte,
 	mutex:        sync.Mutex,
 }
 
@@ -44,15 +45,24 @@ PID_Entry :: struct($T: typeid, $HT: typeid) #align (CACHE_LINE_SIZE) {
 }
 
 @(private)
-init_pid_map :: proc(m: ^PID_Map($T, $HT), initial_capacity: int, allocator := context.allocator) {
+init_pid_map :: proc(m: ^PID_Map($T, $HT), initial_capacity: int) {
 	capacity := next_power_of_two(initial_capacity)
+	assert(capacity <= REGISTRY_MAX_CAPACITY, "registry capacity exceeds REGISTRY_MAX_CAPACITY")
 
-	arena_err := vmem.arena_init_static(&m.arena)
-	assert(arena_err == nil, "Failed to initialize virtual memory arena for PID_Map")
-	m.allocator = vmem.arena_allocator(&m.arena)
+	items_backing, items_err := vmem.reserve(REGISTRY_MAX_CAPACITY * size_of(PID_Entry(T, HT)))
+	assert(items_err == nil, "Failed to reserve address space for PID_Map items")
+	unused_backing, unused_err := vmem.reserve(REGISTRY_MAX_CAPACITY * size_of(u32))
+	assert(unused_err == nil, "Failed to reserve address space for the PID_Map freelist")
 
-	m.items = make([]PID_Entry(T, HT), capacity, m.allocator)
-	m.unused_items = make([]u32, capacity, m.allocator)
+	items_commit := vmem.commit(raw_data(items_backing), uint(capacity) * size_of(PID_Entry(T, HT)))
+	assert(items_commit == nil, "Failed to commit PID_Map items")
+	unused_commit := vmem.commit(raw_data(unused_backing), uint(capacity) * size_of(u32))
+	assert(unused_commit == nil, "Failed to commit the PID_Map freelist")
+
+	m.items_backing = items_backing
+	m.unused_backing = unused_backing
+	m.items = mem.slice_data_cast([]PID_Entry(T, HT), items_backing)
+	m.unused_items = mem.slice_data_cast([]u32, unused_backing)
 	m.capacity = u32(capacity)
 	m.num_items = 0
 	m.next_unused = 0
@@ -82,18 +92,33 @@ try_grow_registry :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> bool
 	}
 
 	old_capacity := m.capacity
-	new_capacity := m.capacity * 2
+	if old_capacity >= REGISTRY_MAX_CAPACITY {
+		log.errorf(
+			"actor registry is at its maximum capacity (%d)",
+			old_capacity,
+			location = loc,
+		)
+		return false
+	}
+	new_capacity := old_capacity * 2
 
 	log.infof("Growing actor registry: %d → %d", old_capacity, new_capacity)
 
-	new_items := make([]PID_Entry(T, HT), new_capacity, m.allocator)
-	new_unused := make([]u32, new_capacity, m.allocator)
+	items_err := vmem.commit(
+		raw_data(m.items_backing),
+		uint(new_capacity) * size_of(PID_Entry(T, HT)),
+	)
+	unused_err := vmem.commit(raw_data(m.unused_backing), uint(new_capacity) * size_of(u32))
+	if items_err != nil || unused_err != nil {
+		log.errorf(
+			"actor registry growth could not commit memory: %v / %v",
+			items_err,
+			unused_err,
+			location = loc,
+		)
+		return false
+	}
 
-	copy(new_items, m.items)
-	copy(new_unused, m.unused_items)
-
-	m.items = new_items
-	m.unused_items = new_unused
 	sync.atomic_store(&m.capacity, new_capacity)
 
 	log.infof("Registry growth complete: new capacity=%d", new_capacity)
@@ -785,7 +810,8 @@ clear :: proc(m: ^PID_Map($T, $HT)) {
 	sync.atomic_store_explicit(&m.next_unused, 0, .Release)
 	sync.atomic_store_explicit(&m.num_unused, 0, .Release)
 
-	for i in 0 ..< len(m.items) {
+	committed := sync.atomic_load_explicit(&m.capacity, .Acquire)
+	for i in 0 ..< committed {
 		sync.atomic_store_explicit(&m.items[i].sequence, 0, .Release)
 		m.items[i].data = T{}
 		m.items[i].name_hash = 0
@@ -793,15 +819,22 @@ clear :: proc(m: ^PID_Map($T, $HT)) {
 	}
 
 	// Zero out the unused_items slice content
-	if len(m.unused_items) > 0 {
-		intrinsics.mem_zero(raw_data(m.unused_items), len(m.unused_items) * size_of(u32))
+	if committed > 0 {
+		intrinsics.mem_zero(raw_data(m.unused_items), int(committed) * size_of(u32))
 	}
 	intrinsics.mem_zero(&m.name_buckets, size_of(m.name_buckets))
 }
 
 destroy :: proc(m: ^PID_Map($T, $HT)) {
 	clear(m)
-	vmem.arena_destroy(&m.arena)
+	if m.items_backing != nil {
+		vmem.release(raw_data(m.items_backing), uint(len(m.items_backing)))
+	}
+	if m.unused_backing != nil {
+		vmem.release(raw_data(m.unused_backing), uint(len(m.unused_backing)))
+	}
+	m.items_backing = nil
+	m.unused_backing = nil
 	m.items = nil
 	m.unused_items = nil
 }

@@ -239,7 +239,7 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 	if registry_size == 0 {
 		registry_size = 256
 	}
-	init_pid_map(&global_registry, registry_size, actor_system_allocator)
+	init_pid_map(&global_registry, registry_size)
 
 	worker_count := opts.worker_count
 	if worker_count == 0 {

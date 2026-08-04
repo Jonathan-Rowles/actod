@@ -11,8 +11,6 @@ import "core:time"
 Start_Benchmark_Send :: struct {}
 Go_Benchmark_Send :: struct {}
 
-RECEIVER_MAILBOX_SIZE :: 4096
-
 @(init)
 register_benchmark_messages :: proc "contextless" () {
 	actod.register_message_type(Start_Benchmark_Send)
@@ -66,6 +64,10 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 						target = data.targets[i % len(data.targets)]
 					}
 					err := actod.send_message(target, v)
+					for err == .RECEIVER_BACKLOGGED {
+						shared.track_send_error(data.state, err)
+						err = actod.send_message(target, v)
+					}
 					if err != .OK {
 						shared.track_send_error(data.state, err)
 					}
@@ -89,6 +91,10 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 						target = data.targets[i % len(data.targets)]
 					}
 					err := actod.send_message(target, v)
+					for err == .RECEIVER_BACKLOGGED {
+						shared.track_send_error(data.state, err)
+						err = actod.send_message(target, v)
+					}
 					if err == .OK {
 						local_count += 1
 					} else {
@@ -143,11 +149,13 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 			logging = actod.make_log_config(enable_file = false, level = .Error),
 			home_worker = hw,
 		)
+
 		name := fmt.tprintf("recv-%d", i)
 		data := shared.Benchmark_Actor_Data {
 			id = i,
 		}
-		pid, ok := actod.spawn_sized(name, data, receiver_behaviour, RECEIVER_MAILBOX_SIZE, actor_config)
+
+		pid, ok := actod.spawn(name, data, receiver_behaviour, actor_config)
 		if !ok do panic("Failed to spawn receiver")
 		actors[i] = pid
 	}

@@ -68,11 +68,11 @@ run_local_throughput :: proc(
 	receiver_config := actod.make_actor_config(
 		logging = actod.make_log_config(enable_file = false, level = .Warning),
 	)
-	receiver, ok_r := actod.spawn_sized(
+
+	receiver, ok_r := actod.spawn(
 		"flood_receiver",
 		Flood_Receiver_Data{},
 		receiver_behaviour,
-		RECEIVER_MAILBOX_SIZE,
 		receiver_config,
 	)
 	if !ok_r do panic("Failed to spawn receiver")
@@ -83,14 +83,14 @@ run_local_throughput :: proc(
 			case Start_Flood:
 				for _ in 0 ..< m.warmup_count {
 					v: T
-					actod.send_message(m.target, v)
+					for actod.send_message(m.target, v) == .RECEIVER_BACKLOGGED {}
 				}
 
 				sync.sema_post(data.warmup_done_sema)
 
 				for _ in 0 ..< m.message_count {
 					v: T
-					actod.send_message(m.target, v)
+					for actod.send_message(m.target, v) == .RECEIVER_BACKLOGGED {}
 				}
 
 				sync.sema_post(data.done_sema)

@@ -37,7 +37,7 @@ print_provenance_header :: proc() {
 	fmt.printf("build:            -o:aggressive -no-bounds-check -disable-assert -microarch:native\n")
 	fmt.printf("page_size:        %d KB\n", 64)
 	fmt.printf("spin_strategy:    CPU_RELAX\n")
-	fmt.printf("recv mailbox:     %d slots (spawn_sized), senders default %d\n", RECEIVER_MAILBOX_SIZE, actod.DEFAULT_MAIL_BOX_SIZE)
+	fmt.printf("mailboxes:        %d slots (default), backlogged sends retried\n", actod.DEFAULT_MAIL_BOX_SIZE)
 	fmt.printf("repeats:          %d\n", BENCH_REPEATS)
 	fmt.println()
 }

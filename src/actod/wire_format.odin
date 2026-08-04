@@ -5,6 +5,7 @@ import "core:encoding/endian"
 
 NETWORK_HEADER_SIZE :: 26
 MAX_MESSAGE_SIZE :: 1024 * 1024
+HANDSHAKE_MAX_FRAME_SIZE :: 4 * 1024
 WIRE_FORMAT_OVERHEAD :: 64
 
 Network_Message_Flags :: bit_set[Network_Message_Flag;u16]

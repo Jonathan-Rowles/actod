@@ -1,6 +1,7 @@
 package integration
 
 import "../actod"
+import "core:sync"
 import "core:testing"
 
 Panic_Actor_Data :: struct {
@@ -148,4 +149,66 @@ test_actor_panic_in_init :: proc(t: ^testing.T) {
 
 	actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(echo_pid, 500)
+}
+
+Crash_Teardown_Data :: struct {
+	id: int,
+}
+
+crash_teardown_terminate_ran: int
+
+Crash_Teardown_Behaviour :: actod.Actor_Behaviour(Crash_Teardown_Data) {
+	handle_message = crash_teardown_handle_message,
+	terminate      = crash_teardown_terminate,
+}
+
+crash_teardown_handle_message :: proc(data: ^Crash_Teardown_Data, from: actod.PID, msg: any) {
+	if text, ok := msg.(string); ok && text == "panic" {
+		panic("intentional panic")
+	}
+}
+
+crash_teardown_terminate :: proc(data: ^Crash_Teardown_Data) {
+	sync.atomic_add(&crash_teardown_terminate_ran, 1)
+}
+
+test_crash_runs_terminate_and_reaps_children :: proc(t: ^testing.T) {
+	reset_test_state()
+	sync.atomic_store(&crash_teardown_terminate_ran, 0)
+
+	parent_pid, ok := actod.spawn(
+		"crash-teardown-parent",
+		Crash_Teardown_Data{id = 1},
+		Crash_Teardown_Behaviour,
+		actod.make_actor_config(restart_policy = .TEMPORARY),
+	)
+	expect(t, ok, "Failed to spawn parent")
+	if !ok do return
+
+	_, added := actod.add_child(parent_pid, create_crash_child(0))
+	expect(t, added, "Failed to add child")
+	expect(t, wait_for_child_count(parent_pid, 1, 2000), "Child should be registered")
+
+	children := actod.get_children(parent_pid)
+	child_pid := children[0]
+	delete(children)
+
+	err := actod.send_message(parent_pid, "panic")
+	expect(t, err == .OK, "Failed to send panic message")
+
+	expect(
+		t,
+		wait_for_actor_invalid(parent_pid, 2000),
+		"Crashed parent should be removed from registry",
+	)
+	expect(
+		t,
+		wait_for_actor_invalid(child_pid, 2000),
+		"Crashed parent's child must be terminated, not orphaned",
+	)
+	expect(
+		t,
+		sync.atomic_load(&crash_teardown_terminate_ran) == 1,
+		"terminate callback must run exactly once on crash",
+	)
 }

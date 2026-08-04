@@ -152,6 +152,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 Actor_Context :: struct {
 	pid:                 PID,
 	name:                string,
+	panic_teardown_started: bool,
 	panic_jmp_buf:       libc.jmp_buf,
 	panic_message:       [PANIC_MESSAGE_BUF_SIZE]u8,
 	panic_message_len:   int,
@@ -650,6 +651,13 @@ actor_loop :: proc(actor: ^Actor($T)) {
 
 		actor.termination_reason = .ABNORMAL
 		sync.atomic_store(&actor.state, .STOPPING)
+
+		if !actor_ctx.panic_teardown_started {
+			actor_ctx.panic_teardown_started = true
+			terminate_children(actor)
+			call_terminate_handler(actor)
+		}
+
 		sync.atomic_store(&actor.state, .THREAD_STOPPED)
 
 		if actor.started != nil {

@@ -284,7 +284,7 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []
 	}
 
 	msg_size := endian.unchecked_get_u32le(size_buf[:])
-	if msg_size == 0 || msg_size > MAX_MESSAGE_SIZE {
+	if msg_size == 0 || msg_size > HANDSHAKE_MAX_FRAME_SIZE {
 		return nil
 	}
 

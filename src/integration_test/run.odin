@@ -133,6 +133,10 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_actor_panic_supervisor_restart,
 	},
 	{name = "test_actor_panic_in_init", test_proc = test_actor_panic_in_init},
+	{
+		name = "test_crash_runs_terminate_and_reaps_children",
+		test_proc = test_crash_runs_terminate_and_reaps_children,
+	},
 
 	// Slower tests
 	{name = "test_restart_limit_within_window", test_proc = test_restart_limit_within_window},

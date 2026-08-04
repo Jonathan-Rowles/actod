@@ -1,6 +1,5 @@
 package actod
 
-import "base:intrinsics"
 import "base:runtime"
 import "core:log"
 import "core:strings"
@@ -446,8 +445,11 @@ stop_observer :: proc() {
 
 		a, actor_ok := get_actor_from_pointer(a_ptr, true)
 		if actor_ok && a != nil {
-			for mpsc_size(&a.mailbox) > 0 {
-				intrinsics.cpu_relax()
+			for i := 0; i < 100; i += 1 {
+				if mpsc_size(&a.mailbox) == 0 {
+					break
+				}
+				time.sleep(10 * time.Millisecond)
 			}
 		} else {
 			log.warnf(

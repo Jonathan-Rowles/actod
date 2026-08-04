@@ -43,7 +43,7 @@ create_message_impl :: proc(
 
 		header := cast(^Type_Header)buffer
 		header.type_id = tid
-		header.size = aligned_size
+		header.size = i32(aligned_size)
 
 		data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
 		intrinsics.mem_copy_non_overlapping(data_ptr, data, size)
@@ -74,7 +74,7 @@ create_message_impl :: proc(
 
 	header := cast(^Type_Header)buffer
 	header.type_id = tid
-	header.size = aligned_size
+	header.size = i32(aligned_size)
 
 	data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
 	intrinsics.mem_copy_non_overlapping(data_ptr, data, size)

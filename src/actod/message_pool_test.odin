@@ -44,12 +44,13 @@ test_basic_alloc_free :: proc(t: ^testing.T) {
 	testing.expect(t, err == .OK, "Allocation should succeed")
 	testing.expect(t, ptr != nil, "Pointer should not be nil")
 
-	data := cast([^]byte)ptr
-	for i in 0 ..< size {
+	payload_size := size - TYPE_HEADER_SIZE
+	data := cast([^]byte)(uintptr(ptr) + TYPE_HEADER_SIZE)
+	for i in 0 ..< payload_size {
 		data[i] = byte(i & 0xFF)
 	}
 
-	for i in 0 ..< size {
+	for i in 0 ..< payload_size {
 		testing.expect(t, data[i] == byte(i & 0xFF), fmt.tprintf("Data mismatch at offset %d", i))
 	}
 
@@ -84,7 +85,7 @@ test_large_allocation :: proc(t: ^testing.T) {
 	init_pool(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
-	size := pool.page_size - size_of([2]int)
+	size := pool.page_size
 	ptr, err := message_alloc(&pool, size)
 	testing.expect(t, err == .OK, "Allocation at max size should succeed")
 	testing.expect(t, ptr != nil, "Pointer should not be nil")
@@ -125,8 +126,8 @@ test_concurrent_allocations :: proc(t: ^testing.T) {
 			ptr, _ := message_alloc(work_data.pool, allocation_size)
 			if ptr != nil {
 				ptrs[i] = ptr
-				data := cast([^]byte)ptr
-				for j in 0 ..< min(16, allocation_size) {
+				data := cast([^]byte)(uintptr(ptr) + TYPE_HEADER_SIZE)
+				for j in 0 ..< min(16, allocation_size - TYPE_HEADER_SIZE) {
 					data[j] = byte(work_data.id)
 				}
 			}
@@ -268,8 +269,8 @@ test_message_reuse :: proc(t: ^testing.T) {
 				seen_ptrs[ptr] = true
 			}
 
-			data := cast([^]u64)ptr
-			for j in 0 ..< size / size_of(u64) {
+			data := cast([^]u64)(uintptr(ptr) + TYPE_HEADER_SIZE)
+			for j in 0 ..< (size - TYPE_HEADER_SIZE) / size_of(u64) {
 				data[j] = u64(i) << 32 | u64(j)
 			}
 

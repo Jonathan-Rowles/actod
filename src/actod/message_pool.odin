@@ -8,8 +8,7 @@ INLINE_MESSAGE_SIZE :: 32
 INLINE_NEEDS_FIXUP :: rawptr(uintptr(1)) // sentinel: inline message with string/slice pointers
 MAX_ALLOC_RETRIES :: 1000
 DEFAULT_PAGE_SIZE :: mem.Kilobyte * 64
-PAGE_METADATA_SIZE :: size_of([2]int)
-MAX_STATIC_MESSAGE_SIZE :: #config(ACTOD_MAX_MESSAGE_SIZE, DEFAULT_PAGE_SIZE - PAGE_METADATA_SIZE)
+MAX_STATIC_MESSAGE_SIZE :: #config(ACTOD_MAX_MESSAGE_SIZE, DEFAULT_PAGE_SIZE)
 @(private)
 pool_max_pages :: proc(mailbox_capacity: int) -> int {
 	return mailbox_capacity + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE
@@ -39,8 +38,9 @@ message_ask_token :: #force_inline proc "contextless" (msg: ^Message) -> (token:
 
 @(private)
 Type_Header :: struct {
-	type_id: typeid,
-	size:    int,
+	type_id:    typeid,
+	size:       i32,
+	page_index: i32,
 }
 
 TYPE_HEADER_SIZE :: size_of(Type_Header)
@@ -114,7 +114,7 @@ Alloc_Error :: enum {
 
 @(private)
 message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
-	if size > page_pool.page_size - size_of([2]int) {
+	if size > page_pool.page_size {
 		return nil, .SIZE_EXCEEDS_PAGE
 	}
 
@@ -136,10 +136,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 				sync.atomic_store_explicit(&entry.sequence, pos + page_pool.ring_mask + 1, .Release)
 
 				ptr := page_pool.pages[page_index]
-				metadata_ptr := cast(^[2]int)(uintptr(ptr) +
-					uintptr(page_pool.page_size) -
-					size_of([2]int))
-				metadata_ptr[0] = page_index
+				(cast(^Type_Header)ptr).page_index = i32(page_index)
 				return ptr, .OK
 			}
 		} else if diff < 0 {
@@ -168,10 +165,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 				}
 				page_pool.pages[slot] = ptr
 
-				metadata_ptr := cast(^[2]int)(uintptr(ptr) +
-					uintptr(page_pool.page_size) -
-					size_of([2]int))
-				metadata_ptr[0] = slot
+				(cast(^Type_Header)ptr).page_index = i32(slot)
 				return ptr, .OK
 			}
 		} else {
@@ -188,13 +182,12 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
 		return
 	}
 
-	metadata_ptr := cast(^[2]int)(uintptr(ptr) + uintptr(page_pool.page_size) - size_of([2]int))
-	idx := metadata_ptr[0]
+	idx := int((cast(^Type_Header)ptr).page_index)
 
 	if idx < 0 || idx >= page_pool.max_pages || page_pool.pages[idx] != ptr {
 		panic_at(
 			loc,
-			"free_message: invalid page pointer %p, its trailing metadata says page index %d (valid range is 0 to %d), the page was double freed or the message buffer was overrun",
+			"free_message: invalid page pointer %p, its header says page index %d (valid range is 0 to %d), the page was double freed or its header was overwritten",
 			ptr,
 			idx,
 			page_pool.max_pages - 1,
@@ -247,13 +240,12 @@ flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer, loc := #calle
 		ptr := buffer.entries[i]
 		if ptr == nil do continue
 
-		metadata_ptr := cast(^[2]int)(uintptr(ptr) + uintptr(pool.page_size) - size_of([2]int))
-		idx := metadata_ptr[0]
+		idx := int((cast(^Type_Header)ptr).page_index)
 
 		if idx < 0 || idx >= pool.max_pages || pool.pages[idx] != ptr {
 			panic_at(
 				loc,
-				"flush_batch_free: invalid page pointer %p at batch slot %d, its trailing metadata says page index %d (valid range is 0 to %d), the page was double freed or the message buffer was overrun",
+				"flush_batch_free: invalid page pointer %p at batch slot %d, its header says page index %d (valid range is 0 to %d), the page was double freed or its header was overwritten",
 				ptr,
 				i,
 				idx,

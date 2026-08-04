@@ -2146,7 +2146,7 @@ create_message_from_payload :: #force_inline proc(
 
 		header := cast(^Type_Header)buffer
 		header.type_id = info.type_id
-		header.size = aligned_size
+		header.size = i32(aligned_size)
 		intrinsics.mem_copy_non_overlapping(
 			rawptr(uintptr(buffer) + TYPE_HEADER_SIZE),
 			raw_data(payload),
@@ -2187,7 +2187,7 @@ create_message_from_payload :: #force_inline proc(
 
 	header := cast(^Type_Header)buffer
 	header.type_id = info.type_id
-	header.size = aligned_size
+	header.size = i32(aligned_size)
 
 	data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
 	intrinsics.mem_copy_non_overlapping(data_ptr, raw_data(payload), struct_size)

@@ -211,7 +211,7 @@ get_local_node_name :: proc() -> string {
 // Spawning
 
 @(require_results)
-spawn :: proc(
+spawn_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
@@ -245,9 +245,17 @@ spawn_sized :: proc(
 	return actod.spawn_sized(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
 }
 
+// One name for both variants:
+//   spawn(name, data, behaviour)              default mailbox capacity
+//   spawn(name, data, behaviour, 4096)        compile-time mailbox capacity
+spawn :: proc {
+	spawn_default,
+	spawn_sized,
+}
+
 // Spawn a child actor with the current actor as parent. Must be called from within an actor.
 @(require_results)
-spawn_child :: proc(
+spawn_child_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
@@ -276,6 +284,11 @@ spawn_child_sized :: proc(
 	bool,
 ) {
 	return actod.spawn_child_sized(name, data, behaviour, MAILBOX_SIZE, opts, loc)
+}
+
+spawn_child :: proc {
+	spawn_child_default,
+	spawn_child_sized,
 }
 
 // Register a named spawn function for remote spawning and spawn_by_name.

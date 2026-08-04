@@ -476,7 +476,7 @@ get_local_node_name :: proc() -> string {
 	return hot_api.get_local_node_name()
 }
 
-spawn :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts: Actor_Config = {}, parent_pid: PID = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
+spawn_default :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts: Actor_Config = {}, parent_pid: PID = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
 	val := data
 	raw_beh := Raw_Spawn_Behaviour{
 		handle_message           = rawptr(behaviour.handle_message),
@@ -491,7 +491,7 @@ spawn :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts: Actor
 	return hot_api.spawn_raw(name, &val, size_of(T), raw_beh, opts, parent_pid, loc)
 }
 
-spawn_child :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts: Actor_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
+spawn_child_default :: proc(name: string, data: $T, behaviour: Actor_Behaviour(T), opts: Actor_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
 	val := data
 	raw_beh := Raw_Spawn_Behaviour{
 		handle_message           = rawptr(behaviour.handle_message),

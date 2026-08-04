@@ -1142,7 +1142,11 @@ process_stop_signals :: proc(actor: ^Actor($T)) {
 		next := cast(^Actor(int))child.stop_signal.next
 
 		if actor.pid == NODE.pid {
-			cleanup_terminated_actor(child.stop_signal.pid, rawptr(child))
+			if stop_signal_ready(child) {
+				cleanup_terminated_actor(child.stop_signal.pid, rawptr(child))
+			} else {
+				push_stop_signal(cast(^Actor(int))rawptr(actor), child)
+			}
 		} else {
 			name_buf: [STOP_SIGNAL_NAME_CAP]u8
 			name_len := copy(name_buf[:], child.stop_signal.name_buf[:child.stop_signal.name_len])
@@ -1158,6 +1162,12 @@ process_stop_signals :: proc(actor: ^Actor($T)) {
 
 		child = next
 	}
+}
+
+@(private)
+stop_signal_ready :: proc(child: ^Actor(int)) -> bool {
+	if child.pool_handle == nil do return true
+	return coro.status(child.pool_handle.co) == .Dead
 }
 
 @(private)

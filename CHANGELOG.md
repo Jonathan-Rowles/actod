@@ -46,6 +46,10 @@ after the header (ASK_TOKEN flag).
 - Local supervision signals are lossless now. `Actor_Stopped` no longer goes
   through the bounded system mailbox, so a supervisor under load can no longer
   miss a child death (lost restart, leaked registry entry).
+- The node actor no longer blocks its worker for up to 1s per reaped actor
+  (plus 100ms per child); dead-actor cleanup is non-blocking on the hot path.
+- A stale or malformed `Actor_Stopped` reaching the node logs an error instead
+  of crashing the process.
 - Per-sender FIFO ordering. The overflow path could park a message in a
   different priority ring and the drain serviced rings in priority order, so
   one send during one full-ring burst was silently delivered early. With a

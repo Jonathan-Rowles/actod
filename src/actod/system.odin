@@ -353,20 +353,22 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 	switch v in msg {
 	case Actor_Stopped:
 		if !valid(&global_registry, from) {
-			log.fatalf(
-				"Actor_Stopped received from PID %v, which is not a valid handle (child '%s')",
+			log.errorf(
+				"ignoring Actor_Stopped from PID %v, which is not a valid handle (child '%s')",
 				from,
 				v.child_name,
 			)
+			return
 		}
 
 		actor_ptr, active := get(&global_registry, from)
 		if !active || actor_ptr == nil {
-			log.fatalf(
-				"Actor_Stopped received from PID %v (child '%s'), which is no longer in the registry",
+			log.errorf(
+				"ignoring Actor_Stopped from PID %v (child '%s'), which is no longer in the registry",
 				from,
 				v.child_name,
 			)
+			return
 		}
 
 		state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
@@ -375,8 +377,8 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 		if current_state == .THREAD_STOPPED || current_state == .STOPPING {
 			cleanup_terminated_actor(from, actor_ptr)
 		} else {
-			log.panicf(
-				"Actor %v in unexpected state %v when Actor_Stopped received",
+			log.errorf(
+				"ignoring Actor_Stopped for actor %v in unexpected state %v",
 				from,
 				current_state,
 			)
@@ -428,6 +430,12 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 	remove(&global_registry, pid)
 
+	actor_typed := cast(^Actor(int))actor_ptr
+	sync.atomic_store(&actor_typed.stopped_closed, true)
+	if pid != NODE.pid {
+		drain_stop_signals_to_node(actor_typed)
+	}
+
 	if sync.atomic_load(&NODE.shutting_down) {
 		append(&shutdown_deferred_frees, actor_ptr)
 		if pid == NODE.pid {
@@ -457,7 +465,11 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 		current = sync.atomic_load(state_ptr)
 		if current != .THREAD_STOPPED {
-			log.fatalf("[PANIC] Actor %v in unexpected state %v after thread join", pid, current)
+			log.errorf(
+				"actor %v in unexpected state %v after thread join, leaking it instead of freeing a live stack",
+				pid,
+				current,
+			)
 		}
 	} else if current == .RUNNING || current == .IDLE {
 		sync.atomic_store(state_ptr, .STOPPING)
@@ -497,15 +509,6 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 					actor_origin(child_pid),
 					actor_origin(pid),
 				)
-			}
-		}
-
-		for child_pid in child_pids {
-			for i := 0; i < 100; i += 1 {
-				if _, active := get(&global_registry, child_pid); !active {
-					break
-				}
-				time.sleep(1 * time.Millisecond)
 			}
 		}
 	}

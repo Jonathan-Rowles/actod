@@ -218,6 +218,15 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 		)
 	}
 
+	if opts.network.port > 0 && !opts.network.enable_encryption && get_auth_password() == "" {
+		log.warnf(
+			"node_init('%s'): listening on 0.0.0.0:%d with NO authentication and NO encryption%s. Any host that can reach this port can spawn actors, deliver messages, and terminate actors on this node. Set auth_password (and preferably enable_encryption), or keep port = 0 unless the network is trusted",
+			name,
+			opts.network.port,
+			config_origin(opts.loc),
+		)
+	}
+
 	NODE.started = true
 	NODE.shutting_down = false
 	if NODE.node_name_to_id == nil {

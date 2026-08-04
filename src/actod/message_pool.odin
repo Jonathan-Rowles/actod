@@ -155,7 +155,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 				.Release,
 				.Relaxed,
 			); ok {
-				ptr, _ := mem.alloc(page_pool.page_size, 1, page_pool.allocator)
+				ptr, _ := mem.alloc(page_pool.page_size, CACHE_LINE_SIZE, page_pool.allocator)
 				if ptr == nil {
 					sync.atomic_compare_exchange_strong_explicit(
 						&page_pool.allocated_count,

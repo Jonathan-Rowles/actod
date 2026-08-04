@@ -163,7 +163,7 @@ mpsc_pop_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {
 	sync.atomic_thread_fence(.Release)
 	for i in 0 ..< count {
 		pos := start_pos + u64(i)
-		entries[pos & mask].sequence = pos + mask + 1
+		sync.atomic_store_explicit(&entries[pos & mask].sequence, pos + mask + 1, .Relaxed)
 	}
 
 	return count

@@ -1449,21 +1449,21 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 		str_offset := size_of(Actor_Spawned_Broadcast)
 
 		name_len := len(msg.name)
+		if name_len < 0 || name_len > len(payload) - str_offset {
+			log.warn("Spawn broadcast payload truncated at name")
+			return
+		}
 		if name_len > 0 {
-			if len(payload) < str_offset + name_len {
-				log.warn("Spawn broadcast payload truncated at name")
-				return
-			}
 			msg.name = string(payload[str_offset:str_offset + name_len])
 			str_offset += name_len
 		}
 
 		source_name_len := len(msg.source_node_name)
+		if source_name_len < 0 || source_name_len > len(payload) - str_offset {
+			log.warn("Spawn broadcast payload truncated at source_node_name")
+			return
+		}
 		if source_name_len > 0 {
-			if len(payload) < str_offset + source_name_len {
-				log.warn("Spawn broadcast payload truncated at source_node_name")
-				return
-			}
 			msg.source_node_name = string(payload[str_offset:str_offset + source_name_len])
 		}
 
@@ -1485,21 +1485,21 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 		str_offset := size_of(Actor_Terminated_Broadcast)
 
 		name_len := len(msg.name)
+		if name_len < 0 || name_len > len(payload) - str_offset {
+			log.warn("Terminate broadcast payload truncated at name")
+			return
+		}
 		if name_len > 0 {
-			if len(payload) < str_offset + name_len {
-				log.warn("Terminate broadcast payload truncated at name")
-				return
-			}
 			msg.name = string(payload[str_offset:str_offset + name_len])
 			str_offset += name_len
 		}
 
 		source_name_len := len(msg.source_node_name)
+		if source_name_len < 0 || source_name_len > len(payload) - str_offset {
+			log.warn("Terminate broadcast payload truncated at source_node_name")
+			return
+		}
 		if source_name_len > 0 {
-			if len(payload) < str_offset + source_name_len {
-				log.warn("Terminate broadcast payload truncated at source_node_name")
-				return
-			}
 			msg.source_node_name = string(payload[str_offset:str_offset + source_name_len])
 		}
 
@@ -1545,12 +1545,12 @@ handle_remote_spawn_request :: proc(from_node: Node_ID, payload: []byte) {
 	intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Remote_Spawn_Request))
 
 	name_len := len(msg.actor_name)
+	name_start := size_of(Remote_Spawn_Request)
+	if name_len < 0 || name_len > len(payload) - name_start {
+		log.warn("Remote spawn request payload truncated at actor_name")
+		return
+	}
 	if name_len > 0 {
-		name_start := size_of(Remote_Spawn_Request)
-		if len(payload) < name_start + name_len {
-			log.warn("Remote spawn request payload truncated at actor_name")
-			return
-		}
 		msg.actor_name = string(payload[name_start:name_start + name_len])
 	}
 
@@ -1598,12 +1598,12 @@ handle_remote_spawn_response :: proc(payload: []byte) {
 	intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Remote_Spawn_Response))
 
 	error_len := len(msg.error_msg)
+	str_start := size_of(Remote_Spawn_Response)
+	if error_len < 0 || error_len > len(payload) - str_start {
+		log.warn("Remote spawn response payload truncated at error_msg")
+		return
+	}
 	if error_len > 0 {
-		str_start := size_of(Remote_Spawn_Response)
-		if len(payload) < str_start + error_len {
-			log.warn("Remote spawn response payload truncated at error_msg")
-			return
-		}
 		msg.error_msg = string(payload[str_start:str_start + error_len])
 	}
 

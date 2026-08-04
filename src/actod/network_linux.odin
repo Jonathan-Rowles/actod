@@ -44,7 +44,14 @@ platform_socket_fd :: #force_inline proc(sock: net.TCP_Socket) -> i32 {
 	return i32(sock)
 }
 platform_gen_random :: proc(buf: rawptr, len: uint) {
-	libc_getrandom(buf, len, 0)
+	filled: uint
+	for filled < len {
+		n := libc_getrandom(rawptr(uintptr(buf) + uintptr(filled)), len - filled, 0)
+		if n <= 0 {
+			panic("getrandom failed, cannot generate secure random bytes")
+		}
+		filled += uint(n)
+	}
 }
 
 Timeval :: struct {

@@ -37,7 +37,9 @@ platform_socket_fd :: #force_inline proc(sock: net.TCP_Socket) -> win32.SOCKET {
 }
 
 platform_gen_random :: proc(buf: rawptr, len: uint) {
-	win32.RtlGenRandom(cast(^u8)buf, win32.ULONG(len))
+	if !bool(win32.RtlGenRandom(cast(^u8)buf, win32.ULONG(len))) {
+		panic("RtlGenRandom failed, cannot generate secure random bytes")
+	}
 }
 
 platform_set_recv_timeout :: proc(sock: net.TCP_Socket, seconds: i64) -> bool {

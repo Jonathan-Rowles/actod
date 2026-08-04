@@ -850,18 +850,14 @@ process_system_mailbox :: #force_no_inline proc(
 		case Terminate:
 			actor.termination_reason = v.reason
 
-			_, ok := sync.atomic_compare_exchange_strong(
-				&actor.state,
-				sync.atomic_load(&actor.state),
-				.STOPPING,
-			)
-			if !ok {
-				log.panicf(
-					"[PANIC] Actor %v (%s) failed to transition from %v to STOPPING",
-					actor.pid,
-					actor.name,
-					sync.atomic_load(&actor.state),
-				)
+			for {
+				current := sync.atomic_load(&actor.state)
+				if current == .STOPPING || current == .THREAD_STOPPED {
+					break
+				}
+				if try_transition_state(&actor.state, current, .STOPPING) {
+					break
+				}
 			}
 
 			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do free_message(&actor.pool, msg.content)
@@ -1796,6 +1792,15 @@ add_child_existing :: proc(
 	bool,
 ) {
 	context.logger = diagnostic_logger(context.logger)
+	if child_spawn == nil && spawn_func_name_hash == 0 {
+		panic_at(
+			loc,
+			"add_child_existing(parent=%v, child=%v): child_spawn must not be nil unless spawn_func_name_hash identifies a registered remote spawn function",
+			parent,
+			existing_child,
+		)
+	}
+
 	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
 	if !ok {
 		log.errorf(

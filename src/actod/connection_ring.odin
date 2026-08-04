@@ -621,6 +621,8 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 			sync.atomic_store(&slot.state, .READY)
 			sync.atomic_store(&ring.batch_pending, 1)
 			sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(time.now()))
+		} else if state == .WRITING {
+			sync.atomic_store(&ring.batch_pending, 1)
 		}
 	}
 }

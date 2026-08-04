@@ -382,6 +382,8 @@ now :: proc() -> time.Time {
 cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if err, ok := ti.intercept_cancel_timer(id); ok do return Send_Error(err)}
 
+	if id == 0 do return .OK
+
 	if current_actor_context != nil {
 		for i := 0; i < len(current_actor_context.timers); i += 1 {
 			if current_actor_context.timers[i] == Timer_Registration(id) {
@@ -401,7 +403,13 @@ cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 	}
 
 	err := send_message(TIMER_PID, Cancel_Timer{id = id}, loc)
-	if err != .OK {
+	if err == .SYSTEM_SHUTTING_DOWN {
+		log.debugf(
+			"cancel_timer skipped during shutdown, timer id=%d dies with the timer actor",
+			id,
+			location = loc,
+		)
+	} else if err != .OK {
 		log.errorf(
 			"cancel_timer failed: could not reach the timer actor (%v), timer id=%d was not cancelled and may still fire",
 			err,

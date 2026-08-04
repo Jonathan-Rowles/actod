@@ -93,6 +93,7 @@ default spin_strategy = .WAKE_SEMA
 default logging = {}
 default message_batch = 64
 default page_size = 65536
+default arena_headroom = 16777216
 default supervision_strategy = .ONE_FOR_ONE
 default restart_policy = .PERMANENT
 default max_restarts = 3
@@ -102,7 +103,7 @@ default affinity = nil
 default coro_stack_size = 57344
 default use_dedicated_os_thread = false
 default stack_size_dedicated_os_thread = 131072
-return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
+return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 `)
 make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
@@ -110,6 +111,7 @@ make_actor_config :: proc(
 	logging: Log_Config = actod.SYSTEM_CONFIG.actor_config.logging,
 	message_batch: int = actod.SYSTEM_CONFIG.actor_config.message_batch,
 	page_size: int = actod.SYSTEM_CONFIG.actor_config.page_size,
+	arena_headroom: int = actod.SYSTEM_CONFIG.actor_config.arena_headroom,
 	supervision_strategy: Supervision_Strategy = actod.SYSTEM_CONFIG.actor_config.supervision_strategy,
 	restart_policy: Restart_Policy = actod.SYSTEM_CONFIG.actor_config.restart_policy,
 	max_restarts: int = actod.SYSTEM_CONFIG.actor_config.max_restarts,
@@ -127,6 +129,7 @@ make_actor_config :: proc(
 		logging,
 		message_batch,
 		page_size,
+		arena_headroom,
 		supervision_strategy,
 		restart_policy,
 		max_restarts,

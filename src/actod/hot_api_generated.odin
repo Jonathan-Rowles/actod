@@ -26,6 +26,7 @@ Hot_API :: struct {
 		logging: Log_Config,
 		message_batch: int,
 		page_size: int,
+		arena_headroom: int,
 		supervision_strategy: Supervision_Strategy,
 		restart_policy: Restart_Policy,
 		max_restarts: int,

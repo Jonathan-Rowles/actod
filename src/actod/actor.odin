@@ -181,6 +181,28 @@ Actor_Context :: struct {
 	},
 }
 
+ARENA_COMMIT_SIZE :: mem.Kilobyte * 64
+ARENA_FIXED_OVERHEAD :: mem.Kilobyte * 64
+
+@(private)
+actor_arena_reserve :: proc(data_size: int, mailbox_size: int, opts: Actor_Config) -> uint {
+	max_pages := pool_max_pages(mailbox_size)
+	pool_pages := max_pages * opts.page_size
+	pool_bookkeeping :=
+		next_power_of_two(max_pages) * size_of(Pool_Entry) + max_pages * size_of(rawptr)
+	mailbox_bytes := mailbox_size * size_of(Entry(Message))
+	local_bytes := size_of([LOCAL_MAILBOX_SIZE]Message)
+	static_worst :=
+		data_size +
+		mailbox_bytes +
+		pool_pages +
+		pool_bookkeeping +
+		local_bytes +
+		size_of(Actor_Context) +
+		ARENA_FIXED_OVERHEAD
+	return uint(static_worst + opts.arena_headroom)
+}
+
 spawn :: proc {
 	spawn_default,
 	spawn_sized,
@@ -254,7 +276,11 @@ spawn_impl :: proc(
 		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor(%v)", name, typeid_of(T))
 	}
 
-	arena_err := vmem.arena_init_static(&actor.arena)
+	arena_err := vmem.arena_init_static(
+		&actor.arena,
+		actor_arena_reserve(size_of(T), mailbox_size, opts),
+		ARENA_COMMIT_SIZE,
+	)
 	if arena_err != nil {
 		panic_at(loc, "spawn('%s'): failed to reserve actor arena: %v", name, arena_err)
 	}

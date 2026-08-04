@@ -119,6 +119,7 @@ SYSTEM_CONFIG := System_Config {
 	actor_config = Actor_Config {
 		children = nil,
 		page_size = DEFAULT_PAGE_SIZE,
+		arena_headroom = DEFAULT_ARENA_HEADROOM,
 		spin_strategy = .WAKE_SEMA,
 		message_batch = BATCH_SIZE,
 		logging = Log_Config {
@@ -185,12 +186,15 @@ make_node_config :: proc(
 	}
 }
 
+DEFAULT_ARENA_HEADROOM :: #config(ACTOD_ARENA_HEADROOM, mem.Megabyte * 16)
+
 Actor_Config :: struct {
 	children:                       [dynamic]SPAWN,
 	spin_strategy:                  SPIN_STRATEGY,
 	message_batch:                  int,
 	logging:                        Log_Config,
 	page_size:                      int,
+	arena_headroom:                 int, // extra arena reserve beyond the computed worst case, for runtime allocations
 	// Supervision configuration
 	supervision_strategy:           Supervision_Strategy,
 	restart_policy:                 Restart_Policy,
@@ -216,6 +220,7 @@ make_actor_config :: proc(
 	logging: Log_Config = SYSTEM_CONFIG.actor_config.logging,
 	message_batch: int = SYSTEM_CONFIG.actor_config.message_batch,
 	page_size: int = SYSTEM_CONFIG.actor_config.page_size,
+	arena_headroom: int = SYSTEM_CONFIG.actor_config.arena_headroom,
 	supervision_strategy: Supervision_Strategy = SYSTEM_CONFIG.actor_config.supervision_strategy,
 	restart_policy: Restart_Policy = SYSTEM_CONFIG.actor_config.restart_policy,
 	max_restarts: int = SYSTEM_CONFIG.actor_config.max_restarts,
@@ -248,6 +253,9 @@ make_actor_config :: proc(
 	if max_restarts < 0 {
 		panic_at(loc, "make_actor_config: max_restarts must be >= 0, got %d", max_restarts)
 	}
+	if arena_headroom < 0 {
+		panic_at(loc, "make_actor_config: arena_headroom must be >= 0, got %d", arena_headroom)
+	}
 	if stack_size_dedicated_os_thread < 0 {
 		panic_at(
 			loc,
@@ -263,6 +271,7 @@ make_actor_config :: proc(
 		children = children,
 		message_batch = message_batch,
 		page_size = page_size,
+		arena_headroom = arena_headroom,
 		supervision_strategy = supervision_strategy,
 		restart_policy = restart_policy,
 		max_restarts = max_restarts,

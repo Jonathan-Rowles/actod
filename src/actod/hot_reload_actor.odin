@@ -115,7 +115,11 @@ spawn_from_raw :: proc(
 		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
 	}
 
-	arena_err := vmem.arena_init_static(&actor.arena)
+	arena_err := vmem.arena_init_static(
+		&actor.arena,
+		actor_arena_reserve(data_size, DEFAULT_MAIL_BOX_SIZE, opts),
+		ARENA_COMMIT_SIZE,
+	)
 	if arena_err != nil {
 		panic_at(loc, "spawn('%s'): failed to reserve actor arena: %v", name, arena_err)
 	}

@@ -83,6 +83,11 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_mass_simultaneous_child_deaths,
 		worker_count = 4,
 	},
+	{
+		name = "test_blocked_supervisor_past_old_retry_window",
+		test_proc = test_blocked_supervisor_past_old_retry_window,
+		worker_count = 4,
+	},
 
 	// Supervisor hierarchy tests
 	{name = "test_supervisor_child_lifecycle", test_proc = test_supervisor_child_lifecycle},

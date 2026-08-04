@@ -659,6 +659,8 @@ is_connection_actor :: proc(pid: PID) -> bool {
 cleanup_node_actor :: proc() {
 	if NODE.pid == 0 do return
 
+	drain_node_stop_signals()
+
 	node_ptr, active := get(&global_registry, NODE.pid)
 	if !active || node_ptr == nil do return
 
@@ -708,6 +710,7 @@ wait_for_actors_to_clear :: proc(
 	iterations := max_wait_ms / poll_interval_ms
 
 	for i := 0; i < iterations; i += 1 {
+		drain_node_stop_signals()
 		if num_used(&global_registry) <= max_remaining {
 			return true
 		}
@@ -715,6 +718,16 @@ wait_for_actors_to_clear :: proc(
 	}
 
 	return false
+}
+
+@(private)
+drain_node_stop_signals :: proc() {
+	if NODE.pid == 0 do return
+	node_ptr, active := get(&global_registry, NODE.pid)
+	if !active || node_ptr == nil do return
+	node_actor, ok := get_actor_from_pointer(node_ptr, true)
+	if !ok || node_actor == nil do return
+	process_stop_signals(node_actor)
 }
 
 wait_for_pids :: proc(

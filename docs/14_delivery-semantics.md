@@ -29,6 +29,10 @@ The message is copied at the call site: inline for small plain structs, into the
 
 When the mailbox or page pool is full, the sender blocks instead of failing: coroutine senders yield and retry, dedicated-thread senders sleep. The sender watches the receiver's progress the whole time. `RECEIVER_BACKLOGGED` is returned only after the receiver has made **no progress for `-define:ACTOD_SEND_STALL_TIMEOUT_MS`** (default 100, wall-clock). A slow-but-healthy receiver costs the sender latency, never messages; a stuck or dead receiver fails the send in about 100ms.
 
+### Supervision Signals
+
+Local termination signals are lossless. A dying actor does not send `Actor_Stopped` through a mailbox: it links its own embedded death record into its supervisor's stop-signal chain, which cannot fill (an actor stops exactly once, so capacity is bounded by construction). Restarts and node-side cleanup never compete with telemetry for mailbox slots and are never dropped under load. Cross-node `Actor_Stopped` rides the wire like any other message and keeps remote-send semantics.
+
 ## Remote Sends
 
 `.OK` means the message was committed into this node's send buffer for the peer. The buffer keeps accepting while the peer is disconnected and flushes on (re)connect. There is no peer acknowledgement, and a remote send does not check whether the target actor exists on the peer:

@@ -10,6 +10,7 @@ import "core:time"
 LEAK_TEST_ROUNDS :: 80
 LEAK_TEST_BATCH :: 8
 MASS_DEATH_CHILDREN :: 40
+BLOCKED_SUPERVISOR_CHILDREN :: 24
 
 #assert(size_of(actod.Actor_Stopped) > actod.INLINE_MESSAGE_SIZE)
 
@@ -27,14 +28,24 @@ Leak_Supervisor_Data :: struct {
 	id: int,
 }
 
+Leak_Supervisor_Cmd :: enum {
+	Block,
+	Block_Long,
+}
+
 Leak_Supervisor_Behaviour :: actod.Actor_Behaviour(Leak_Supervisor_Data) {
 	handle_message      = leak_supervisor_handle_message,
 	on_child_terminated = leak_supervisor_on_child_terminated,
 }
 
 leak_supervisor_handle_message :: proc(data: ^Leak_Supervisor_Data, from: actod.PID, msg: any) {
-	if text, ok := msg.(string); ok && text == "block" {
-		time.sleep(400 * time.Millisecond)
+	if cmd, ok := msg.(Leak_Supervisor_Cmd); ok {
+		switch cmd {
+		case .Block:
+			time.sleep(400 * time.Millisecond)
+		case .Block_Long:
+			time.sleep(1300 * time.Millisecond)
+		}
 	}
 }
 
@@ -148,7 +159,7 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 		return
 	}
 
-	actod.send_message(supervisor_pid, "block")
+	actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block)
 	time.sleep(50 * time.Millisecond)
 
 	for child in children {
@@ -171,6 +182,69 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 		"on_child_terminated must fire once per child, got %d of %d",
 		reaped,
 		MASS_DEATH_CHILDREN,
+	)
+
+	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+}
+
+test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
+	reset_test_state()
+	sync.atomic_store(&reaped_by_supervisor, 0)
+
+	supervisor_pid, ok := actod.spawn(
+		"blocked-supervisor",
+		Leak_Supervisor_Data{id = 13},
+		Leak_Supervisor_Behaviour,
+		actod.make_actor_config(
+			supervision_strategy = .ONE_FOR_ONE,
+			restart_policy = .TEMPORARY,
+		),
+	)
+	expect(t, ok, "Failed to spawn supervisor")
+	if !ok do return
+
+	for _ in 0 ..< BLOCKED_SUPERVISOR_CHILDREN {
+		added := false
+		for _ in 0 ..< 200 {
+			if _, add_ok := actod.add_child(supervisor_pid, create_crash_child(0)); add_ok {
+				added = true
+				break
+			}
+			time.sleep(5 * time.Millisecond)
+		}
+		if !added do fail_hard("failed to add child after retries")
+	}
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, BLOCKED_SUPERVISOR_CHILDREN, 3000),
+		"All children should be registered",
+	)
+
+	children := actod.get_children(supervisor_pid)
+	defer delete(children)
+
+	actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block_Long)
+	time.sleep(50 * time.Millisecond)
+
+	for child in children {
+		actod.send_message(child, actod.Terminate{reason = .NORMAL})
+	}
+
+	converged := wait_for_child_count(supervisor_pid, 0, 5000)
+	reaped := sync.atomic_load(&reaped_by_supervisor)
+
+	expectf(
+		t,
+		converged,
+		"supervisor blocked past the old 1s retry give-up must still reap every child, %d Actor_Stopped were lost",
+		BLOCKED_SUPERVISOR_CHILDREN - reaped,
+	)
+	expectf(
+		t,
+		reaped == BLOCKED_SUPERVISOR_CHILDREN,
+		"on_child_terminated must fire once per child, got %d of %d",
+		reaped,
+		BLOCKED_SUPERVISOR_CHILDREN,
 	)
 
 	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})

@@ -105,6 +105,16 @@ Restart_Info :: struct {
 
 LOCAL_MAILBOX_SIZE :: 64
 
+STOP_SIGNAL_NAME_CAP :: 64
+
+Stop_Signal :: struct {
+	next:     rawptr,
+	pid:      PID,
+	reason:   Termination_Reason,
+	name_len: int,
+	name_buf: [STOP_SIGNAL_NAME_CAP]u8,
+}
+
 Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	state:              Actor_State,
 	local_write:        u64,
@@ -128,6 +138,9 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	restart_info:       Restart_Info,
 	termination_reason: Termination_Reason,
 	spawn_loc:          runtime.Source_Code_Location,
+	stop_signal:        Stop_Signal,
+	stopped_head:       rawptr,
+	stopped_closed:     bool,
 
 	// keep unknown sizes at the bottom
 	children:           [dynamic]PID,
@@ -780,6 +793,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 	rounds: u8 = 0
 	for {
 		if !process_system_mailbox(actor, ctx) do return
+		process_stop_signals(actor)
 		if !process_user_mailboxes(actor, ctx) do return
 		if sync.atomic_load(&actor.state) != .RUNNING do return
 		if co == nil {
@@ -810,6 +824,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 @(private)
 mailbox_has_messages :: #force_inline proc(actor: ^Actor($T)) -> bool {
 	if actor.local_read != actor.local_write do return true
+	if sync.atomic_load_explicit(&actor.stopped_head, .Relaxed) != nil do return true
 	return !mpsc_is_empty(&actor.mailbox)
 }
 
@@ -939,7 +954,9 @@ wait_for_messages_if_idle :: #force_inline proc(
 	actor: ^Actor($T),
 	ctx: ^Message_Processing_Context,
 ) {
-	if mpsc_size(&actor.mailbox) == 0 && mpsc_size(&actor.system_mailbox) == 0 {
+	if mpsc_size(&actor.mailbox) == 0 &&
+	   mpsc_size(&actor.system_mailbox) == 0 &&
+	   sync.atomic_load(&actor.stopped_head) == nil {
 		#partial switch actor.opts.spin_strategy {
 		case .WAKE_SEMA:
 			sync.atomic_sema_wait(&actor.wake_sema)
@@ -1019,10 +1036,8 @@ notify_termination :: proc(actor: ^Actor($T)) {
 	broadcast_actor_terminated(actor.pid, actor.name, actor.termination_reason)
 
 	defer {
-		if actor.parent != 0 {
-			notify_parent_of_termination(actor)
-		} else if NODE.pid != actor.pid {
-			notify_node_of_termination(actor)
+		if NODE.pid != actor.pid {
+			push_termination_signal(actor)
 		}
 	}
 
@@ -1089,98 +1104,150 @@ notify_termination :: proc(actor: ^Actor($T)) {
 }
 
 @(private)
-notify_parent_of_termination :: proc(actor: ^Actor($T)) {
-	if actor.termination_reason == .SHUTDOWN || actor.termination_reason == .KILLED {
-		notify_node_of_termination(actor)
+push_stop_signal :: proc(target: ^Actor(int), child: ^Actor(int)) {
+	for {
+		old := sync.atomic_load(&target.stopped_head)
+		child.stop_signal.next = old
+		_, swapped := sync.atomic_compare_exchange_weak(
+			&target.stopped_head,
+			old,
+			rawptr(child),
+		)
+		if swapped do return
+	}
+}
+
+@(private)
+take_stop_signals :: proc(actor: ^Actor($T)) -> ^Actor(int) {
+	if sync.atomic_load(&actor.stopped_head) == nil {
+		return nil
+	}
+	chain := sync.atomic_exchange(&actor.stopped_head, nil)
+
+	reversed: rawptr
+	for chain != nil {
+		child := cast(^Actor(int))chain
+		next := child.stop_signal.next
+		child.stop_signal.next = reversed
+		reversed = chain
+		chain = next
+	}
+	return cast(^Actor(int))reversed
+}
+
+@(private)
+process_stop_signals :: proc(actor: ^Actor($T)) {
+	child := take_stop_signals(actor)
+	for child != nil {
+		next := cast(^Actor(int))child.stop_signal.next
+
+		if actor.pid == NODE.pid {
+			cleanup_terminated_actor(child.stop_signal.pid, rawptr(child))
+		} else {
+			name_buf: [STOP_SIGNAL_NAME_CAP]u8
+			name_len := copy(name_buf[:], child.stop_signal.name_buf[:child.stop_signal.name_len])
+			stopped := Actor_Stopped {
+				child_pid   = child.stop_signal.pid,
+				reason      = child.stop_signal.reason,
+				child_name  = string(name_buf[:name_len]),
+				child_index = -1,
+			}
+			forward_stop_signal_to_node(child)
+			handle_child_termination(actor, stopped)
+		}
+
+		child = next
+	}
+}
+
+@(private)
+forward_stop_signal_to_node :: proc(child: ^Actor(int)) {
+	if NODE.pid == 0 || NODE.pid == child.stop_signal.pid {
+		return
+	}
+	node_actor, ok := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+	if !ok || node_actor == nil {
+		log.debugf(
+			"no node actor to receive the stop signal of %d (%v)",
+			child.stop_signal.pid,
+			child.stop_signal.reason,
+		)
+		return
+	}
+	push_stop_signal(node_actor, child)
+	wake_actor(node_actor)
+}
+
+@(private)
+drain_stop_signals_to_node :: proc(actor: ^Actor(int)) {
+	chain := sync.atomic_exchange(&actor.stopped_head, nil)
+	for chain != nil {
+		child := cast(^Actor(int))chain
+		next := child.stop_signal.next
+		forward_stop_signal_to_node(child)
+		chain = next
+	}
+}
+
+@(private)
+push_termination_signal :: proc(actor: ^Actor($T)) {
+	self := cast(^Actor(int))rawptr(actor)
+	sig := &actor.stop_signal
+	sig.pid = actor.pid
+	sig.reason = actor.termination_reason
+	sig.name_len = copy(sig.name_buf[:], actor.name)
+
+	sync.atomic_store(&actor.stopped_closed, true)
+
+	reclaim_pin()
+	defer reclaim_unpin()
+
+	drain_stop_signals_to_node(self)
+
+	if actor.parent != 0 && !is_local_pid(actor.parent) {
+		remote_msg := Actor_Stopped {
+			child_pid   = actor.pid,
+			reason      = actor.termination_reason,
+			child_name  = actor.name,
+			child_index = -1,
+		}
+		err := send_message(actor.parent, remote_msg)
+		if err != .OK && err != .ACTOR_NOT_FOUND {
+			log.errorf(
+				"failed to notify remote parent %d that actor %d terminated: %v",
+				actor.parent,
+				actor.pid,
+				err,
+			)
+		}
+		forward_stop_signal_to_node(self)
 		return
 	}
 
-	if actor.parent == 0 {
-		notify_node_of_termination(actor)
-		return
-	}
+	deliver_to_parent :=
+		actor.parent != 0 &&
+		actor.termination_reason != .SHUTDOWN &&
+		actor.termination_reason != .KILLED
 
-	if is_local_pid(actor.parent) {
+	if deliver_to_parent {
 		parent_actor, ok := get_actor_from_pointer(get(&global_registry, actor.parent), true)
-		if ok {
+		if ok && parent_actor != nil {
 			parent_state := sync.atomic_load(&parent_actor.state)
-			if parent_state == .STOPPING ||
-			   parent_state == .THREAD_STOPPED ||
-			   parent_state == .TERMINATED {
-				notify_node_of_termination(actor)
+			if parent_state != .STOPPING &&
+			   parent_state != .THREAD_STOPPED &&
+			   parent_state != .TERMINATED {
+				push_stop_signal(parent_actor, self)
+				if sync.atomic_load(&parent_actor.stopped_closed) {
+					drain_stop_signals_to_node(parent_actor)
+				} else {
+					wake_actor(parent_actor)
+				}
 				return
 			}
 		}
 	}
 
-	msg := Actor_Stopped {
-		child_pid   = actor.pid,
-		reason      = actor.termination_reason,
-		child_name  = actor.name,
-		child_index = -1,
-	}
-
-	backoff := 1 * time.Microsecond
-	max_backoff := 10 * time.Millisecond
-	last_err := Send_Error.OK
-
-	for retry_start := time.tick_now(); true; {
-		last_err = send_message(actor.parent, msg)
-		if last_err == .OK || last_err == .ACTOR_NOT_FOUND {
-			break
-		}
-		if time.tick_since(retry_start) > time.Second {
-			break
-		}
-
-		co := coro.running()
-		if co != nil {
-			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-			handle.wants_reschedule = true
-			coro.yield(co)
-		} else {
-			time.sleep(backoff)
-		}
-		backoff = min(backoff * 2, max_backoff)
-	}
-
-	if last_err != .OK && last_err != .ACTOR_NOT_FOUND {
-		log.errorf(
-			"Failed to notify parent %d about child %d termination after retries: %v",
-			actor.parent,
-			actor.pid,
-			last_err,
-		)
-	}
-	notify_node_of_termination(actor)
-}
-
-@(private)
-notify_node_of_termination :: proc(actor: ^Actor($T)) {
-	msg := Actor_Stopped {
-		child_pid  = actor.pid,
-		reason     = actor.termination_reason,
-		child_name = actor.name,
-	}
-
-	backoff := 1 * time.Microsecond
-	max_backoff := 10 * time.Millisecond
-
-	for _ in 0 ..< 100 {
-		if send_node_msg(msg) do return
-
-		co := coro.running()
-		if co != nil {
-			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-			handle.wants_reschedule = true
-			coro.yield(co)
-		} else {
-			time.sleep(backoff)
-		}
-		backoff = min(backoff * 2, max_backoff)
-	}
-
-	log.errorf("Failed to notify node of termination for actor %v after retries", actor.pid)
+	forward_stop_signal_to_node(self)
 }
 
 @(private)

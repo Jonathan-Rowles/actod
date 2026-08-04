@@ -43,6 +43,9 @@ after the header (ASK_TOKEN flag).
   mailbox already covers urgent control traffic.
 
 ### Fixed
+- Local supervision signals are lossless now. `Actor_Stopped` no longer goes
+  through the bounded system mailbox, so a supervisor under load can no longer
+  miss a child death (lost restart, leaked registry entry).
 - Per-sender FIFO ordering. The overflow path could park a message in a
   different priority ring and the drain serviced rings in priority order, so
   one send during one full-ring burst was silently delivered early. With a

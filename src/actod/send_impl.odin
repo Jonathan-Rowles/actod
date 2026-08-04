@@ -129,9 +129,9 @@ send_user_backpressure_loop :: proc(
 	co := coro.running()
 	msg_ready := initial_msg_ready
 	observed_read: u64
-	observed_frees: u64
 	have_observation := false
-	stall_start := time.tick_now()
+	loop_start := time.tick_now()
+	stall_start := loop_start
 
 	for {
 		if co != nil {
@@ -208,9 +208,8 @@ send_user_backpressure_loop :: proc(
 			return .SYSTEM_SHUTTING_DOWN
 		}
 
-		if !have_observation || current_read != observed_read || current_frees != observed_frees {
+		if !have_observation || current_read != observed_read {
 			observed_read = current_read
-			observed_frees = current_frees
 			have_observation = true
 			stall_start = time.tick_now()
 		} else if time.tick_since(stall_start) > SEND_STALL_TIMEOUT {
@@ -220,6 +219,18 @@ send_user_backpressure_loop :: proc(
 				"send to %s failed: receiver made no progress for %v, its mailbox or message pool is still full",
 				actor_origin(to),
 				SEND_STALL_TIMEOUT,
+				location = loc,
+			)
+			return .RECEIVER_BACKLOGGED
+		}
+
+		if time.tick_since(loop_start) > SEND_MAX_BLOCK_TIMEOUT {
+			release_undelivered(target, msg, msg_ready)
+			reclaim_unpin()
+			log.errorf(
+				"send to %s failed: could not claim a mailbox slot within %v, the receiver is draining but stays saturated",
+				actor_origin(to),
+				SEND_MAX_BLOCK_TIMEOUT,
 				location = loc,
 			)
 			return .RECEIVER_BACKLOGGED

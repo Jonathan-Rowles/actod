@@ -789,6 +789,18 @@ wait_for_pids :: proc(
 }
 
 cleanup_actor_arena :: proc(actor_ptr: rawptr) {
+	pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
+		offset_of(Actor(int), pool_handle))
+	if pool_handle_ptr^ != nil && pool_handle_ptr^.co != nil {
+		if res := coro.destroy(pool_handle_ptr^.co); res != .Success {
+			log.errorf(
+				"leaking the coroutine stack of a terminated actor: %s",
+				coro.result_description(res),
+			)
+		}
+		pool_handle_ptr^.co = nil
+	}
+
 	arena_offset := offset_of(Actor(int), arena)
 	arena_ptr := cast(^vmem.Arena)(uintptr(actor_ptr) + arena_offset)
 	vmem.arena_destroy(arena_ptr)

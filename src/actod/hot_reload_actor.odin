@@ -255,7 +255,7 @@ spawn_from_raw :: proc(
 		if coro_stack < coro.MIN_STACK_SIZE {
 			coro_stack = coro.MIN_STACK_SIZE
 		}
-		desc := coro.desc_init(coro_entry, coro_stack, actor.allocator)
+		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
 		co, co_res := coro.create(&desc)
 		if co_res != .Success {

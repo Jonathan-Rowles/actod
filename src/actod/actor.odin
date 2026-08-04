@@ -22,6 +22,7 @@ DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 512)
 )
 SEND_RETRY_DELAY :: 1 * time.Microsecond
 SEND_STALL_TIMEOUT :: #config(ACTOD_SEND_STALL_TIMEOUT_MS, 100) * time.Millisecond
+SEND_MAX_BLOCK_TIMEOUT :: #config(ACTOD_SEND_MAX_BLOCK_MS, 100) * time.Millisecond
 THREAD_SEND_SPIN_TRIES :: 4096
 BATCH_SIZE :: 64
 FREE_BATCH_SIZE :: BATCH_SIZE
@@ -426,7 +427,7 @@ spawn_impl :: proc(
 		if coro_stack < coro.MIN_STACK_SIZE {
 			coro_stack = coro.MIN_STACK_SIZE
 		}
-		desc := coro.desc_init(coro_entry, coro_stack, actor.allocator)
+		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
 		co, co_res := coro.create(&desc)
 		if co_res != .Success {

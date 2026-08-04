@@ -56,5 +56,5 @@ test_system_mailbox_full_returns_error :: proc(t: ^testing.T) {
 	_, alive := actod.get_actor_pid("system-backlog-actor")
 	expect(t, alive, "Actor must survive a system mailbox overflow")
 
-	actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 }

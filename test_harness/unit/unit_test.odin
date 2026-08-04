@@ -76,11 +76,11 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 	case Test_Ping:
 		s.pings += 1
 		s.last_value = v.value
-		actod.send_message(from, Test_Pong{value = v.value * 2})
+		_ = actod.send_message(from, Test_Pong{value = v.value * 2})
 	case Test_Publish_Cmd:
 		actod.publish(&test_topic, Test_Pong{value = v.value})
 	case Test_Spawn_Cmd:
-		actod.spawn_child("spawned-child", test_state{}, test_behaviour)
+		_, _ = actod.spawn_child("spawned-child", test_state{}, test_behaviour)
 	case Test_Terminate_Cmd:
 		actod.self_terminate(.NORMAL)
 	case Test_Broadcast_Cmd:
@@ -88,13 +88,13 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 	case Test_Rename_Cmd:
 		actod.self_rename(v.new_name)
 	case Test_Subscribe_Type_Cmd:
-		actod.subscribe_type(actod.Actor_Type(1))
+		_, _ = actod.subscribe_type(actod.Actor_Type(1))
 	case Test_Subscribe_Topic_Cmd:
-		actod.subscribe_topic(&test_topic)
+		_, _ = actod.subscribe_topic(&test_topic)
 	case Test_Send_Parent_Cmd:
-		actod.send_message_to_parent(Test_Pong{value = v.value})
+		_ = actod.send_message_to_parent(Test_Pong{value = v.value})
 	case Test_Send_Children_Cmd:
-		actod.send_message_to_children(Test_Pong{value = v.value})
+		_ = actod.send_message_to_children(Test_Pong{value = v.value})
 	}
 }
 

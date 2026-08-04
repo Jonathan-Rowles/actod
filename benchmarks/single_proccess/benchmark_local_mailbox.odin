@@ -111,7 +111,7 @@ run_local_throughput :: proc(
 
 	time.sleep(5 * time.Millisecond)
 
-	actod.send_message(
+	_ = actod.send_message(
 		sender,
 		Start_Flood{target = receiver, message_count = message_count, warmup_count = 10_000},
 	)
@@ -135,8 +135,8 @@ run_local_throughput :: proc(
 
 	time.sleep(50 * time.Millisecond)
 
-	actod.terminate_actor(sender)
-	actod.terminate_actor(receiver)
+	_ = actod.terminate_actor(sender)
+	_ = actod.terminate_actor(receiver)
 	time.sleep(50 * time.Millisecond)
 
 	actod.shutdown_node()

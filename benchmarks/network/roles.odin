@@ -65,7 +65,7 @@ create_network_benchmark_behaviour :: proc(
 		handle_message = proc(data: ^shared.Benchmark_Actor_Data, from: actod.PID, msg: any) {
 			switch m in msg {
 			case shared.Get_PID_Request:
-				actod.send_message(from, shared.Get_PID_Response{request_id = m.request_id})
+				_ = actod.send_message(from, shared.Get_PID_Response{request_id = m.request_id})
 			case T:
 				data.message_count += 1
 				when CORRUPTION_DEBUG {
@@ -95,7 +95,7 @@ create_network_benchmark_behaviour :: proc(
 							start_time        = data.start_time,
 							end_time          = data.last_msg_time,
 						}
-						actod.send_message(global_receiver_state.stats_collector, complete_msg)
+						_ = actod.send_message(global_receiver_state.stats_collector, complete_msg)
 					}
 				}
 			}
@@ -192,7 +192,7 @@ spawn_benchmark_actor :: proc($T: typeid, id: int) -> actod.PID {
 
 handle_start_test :: proc(msg: shared.Start_Test_Message) {
 	for pid in global_receiver_state.actors {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 	}
 	delete(global_receiver_state.actors)
 
@@ -201,7 +201,7 @@ handle_start_test :: proc(msg: shared.Start_Test_Message) {
 	global_receiver_state.current_test = test_copy
 	global_receiver_state.test_complete = false
 
-	actod.send_message(global_receiver_state.stats_collector, msg)
+	_ = actod.send_message(global_receiver_state.stats_collector, msg)
 
 	actors := make([]actod.PID, msg.actor_count)
 

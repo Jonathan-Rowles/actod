@@ -39,12 +39,12 @@ crash_test_handle_message :: proc(data: ^Crash_Test_Data, from: actod.PID, msg: 
 		if m == data.crash_on_msg {
 			actod.self_terminate(data.crash_reason)
 		} else if m == "ping" {
-			actod.send_message(from, "pong")
+			_ = actod.send_message(from, "pong")
 		}
 
 	case Integration_Test_Message:
 		sync.atomic_add(&global_test_state.messages_received, 1)
-		actod.send_message(from, m)
+		_ = actod.send_message(from, m)
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	}
 }
@@ -98,7 +98,7 @@ supervisor_test_handle_message :: proc(data: ^Supervisor_Test_Data, from: actod.
 	case string:
 		if m == "get_stats" {
 			stats := fmt.tprintf("restarts=%d", data.restarts_seen)
-			actod.send_message(from, stats)
+			_ = actod.send_message(from, stats)
 		}
 	}
 }
@@ -394,7 +394,7 @@ test_supervisor_child_lifecycle :: proc(t: ^testing.T) {
 		expect(t, new_pid != old_child, "Child should have new PID after restart")
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_one_for_one_strategy :: proc(t: ^testing.T) {
@@ -446,7 +446,7 @@ test_one_for_one_strategy :: proc(t: ^testing.T) {
 		expect_value(t, new_children[2], initial_children[2])
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_one_for_all_strategy :: proc(t: ^testing.T) {
@@ -500,7 +500,7 @@ test_one_for_all_strategy :: proc(t: ^testing.T) {
 		}
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_rest_for_one_strategy :: proc(t: ^testing.T) {
@@ -556,7 +556,7 @@ test_rest_for_one_strategy :: proc(t: ^testing.T) {
 		}
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_restart_limit_within_window :: proc(t: ^testing.T) {
@@ -625,7 +625,7 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 		"Supervisor should still be running",
 	)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 
 	for i := 0; i < 20; i += 1 {
 		if !actod.valid(&actod.global_registry, supervisor_pid) {
@@ -670,7 +670,7 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 			break
 		}
 		if len(children) > 0 {
-			actod.send_message(children[0], "crash")
+			_ = actod.send_message(children[0], "crash")
 			expect(
 				t,
 				wait_for_child_count(supervisor_pid, 1, 200),
@@ -697,7 +697,7 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 		expect_value(t, len(new_children), 1)
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 
 	for i := 0; i < 20; i += 1 {
 		if !actod.valid(&actod.global_registry, supervisor_pid) {
@@ -753,7 +753,7 @@ test_permanent_restart_policy :: proc(t: ^testing.T) {
 		}
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_transient_restart_policy :: proc(t: ^testing.T) {
@@ -807,7 +807,7 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 		expect(t, no_child, "TRANSIENT child should NOT restart on NORMAL termination")
 	}
 
-	actod.add_child(supervisor_pid, create_transient_child(0))
+	_, _ = actod.add_child(supervisor_pid, create_transient_child(0))
 	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "New child should be added")
 
 	children2 := actod.get_children(supervisor_pid)
@@ -819,8 +819,8 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 			id      = 999,
 			payload = "cause_abnormal",
 		}
-		actod.send_message(old_child, msg)
-		actod.send_message(old_child, actod.Terminate{reason = .ABNORMAL})
+		_ = actod.send_message(old_child, msg)
+		_ = actod.send_message(old_child, actod.Terminate{reason = .ABNORMAL})
 
 		_, success := wait_for_child_pid_change(supervisor_pid, old_child, 0, 500)
 		expect(t, success, "TRANSIENT child should restart on ABNORMAL termination")
@@ -830,7 +830,7 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 		expect_value(t, len(new_children), 1)
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 
 	for i := 0; i < 20; i += 1 {
 		if !actod.valid(&actod.global_registry, supervisor_pid) {
@@ -890,7 +890,7 @@ test_add_child_dynamically :: proc(t: ^testing.T) {
 	time.sleep(150 * time.Millisecond)
 	verify_child_count(t, supervisor_pid, 3)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_remove_child_dynamically :: proc(t: ^testing.T) {
@@ -957,7 +957,7 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 		}
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_adopt_existing_actor :: proc(t: ^testing.T) {
@@ -1029,7 +1029,7 @@ test_adopt_existing_actor :: proc(t: ^testing.T) {
 		"Adopted child should have new PID after restart",
 	)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_self_termination_reasons :: proc(t: ^testing.T) {
@@ -1091,7 +1091,7 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 			"TEMPORARY child should be removed after terminating",
 		)
 
-		actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 		time.sleep(50 * time.Millisecond)
 	}
 }

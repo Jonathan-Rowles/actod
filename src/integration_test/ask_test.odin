@@ -178,8 +178,8 @@ test_ask_reply_roundtrip :: proc(t: ^testing.T) {
 	off_actor_err := actod.reply(Ask_Answer{y = 0})
 	expect(t, off_actor_err == .NOT_ASKED, "reply() outside an actor must return NOT_ASKED")
 
-	actod.send_message(requester, actod.Terminate{reason = .NORMAL})
-	actod.send_message(responder, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(requester, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(responder, actod.Terminate{reason = .NORMAL})
 }
 
 test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
@@ -278,7 +278,7 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 	expect(t, sync.atomic_load(&timeout_token) != 0, "Ask_Timeout must fire before the late reply")
 	expect(t, sync.atomic_load(&answer_y) == 0, "a late reply must be dropped, not delivered")
 
-	actod.send_message(requester, actod.Terminate{reason = .NORMAL})
-	actod.send_message(silent, actod.Terminate{reason = .NORMAL})
-	actod.send_message(late, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(requester, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(silent, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(late, actod.Terminate{reason = .NORMAL})
 }

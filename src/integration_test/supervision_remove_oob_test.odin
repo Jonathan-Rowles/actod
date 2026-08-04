@@ -61,5 +61,5 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 	defer delete(survivors)
 	expect_value(t, len(survivors), 2)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }

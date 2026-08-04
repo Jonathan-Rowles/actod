@@ -88,7 +88,7 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 
 		children := actod.get_children(supervisor_pid)
 		for child in children {
-			actod.send_message(child, actod.Terminate{reason = .NORMAL})
+			_ = actod.send_message(child, actod.Terminate{reason = .NORMAL})
 		}
 		delete(children)
 
@@ -111,7 +111,7 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 		fail_hard("supervisor processed only %d of %d Actor_Stopped messages", reaped, expected)
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
@@ -159,11 +159,11 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 		return
 	}
 
-	actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block)
+	_ = actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block)
 	time.sleep(50 * time.Millisecond)
 
 	for child in children {
-		actod.send_message(child, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(child, actod.Terminate{reason = .NORMAL})
 	}
 
 	converged := wait_for_child_count(supervisor_pid, 0, 5000)
@@ -184,7 +184,7 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 		MASS_DEATH_CHILDREN,
 	)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
 test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
@@ -223,11 +223,11 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 	children := actod.get_children(supervisor_pid)
 	defer delete(children)
 
-	actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block_Long)
+	_ = actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block_Long)
 	time.sleep(50 * time.Millisecond)
 
 	for child in children {
-		actod.send_message(child, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(child, actod.Terminate{reason = .NORMAL})
 	}
 
 	converged := wait_for_child_count(supervisor_pid, 0, 5000)
@@ -247,5 +247,5 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 		BLOCKED_SUPERVISOR_CHILDREN,
 	)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }

@@ -27,8 +27,8 @@ register_test_spawn_funcs :: proc() {
 		return
 	}
 
-	register_spawn_func("test_spawn_a", test_spawn_func_a)
-	register_spawn_func("test_spawn_b", test_spawn_func_b)
+	_ = register_spawn_func("test_spawn_a", test_spawn_func_a)
+	_ = register_spawn_func("test_spawn_b", test_spawn_func_b)
 
 	test_spawn_funcs_registered = true
 }

@@ -49,12 +49,12 @@ reclaim_sender_behaviour := actod.Actor_Behaviour(Reclaim_Sender) {
 			for slot in 0 ..< RECLAIM_NUM_SLOTS {
 				pid := actod.PID(sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire))
 				if pid != 0 {
-					actod.send_message(pid, Reclaim_Ping{n = d.sent})
+					_ = actod.send_message(pid, Reclaim_Ping{n = d.sent})
 					d.sent += 1
 				}
 			}
 			sync.atomic_add(&reclaim_total_sent, RECLAIM_NUM_SLOTS)
-			actod.send_self(Reclaim_Tick{})
+			_ = actod.send_self(Reclaim_Tick{})
 		}
 	},
 }
@@ -86,7 +86,7 @@ reclaim_external_sender_proc :: proc(_: rawptr) {
 				continue
 			}
 			for _ in 0 ..< 4 {
-				actod.send_message(pid, Reclaim_Ping{n = sent})
+				_ = actod.send_message(pid, Reclaim_Ping{n = sent})
 				sent += 1
 			}
 		}
@@ -104,7 +104,7 @@ reclaim_reaper_proc :: proc(_: rawptr) {
 				reclaim_spawn_target(slot, &seq)
 				continue
 			}
-			actod.terminate_actor(pid, .SHUTDOWN)
+			_ = actod.terminate_actor(pid, .SHUTDOWN)
 			terminations += 1
 			reclaim_spawn_target(slot, &seq)
 		}
@@ -136,7 +136,7 @@ test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
 			),
 		)
 		if ok {
-			actod.send_message(pid, Reclaim_Tick{})
+			_ = actod.send_message(pid, Reclaim_Tick{})
 		}
 	}
 

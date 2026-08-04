@@ -361,7 +361,7 @@ run_latency_benchmark :: proc(config: Latency_Config) -> Latency_Stats {
 
 	actor := spawn_latency_actor()
 	defer {
-		actod.terminate_actor(actor)
+		_ = actod.terminate_actor(actor)
 		time.sleep(10 * time.Millisecond)
 	}
 
@@ -426,22 +426,22 @@ create_pingpong_receiver_behaviour :: proc() -> actod.Actor_Behaviour(Pingpong_R
 		handle_message = proc(data: ^Pingpong_Receiver_Data, from: actod.PID, msg: any) {
 			switch m in msg {
 			case Latency_Msg_32:
-				actod.send_message(
+				_ = actod.send_message(
 					from,
 					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
 				)
 			case Latency_Msg_256:
-				actod.send_message(
+				_ = actod.send_message(
 					from,
 					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
 				)
 			case Latency_Msg_1K:
-				actod.send_message(
+				_ = actod.send_message(
 					from,
 					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
 				)
 			case Latency_Msg_4K:
-				actod.send_message(
+				_ = actod.send_message(
 					from,
 					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
 				)
@@ -515,7 +515,7 @@ run_pingpong_test :: proc(size: Latency_Size, count: int) -> Latency_Stats {
 	if !ok_r {
 		panic("Failed to spawn pingpong receiver")
 	}
-	defer actod.terminate_actor(receiver)
+	defer _ = actod.terminate_actor(receiver)
 
 	sender_data := Pingpong_Sender_Data {
 		receiver    = receiver,
@@ -533,11 +533,11 @@ run_pingpong_test :: proc(size: Latency_Size, count: int) -> Latency_Stats {
 	if !ok_s {
 		panic("Failed to spawn pingpong sender")
 	}
-	defer actod.terminate_actor(sender)
+	defer _ = actod.terminate_actor(sender)
 
 	time.sleep(5 * time.Millisecond)
 
-	actod.send_message(sender, Start_Pingpong{count = count})
+	_ = actod.send_message(sender, Start_Pingpong{count = count})
 
 	sync.sema_wait(&done_sema)
 

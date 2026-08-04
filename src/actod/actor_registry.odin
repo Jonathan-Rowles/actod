@@ -896,6 +896,7 @@ collect_actors :: proc(
 	return actors
 }
 
+@(require_results)
 register_node :: proc(
 	name: string,
 	address: net.Endpoint,
@@ -987,6 +988,7 @@ register_node_entry :: proc(
 	return node_id, true
 }
 
+@(require_results)
 get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
 	if node_id == 0 || node_id >= MAX_NODES {
 		return {}, false
@@ -1168,6 +1170,7 @@ destroy_all_connection_rings :: proc() {
 	}
 }
 
+@(require_results)
 get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
 	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
 	defer sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
@@ -1187,7 +1190,7 @@ unregister_node :: proc(node_id: Node_ID) {
 	)
 
 	if conn_pid != 0 {
-		send_message(conn_pid, Terminate{})
+		_ = send_message(conn_pid, Terminate{})
 
 		// TODO: be more deterministic
 		time.sleep(10 * time.Millisecond)

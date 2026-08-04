@@ -100,6 +100,6 @@ test_spawn_sized_mailbox :: proc(t: ^testing.T) {
 	expect(t, sync.atomic_load(&big_done), "actor never drained the burst")
 	expect(t, len(big_received) == burst, "every burst message must be delivered")
 
-	actod.send_message(tiny_pid, actod.Terminate{reason = .NORMAL})
-	actod.send_message(big_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(tiny_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(big_pid, actod.Terminate{reason = .NORMAL})
 }

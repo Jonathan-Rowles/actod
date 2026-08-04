@@ -192,14 +192,14 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 			active_stats     = data.active_stats,
 			terminated_stats = data.terminated_stats[:],
 		}
-		send_message(from, response)
+		_ = send_message(from, response)
 
 	case Get_All_Stats_Request:
 		response := All_Stats_Response {
 			active_stats     = data.active_stats,
 			terminated_stats = data.terminated_stats[:],
 		}
-		send_message(m.requester, response)
+		_ = send_message(m.requester, response)
 
 	case Get_Actor_Stats:
 		response: Actor_Stats_Response
@@ -215,7 +215,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 				}
 			}
 		}
-		send_message(from, response)
+		_ = send_message(from, response)
 
 	case Get_Actor_Stats_Request:
 		response: Actor_Stats_Response
@@ -231,7 +231,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 				}
 			}
 		}
-		send_message(m.requester, response)
+		_ = send_message(m.requester, response)
 
 	case Clear_Terminated_Stats:
 		for &stats in data.terminated_stats {
@@ -356,7 +356,7 @@ collect_all_stats :: proc(data: ^Observer_Data) {
 			requester = OBSERVER_PID,
 		}
 
-		send_message(pid, msg)
+		_ = send_message(pid, msg)
 	}
 
 
@@ -428,7 +428,7 @@ start_observer :: proc(
 	OBSERVER_PID = pid
 
 	if collection_interval > 0 {
-		send_message(OBSERVER_PID, Set_Collection_Interval{interval = collection_interval})
+		_ = send_message(OBSERVER_PID, Set_Collection_Interval{interval = collection_interval})
 	}
 
 	SYSTEM_CONFIG.enable_observer = true
@@ -458,7 +458,7 @@ stop_observer :: proc() {
 			)
 		}
 
-		terminate_actor(OBSERVER_PID, .SHUTDOWN)
+		_ = terminate_actor(OBSERVER_PID, .SHUTDOWN)
 		for i := 0; i < 100; i += 1 {
 			if _, active := get(&global_registry, OBSERVER_PID); !active {
 				break
@@ -575,6 +575,7 @@ clear_terminated_stats :: proc(loc := #caller_location) -> bool {
 	return err == .OK
 }
 
+@(require_results)
 subscribe_to_stats :: proc(loc := #caller_location) -> (Subscription, bool) {
 	if OBSERVER_TYPE == ACTOR_TYPE_UNTYPED {
 		log_observer_not_started("subscribe_to_stats", loc)
@@ -583,6 +584,7 @@ subscribe_to_stats :: proc(loc := #caller_location) -> (Subscription, bool) {
 	return subscribe_type(OBSERVER_TYPE, loc)
 }
 
+@(require_results)
 unsubscribe_from_stats :: proc(sub: Subscription, loc := #caller_location) -> bool {
 	return pubsub_unsubscribe(sub, loc)
 }

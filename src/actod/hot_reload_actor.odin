@@ -494,7 +494,7 @@ start_hot_reload_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 
 stop_hot_reload_actor :: proc() {
 	if HOT_RELOAD_PID != 0 {
-		terminate_actor(HOT_RELOAD_PID)
+		_ = terminate_actor(HOT_RELOAD_PID)
 		wait_for_pids([]PID{HOT_RELOAD_PID})
 		HOT_RELOAD_PID = 0
 	}
@@ -544,7 +544,7 @@ hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 		}
 		msg.package_path = path_buf
 
-		send_message(HOT_RELOAD_PID, msg)
+		_ = send_message(HOT_RELOAD_PID, msg)
 	}
 
 	w, ok := hot_reload.create_watcher(watcher_callback, nil)
@@ -1548,7 +1548,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 
 	msg.state_size = size_of(T)
 
-	send_message(HOT_RELOAD_PID, msg)
+	_ = send_message(HOT_RELOAD_PID, msg)
 }
 
 @(private)

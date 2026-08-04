@@ -197,7 +197,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 				data.tcp_socket = 0
 			}
 			data.state = .Disconnected
-			terminate_actor(get_self_pid(), .SHUTDOWN)
+			_ = terminate_actor(get_self_pid(), .SHUTDOWN)
 		}
 
 	case Remote_Message:
@@ -1018,7 +1018,7 @@ resolve_incoming_peer :: proc(data: ^Connection_Actor_Data, info: Hello_Info) ->
 			our_port,
 			their_port,
 		)
-		terminate_actor(existing_conn, .SHUTDOWN)
+		_ = terminate_actor(existing_conn, .SHUTDOWN)
 		if !wait_for_actor_exit(existing_conn, DUPLICATE_TAKEOVER_TIMEOUT) {
 			log.errorf("Timed out waiting for duplicate connection actor to exit")
 			return false
@@ -1145,7 +1145,7 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 	cancel_timer(data.heartbeat_timer_id)
 
 	if data.is_incoming {
-		terminate_actor(get_self_pid(), .SHUTDOWN)
+		_ = terminate_actor(get_self_pid(), .SHUTDOWN)
 		return
 	}
 

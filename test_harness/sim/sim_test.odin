@@ -30,7 +30,7 @@ handle_echo :: proc(s: ^echo_state, from: actod.PID, msg: any) {
 	case Ping:
 		s.pings += 1
 		s.last_value = v.value
-		actod.send_message(from, Pong{value = v.value * 2})
+		_ = actod.send_message(from, Pong{value = v.value * 2})
 	case Pong:
 		s.last_value = v.value
 	}
@@ -51,7 +51,7 @@ counter_behaviour := actod.Actor_Behaviour(counter_state) {
 
 init_counter :: proc(s: ^counter_state) {
 	if s.topic != nil {
-		actod.subscribe_topic(s.topic)
+		_, _ = actod.subscribe_topic(s.topic)
 	}
 }
 
@@ -107,7 +107,7 @@ init_forwarder :: proc(s: ^forwarder_state) {}
 handle_forwarder :: proc(s: ^forwarder_state, from: actod.PID, msg: any) {
 	switch v in msg {
 	case Forward:
-		actod.send_message_name(v.target, Ping{value = v.value})
+		_ = actod.send_message_name(v.target, Ping{value = v.value})
 		s.forwarded += 1
 	}
 }
@@ -126,7 +126,7 @@ spawner_behaviour := actod.Actor_Behaviour(spawner_state) {
 handle_spawner :: proc(s: ^spawner_state, from: actod.PID, msg: any) {
 	switch v in msg {
 	case Spawn_Child_Cmd:
-		actod.spawn_child("child", echo_state{name = "spawned-child"}, echo_behaviour)
+		_, _ = actod.spawn_child("child", echo_state{name = "spawned-child"}, echo_behaviour)
 		s.spawned += 1
 	}
 }
@@ -740,7 +740,7 @@ handle_pricer :: proc(s: ^pricer_state, from: actod.PID, msg: any) {
 		if s.stay_mute {
 			return
 		}
-		actod.reply(Price{value = len(v.symbol) * 10})
+		_ = actod.reply(Price{value = len(v.symbol) * 10})
 	}
 }
 

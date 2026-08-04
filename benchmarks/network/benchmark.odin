@@ -208,7 +208,7 @@ run_network_benchmark :: proc(
 	time.sleep(500 * time.Millisecond)
 
 	for i in 0 ..< config.actor_count {
-		actod.send_message(
+		_ = actod.send_message(
 			global_coordinator_pid,
 			Request_PIDs_Message {
 				actor_count = i,

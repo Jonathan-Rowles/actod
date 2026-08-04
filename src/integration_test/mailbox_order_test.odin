@@ -74,5 +74,5 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 	}
 	expect(t, inversions == 0, "an overflowed send must never overtake earlier sends from the same producer")
 
-	actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 }

@@ -196,7 +196,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	time.sleep(5 * time.Millisecond)
 
 	for i in 0 ..< config.sender_count {
-		actod.send_message(senders[i], Start_Benchmark_Send{})
+		_ = actod.send_message(senders[i], Start_Benchmark_Send{})
 	}
 
 	for _ in 0 ..< config.sender_count {
@@ -215,7 +215,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	start_ns := time.tick_now()._nsec
 
 	for i in 0 ..< config.sender_count {
-		actod.send_message(senders[i], Go_Benchmark_Send{})
+		_ = actod.send_message(senders[i], Go_Benchmark_Send{})
 	}
 
 	for _ in 0 ..< config.sender_count {
@@ -240,10 +240,10 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	final_received := sync.atomic_load(&global_benchmark_state.receive_count)
 
 	for pid in actors {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 	}
 	for pid in senders {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 	}
 
 	time.sleep(50 * time.Millisecond)

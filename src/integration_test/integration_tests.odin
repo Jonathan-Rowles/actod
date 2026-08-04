@@ -139,7 +139,7 @@ lifecycle_actor_handle_message :: proc(data: ^Lifecycle_Actor_Data, from: actod.
 			payload = fmt.tprintf("Echo: %s", m.payload),
 			sender  = actod.NODE.pid,
 		}
-		actod.send_message(from, reply)
+		_ = actod.send_message(from, reply)
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 
 	}
@@ -158,7 +158,7 @@ echo_actor_handle_message :: proc(data: ^Echo_Actor_Data, from: actod.PID, msg: 
 		data.echo_count += 1
 		sync.atomic_add(&global_test_state.messages_received, 1)
 
-		actod.send_message(from, m)
+		_ = actod.send_message(from, m)
 		sync.atomic_add(&global_test_state.messages_sent, 1)
 	case Stress_Test_Message:
 		data.echo_count += 1
@@ -192,7 +192,7 @@ pipeline_actor_handle_message :: proc(data: ^Pipeline_Actor_Data, from: actod.PI
 					valid,
 				)
 				thread.yield()
-				actod.send_message(data.next_pid, mut_msg)
+				_ = actod.send_message(data.next_pid, mut_msg)
 			}
 			sync.atomic_add(&global_test_state.messages_sent, 1)
 		} else {
@@ -228,7 +228,7 @@ broadcast_actor_handle_message :: proc(data: ^Broadcast_Actor_Data, from: actod.
 		sync.atomic_add(&global_test_state.messages_received, 1)
 
 		for j in 0 ..< data.sub_count {
-			actod.send_message(data.subscribers[j], m)
+			_ = actod.send_message(data.subscribers[j], m)
 			sync.atomic_add(&global_test_state.messages_sent, 1)
 		}
 
@@ -360,7 +360,7 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 	}
 
 	for pid in echo_actors {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 	sent := sync.atomic_load(&global_test_state.messages_sent)
@@ -447,9 +447,9 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 	}
 
 	for pid in pipeline_actors {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
-	actod.send_message(origin_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(origin_pid, actod.Terminate{reason = .NORMAL})
 
 	received := sync.atomic_load(&global_test_state.messages_received)
 	_ = sync.atomic_load(&global_test_state.messages_sent)
@@ -512,9 +512,9 @@ test_broadcast_pattern :: proc(t: ^testing.T) {
 		expected_deliveries,
 	)
 
-	actod.send_message(broadcaster, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(broadcaster, actod.Terminate{reason = .NORMAL})
 	for pid in subscribers {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 }
 
@@ -547,11 +547,11 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 				payload = fmt.tprintf("rapid-test-%d", i),
 				sender  = actod.NODE.pid,
 			}
-			actod.send_message(actors[i], msg)
+			_ = actod.send_message(actors[i], msg)
 		}
 
 		for pid in actors {
-			actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+			_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 		}
 
 		expected_terminated := u64((cycle + 1) * actors_per_cycle)
@@ -634,7 +634,7 @@ test_stress_message_throughput :: proc(t: ^testing.T) {
 				sender = actod.NODE.pid,
 			}
 
-			actod.send_message(actors[actor_idx], msg)
+			_ = actod.send_message(actors[actor_idx], msg)
 			sync.atomic_add(&global_test_state.messages_sent, 1)
 
 			if i % 100 == 0 {
@@ -693,7 +693,7 @@ test_stress_message_throughput :: proc(t: ^testing.T) {
 	}
 
 	for pid in actors {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 	sent := sync.atomic_load(&global_test_state.messages_sent)
@@ -727,7 +727,7 @@ test_pool_integration :: proc(t: ^testing.T) {
 				payload = fmt.tprintf("pool-stress-%d-%d", i, j),
 				sender  = actod.NODE.pid,
 			}
-			actod.send_message(actors[j], msg)
+			_ = actod.send_message(actors[j], msg)
 		}
 
 		if i % 10 == 0 {
@@ -753,7 +753,7 @@ test_pool_integration :: proc(t: ^testing.T) {
 	)
 
 	for pid in actors {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 }
 
@@ -800,7 +800,7 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 			for k in 0 ..< len(msg.data) {
 				msg.data[k] = u8((i + j + k) & 0xFF)
 			}
-			actod.send_message(actors[j], msg)
+			_ = actod.send_message(actors[j], msg)
 			sync.atomic_add(&global_test_state.messages_sent, 1)
 		}
 	}
@@ -816,7 +816,7 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 	initial_registry_count := actod.num_used(&actod.global_registry)
 
 	for pid in actors {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
@@ -900,7 +900,7 @@ test_registry_consistency :: proc(t: ^testing.T) {
 			payload = fmt.tprintf("registry-%d", i),
 			sender  = actod.NODE.pid,
 		}
-		actod.send_message(actors[i], msg)
+		_ = actod.send_message(actors[i], msg)
 	}
 
 	expected_messages := u64(len(actors) * 2)
@@ -912,7 +912,7 @@ test_registry_consistency :: proc(t: ^testing.T) {
 	}
 
 	for pid in actors {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
@@ -986,7 +986,7 @@ string_actor_handle_message :: proc(data: ^String_Actor_Data, from: actod.PID, m
 			description = fmt.tprintf("Received: %s", m.description),
 			metadata    = fmt.tprintf("Count: %d", data.received_messages),
 		}
-		actod.send_message(from, reply)
+		_ = actod.send_message(from, reply)
 
 	case Complex_String_Message:
 		data.received_messages += 1
@@ -1092,7 +1092,7 @@ test_string_handling :: proc(t: ^testing.T) {
 					),
 					metadata    = fmt.tprintf("Metadata: %d-%d", data.id, i),
 				}
-				actod.send_message(data.target, msg)
+				_ = actod.send_message(data.target, msg)
 			}
 		},
 		handle_message = proc(data: ^Sender_Data, from: actod.PID, msg: any) {
@@ -1120,9 +1120,9 @@ test_string_handling :: proc(t: ^testing.T) {
 	}
 
 
-	actod.send_message(string_actor, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(string_actor, actod.Terminate{reason = .NORMAL})
 	for pid in senders {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 
@@ -1177,7 +1177,7 @@ byte_slice_actor_handle_message :: proc(data: ^Byte_Slice_Actor_Data, from: acto
 			description = transmute([]byte)fmt.tprintf("Received: %s", string(m.description)),
 			metadata    = transmute([]byte)fmt.tprintf("Count: %d", data.received_messages),
 		}
-		actod.send_message(from, reply)
+		_ = actod.send_message(from, reply)
 
 	case Complex_Byte_Slice_Message:
 		data.received_messages += 1
@@ -1292,7 +1292,7 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 					),
 					metadata    = transmute([]byte)fmt.tprintf("Metadata: %d-%d", data.id, i),
 				}
-				actod.send_message(data.target, msg)
+				_ = actod.send_message(data.target, msg)
 			}
 		},
 		handle_message = proc(data: ^Byte_Sender_Data, from: actod.PID, msg: any) {
@@ -1321,9 +1321,9 @@ test_byte_slice_handling :: proc(t: ^testing.T) {
 		time.sleep(time.Millisecond)
 	}
 
-	actod.send_message(byte_actor, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(byte_actor, actod.Terminate{reason = .NORMAL})
 	for pid in senders {
-		actod.send_message(pid, actod.Terminate{reason = .NORMAL})
+		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 	received := sync.atomic_load(&global_test_state.messages_received)
@@ -1364,7 +1364,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 							payload = "relay",
 							sender  = actod.NODE.pid,
 						}
-						actod.send_message(data.target_actors[target_idx], reply)
+						_ = actod.send_message(data.target_actors[target_idx], reply)
 						sync.atomic_add(&global_test_state.messages_sent, 1)
 					}
 				}
@@ -1399,7 +1399,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 			count = len(actors),
 		}
 		copy(msg.actors[:len(actors)], actors[:])
-		actod.send_message(pid, msg)
+		_ = actod.send_message(pid, msg)
 	}
 
 	initial_messages := 50
@@ -1410,7 +1410,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 				payload = "initial",
 				sender  = actod.NODE.pid,
 			}
-			actod.send_message(actors[j], msg)
+			_ = actod.send_message(actors[j], msg)
 			sync.atomic_add(&global_test_state.messages_sent, 1)
 		}
 	}
@@ -1443,7 +1443,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 			}
 
 			for i := 0; i < 5; i += 1 {
-				actod.send_message(sender_ctx.actors[target_idx], msg)
+				_ = actod.send_message(sender_ctx.actors[target_idx], msg)
 			}
 			msg_id += 1
 
@@ -1582,7 +1582,7 @@ union_actor_handle_message :: proc(data: ^Union_Actor_Data, from: actod.PID, msg
 		ack := Union_Ack {
 			seq = data.last_seq,
 		}
-		actod.send_message(from, ack)
+		_ = actod.send_message(from, ack)
 	}
 }
 
@@ -1600,7 +1600,7 @@ test_union_message_handling :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
 			case Union_Test_Message:
-				actod.send_message(data.target, m)
+				_ = actod.send_message(data.target, m)
 			case Union_Ack:
 				data.ack_count += 1
 				if data.ack_count >= data.expected {
@@ -1624,11 +1624,11 @@ test_union_message_handling :: proc(t: ^testing.T) {
 	collector, col_ok := actod.spawn("union-collector", collector_data, Collector_Behaviour)
 	expect(t, col_ok, "Failed to spawn collector")
 
-	actod.send_message(collector, Union_Test_Message(Union_Ping{seq = 1}))
-	actod.send_message(collector, Union_Test_Message(Union_Ping{seq = 42}))
+	_ = actod.send_message(collector, Union_Test_Message(Union_Ping{seq = 1}))
+	_ = actod.send_message(collector, Union_Test_Message(Union_Ping{seq = 42}))
 
-	actod.send_message(collector, Union_Test_Message(Union_Chat{name = "alice", content = "hi"}))
-	actod.send_message(
+	_ = actod.send_message(collector, Union_Test_Message(Union_Chat{name = "alice", content = "hi"}))
+	_ = actod.send_message(
 		collector,
 		Union_Test_Message(
 			Union_Chat {
@@ -1637,8 +1637,8 @@ test_union_message_handling :: proc(t: ^testing.T) {
 			},
 		),
 	)
-	actod.send_message(collector, Union_Test_Message(Union_Chat{name = "", content = ""}))
-	actod.send_message(
+	_ = actod.send_message(collector, Union_Test_Message(Union_Chat{name = "", content = ""}))
+	_ = actod.send_message(
 		collector,
 		Union_Test_Message(Union_Chat{name = "unicode 你好", content = "🎭 ñ ü"}),
 	)
@@ -1653,8 +1653,8 @@ test_union_message_handling :: proc(t: ^testing.T) {
 		fmt.tprintf("Not all union messages received: %d < %d", received, expected_messages),
 	)
 
-	actod.terminate_actor(union_actor)
-	actod.terminate_actor(collector)
+	_ = actod.terminate_actor(union_actor)
+	_ = actod.terminate_actor(collector)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, union_actor) {
@@ -1688,7 +1688,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 			case Integration_Test_Message:
 				sync.atomic_add(&contention_received[data.idx], 1)
 				target := contention_pids[int(rand.uint32()) % CONTENTION_ACTOR_COUNT]
-				actod.send_message(target, Integration_Test_Message{})
+				_ = actod.send_message(target, Integration_Test_Message{})
 			}
 		},
 	}
@@ -1705,7 +1705,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 
 	for i in 0 ..< CONTENTION_ACTOR_COUNT {
 		for _ in 0 ..< CONTENTION_SEED_PINGS {
-			actod.send_message(contention_pids[i], Integration_Test_Message{})
+			_ = actod.send_message(contention_pids[i], Integration_Test_Message{})
 		}
 	}
 
@@ -1745,7 +1745,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 	expectf(t, total > 0, "No messages processed at all")
 
 	for i in 0 ..< CONTENTION_ACTOR_COUNT {
-		actod.terminate_actor(contention_pids[i])
+		_ = actod.terminate_actor(contention_pids[i])
 	}
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
@@ -1810,7 +1810,7 @@ Pubsub_Subscriber_Behaviour :: actod.Actor_Behaviour(Pubsub_Subscriber_Data) {
 }
 
 pubsub_subscriber_init :: proc(data: ^Pubsub_Subscriber_Data) {
-	actod.subscribe_type(PUBSUB_PUBLISHER_TYPE)
+	_, _ = actod.subscribe_type(PUBSUB_PUBLISHER_TYPE)
 }
 
 pubsub_subscriber_handle :: proc(data: ^Pubsub_Subscriber_Data, from: actod.PID, msg: any) {
@@ -1858,7 +1858,7 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 		sub_count,
 	)
 
-	actod.send_message(pub_pid, "publish")
+	_ = actod.send_message(pub_pid, "publish")
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= PUBSUB_SUBSCRIBER_COUNT {
@@ -1877,9 +1877,9 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 	)
 
 	for pid in sub_pids {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 	}
-	actod.terminate_actor(pub_pid)
+	_ = actod.terminate_actor(pub_pid)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, pub_pid) {
@@ -1915,7 +1915,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 		"Should have at least 1 subscriber",
 	)
 
-	actod.terminate_actor(sub_pid)
+	_ = actod.terminate_actor(sub_pid)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, sub_pid) {
@@ -1934,7 +1934,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 		count_after,
 	)
 
-	actod.send_message(pub_pid, "publish")
+	_ = actod.send_message(pub_pid, "publish")
 	time.sleep(50 * time.Millisecond)
 
 	expect(
@@ -1943,7 +1943,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 		"No messages should be received after subscriber terminated",
 	)
 
-	actod.terminate_actor(pub_pid)
+	_ = actod.terminate_actor(pub_pid)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if !actod.valid(&actod.global_registry, pub_pid) {

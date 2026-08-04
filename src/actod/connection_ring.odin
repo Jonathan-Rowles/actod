@@ -360,7 +360,7 @@ pool_note_contention :: proc(pool: ^Connection_Pool) {
 	   swapped {
 		conn_pid := PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
 		if conn_pid != 0 {
-			send_message(conn_pid, Scale_Up_Request{})
+			_ = send_message(conn_pid, Scale_Up_Request{})
 		}
 	}
 }
@@ -809,21 +809,21 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 
 	if !ring_io_attach(ring, ctx.conn_pid) {
 		log.error("IO attach timed out, previous owner still active")
-		send_message(ctx.conn_pid, Close_Connection{reason = "io attach timeout"})
+		_ = send_message(ctx.conn_pid, Close_Connection{reason = "io attach timeout"})
 		return
 	}
 	defer ring_io_release(ring)
 
 	if err := nbio.acquire_thread_event_loop(); err != nil {
 		log.errorf("Failed to acquire NBIO event loop: %v", err)
-		send_message(ctx.conn_pid, Close_Connection{reason = "nbio unavailable"})
+		_ = send_message(ctx.conn_pid, Close_Connection{reason = "nbio unavailable"})
 		return
 	}
 	defer nbio.release_thread_event_loop()
 
 	if err := nbio.associate_socket(ring.tcp_socket); err != nil {
 		log.errorf("Failed to associate socket: %v", err)
-		send_message(ctx.conn_pid, Close_Connection{reason = "nbio associate failed"})
+		_ = send_message(ctx.conn_pid, Close_Connection{reason = "nbio associate failed"})
 		return
 	}
 
@@ -1075,11 +1075,11 @@ notify_ring_error :: proc(ring: ^Connection_Ring, reason: string) {
 	if pool != nil {
 		primary := atomic_load_ring_ptr(&pool.rings[0])
 		if primary != nil && ring != primary {
-			send_message(ring.conn_pid, Pool_Ring_Closed{ring_ptr = u64(uintptr(ring))})
+			_ = send_message(ring.conn_pid, Pool_Ring_Closed{ring_ptr = u64(uintptr(ring))})
 			return
 		}
 	}
-	send_message(ring.conn_pid, Close_Connection{reason = reason})
+	_ = send_message(ring.conn_pid, Close_Connection{reason = reason})
 }
 
 send_raw_via_ring :: proc(ring: ^Connection_Ring, raw_data_with_size: []byte) -> bool {

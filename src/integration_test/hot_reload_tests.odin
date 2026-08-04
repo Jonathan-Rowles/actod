@@ -84,7 +84,7 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 
 	mod: ^hot_reload.Hot_Module
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
 			delete_key(&actod.hot_module_table, 1)
@@ -142,7 +142,7 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 
 	mod: ^hot_reload.Hot_Module
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
 			delete_key(&actod.hot_module_table, 2)
@@ -153,7 +153,7 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 	time.sleep(10 * time.Millisecond)
 
 	for _ in 0 ..< 5 {
-		actod.send_message(pid, "tick")
+		_ = actod.send_message(pid, "tick")
 	}
 	expect(t, hr_wait_for_count(pid, 5), "should reach 5")
 
@@ -183,7 +183,7 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 	expect(t, ok, "should be able to read count")
 	expect_value(t, count_before, i32(5))
 
-	actod.send_message(pid, "tick")
+	_ = actod.send_message(pid, "tick")
 	expect(t, hr_wait_for_count(pid, 15), "should be 5 + 10 = 15")
 }
 
@@ -194,7 +194,7 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 
 	mod: ^hot_reload.Hot_Module
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
 			delete_key(&actod.hot_module_table, 3)
@@ -249,7 +249,7 @@ test_rollback :: proc(t: ^testing.T) {
 	v2_mod: ^hot_reload.Hot_Module
 	v1_mod: ^hot_reload.Hot_Module
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if v2_mod != nil {
 			delete_key(&actod.hot_module_table, 5)
@@ -303,20 +303,20 @@ test_rollback :: proc(t: ^testing.T) {
 	actod.hot_module_table[5] = v2_mod
 
 	for _ in 0 ..< 2 {
-		actod.send_message(pid, "tick")
+		_ = actod.send_message(pid, "tick")
 	}
 	expect(t, hr_wait_for_count(pid, 2), "should reach 2")
 
 	actod.send_reload_behaviour(pid, 5)
 	time.sleep(20 * time.Millisecond)
 
-	actod.send_message(pid, "tick")
+	_ = actod.send_message(pid, "tick")
 	expect(t, hr_wait_for_count(pid, 12), "v2 should reach 12")
 
 	actod.send_reload_behaviour(pid, 4)
 	time.sleep(20 * time.Millisecond)
 
-	actod.send_message(pid, "tick")
+	_ = actod.send_message(pid, "tick")
 	expect(t, hr_wait_for_count(pid, 13), "after rollback should increment by 1 to 13")
 
 	count, ok := hr_read_count(pid)
@@ -435,7 +435,7 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 
 	mod: ^hot_reload.Hot_Module
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
 			delete_key(&actod.hot_module_table, 100)
@@ -516,7 +516,7 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 	expect(t, ok, "should read count")
 	expect(t, count_before > 0, "should have processed messages")
 
-	actod.send_message(pid, "tick")
+	_ = actod.send_message(pid, "tick")
 	expect(t, hr_wait_for_count(pid, count_before + 10), "post-reload tick should add 10")
 
 	count_after, ok2 := hr_read_count(pid)

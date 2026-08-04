@@ -18,6 +18,7 @@ init_ask_messages :: proc "contextless" () {
 	register_message_type(Ask_Timeout)
 }
 
+@(require_results)
 ask :: #force_inline proc(
 	to: PID,
 	content: $T,
@@ -58,6 +59,7 @@ ask :: #force_inline proc(
 	return Ask_Token(token), .OK
 }
 
+@(require_results)
 reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {
 		if err, ok := ti.intercept_reply(content); ok {
@@ -83,6 +85,7 @@ reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error 
 	)
 }
 
+@(require_results)
 replying_to :: proc() -> (Ask_Token, bool) {
 	when ODIN_TEST {
 		if token, replying, ok := ti.intercept_replying_to(); ok {

@@ -27,7 +27,7 @@ panic_actor_handle_message :: proc(data: ^Panic_Actor_Data, from: actod.PID, msg
 		if m == "panic" {
 			panic("intentional panic")
 		} else if m == "ping" {
-			actod.send_message(from, "pong")
+			_ = actod.send_message(from, "pong")
 		}
 	}
 }
@@ -68,7 +68,7 @@ test_actor_panic_recovery :: proc(t: ^testing.T) {
 	err2 := actod.send_message(echo_pid, "ping")
 	expect(t, err2 == .OK, "Echo actor should still accept messages")
 
-	actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(echo_pid, 500)
 }
 
@@ -115,7 +115,7 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 	err2 := actod.send_message(new_pid, "ping")
 	expect(t, err2 == .OK, "Restarted child should accept messages")
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(supervisor_pid, 500)
 }
 
@@ -147,7 +147,7 @@ test_actor_panic_in_init :: proc(t: ^testing.T) {
 	err := actod.send_message(echo_pid, "ping")
 	expect(t, err == .OK, "System should be functional after init panic")
 
-	actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(echo_pid, actod.Terminate{reason = .NORMAL})
 	wait_for_actor_invalid(echo_pid, 500)
 }
 

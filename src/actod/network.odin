@@ -241,7 +241,7 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 		return false
 	}
 
-	send_message(conn_pid, Start_Receiving{})
+	_ = send_message(conn_pid, Start_Receiving{})
 
 	return true
 }
@@ -439,7 +439,7 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 	if existing_pid != 0 {
 		actor_ptr, actor_exists := get(&global_registry, existing_pid)
 		if actor_exists && actor_ptr != nil {
-			send_message(
+			_ = send_message(
 				existing_pid,
 				Connect_Request{node_id = node_id, address = node_info.address},
 			)
@@ -498,11 +498,11 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		existing := PID(
 			sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[node_id], .Acquire),
 		)
-		terminate_actor(conn_pid, .SHUTDOWN)
+		_ = terminate_actor(conn_pid, .SHUTDOWN)
 		return existing
 	}
 
-	send_message(conn_pid, Connect_Request{node_id = node_id, address = node_info.address})
+	_ = send_message(conn_pid, Connect_Request{node_id = node_id, address = node_info.address})
 
 	return conn_pid
 }
@@ -669,6 +669,7 @@ g_pending_spawn_ids: [MAX_PENDING_SPAWNS]u64
 @(private)
 g_spawn_request_counter: u64
 
+@(require_results)
 spawn_remote :: proc(
 	spawn_func_name: string,
 	actor_name: string,

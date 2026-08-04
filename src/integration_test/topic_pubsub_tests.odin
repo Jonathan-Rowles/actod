@@ -22,7 +22,7 @@ Topic_Sub_Behaviour :: actod.Actor_Behaviour(Topic_Sub_Data) {
 }
 
 topic_sub_init :: proc(data: ^Topic_Sub_Data) {
-	actod.subscribe_topic(&shared_topic)
+	_, _ = actod.subscribe_topic(&shared_topic)
 }
 
 topic_sub_handle :: proc(data: ^Topic_Sub_Data, from: actod.PID, msg: any) {
@@ -83,7 +83,7 @@ test_topic_publish :: proc(t: ^testing.T) {
 
 	time.sleep(20 * time.Millisecond)
 
-	actod.send_message(pub_pid, "go")
+	_ = actod.send_message(pub_pid, "go")
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= SUBSCRIBER_COUNT {
@@ -102,9 +102,9 @@ test_topic_publish :: proc(t: ^testing.T) {
 	)
 
 	for pid in sub_pids {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 	}
-	actod.terminate_actor(pub_pid)
+	_ = actod.terminate_actor(pub_pid)
 	actod.wait_for_pids(sub_pids[:])
 	actod.wait_for_pids([]actod.PID{pub_pid})
 }
@@ -127,7 +127,7 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 		"Should have 1 topic subscriber",
 	)
 
-	actod.terminate_actor(sub_pid)
+	_ = actod.terminate_actor(sub_pid)
 	actod.wait_for_pids([]actod.PID{sub_pid})
 
 	expectf(
@@ -159,7 +159,7 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 
 	time.sleep(20 * time.Millisecond)
 
-	actod.send_message(pub_pid, "go")
+	_ = actod.send_message(pub_pid, "go")
 	time.sleep(50 * time.Millisecond)
 
 	expect(
@@ -168,7 +168,7 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 		"No messages should be received after subscriber terminated",
 	)
 
-	actod.terminate_actor(pub_pid)
+	_ = actod.terminate_actor(pub_pid)
 	actod.wait_for_pids([]actod.PID{pub_pid})
 }
 
@@ -195,7 +195,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 				sync.atomic_add(data.received, 1)
 			case string:
 				if m == "unsub" {
-					actod.unsubscribe_topic(data.sub)
+					_ = actod.unsubscribe_topic(data.sub)
 				}
 			}
 		},
@@ -236,7 +236,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	expect(t, pub_ok, "Should spawn publisher")
 	time.sleep(20 * time.Millisecond)
 
-	actod.send_message(pub_pid, "go")
+	_ = actod.send_message(pub_pid, "go")
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= 1 {
 			break
@@ -245,7 +245,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	}
 	expect(t, sync.atomic_load(&received_count) == 1, "Should receive first publish")
 
-	actod.send_message(sub_pid, "unsub")
+	_ = actod.send_message(sub_pid, "unsub")
 	time.sleep(50 * time.Millisecond)
 
 	expectf(
@@ -255,7 +255,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire),
 	)
 
-	actod.send_message(pub_pid, "go")
+	_ = actod.send_message(pub_pid, "go")
 	time.sleep(50 * time.Millisecond)
 
 	expectf(
@@ -265,7 +265,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		sync.atomic_load(&received_count),
 	)
 
-	actod.terminate_actor(sub_pid)
-	actod.terminate_actor(pub_pid)
+	_ = actod.terminate_actor(sub_pid)
+	_ = actod.terminate_actor(pub_pid)
 	actod.wait_for_pids([]actod.PID{sub_pid, pub_pid})
 }

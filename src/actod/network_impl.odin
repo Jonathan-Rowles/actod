@@ -403,6 +403,7 @@ send_remote_by_name_impl :: proc(
 	return .NETWORK_RING_FULL
 }
 
+@(require_results)
 send_unreliable :: #force_inline proc(
 	to: PID,
 	content: $T,

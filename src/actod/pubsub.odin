@@ -104,6 +104,7 @@ remove_subscriber :: proc(actor_type: Actor_Type, pid: PID) -> bool {
 	return false
 }
 
+@(require_results)
 subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subscription, bool) {
 	when ODIN_TEST {
 		if ti.intercept_subscribe_type(u8(actor_type)) {
@@ -155,6 +156,7 @@ subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subs
 	return sub, true
 }
 
+@(require_results)
 pubsub_unsubscribe :: proc(sub: Subscription, loc := #caller_location) -> bool {
 	if sub.pid == 0 {
 		log.warn(
@@ -222,7 +224,7 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
 		if pid != 0 && pid != self_pid {
-			send_message(pid, msg)
+			_ = send_message(pid, msg)
 		}
 	}
 
@@ -348,6 +350,7 @@ clear_all_subscriptions :: proc() {
 	}
 }
 
+@(require_results)
 subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscription, bool) {
 	if topic == nil {
 		log.warn(
@@ -407,6 +410,7 @@ subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscr
 	}
 }
 
+@(require_results)
 unsubscribe_topic :: proc(sub: Topic_Subscription, loc := #caller_location) -> bool {
 	if sub.topic == nil || sub.pid == 0 {
 		log.warn(
@@ -452,7 +456,7 @@ publish :: proc(topic: ^Topic, msg: $T, loc := #caller_location) {
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
 		if pid != 0 && pid != self_pid {
-			send_message(pid, msg)
+			_ = send_message(pid, msg)
 		}
 	}
 }

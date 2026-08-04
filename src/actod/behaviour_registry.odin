@@ -7,6 +7,7 @@ MAX_SPAWN_FUNCS :: 256
 
 g_spawn_registry: Name_Registry(SPAWN, MAX_SPAWN_FUNCS)
 
+@(require_results)
 register_spawn_func :: proc(name: string, spawn_func: SPAWN, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	idx, registered := registry_register(&g_spawn_registry, name, spawn_func, loc)
@@ -61,6 +62,7 @@ has_spawn_func :: proc(name: string, loc := #caller_location) -> bool {
 	return registry_has(&g_spawn_registry, name, loc)
 }
 
+@(require_results)
 spawn_by_name :: proc(
 	spawn_func_name: string,
 	actor_name: string,

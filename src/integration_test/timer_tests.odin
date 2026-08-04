@@ -42,7 +42,7 @@ test_timer_repeating :: proc(t: ^testing.T) {
 	)
 	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
@@ -86,7 +86,7 @@ test_timer_one_shot :: proc(t: ^testing.T) {
 	)
 	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
@@ -143,14 +143,14 @@ test_timer_cancel :: proc(t: ^testing.T) {
 	)
 	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
 	success := sync.sema_wait_with_timeout(&first_tick, 2 * time.Second)
 	expect(t, success, "Timer should fire at least once")
 
-	actod.send_message(pid, "cancel")
+	_ = actod.send_message(pid, "cancel")
 
 	time.sleep(30 * time.Millisecond)
 
@@ -176,10 +176,10 @@ Multi_Timer_Behaviour :: actod.Actor_Behaviour(Multi_Timer_Data) {
 }
 
 multi_timer_init :: proc(data: ^Multi_Timer_Data) {
-	actod.set_timer(10 * time.Millisecond, false)
-	actod.set_timer(15 * time.Millisecond, false)
-	actod.set_timer(20 * time.Millisecond, false)
-	actod.set_timer(25 * time.Millisecond, false)
+	_, _ = actod.set_timer(10 * time.Millisecond, false)
+	_, _ = actod.set_timer(15 * time.Millisecond, false)
+	_, _ = actod.set_timer(20 * time.Millisecond, false)
+	_, _ = actod.set_timer(25 * time.Millisecond, false)
 }
 
 multi_timer_handle :: proc(data: ^Multi_Timer_Data, from: actod.PID, msg: any) {
@@ -201,7 +201,7 @@ test_timer_multiple :: proc(t: ^testing.T) {
 	)
 	expect(t, spawn_ok, "Failed to spawn test actor")
 	defer {
-		actod.terminate_actor(pid)
+		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
@@ -219,8 +219,8 @@ Cleanup_Timer_Behaviour :: actod.Actor_Behaviour(Cleanup_Timer_Data) {
 }
 
 cleanup_timer_init :: proc(data: ^Cleanup_Timer_Data) {
-	actod.set_timer(10 * time.Millisecond, true)
-	actod.set_timer(20 * time.Millisecond, true)
+	_, _ = actod.set_timer(10 * time.Millisecond, true)
+	_, _ = actod.set_timer(20 * time.Millisecond, true)
 	data.started = true
 }
 
@@ -238,7 +238,7 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 
 	time.sleep(50 * time.Millisecond)
 
-	actod.terminate_actor(pid)
+	_ = actod.terminate_actor(pid)
 	actod.wait_for_pids([]actod.PID{pid})
 
 	done: sync.Sema
@@ -249,7 +249,7 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 	)
 	expect(t, verify_ok, "Failed to spawn verify actor")
 	defer {
-		actod.terminate_actor(verify_pid)
+		_ = actod.terminate_actor(verify_pid)
 		actod.wait_for_pids([]actod.PID{verify_pid})
 	}
 

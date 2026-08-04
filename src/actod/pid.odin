@@ -114,6 +114,7 @@ cleanup_actor_type_registry :: proc "contextless" () {
 	registry_destroy(&g_actor_type_registry)
 }
 
+@(require_results)
 register_actor_type :: proc(name: string) -> (Actor_Type, bool) {
 	registry_ensure_init(&g_actor_type_registry)
 
@@ -147,6 +148,7 @@ register_actor_type :: proc(name: string) -> (Actor_Type, bool) {
 	return local_id, true
 }
 
+@(require_results)
 get_actor_type_name :: proc(actor_type: Actor_Type) -> (string, bool) {
 	registry_ensure_init(&g_actor_type_registry)
 

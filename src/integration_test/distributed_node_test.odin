@@ -28,7 +28,7 @@ Distributed_Receiver_Behaviour :: actod.Actor_Behaviour(Distributed_Receiver_Dat
 			append(&data.messages, m)
 
 			resp := shared.make_two_node_response(m.id, "ACK", actod.get_local_node_name())
-			actod.send_message(from, resp)
+			_ = actod.send_message(from, resp)
 
 			if len(data.messages) >= data.expected_count {
 				sync.sema_post(data.done)
@@ -53,7 +53,7 @@ Distributed_Echo_Actor_Behaviour :: actod.Actor_Behaviour(Distributed_Echo_Actor
 				from_actor = data.name,
 			}
 			target := m.reply_to if m.reply_to != 0 else from
-			actod.send_message(target, response)
+			_ = actod.send_message(target, response)
 		}
 	},
 }
@@ -526,7 +526,7 @@ spawn_test_worker :: proc(name: string, parent_pid: actod.PID) -> (actod.PID, bo
 					message   = m.message,
 					from_node = "spawn_test",
 				}
-				actod.send_message(from, response)
+				_ = actod.send_message(from, response)
 			}
 		},
 	}
@@ -563,7 +563,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
 			case shared.Network_Test_Request:
-				actod.send_message(data.target, m)
+				_ = actod.send_message(data.target, m)
 			case shared.Network_Test_Response:
 				data.response = m
 				sync.sema_post(data.done)
@@ -583,7 +583,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		id      = 42,
 		message = "hello from spawn test",
 	}
-	actod.send_message(collector_pid, req)
+	_ = actod.send_message(collector_pid, req)
 
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
 	expect(t, success, "Should receive response from spawned actor")
@@ -620,10 +620,10 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		"Actor spawned via hash should have correct type",
 	)
 
-	actod.terminate_actor(hash_pid)
-	actod.terminate_actor(child_pid)
-	actod.terminate_actor(pid)
-	actod.terminate_actor(collector_pid)
+	_ = actod.terminate_actor(hash_pid)
+	_ = actod.terminate_actor(child_pid)
+	_ = actod.terminate_actor(pid)
+	_ = actod.terminate_actor(collector_pid)
 	time.sleep(100 * time.Millisecond)
 }
 
@@ -798,7 +798,7 @@ start_supervision_server :: proc(node_port: int, base_port: int) -> (os.Process,
 }
 
 test_remote_spawn_basic :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
@@ -835,7 +835,7 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Pong_Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
 			case shared.Supervision_Ping:
-				actod.send_message(data.target, m)
+				_ = actod.send_message(data.target, m)
 			case shared.Supervision_Pong:
 				data.response = m
 				sync.sema_post(data.done)
@@ -861,11 +861,11 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
 	expect(t, success, "Should receive pong from remote actor")
 
-	actod.terminate_actor(collector_pid)
+	_ = actod.terminate_actor(collector_pid)
 }
 
 test_remote_child_crash_notification :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
@@ -948,11 +948,11 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
 	expect(t, success, "Observer should observe child termination via on_child_terminated")
 
-	actod.terminate_actor(observer_pid)
+	_ = actod.terminate_actor(observer_pid)
 }
 
 test_remote_one_for_one_restart :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	g_supervision_target_node = "SupervisionNode"
 	sync.atomic_store(&g_remote_child_counter, 0)
@@ -1020,12 +1020,12 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 
 	verify_child_count(t, supervisor_pid, 1)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 	time.sleep(200 * time.Millisecond)
 }
 
 test_remote_one_for_all_restart :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	g_supervision_target_node = "SupervisionNode"
 	sync.atomic_store(&g_remote_child_counter, 0)
@@ -1103,12 +1103,12 @@ test_remote_one_for_all_restart :: proc(t: ^testing.T) {
 		}
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 	time.sleep(200 * time.Millisecond)
 }
 
 test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	g_supervision_target_node = "SupervisionNode"
 	sync.atomic_store(&g_remote_child_counter, 0)
@@ -1189,12 +1189,12 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 		}
 	}
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 	time.sleep(200 * time.Millisecond)
 }
 
 test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
@@ -1274,12 +1274,12 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 
 	verify_child_count(t, supervisor_pid, 1)
 
-	actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 	time.sleep(200 * time.Millisecond)
 }
 
 test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {
-	actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
@@ -1425,7 +1425,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Mesh_Collector_Data, from: actod.PID, msg: any) {
 			switch m in msg {
 			case shared.Network_Test_Request:
-				actod.send_message(data.target, m)
+				_ = actod.send_message(data.target, m)
 			case shared.Network_Test_Response:
 				data.response = m
 				sync.sema_post(data.done)
@@ -1456,7 +1456,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 		"Should receive response from MeshNodeC's mesh_actor via lazy connection",
 	)
 
-	actod.terminate_actor(collector_pid)
+	_ = actod.terminate_actor(collector_pid)
 	time.sleep(50 * time.Millisecond)
 
 	_ = os.process_kill(node_c_process)
@@ -1578,7 +1578,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 		sub_count,
 	)
 
-	actod.send_message(pub_pid, "publish")
+	_ = actod.send_message(pub_pid, "publish")
 
 	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
 	expectf(
@@ -1589,8 +1589,8 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 		sync.atomic_load(&ack_count),
 	)
 
-	actod.terminate_actor(collector_pid)
-	actod.terminate_actor(pub_pid)
+	_ = actod.terminate_actor(collector_pid)
+	_ = actod.terminate_actor(pub_pid)
 	time.sleep(100 * time.Millisecond)
 }
 
@@ -1626,7 +1626,7 @@ test_distributed_union_messages :: proc(t: ^testing.T) {
 				case shared.Network_Union_Chat:
 					ack.variant_id = 2
 				}
-				actod.send_message(from, ack)
+				_ = actod.send_message(from, ack)
 
 				count := sync.atomic_add(data.ack_count, 1)
 				if count + 1 >= data.expected {
@@ -1708,7 +1708,7 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 					sync.atomic_add(data.intact_count, 1)
 				}
 
-				actod.send_message(
+				_ = actod.send_message(
 					from,
 					shared.Network_Bytes_Ack {
 						id = m.id,

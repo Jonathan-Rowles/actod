@@ -208,6 +208,7 @@ spawn :: proc {
 	spawn_sized,
 }
 
+@(require_results)
 spawn_default :: proc(
 	name: string,
 	data: $T,
@@ -222,6 +223,7 @@ spawn_default :: proc(
 	return spawn_impl(name, data, behaviour, DEFAULT_MAIL_BOX_SIZE, opts, parent_pid, loc)
 }
 
+@(require_results)
 spawn_sized :: proc(
 	name: string,
 	data: $T,
@@ -555,6 +557,7 @@ spawn_child :: proc {
 	spawn_child_sized,
 }
 
+@(require_results)
 spawn_child_default :: proc(
 	name: string,
 	data: $T,
@@ -582,6 +585,7 @@ spawn_child_default :: proc(
 	return spawn_impl(name, data, behaviour, DEFAULT_MAIL_BOX_SIZE, opts, self_pid, loc)
 }
 
+@(require_results)
 spawn_child_sized :: proc(
 	name: string,
 	data: $T,
@@ -1348,6 +1352,7 @@ reconstruct_msg :: #force_inline proc(msg: ^Message, data: ^any, header: ^^Type_
 	}
 }
 
+@(require_results)
 send_self :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_self(content); ok do return Send_Error(r)}
 	v := content
@@ -1359,6 +1364,7 @@ send_self :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Er
 	}
 }
 
+@(require_results)
 send_message :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content); ok do return Send_Error(r)}
 	v := content
@@ -1377,6 +1383,7 @@ send_message :: #force_inline proc(to: PID, content: $T, loc := #caller_location
 //   send_message_name("my_actor@remote_node", msg)    // Remote actor on "remote_node"
 // For dynamic node/actor names, use send_to(actor, node, msg) instead.
 // For performance with known PIDs, use send_message(to: PID, content) instead.
+@(require_results)
 send_message_name :: proc(to: string, content: $T, loc := #caller_location) -> Send_Error {
 	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_name(to, content); ok do return Send_Error(r)}
@@ -1418,6 +1425,7 @@ send_message_name :: proc(to: string, content: $T, loc := #caller_location) -> S
 // Local actors only, does not support "actor@node" remote format.
 // The cache is a simple linear scan, intended for a small number of target names
 // per message type. If you're sending to many distinct names, use get_actor_pid + send_message.
+@(require_results)
 send_by_name_cached :: proc(to: string, content: $T, loc := #caller_location) -> Send_Error {
 	context.logger = diagnostic_logger(context.logger)
 	NAME_CACHE_MAX :: 16
@@ -1488,6 +1496,7 @@ send_by_name_cached :: proc(to: string, content: $T, loc := #caller_location) ->
 }
 
 // Send message to a remote actor with dynamic node and actor names.
+@(require_results)
 send_to :: proc(
 	actor_name: string,
 	node_name: string,
@@ -1510,6 +1519,7 @@ send_to :: proc(
 	return .NODE_NOT_FOUND
 }
 
+@(require_results)
 send_message_to_children :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return Send_Error(r)}
 	v := content
@@ -1521,6 +1531,7 @@ send_message_to_children :: #force_inline proc(content: $T, loc := #caller_locat
 	}
 }
 
+@(require_results)
 send_message_to_parent :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return Send_Error(r)}
 	v := content
@@ -1735,6 +1746,7 @@ send :: #force_inline proc(
 	}
 }
 
+@(require_results)
 terminate_actor :: proc(
 	to: PID,
 	reason: Termination_Reason = .SHUTDOWN,
@@ -1787,6 +1799,7 @@ terminate_actor :: proc(
 }
 
 // Dynamically add a child to a supervisor
+@(require_results)
 add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (PID, bool) {
 	context.logger = diagnostic_logger(context.logger)
 	if child_spawn == nil {
@@ -1825,6 +1838,7 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (
 adopt_child :: add_child_existing
 
 // Dynamically adopt an existing actor as a child of a supervisor
+@(require_results)
 add_child_existing :: proc(
 	parent: PID,
 	existing_child: PID,
@@ -1877,6 +1891,7 @@ add_child_existing :: proc(
 
 // Remove a child from a supervisor
 // remote??
+@(require_results)
 remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
@@ -1938,6 +1953,7 @@ get_actor_name :: #force_inline proc(pid: PID) -> string {
 	return name_ptr^
 }
 
+@(require_results)
 get_actor_pid :: #force_inline proc(name: string) -> (PID, bool) {
 	when ODIN_TEST {if pid, found, ok := ti.intercept_get_actor_pid(name); ok do return PID(pid), found}
 
@@ -1989,6 +2005,7 @@ self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_loca
 	return terminate_actor(pid, reason, loc)
 }
 
+@(require_results)
 rename_actor :: proc(pid: PID, new_name: string, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if ti.intercept_rename_actor(u64(pid), new_name) do return true}

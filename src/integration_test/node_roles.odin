@@ -264,9 +264,9 @@ run_send_burst :: proc() {
 			sync.atomic_load(cast(^u64)&actod.NODE.connection_actors[node_id]),
 		)
 		if conn_pid != 0 {
-			actod.send_message(conn_pid, actod.Scale_Up_Request{})
+			_ = actod.send_message(conn_pid, actod.Scale_Up_Request{})
 			time.sleep(50 * time.Millisecond)
-			actod.send_message(conn_pid, actod.Scale_Up_Request{})
+			_ = actod.send_message(conn_pid, actod.Scale_Up_Request{})
 			time.sleep(150 * time.Millisecond)
 		}
 	}
@@ -350,7 +350,7 @@ run_relay_node :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
 
 	Relay_Actor_Data :: struct {
 		node_name:   string,
@@ -428,7 +428,7 @@ run_echo_back :: proc() {
 		address = net.IP4_Loopback,
 		port    = echo_to_port,
 	}
-	actod.register_node(echo_to_node, echo_addr, .TCP_Custom_Protocol)
+	_, _ = actod.register_node(echo_to_node, echo_addr, .TCP_Custom_Protocol)
 
 	Echo_Back_Data :: struct {
 		node_name:     string,
@@ -529,7 +529,7 @@ run_concurrent_echo :: proc() {
 				}
 
 				target := m.reply_to if m.reply_to != 0 else from
-				actod.send_message(target, response)
+				_ = actod.send_message(target, response)
 			}
 		},
 	}
@@ -624,7 +624,7 @@ run_lifecycle_server :: proc() {
 			address = net.IP4_Loopback,
 			port    = reply_to_port,
 		}
-		actod.register_node(reply_to_node, reply_addr, .TCP_Custom_Protocol)
+		_, _ = actod.register_node(reply_to_node, reply_addr, .TCP_Custom_Protocol)
 	}
 
 	Lifecycle_Echo_Data :: struct {
@@ -645,9 +645,9 @@ run_lifecycle_server :: proc() {
 					from_node = data.name,
 				}
 				if data.reply_to_actor != "" && data.reply_to_node != "" {
-					actod.send_to(data.reply_to_actor, data.reply_to_node, response)
+					_ = actod.send_to(data.reply_to_actor, data.reply_to_node, response)
 				} else {
-					actod.send_message(from, response)
+					_ = actod.send_message(from, response)
 				}
 			}
 		},
@@ -711,7 +711,7 @@ run_lifecycle_broadcast :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	time.sleep(250 * time.Millisecond)
 
@@ -808,7 +808,7 @@ run_registry_exchange :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	fmt.println("READY")
 
@@ -831,7 +831,7 @@ Supervision_Worker_Behaviour :: actod.Actor_Behaviour(Supervision_Worker_Data) {
 				id        = m.id,
 				from_name = data.name,
 			}
-			actod.send_message(from, response)
+			_ = actod.send_message(from, response)
 		}
 	},
 }
@@ -879,13 +879,13 @@ run_supervision_server :: proc() {
 	)
 	defer actod.shutdown_node()
 
-	actod.register_spawn_func("supervision_worker", spawn_supervision_worker)
+	_ = actod.register_spawn_func("supervision_worker", spawn_supervision_worker)
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
 
 	fmt.println("READY")
 
@@ -934,7 +934,7 @@ run_mesh_middle :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	fmt.println("READY")
 
@@ -983,7 +983,7 @@ run_mesh_leaf :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
 	time.sleep(250 * time.Millisecond)
 
@@ -1000,7 +1000,7 @@ run_mesh_leaf :: proc() {
 					message   = m.message,
 					from_node = data.name,
 				}
-				actod.send_message(from, response)
+				_ = actod.send_message(from, response)
 			}
 		},
 	}
@@ -1051,11 +1051,11 @@ run_pubsub_subscriber :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
 
 	PUBLISHER_TYPE, _ := actod.register_actor_type("pubsub_broadcast_publisher")
 
-	actod.send_to("_", target_node, shared.Pubsub_Broadcast_Msg{})
+	_ = actod.send_to("_", target_node, shared.Pubsub_Broadcast_Msg{})
 	for _ in 0 ..< 50 {
 		target_node_id, found := actod.get_node_by_name(target_node)
 		if found {
@@ -1076,7 +1076,7 @@ run_pubsub_subscriber :: proc() {
 
 	Pubsub_Sub_Behaviour :: actod.Actor_Behaviour(Pubsub_Sub_Data) {
 		init = proc(data: ^Pubsub_Sub_Data) {
-			actod.subscribe_type(data.publisher_type)
+			_, _ = actod.subscribe_type(data.publisher_type)
 		},
 		handle_message = proc(data: ^Pubsub_Sub_Data, from: actod.PID, msg: any) {
 			switch m in msg {
@@ -1085,7 +1085,7 @@ run_pubsub_subscriber :: proc() {
 					subscriber_id = data.subscriber_id,
 					value         = m.value,
 				}
-				actod.send_to(data.ack_actor, data.target_node, ack)
+				_ = actod.send_to(data.ack_actor, data.target_node, ack)
 			}
 		},
 	}

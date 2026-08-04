@@ -200,7 +200,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 			sync.mutex_unlock(&reg.lock)
 
 			for i in 0 ..< fired_count {
-				send_message(fired_buf[i].owner, Timer_Tick{id = fired_buf[i].id})
+				_ = send_message(fired_buf[i].owner, Timer_Tick{id = fired_buf[i].id})
 			}
 		}
 	}
@@ -328,12 +328,13 @@ start_timer_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 
 stop_timer_actor :: proc() {
 	if TIMER_PID != 0 {
-		terminate_actor(TIMER_PID)
+		_ = terminate_actor(TIMER_PID)
 		wait_for_pids([]PID{TIMER_PID})
 		TIMER_PID = 0
 	}
 }
 
+@(require_results)
 set_timer :: proc(
 	interval: time.Duration,
 	repeat: bool,

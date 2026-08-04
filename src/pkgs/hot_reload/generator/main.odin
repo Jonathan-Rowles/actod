@@ -625,8 +625,9 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []st
 	}
 
 	for group in groups {
-		if shim_has_all_group_members(strings.to_string(procs_sb), group) {
-			fmt.sbprintf(&procs_sb, "%s\n\n", group)
+		if filtered, keep := filter_group_to_shim_members(strings.to_string(procs_sb), group);
+		   keep {
+			fmt.sbprintf(&procs_sb, "%s\n\n", filtered)
 		}
 	}
 
@@ -641,17 +642,29 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []st
 	return strings.to_string(out)
 }
 
-shim_has_all_group_members :: proc(shim_text: string, group: string) -> bool {
+filter_group_to_shim_members :: proc(shim_text: string, group: string) -> (string, bool) {
 	open := strings.index_byte(group, '{')
 	close := strings.last_index_byte(group, '}')
-	if open < 0 || close <= open do return false
+	if open < 0 || close <= open do return "", false
+
+	kept: [dynamic]string
 	for member in strings.split(group[open + 1:close], ",") {
 		name := strings.trim_space(member)
 		if name == "" do continue
 		needle := fmt.tprintf("\n%s :: proc", name)
-		if !strings.contains(shim_text, needle) do return false
+		if strings.contains(shim_text, needle) {
+			append(&kept, name)
+		}
 	}
-	return true
+	if len(kept) == 0 do return "", false
+
+	sb := strings.builder_make()
+	fmt.sbprintf(&sb, "%s\n", group[:open + 1])
+	for name in kept {
+		fmt.sbprintf(&sb, "\t%s,\n", name)
+	}
+	fmt.sbprint(&sb, "}")
+	return strings.to_string(sb), true
 }
 
 emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {

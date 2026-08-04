@@ -1839,7 +1839,6 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 			adopted_rings = actod.pool_active_count(pool)
 		}
 	}
-	fmt.printf("[test] pool rings toward sender: %d\n", adopted_rings)
 }
 
 test_encryption_mismatch_rejected :: proc(t: ^testing.T) {

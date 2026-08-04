@@ -4,7 +4,7 @@ DEV_FLAGS := -vet -strict-style -microarch:native
 RELEASE_FLAGS := -o:aggressive -no-bounds-check -disable-assert -microarch:native
 TEST_FLAGS := -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning
 
-test: test-unit test-integration test-facade
+test: test-unit test-facade test-integration
 
 test-facade:
 	@odin check ./src/facade_check -vet -strict-style

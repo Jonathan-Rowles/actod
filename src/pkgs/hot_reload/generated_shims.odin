@@ -750,6 +750,14 @@ get_node_log_ctx :: proc() -> log.Logger {
 	return hot_api.get_node_log_ctx()
 }
 
+spawn :: proc {
+	spawn_default,
+}
+
+spawn_child :: proc {
+	spawn_child_default,
+}
+
 send :: proc {
 	send_message,
 	send_message_name,

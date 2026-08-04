@@ -227,8 +227,8 @@ send_user_backpressure_loop :: proc(
 		if time.tick_since(loop_start) > SEND_MAX_BLOCK_TIMEOUT {
 			release_undelivered(target, msg, msg_ready)
 			reclaim_unpin()
-			log.errorf(
-				"send to %s failed: could not claim a mailbox slot within %v, the receiver is draining but stays saturated",
+			log.debugf(
+				"send to %s backlogged: could not claim a mailbox slot within %v, the receiver is draining but stays saturated",
 				actor_origin(to),
 				SEND_MAX_BLOCK_TIMEOUT,
 				location = loc,

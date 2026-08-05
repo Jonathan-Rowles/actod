@@ -117,7 +117,7 @@ test_distributed_communication :: proc(t: ^testing.T) {
 		panic("failed to start node2")
 	}
 
-	success := sync.sema_wait_with_timeout(&received, 3 * time.Second)
+	success := sync.sema_wait_with_timeout(&received, scaled_timeout(3 * time.Second))
 	expect(t, success, "Failed to receive message from remote node")
 
 	_ = os.process_kill(remote_process)
@@ -151,7 +151,7 @@ test_distributed_wrong_password_rejected :: proc(t: ^testing.T) {
 		panic("failed to start node2")
 	}
 
-	delivered := sync.sema_wait_with_timeout(&received, 2 * time.Second)
+	delivered := sync.sema_wait_with_timeout(&received, scaled_timeout(2 * time.Second))
 	expect(t, !delivered, "Message from a wrong-password peer must be rejected")
 
 	_ = os.process_kill(remote_process)
@@ -249,7 +249,7 @@ test_distributed_network_message_routing :: proc(t: ^testing.T) {
 	err := actod.send_message_name("relay_actor@RelayNode2", msg)
 	expect(t, err == .OK, "Failed to send to relay node")
 
-	success := sync.sema_wait_with_timeout(&received, 3 * time.Second)
+	success := sync.sema_wait_with_timeout(&received, scaled_timeout(3 * time.Second))
 	expect(t, success, "Failed to receive message back through network relay")
 }
 
@@ -316,7 +316,7 @@ test_distributed_concurrent_network_messages :: proc(t: ^testing.T) {
 	}
 
 	timeout := time.Duration(max(5, message_count / 100) * int(time.Second))
-	success := sync.sema_wait_with_timeout(&done, timeout)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(timeout))
 	expect(
 		t,
 		success,
@@ -402,7 +402,7 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 		time.sleep(100 * time.Millisecond)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(3 * time.Second))
 	expect(t, success, "Failed to receive all responses")
 }
 
@@ -432,7 +432,7 @@ test_lifecycle_broadcast :: proc(t: ^testing.T) {
 	}
 
 	found := false
-	for _ in 0 ..< 30 {
+	for _ in 0 ..< scaled_attempts(30) {
 		pid, ok := actod.get_actor_pid("broadcast_test_actor@BroadcastNode")
 		if ok && pid != 0 {
 			expect(t, !actod.is_local_pid(pid), "Broadcast actor should be a remote PID")
@@ -471,7 +471,7 @@ test_registry_exchange :: proc(t: ^testing.T) {
 
 	found_actor_1 := false
 	found_actor_2 := false
-	for _ in 0 ..< 30 {
+	for _ in 0 ..< scaled_attempts(30) {
 		if !found_actor_1 {
 			pid1, ok1 := actod.get_actor_pid("pre_existing_actor_1@RegistryNode")
 			if ok1 && pid1 != 0 {
@@ -585,7 +585,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	}
 	_ = actod.send_message(collector_pid, req)
 
-	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(2 * time.Second))
 	expect(t, success, "Should receive response from spawned actor")
 
 	parent_pid := collector_pid
@@ -717,7 +717,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 		time.sleep(100 * time.Millisecond)
 	}
 
-	phase1_success := sync.sema_wait_with_timeout(&phase1_done, 3 * time.Second)
+	phase1_success := sync.sema_wait_with_timeout(&phase1_done, scaled_timeout(3 * time.Second))
 	expect(t, phase1_success, "Failed to complete phase 1")
 
 	_ = os.process_kill(remote_process)
@@ -748,7 +748,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 		time.sleep(100 * time.Millisecond)
 	}
 
-	phase2_success := sync.sema_wait_with_timeout(&phase2_done, 5 * time.Second)
+	phase2_success := sync.sema_wait_with_timeout(&phase2_done, scaled_timeout(5 * time.Second))
 	expect(t, phase2_success, "Failed to complete phase 2 - reconnection may have failed")
 }
 
@@ -858,7 +858,7 @@ test_remote_spawn_basic :: proc(t: ^testing.T) {
 	err := actod.send_message(collector_pid, ping)
 	expect(t, err == .OK, "Should send ping via the collector")
 
-	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(3 * time.Second))
 	expect(t, success, "Should receive pong from remote actor")
 
 	_ = actod.terminate_actor(collector_pid)
@@ -945,7 +945,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	err := actod.send_message(child_pid, crash_cmd)
 	expect(t, err == .OK, "Should send crash command to remote child")
 
-	success := sync.sema_wait_with_timeout(&done, 3 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(3 * time.Second))
 	expect(t, success, "Observer should observe child termination via on_child_terminated")
 
 	_ = actod.terminate_actor(observer_pid)
@@ -1393,7 +1393,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 
 	found := false
 	mesh_actor_pid: actod.PID
-	for _ in 0 ..< 30 {
+	for _ in 0 ..< scaled_attempts(30) {
 		pid, ok := actod.get_actor_pid("mesh_actor@MeshNodeC")
 		if ok && pid != 0 {
 			expect(t, !actod.is_local_pid(pid), "mesh_actor should be a remote PID")
@@ -1449,7 +1449,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	send_err := actod.send_message(collector_pid, req)
 	expect(t, send_err == .OK, "Should send message to mesh-discovered actor on MeshNodeC")
 
-	got_response := sync.sema_wait_with_timeout(&done, 3 * time.Second)
+	got_response := sync.sema_wait_with_timeout(&done, scaled_timeout(3 * time.Second))
 	expect(
 		t,
 		got_response,
@@ -1463,7 +1463,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	_, _ = os.process_wait(node_c_process)
 
 	removed := false
-	for _ in 0 ..< 30 {
+	for _ in 0 ..< scaled_attempts(30) {
 		_, ok := actod.get_actor_pid("mesh_actor@MeshNodeC")
 		if !ok {
 			removed = true
@@ -1561,7 +1561,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	for _ in 0 ..< 30 {
+	for _ in 0 ..< scaled_attempts(30) {
 		count := actod.get_subscriber_count(PUBSUB_BROADCAST_PUBLISHER_TYPE)
 		if count >= PUBSUB_BROADCAST_SUBSCRIBER_COUNT {
 			break
@@ -1580,7 +1580,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 
 	_ = actod.send_message(pub_pid, "publish")
 
-	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(5 * time.Second))
 	expectf(
 		t,
 		success,
@@ -1666,7 +1666,7 @@ test_distributed_union_messages :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(5 * time.Second))
 	expectf(
 		t,
 		success,
@@ -1758,7 +1758,7 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 5 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(5 * time.Second))
 	expectf(
 		t,
 		success,
@@ -1830,7 +1830,7 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 20 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(20 * time.Second))
 	expect(t, success, "Did not receive all messages over the encrypted connection")
 
 	adopted_rings: u32 = 0
@@ -1873,7 +1873,7 @@ test_encryption_mismatch_rejected :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(2 * time.Second))
 	expect(
 		t,
 		!success,
@@ -1918,7 +1918,7 @@ test_udp_send_unreliable :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 15 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(15 * time.Second))
 	expect(t, success, "Did not receive enough messages over the encrypted UDP lane")
 }
 
@@ -1959,6 +1959,6 @@ test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
 		_, _ = os.process_wait(remote_process)
 	}
 
-	success := sync.sema_wait_with_timeout(&done, 10 * time.Second)
+	success := sync.sema_wait_with_timeout(&done, scaled_timeout(10 * time.Second))
 	expect(t, success, "send_unreliable must fall back to TCP when the peer has no UDP lane")
 }

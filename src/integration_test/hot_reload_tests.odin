@@ -67,7 +67,7 @@ hr_read_count :: proc(pid: actod.PID) -> (i32, bool) {
 }
 
 hr_wait_for_count :: proc(pid: actod.PID, expected: i32, max_ms: int = 500) -> bool {
-	for _ in 0 ..< max_ms / 5 {
+	for _ in 0 ..< scaled_timeout_ms(max_ms) / 5 {
 		count, ok := hr_read_count(pid)
 		if ok && count >= expected {
 			return true

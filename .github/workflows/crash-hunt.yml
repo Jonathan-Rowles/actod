@@ -1,0 +1,61 @@
+name: Linux crash hunt
+
+on:
+  workflow_dispatch:
+    inputs:
+      sweeps:
+        description: How many times to sweep the whole suite
+        default: '5'
+      only:
+        description: Optional single test name to hammer instead of the full suite
+        default: ''
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nasm and gdb
+        run: sudo apt-get update && sudo apt-get install -y nasm gdb
+
+      - name: Setup Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-07a
+
+      - name: Build integration binary
+        run: |
+          mkdir -p bin
+          odin test ./src/integration_test -out:bin/integration_test \
+            -vet -strict-style -keep-executable \
+            -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning \
+            -define:ODIN_TEST_THREADS=1 || true
+          test -x bin/integration_test
+
+      - name: Hunt
+        run: |
+          if [ -n "${{ inputs.only }}" ]; then
+            names="${{ inputs.only }}"
+          else
+            names=$(grep -oE 'name = "test_[a-z_0-9]+"' src/integration_test/run.odin | sed 's/.*"\(.*\)"/\1/' | sort -u)
+          fi
+
+          for sweep in $(seq 1 ${{ inputs.sweeps }}); do
+            for name in $names; do
+              out=$(ACTOD_TEST_RUN="$name" timeout 120 gdb -batch \
+                -ex 'set confirm off' \
+                -ex run \
+                -ex 'thread apply all bt full' \
+                --args bin/integration_test 2>&1) || true
+              if printf '%s' "$out" | grep -qE 'SIGSEGV|SIGBUS|SIGABRT'; then
+                echo "=== CRASH: $name (sweep $sweep) ==="
+                printf '%s\n' "$out"
+                exit 1
+              fi
+            done
+            echo "sweep $sweep clean"
+          done
+          echo "no crash reproduced in ${{ inputs.sweeps }} sweeps"

@@ -30,16 +30,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           release: dev-2026-07a
 
-      - name: Print Odin version
-        run: odin version
+      - name: Print environment
+        shell: bash
+        run: |
+          odin version
+          echo "cpus: $(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo unknown)"
+          echo "nasm: $(nasm -v 2>/dev/null || echo 'NOT INSTALLED')"
 
       - name: Run tests
         if: runner.os != 'Windows'
-        run: make test TEST_FLAGS="-define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1"
+        run: make test-ci
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        env:
-          TEST_FLAGS: -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
-        run: build.bat test
+        run: build.bat test-ci

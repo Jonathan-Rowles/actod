@@ -8,6 +8,7 @@ if not defined TEST_FLAGS set TEST_FLAGS=-define:ODIN_TEST_SHORT_LOGS=true -defi
 
 if "%~1"=="" goto usage
 if "%~1"=="test" goto test
+if "%~1"=="test-ci" goto test-ci
 if "%~1"=="test-unit" goto test-unit
 if "%~1"=="test-facade" goto test-facade
 if "%~1"=="test-integration" goto test-integration
@@ -31,6 +32,11 @@ echo   bench-network     Build and run network benchmark
 echo   gen-hot-api       Generate hot-reload API
 echo   clean             Remove bin/ directory
 exit /b 1
+
+:test-ci
+set "DEV_FLAGS=-vet -strict-style"
+set "TEST_FLAGS=-define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1"
+goto test
 
 :test
 call :test-unit

@@ -1,17 +1,24 @@
-.PHONY: test test-unit test-integration test-facade bench-single bench-network gen-hot-api clean
+.PHONY: test test-ci test-unit test-integration test-facade bench-single bench-network gen-hot-api clean
 
 DEV_FLAGS := -vet -strict-style -microarch:native
 RELEASE_FLAGS := -o:aggressive -no-bounds-check -disable-assert -microarch:native
 TEST_FLAGS := -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning
+JOBS :=
+
+CI_DEV_FLAGS := -vet -strict-style
+CI_TEST_FLAGS := -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
 
 test: test-unit test-facade test-integration
+
+test-ci:
+	@$(MAKE) --no-print-directory test DEV_FLAGS="$(CI_DEV_FLAGS)" TEST_FLAGS="$(CI_TEST_FLAGS)" JOBS=2
 
 test-facade:
 	@odin check ./src/facade_check -vet -strict-style
 	@echo "facade OK"
 
 test-unit:
-	@$(MAKE) --no-print-directory -j $(patsubst ./%,test-unit/%,$(sort $(shell find . -name '*_test.odin' -not -path './pkgs/*' -not -path './src/integration_test/*' | xargs -L1 dirname)))
+	@$(MAKE) --no-print-directory -j$(JOBS) $(patsubst ./%,test-unit/%,$(sort $(shell find . -name '*_test.odin' -not -path './pkgs/*' -not -path './src/integration_test/*' | xargs -L1 dirname)))
 
 test-unit/%:
 	@mkdir -p bin/$*

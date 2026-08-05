@@ -109,7 +109,7 @@ supervisor_test_terminate :: proc(data: ^Supervisor_Test_Data) {
 
 wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
 	start := time.now()
-	deadline := time.time_add(start, time.Duration(timeout_ms) * time.Millisecond)
+	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
 	if condition() {
 		return true
@@ -134,7 +134,7 @@ wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
 
 wait_for_actor_state :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 	start := time.now()
-	deadline := time.time_add(start, time.Duration(timeout_ms) * time.Millisecond)
+	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
 	if _, ok := actod.get(&actod.global_registry, pid); ok {
 		return true
@@ -159,7 +159,7 @@ wait_for_actor_state :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 
 wait_for_child_count :: proc(parent: actod.PID, expected: int, timeout_ms: int) -> bool {
 	start := time.now()
-	deadline := time.time_add(start, time.Duration(timeout_ms) * time.Millisecond)
+	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
 	{
 		children := actod.get_children(parent)
@@ -192,7 +192,7 @@ wait_for_child_count :: proc(parent: actod.PID, expected: int, timeout_ms: int) 
 
 wait_for_actor_invalid :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 	start := time.now()
-	deadline := time.time_add(start, time.Duration(timeout_ms) * time.Millisecond)
+	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
 	if !actod.valid(&actod.global_registry, pid) {
 		return true
@@ -225,7 +225,7 @@ wait_for_child_pid_change :: proc(
 	success: bool,
 ) {
 	start := time.now()
-	deadline := time.time_add(start, time.Duration(timeout_ms) * time.Millisecond)
+	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
 	{
 		children := actod.get_children(parent)

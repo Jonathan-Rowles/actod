@@ -94,7 +94,7 @@ Ask_Requester_Behaviour :: actod.Actor_Behaviour(Ask_Requester_Data) {
 
 wait_for_int :: proc(target: ^int, sentinel: int, budget: time.Duration) {
 	start := time.now()
-	for sync.atomic_load(target) == sentinel && time.diff(start, time.now()) < budget {
+	for sync.atomic_load(target) == sentinel && time.diff(start, time.now()) < scaled_timeout(budget) {
 		time.sleep(5 * time.Millisecond)
 	}
 }

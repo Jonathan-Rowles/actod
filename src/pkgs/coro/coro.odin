@@ -110,7 +110,7 @@ align_forward :: proc "contextless" (addr: uint, align: uint) -> uint {
 }
 
 page_align :: proc "contextless" (size: uint) -> uint {
-	return align_forward(size, vmem.DEFAULT_PAGE_SIZE)
+	return align_forward(size, uint(mem.PAGE_SIZE))
 }
 
 validate_desc :: proc(desc: ^Desc) -> Result {

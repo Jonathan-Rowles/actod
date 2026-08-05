@@ -11,6 +11,8 @@ import "core:time"
 
 SHARED_LIB_EXT :: ".dylib" when ODIN_OS == .Darwin else ".dll" when ODIN_OS == .Windows else ".so"
 
+PROCESS_WAIT_TIMEOUT :: 60 * time.Second
+
 @(private)
 run_process_counter: u64
 
@@ -273,9 +275,10 @@ compile_module :: proc(
 
 	state, err := run_process(args[:], &stdout_buf, &stderr_buf)
 	if err != nil {
+		captured := string(stdout_buf[:]) if len(stdout_buf) > 0 else string(stderr_buf[:])
 		return Compile_Result {
 			ok = false,
-			error_msg = fmt.tprintf("Failed to start odin compiler: %v", err),
+			error_msg = fmt.tprintf("odin compiler did not complete: %v\n%s", err, captured),
 		}
 	}
 
@@ -311,9 +314,11 @@ run_process :: proc(
 	defer os.remove(stdout_path)
 	defer os.remove(stderr_path)
 
-	stdout_f, stdout_err := os.open(stdout_path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
+	capture_flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC | os.File_Flags{.Inheritable}
+
+	stdout_f, stdout_err := os.open(stdout_path, capture_flags)
 	if stdout_err != nil do return {}, stdout_err
-	stderr_f, stderr_err := os.open(stderr_path, os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
+	stderr_f, stderr_err := os.open(stderr_path, capture_flags)
 	if stderr_err != nil {
 		os.close(stdout_f)
 		return {}, stderr_err
@@ -330,8 +335,11 @@ run_process :: proc(
 		process = p
 	}
 
-	state, wait_err := os.process_wait(process)
-	if wait_err != nil do return state, wait_err
+	state, wait_err := os.process_wait(process, PROCESS_WAIT_TIMEOUT)
+	if wait_err == os.General_Error.Timeout {
+		_ = os.process_kill(process)
+		state, _ = os.process_wait(process)
+	}
 
 	if stdout_buf != nil {
 		data, read_err := os.read_entire_file(stdout_path, context.temp_allocator)
@@ -342,7 +350,7 @@ run_process :: proc(
 		if read_err == nil do append(stderr_buf, ..data)
 	}
 
-	return state, nil
+	return state, wait_err
 }
 
 discover_actors_dir :: proc(start_path: string) -> (string, bool) {

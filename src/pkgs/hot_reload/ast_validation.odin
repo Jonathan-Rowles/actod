@@ -1,5 +1,6 @@
 package hot_reload
 
+import "base:runtime"
 import "core:fmt"
 import "core:mem"
 import vmem "core:mem/virtual"
@@ -7,6 +8,13 @@ import "core:odin/ast"
 import "core:odin/parser"
 import "core:odin/tokenizer"
 import "core:strings"
+
+@(init)
+init_tokenizer_keyword_lut :: proc "contextless" () {
+	context = runtime.default_context()
+	t: tokenizer.Tokenizer
+	tokenizer.init(&t, "", "")
+}
 
 Validation_Error_Kind :: enum {
 	State_Layout_Changed,

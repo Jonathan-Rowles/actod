@@ -2,13 +2,14 @@
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
-set DEV_FLAGS=-vet -strict-style -microarch:native
-set RELEASE_FLAGS=-o:aggressive -no-bounds-check -disable-assert -microarch:native
-set TEST_FLAGS=-define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning
+if not defined DEV_FLAGS set DEV_FLAGS=-vet -strict-style -microarch:native
+if not defined RELEASE_FLAGS set RELEASE_FLAGS=-o:aggressive -no-bounds-check -disable-assert -microarch:native
+if not defined TEST_FLAGS set TEST_FLAGS=-define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning
 
 if "%~1"=="" goto usage
 if "%~1"=="test" goto test
 if "%~1"=="test-unit" goto test-unit
+if "%~1"=="test-facade" goto test-facade
 if "%~1"=="test-integration" goto test-integration
 if "%~1"=="bench-single" goto bench-single
 if "%~1"=="bench-network" goto bench-network
@@ -21,8 +22,9 @@ goto usage
 echo Usage: build.bat [target]
 echo.
 echo Targets:
-echo   test              Run all tests (unit + integration)
+echo   test              Run all tests (unit + facade + integration)
 echo   test-unit         Run unit tests (discovers *_test.odin dirs)
+echo   test-facade       Type-check the public facade
 echo   test-integration  Build and run integration tests
 echo   bench-single      Build and run single-process benchmark
 echo   bench-network     Build and run network benchmark
@@ -33,8 +35,16 @@ exit /b 1
 :test
 call :test-unit
 if errorlevel 1 exit /b 1
+call :test-facade
+if errorlevel 1 exit /b 1
 call :test-integration
 exit /b %errorlevel%
+
+:test-facade
+odin check ./src/facade_check -vet -strict-style
+if errorlevel 1 exit /b 1
+echo facade OK
+exit /b 0
 
 :test-unit
 set "TESTED_DIRS="
@@ -44,14 +54,12 @@ exit /b !TEST_UNIT_ERR!
 
 :test-unit-one
 if !TEST_UNIT_ERR! neq 0 exit /b
-set "FPATH=%~1"
-set "DPATH=%~2"
-echo !FPATH! | findstr /i "\\pkgs\\" >nul && exit /b
-echo !FPATH! | findstr /i "\\integration_test\\" >nul && exit /b
 set "RELPATH=%~2"
 set "RELPATH=!RELPATH:%CD%\=!"
 if "!RELPATH:~-1!"=="\" set "RELPATH=!RELPATH:~0,-1!"
 set "RELPATH=!RELPATH:\=/!"
+if "!RELPATH:~0,5!"=="pkgs/" exit /b
+if "!RELPATH!"=="src/integration_test" exit /b
 echo !TESTED_DIRS! | findstr /i /c:"!RELPATH!" >nul && exit /b
 set "TESTED_DIRS=!TESTED_DIRS! !RELPATH!"
 for %%d in ("!RELPATH!") do set "DIRNAME=%%~nxd"

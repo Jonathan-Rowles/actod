@@ -1780,6 +1780,7 @@ Count_Receiver_Data :: struct {
 	received: int,
 	expected: int,
 	done:     ^sync.Sema,
+	counter:  ^int,
 }
 
 Count_Receiver_Behaviour :: actod.Actor_Behaviour(Count_Receiver_Data) {
@@ -1788,6 +1789,9 @@ Count_Receiver_Behaviour :: actod.Actor_Behaviour(Count_Receiver_Data) {
 		case shared.Two_Node_Message:
 			_ = m
 			data.received += 1
+			if data.counter != nil {
+				sync.atomic_store(data.counter, data.received)
+			}
 			if data.received == data.expected {
 				sync.sema_post(data.done)
 			}
@@ -1798,9 +1802,11 @@ Count_Receiver_Behaviour :: actod.Actor_Behaviour(Count_Receiver_Data) {
 test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 	message_count := 200
 	done := sync.Sema{}
+	received: int
 	receiver_data := Count_Receiver_Data {
 		expected = message_count,
 		done     = &done,
+		counter  = &received,
 	}
 	_, ok := actod.spawn("secure_receiver", receiver_data, Count_Receiver_Behaviour)
 	expect(t, ok, "Failed to spawn receiver actor")
@@ -1819,6 +1825,8 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 				"RING_SCALE_THRESHOLD=1",
 			},
 		),
+		stdout  = os.stdout,
+		stderr  = os.stderr,
 	}
 
 	remote_process, remote_err := os.process_start(remote_desc)
@@ -1831,7 +1839,13 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 	}
 
 	success := sync.sema_wait_with_timeout(&done, scaled_timeout(20 * time.Second))
-	expect(t, success, "Did not receive all messages over the encrypted connection")
+	expectf(
+		t,
+		success,
+		"Did not receive all messages over the encrypted connection, got %d of %d",
+		sync.atomic_load(&received),
+		message_count,
+	)
 
 	adopted_rings: u32 = 0
 	if node_id, found := actod.get_node_by_name("BurstSenderNode"); found {

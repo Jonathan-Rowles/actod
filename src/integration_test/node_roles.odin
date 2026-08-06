@@ -173,6 +173,7 @@ run_send_burst :: proc() {
 		message_count: int,
 		use_udp:       bool,
 		done:          ^sync.Sema,
+		queued:        ^int,
 	}
 
 	Burst_Sender_Behaviour :: actod.Actor_Behaviour(Burst_Sender_Data) {
@@ -231,6 +232,9 @@ run_send_burst :: proc() {
 				if !sent {
 					break
 				}
+				if data.queued != nil {
+					sync.atomic_add(data.queued, 1)
+				}
 
 				if i % 10 == 0 && i > 0 {
 					time.sleep(5 * time.Millisecond)
@@ -272,6 +276,7 @@ run_send_burst :: proc() {
 	}
 
 	done_sema := sync.Sema{}
+	queued_total: int
 	per_sender := message_count / sender_count
 	for i in 0 ..< sender_count {
 		count := per_sender
@@ -284,6 +289,7 @@ run_send_burst :: proc() {
 			message_count = count,
 			use_udp       = use_udp,
 			done          = &done_sema,
+			queued        = &queued_total,
 		}
 		name := fmt.tprintf("burst_sender_%d", i)
 		_, spawn_ok := actod.spawn(name, sender_data, Burst_Sender_Behaviour)
@@ -297,6 +303,7 @@ run_send_burst :: proc() {
 		sync.sema_wait(&done_sema)
 	}
 
+	fmt.printf("[burst] queued %d of %d\n", sync.atomic_load(&queued_total), message_count)
 	if node_id, node_ok := actod.get_node_by_name(target_node); node_ok {
 		if pool := actod.get_connection_pool(node_id); pool != nil {
 			fmt.printf("[burst] active rings: %d\n", actod.pool_active_count(pool))
@@ -305,6 +312,17 @@ run_send_burst :: proc() {
 
 	wait_time := max(1, message_count / 1000)
 	time.sleep(time.Duration(wait_time) * time.Second)
+
+	if node_id, node_ok := actod.get_node_by_name(target_node); node_ok {
+		if ring := actod.get_connection_ring(node_id); ring != nil {
+			fmt.printf(
+				"[burst] ring write=%d submit=%d complete=%d\n",
+				sync.atomic_load(&ring.send_write_idx),
+				ring.send_submit_idx,
+				sync.atomic_load(&ring.send_complete_idx),
+			)
+		}
+	}
 
 	actod.shutdown_node()
 	os.exit(0)

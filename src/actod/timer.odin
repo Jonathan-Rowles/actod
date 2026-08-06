@@ -365,12 +365,20 @@ set_timer :: proc(
 		loc,
 	)
 	if err != .OK {
-		log.errorf(
-			"set_timer failed: could not reach the timer actor (%v), timer id=%d will never fire",
-			err,
-			id,
-			location = loc,
-		)
+		if err == .SYSTEM_SHUTTING_DOWN {
+			log.warnf(
+				"set_timer skipped during shutdown, timer id=%d will never fire",
+				id,
+				location = loc,
+			)
+		} else {
+			log.errorf(
+				"set_timer failed: could not reach the timer actor (%v), timer id=%d will never fire",
+				err,
+				id,
+				location = loc,
+			)
+		}
 	}
 	return id, err
 }

@@ -4,6 +4,8 @@ import "../actod"
 import "../pkgs/threads_act"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 import "core:thread"
@@ -25,6 +27,7 @@ Test_Entry :: struct {
 	hot_reload_watch_path: string,
 	enable_encryption:     bool,
 	udp_port:              int,
+	expects_error_logs:    bool,
 }
 
 ALL_TESTS :: []Test_Entry {
@@ -61,6 +64,7 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_system_mailbox_full_returns_error",
 		test_proc = test_system_mailbox_full_returns_error,
 		worker_count = 2,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_mailbox_overflow_preserves_send_order",
@@ -82,11 +86,13 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_mass_simultaneous_child_deaths",
 		test_proc = test_mass_simultaneous_child_deaths,
 		worker_count = 4,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_blocked_supervisor_past_old_retry_window",
 		test_proc = test_blocked_supervisor_past_old_retry_window,
 		worker_count = 4,
+		expects_error_logs = true,
 	},
 
 	// Supervisor hierarchy tests
@@ -127,23 +133,26 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_timer_cleanup_on_termination", test_proc = test_timer_cleanup_on_termination},
 
 	// Panic recovery tests
-	{name = "test_actor_panic_recovery", test_proc = test_actor_panic_recovery},
+	{name = "test_actor_panic_recovery", test_proc = test_actor_panic_recovery, expects_error_logs = true},
 	{
 		name = "test_actor_panic_supervisor_restart",
 		test_proc = test_actor_panic_supervisor_restart,
+		expects_error_logs = true,
 	},
-	{name = "test_actor_panic_in_init", test_proc = test_actor_panic_in_init},
+	{name = "test_actor_panic_in_init", test_proc = test_actor_panic_in_init, expects_error_logs = true},
 	{
 		name = "test_crash_runs_terminate_and_reaps_children",
 		test_proc = test_crash_runs_terminate_and_reaps_children,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_panic_in_terminate_runs_teardown_once",
 		test_proc = test_panic_in_terminate_runs_teardown_once,
+		expects_error_logs = true,
 	},
 
 	// Slower tests
-	{name = "test_restart_limit_within_window", test_proc = test_restart_limit_within_window},
+	{name = "test_restart_limit_within_window", test_proc = test_restart_limit_within_window, expects_error_logs = true},
 	{name = "test_restart_limit_window_reset", test_proc = test_restart_limit_window_reset},
 	{name = "test_one_for_all_strategy", test_proc = test_one_for_all_strategy},
 
@@ -154,6 +163,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17000,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_wrong_password_rejected",
@@ -161,6 +171,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17240,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_network_message_routing",
@@ -168,6 +179,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17010,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_concurrent_network_messages",
@@ -182,6 +194,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17030,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_connection_reconnection",
@@ -189,6 +202,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17040,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_lifecycle_broadcast",
@@ -249,6 +263,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17080,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_one_for_one_restart",
@@ -256,6 +271,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17090,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_one_for_all_restart",
@@ -263,6 +279,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17100,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_rest_for_one_restart",
@@ -270,6 +287,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17110,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_restart_via_registry_lookup",
@@ -277,6 +295,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17120,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_spawn_invalid_func_name",
@@ -284,6 +303,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17130,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_spawn_timeout",
@@ -291,6 +311,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17140,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	// Mesh discovery test (3-node topology A↔B↔C)
 	{
@@ -313,6 +334,7 @@ ALL_TESTS :: []Test_Entry {
 		port = 17170,
 		node_name = "TestNode1",
 		is_networked = true,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_byte_slice_messages",
@@ -325,6 +347,7 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_node_shutdown_under_load",
 		test_proc = test_node_shutdown_under_load,
 		worker_count = ALL_CORES_WORKERS,
+		expects_error_logs = true,
 	},
 
 	// Hot reload tests (Phase 1a)
@@ -390,14 +413,14 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 		udp_port = entry.udp_port,
 		enable_encryption = entry.enable_encryption,
 		heartbeat_interval = 100 * time.Millisecond,
-		heartbeat_timeout = 300 * time.Millisecond,
+		heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 		reconnect_initial_delay = 200 * time.Millisecond,
 		reconnect_retry_delay = 300 * time.Millisecond,
 	)
 
 	node_opts := actod.make_node_config(
 		network = network_config,
-		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Fatal)),
+		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Warning)),
 		hot_reload_dev = entry.hot_reload_dev,
 		hot_reload_watch_path = entry.hot_reload_watch_path,
 	)
@@ -429,10 +452,14 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	return !failed
 }
 
+@(private)
+subprocess_counter: u64
+
 Test_Result :: struct {
-	name:      string,
-	success:   bool,
-	exit_code: int,
+	name:       string,
+	success:    bool,
+	exit_code:  int,
+	logged_err: string,
 }
 
 Test_Thread_Context :: struct {
@@ -450,7 +477,7 @@ Watchdog_Data :: struct {
 
 test_watchdog_proc :: proc(data: rawptr) {
 	wd := cast(^Watchdog_Data)data
-	for _ in 0 ..< TEST_TIMEOUT_SECONDS * 4 {
+	for _ in 0 ..< scaled_attempts(TEST_TIMEOUT_SECONDS * 4) {
 		if sync.atomic_load_explicit(&wd.cancelled, .Acquire) {
 			return
 		}
@@ -462,20 +489,38 @@ test_watchdog_proc :: proc(data: rawptr) {
 	}
 }
 
-run_test_in_subprocess :: proc(test_name: string) -> Test_Result {
+run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool) -> Test_Result {
 	result := Test_Result {
 		name    = test_name,
 		success = false,
+	}
+
+	uid := sync.atomic_add(&subprocess_counter, 1)
+	sys_tmp, _ := os.temp_directory(context.temp_allocator)
+	stderr_path, _ := filepath.join(
+		{sys_tmp, fmt.tprintf("actod_test_%d_%d_err", os.get_pid(), uid)},
+		context.temp_allocator,
+	)
+	defer os.remove(stderr_path)
+
+	stderr_f, stderr_open_err := os.open(
+		stderr_path,
+		os.O_WRONLY | os.O_CREATE | os.O_TRUNC | os.File_Flags{.Inheritable},
+	)
+	if stderr_open_err != nil {
+		fmt.eprintf("Failed to capture stderr for %s: %v\n", test_name, stderr_open_err)
+		return result
 	}
 
 	proc_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
 		env     = make_test_env([]string{fmt.tprintf("ACTOD_TEST_RUN=%s", test_name)}),
 		stdout  = os.stdout,
-		stderr  = os.stderr,
+		stderr  = stderr_f,
 	}
 
 	process, err := os.process_start(proc_desc)
+	os.close(stderr_f)
 	if err != nil {
 		fmt.eprintf("Failed to start test process for %s: %v\n", test_name, err)
 		return result
@@ -492,6 +537,12 @@ run_test_in_subprocess :: proc(test_name: string) -> Test_Result {
 	thread.join(watchdog)
 	thread.destroy(watchdog)
 
+	captured, read_err := os.read_entire_file(stderr_path, context.temp_allocator)
+	if read_err == nil && len(captured) > 0 {
+		os.write(os.stderr, captured)
+		result.logged_err = first_logged_error(string(captured))
+	}
+
 	if watchdog_data.fired {
 		result.exit_code = -1
 		return result
@@ -503,18 +554,34 @@ run_test_in_subprocess :: proc(test_name: string) -> Test_Result {
 	}
 
 	result.exit_code = state.exit_code
-	result.success = state.exit_code == 0
+	result.success = state.exit_code == 0 && (expects_error_logs || result.logged_err == "")
 
 	return result
 }
 
+first_logged_error :: proc(output: string) -> string {
+	remaining := output
+	for line in strings.split_lines_iterator(&remaining) {
+		if strings.contains(line, "[ERROR]") || strings.contains(line, "[FATAL]") {
+			return strings.trim_space(line)
+		}
+	}
+	return ""
+}
+
 test_thread_proc :: proc(data: rawptr) {
 	ctx := cast(^Test_Thread_Context)data
-	ctx.result^ = run_test_in_subprocess(ctx.entry.name)
+	ctx.result^ = run_test_in_subprocess(ctx.entry.name, ctx.entry.expects_error_logs)
 	if ctx.result.success {
 		fmt.printf("  PASS: %s\n", ctx.result.name)
+	} else if ctx.result.exit_code == 0 && ctx.result.logged_err != "" {
+		fmt.printf("  FAIL: %s (logged error: %s)\n", ctx.result.name, ctx.result.logged_err)
 	} else if ctx.result.exit_code == -1 {
-		fmt.printf("  TIMEOUT: %s (killed after %ds)\n", ctx.result.name, TEST_TIMEOUT_SECONDS)
+		fmt.printf(
+			"  TIMEOUT: %s (killed after %ds)\n",
+			ctx.result.name,
+			scaled_timeout_ms(TEST_TIMEOUT_SECONDS),
+		)
 	} else {
 		fmt.printf("  FAIL: %s (exit code: %d)\n", ctx.result.name, ctx.result.exit_code)
 	}

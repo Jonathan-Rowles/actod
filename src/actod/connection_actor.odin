@@ -112,6 +112,9 @@ connection_actor_init :: proc(data: ^Connection_Actor_Data) {
 connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 	is_active := is_active_connection(data)
 
+	if data.node_id != 0 && is_active && data.ring != nil {
+		sync.atomic_store(&data.ring.io_stop, 1)
+	}
 	if data.tcp_socket != 0 {
 		net.close(data.tcp_socket)
 		data.tcp_socket = 0
@@ -121,9 +124,6 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 	cancel_timer(data.reconnect_timer_id)
 
 	if data.node_id != 0 && is_active {
-		if data.ring != nil {
-			sync.atomic_store(&data.ring.io_stop, 1)
-		}
 		stop_connection_io(data)
 
 		udp_clear_peer(data.node_id)
@@ -457,7 +457,11 @@ run_noise_handshake :: proc(
 	keys: ^Noise_Transport,
 	deadline: time.Time,
 ) -> bool {
-	psk := derive_cluster_psk(data.auth_password)
+	psk, psk_ok := derive_cluster_psk(data.auth_password)
+	if !psk_ok {
+		log.error("Refusing encrypted handshake: cluster PSK derivation failed")
+		return false
+	}
 
 	dialer_body := my_hello if initiator else peer_hello
 	responder_body := peer_hello if initiator else my_hello

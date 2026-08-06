@@ -24,6 +24,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nasm
 
+      - name: Install nasm (Windows)
+        if: runner.os == 'Windows'
+        run: choco install nasm -y --no-progress; echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+
       - name: Setup Odin
         uses: laytan/setup-odin@v2
         with:

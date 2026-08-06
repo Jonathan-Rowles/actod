@@ -3,8 +3,17 @@ package actod
 import "core:testing"
 
 @(test)
+test_cluster_psk_derivation_fails_closed :: proc(t: ^testing.T) {
+	psk, ok := derive_cluster_psk("cluster-secret")
+	testing.expect(t, ok, "cluster PSK derivation must report success")
+
+	zero: [CLUSTER_PSK_SIZE]byte
+	testing.expect(t, psk != zero, "a derived cluster PSK must never be all zero")
+}
+
+@(test)
 test_noise_handshake_and_envelope :: proc(t: ^testing.T) {
-	psk := derive_cluster_psk("cluster-secret")
+	psk, _ := derive_cluster_psk("cluster-secret")
 	prologue := []byte{'a', 'c', 't', 'o', 'd', '/', '2'}
 
 	dialer, listener: Noise_Handshake
@@ -46,8 +55,8 @@ test_noise_handshake_and_envelope :: proc(t: ^testing.T) {
 
 @(test)
 test_noise_handshake_wrong_psk_fails :: proc(t: ^testing.T) {
-	good := derive_cluster_psk("right-password")
-	bad := derive_cluster_psk("wrong-password")
+	good, _ := derive_cluster_psk("right-password")
+	bad, _ := derive_cluster_psk("wrong-password")
 	prologue := []byte{'a', 'c', 't', 'o', 'd', '/', '2'}
 
 	dialer, listener: Noise_Handshake
@@ -64,7 +73,7 @@ test_noise_handshake_wrong_psk_fails :: proc(t: ^testing.T) {
 
 @(test)
 test_noise_handshake_prologue_mismatch_fails :: proc(t: ^testing.T) {
-	psk := derive_cluster_psk("cluster-secret")
+	psk, _ := derive_cluster_psk("cluster-secret")
 
 	dialer, listener: Noise_Handshake
 	testing.expect(t, noise_handshake_begin(&dialer, true, []byte{1}, psk[:]), "dialer init")
@@ -80,7 +89,7 @@ test_noise_handshake_prologue_mismatch_fails :: proc(t: ^testing.T) {
 
 @(test)
 test_envelope_tamper_fails :: proc(t: ^testing.T) {
-	psk := derive_cluster_psk("s")
+	psk, _ := derive_cluster_psk("s")
 	dialer, listener: Noise_Handshake
 	_ = noise_handshake_begin(&dialer, true, nil, psk[:])
 	_ = noise_handshake_begin(&listener, false, nil, psk[:])

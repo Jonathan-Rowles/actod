@@ -101,6 +101,7 @@ test_distributed_communication :: proc(t: ^testing.T) {
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_once",
@@ -135,6 +136,7 @@ test_distributed_wrong_password_rejected :: proc(t: ^testing.T) {
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_once",
@@ -185,6 +187,7 @@ test_distributed_network_message_routing :: proc(t: ^testing.T) {
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=relay_node",
@@ -211,6 +214,7 @@ test_distributed_network_message_routing :: proc(t: ^testing.T) {
 
 	node3_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=echo_back",
@@ -294,6 +298,7 @@ test_distributed_concurrent_network_messages :: proc(t: ^testing.T) {
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_burst",
@@ -354,6 +359,7 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=lifecycle_server",
@@ -409,6 +415,7 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 test_lifecycle_broadcast :: proc(t: ^testing.T) {
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=lifecycle_broadcast",
@@ -447,6 +454,7 @@ test_lifecycle_broadcast :: proc(t: ^testing.T) {
 test_registry_exchange :: proc(t: ^testing.T) {
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=registry_exchange",
@@ -670,6 +678,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	start_remote :: proc(node_port: int, reply_port: int) -> (os.Process, bool) {
 		desc := os.Process_Desc {
 			command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 			env     = make_test_env(
 				[]string {
 					"ACTOD_TEST_NODE=lifecycle_server",
@@ -779,6 +788,7 @@ create_remote_crash_child :: proc() -> actod.SPAWN {
 start_supervision_server :: proc(node_port: int, base_port: int) -> (os.Process, bool) {
 	desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=supervision_server",
@@ -1330,6 +1340,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	node_b_port := test_base_port + 1
 	node_b_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=mesh_middle",
@@ -1355,6 +1366,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	node_c_port := test_base_port + 2
 	node_c_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=mesh_leaf",
@@ -1539,6 +1551,7 @@ test_distributed_pubsub_broadcast :: proc(t: ^testing.T) {
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=pubsub_subscriber",
@@ -1646,6 +1659,7 @@ test_distributed_union_messages :: proc(t: ^testing.T) {
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=union_sender",
@@ -1738,6 +1752,7 @@ test_distributed_byte_slice_messages :: proc(t: ^testing.T) {
 
 	node2_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=bytes_sender",
@@ -1813,6 +1828,7 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_burst",
@@ -1825,8 +1841,6 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 				"RING_SCALE_THRESHOLD=1",
 			},
 		),
-		stdout  = os.stdout,
-		stderr  = os.stderr,
 	}
 
 	remote_process, remote_err := os.process_start(remote_desc)
@@ -1866,6 +1880,7 @@ test_encryption_mismatch_rejected :: proc(t: ^testing.T) {
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_once",
@@ -1908,6 +1923,7 @@ test_udp_send_unreliable :: proc(t: ^testing.T) {
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_burst",
@@ -1950,6 +1966,7 @@ test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
 	// back to TCP and deliver every message.
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
 		env     = make_test_env(
 			[]string {
 				"ACTOD_TEST_NODE=send_burst",

@@ -34,7 +34,7 @@ g_cluster_psk_set: bool
 @(private)
 g_cluster_psk_mutex: sync.Mutex
 
-derive_cluster_psk :: proc(password: string) -> [CLUSTER_PSK_SIZE]byte {
+derive_cluster_psk :: proc(password: string) -> ([CLUSTER_PSK_SIZE]byte, bool) {
 	cache_key: [32]byte
 	hash.hash_string_to_buffer(.SHA256, password, cache_key[:])
 
@@ -52,15 +52,20 @@ derive_cluster_psk :: proc(password: string) -> [CLUSTER_PSK_SIZE]byte {
 			transmute([]byte)password,
 			transmute([]byte)string(CLUSTER_PSK_SALT),
 			g_cluster_psk[:],
+			allocator = get_system_allocator(),
 		)
 		if err != nil {
 			log.errorf("Failed to derive cluster PSK: %v", err)
+			g_cluster_psk = {}
+			g_cluster_psk_key = {}
+			g_cluster_psk_set = false
+			return {}, false
 		}
 		g_cluster_psk_key = cache_key
 		g_cluster_psk_set = true
 	}
 
-	return g_cluster_psk
+	return g_cluster_psk, true
 }
 
 noise_handshake_begin :: proc(

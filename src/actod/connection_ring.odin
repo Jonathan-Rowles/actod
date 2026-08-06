@@ -709,8 +709,16 @@ nbio_send_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring, batch_co
 	sync.atomic_add(&ring.send_complete_idx, batch_count)
 
 	if op.send.err != nil {
-		log.errorf("async send error: %v", op.send.err)
-		notify_ring_error(ring, "send error")
+		if sync.atomic_load(&ring.io_stop) == 0 {
+			tcp_err, is_tcp := op.send.err.(net.TCP_Send_Error)
+			peer_lost := is_tcp && tcp_err == .Connection_Closed
+			if peer_lost {
+				log.warnf("connection lost during send: %v", tcp_err)
+			} else {
+				log.errorf("async send error: %v", op.send.err)
+			}
+			notify_ring_error(ring, "send error")
+		}
 		return
 	}
 
@@ -745,15 +753,25 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	ring.pending_recv = nil
 
 	if op.recv.err != nil {
-		log.errorf("recv error: %v", op.recv.err)
-		notify_ring_error(ring, "recv error")
+		if sync.atomic_load(&ring.io_stop) == 0 {
+			tcp_err, is_tcp := op.recv.err.(net.TCP_Recv_Error)
+			peer_lost := is_tcp && tcp_err == .Connection_Closed
+			if peer_lost {
+				log.warnf("connection lost: %v", tcp_err)
+			} else {
+				log.errorf("recv error: %v", op.recv.err)
+			}
+			notify_ring_error(ring, "recv error")
+		}
 		return
 	}
 
 	bytes_recvd := u32(op.recv.received)
 	if bytes_recvd == 0 {
-		log.info("Connection closed by peer")
-		notify_ring_error(ring, "peer closed")
+		if sync.atomic_load(&ring.io_stop) == 0 {
+			log.info("Connection closed by peer")
+			notify_ring_error(ring, "peer closed")
+		}
 		return
 	}
 

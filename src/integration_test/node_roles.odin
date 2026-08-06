@@ -70,6 +70,8 @@ run_send_once :: proc() {
 				port = 0,
 				auth_password = auth_password,
 				enable_encryption = enable_encryption,
+				heartbeat_interval = 100 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -150,6 +152,8 @@ run_send_burst :: proc() {
 				enable_encryption = enable_encryption,
 				udp_port = udp_port,
 				connection_ring = ring_config,
+				heartbeat_interval = 100 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 		),
 	)
@@ -303,26 +307,18 @@ run_send_burst :: proc() {
 		sync.sema_wait(&done_sema)
 	}
 
-	fmt.printf("[burst] queued %d of %d\n", sync.atomic_load(&queued_total), message_count)
 	if node_id, node_ok := actod.get_node_by_name(target_node); node_ok {
 		if pool := actod.get_connection_pool(node_id); pool != nil {
 			fmt.printf("[burst] active rings: %d\n", actod.pool_active_count(pool))
 		}
 	}
 
+	if sent := sync.atomic_load(&queued_total); sent != message_count {
+		fmt.eprintf("[burst] queued only %d of %d messages\n", sent, message_count)
+	}
+
 	wait_time := max(1, message_count / 1000)
 	time.sleep(time.Duration(wait_time) * time.Second)
-
-	if node_id, node_ok := actod.get_node_by_name(target_node); node_ok {
-		if ring := actod.get_connection_ring(node_id); ring != nil {
-			fmt.printf(
-				"[burst] ring write=%d submit=%d complete=%d\n",
-				sync.atomic_load(&ring.send_write_idx),
-				ring.send_submit_idx,
-				sync.atomic_load(&ring.send_complete_idx),
-			)
-		}
-	}
 
 	actod.shutdown_node()
 	os.exit(0)
@@ -355,7 +351,7 @@ run_relay_node :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -433,7 +429,7 @@ run_echo_back :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -521,7 +517,7 @@ run_concurrent_echo :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -716,7 +712,7 @@ run_lifecycle_broadcast :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -785,7 +781,7 @@ run_registry_exchange :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -888,7 +884,7 @@ run_supervision_server :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -939,7 +935,7 @@ run_mesh_middle :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -988,7 +984,7 @@ run_mesh_leaf :: proc() {
 				port = node_port,
 				auth_password = auth_password,
 				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = 300 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
@@ -1057,7 +1053,12 @@ run_pubsub_subscriber :: proc() {
 	actod.node_init(
 		name = "PubsubNode",
 		opts = actod.make_node_config(
-			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			network = actod.make_network_config(
+				port = 0,
+				auth_password = auth_password,
+				heartbeat_interval = 100 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
+			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
 			),
@@ -1144,7 +1145,12 @@ run_union_sender :: proc() {
 	actod.node_init(
 		name = "UnionSenderNode",
 		opts = actod.make_node_config(
-			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			network = actod.make_network_config(
+				port = 0,
+				auth_password = auth_password,
+				heartbeat_interval = 100 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
+			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
 			),
@@ -1208,7 +1214,12 @@ run_bytes_sender :: proc() {
 	actod.node_init(
 		name = "BytesSenderNode",
 		opts = actod.make_node_config(
-			network = actod.make_network_config(port = 0, auth_password = auth_password),
+			network = actod.make_network_config(
+				port = 0,
+				auth_password = auth_password,
+				heartbeat_interval = 100 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
+			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = log_level),
 			),

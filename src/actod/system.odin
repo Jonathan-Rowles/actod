@@ -230,7 +230,7 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 	NODE.started = true
 	NODE.shutting_down = false
 	if NODE.node_name_to_id == nil {
-		NODE.node_name_to_id = make(map[string]Node_ID, actor_system_allocator)
+		NODE.node_name_to_id = make(map[string]Node_ID, get_system_allocator())
 	}
 
 	NODE.connection_actors = {}

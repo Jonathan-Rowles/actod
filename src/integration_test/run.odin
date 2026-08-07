@@ -70,6 +70,7 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_mailbox_overflow_preserves_send_order",
 		test_proc = test_mailbox_overflow_preserves_send_order,
 		worker_count = 2,
+		expects_error_logs = true,
 	},
 	{
 		name = "test_spawn_sized_mailbox",
@@ -163,7 +164,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17000,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_wrong_password_rejected",
@@ -179,7 +179,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17010,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_concurrent_network_messages",
@@ -194,7 +193,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17030,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_connection_reconnection",
@@ -202,7 +200,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17040,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_lifecycle_broadcast",
@@ -263,7 +260,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17080,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_one_for_one_restart",
@@ -271,7 +267,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17090,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_one_for_all_restart",
@@ -279,7 +274,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17100,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_rest_for_one_restart",
@@ -287,7 +281,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17110,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_restart_via_registry_lookup",
@@ -295,7 +288,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17120,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_remote_spawn_invalid_func_name",
@@ -334,7 +326,6 @@ ALL_TESTS :: []Test_Entry {
 		port = 17170,
 		node_name = "TestNode1",
 		is_networked = true,
-		expects_error_logs = true,
 	},
 	{
 		name = "test_distributed_byte_slice_messages",
@@ -580,7 +571,7 @@ test_thread_proc :: proc(data: rawptr) {
 		fmt.printf(
 			"  TIMEOUT: %s (killed after %ds)\n",
 			ctx.result.name,
-			scaled_timeout_ms(TEST_TIMEOUT_SECONDS),
+			TEST_TIMEOUT_SECONDS * timeout_scale(),
 		)
 	} else {
 		fmt.printf("  FAIL: %s (exit code: %d)\n", ctx.result.name, ctx.result.exit_code)
@@ -687,6 +678,9 @@ run_integration_tests :: proc(t: ^testing.T) {
 register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Integration_Test_Message)
 	actod.register_message_type(string)
+	actod.register_message_type(int)
+	actod.register_message_type(Reclaim_Tick)
+	actod.register_message_type(Leak_Supervisor_Cmd)
 	actod.register_message_type(Pipeline_Message)
 	actod.register_message_type(Broadcast_Message)
 	actod.register_message_type(Large_Message)

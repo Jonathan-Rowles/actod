@@ -44,6 +44,7 @@ Type_Header :: struct {
 }
 
 TYPE_HEADER_SIZE :: size_of(Type_Header)
+#assert(TYPE_HEADER_SIZE == 16, "Type_Header must stay 16 bytes, the inline message path packs around it")
 
 assert_message_fits_page :: #force_inline proc "contextless" ($T: typeid) {
 	#assert(

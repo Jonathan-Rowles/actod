@@ -56,7 +56,7 @@ current_worker: ^Worker
 init_worker_pool :: proc(count: int) {
 	if count <= 0 do return
 
-	worker_pool.workers = make([]Worker, count, actor_system_allocator)
+	worker_pool.workers = make([]Worker, count, get_system_allocator())
 	worker_pool.worker_count = count
 
 	for i in 0 ..< count {

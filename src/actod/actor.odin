@@ -108,6 +108,8 @@ LOCAL_MAILBOX_SIZE :: 64
 
 STOP_SIGNAL_NAME_CAP :: 64
 
+STOP_SIGNAL_CHAIN_BOUND :: 1 << 24
+
 Stop_Signal :: struct {
 	next:     rawptr,
 	pid:      PID,
@@ -142,6 +144,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	stop_signal:        Stop_Signal,
 	stopped_head:       rawptr,
 	stopped_closed:     bool,
+	system_drops:       u64,
 
 	// keep unknown sizes at the bottom
 	children:           [dynamic]PID,
@@ -154,6 +157,7 @@ Actor_Context :: struct {
 	pid:                 PID,
 	name:                string,
 	panic_teardown_started: bool,
+	panic_recovery_done: bool,
 	panic_jmp_buf:       libc.jmp_buf,
 	panic_message:       [PANIC_MESSAGE_BUF_SIZE]u8,
 	panic_message_len:   int,
@@ -679,6 +683,15 @@ actor_loop :: proc(actor: ^Actor($T)) {
 			loc.line,
 		)
 
+		if actor_ctx.panic_recovery_done {
+			log.fatalf(
+				"actor %v panicked inside its own panic recovery, aborting instead of corrupting termination state",
+				actor.pid,
+			)
+			runtime.trap()
+		}
+		actor_ctx.panic_recovery_done = true
+
 		actor.termination_reason = .ABNORMAL
 		sync.atomic_store(&actor.state, .STOPPING)
 
@@ -1160,7 +1173,10 @@ take_stop_signals :: proc(actor: ^Actor($T)) -> ^Actor(int) {
 	chain := sync.atomic_exchange(&actor.stopped_head, nil)
 
 	reversed: rawptr
+	links := 0
 	for chain != nil {
+		links += 1
+		assert(links <= STOP_SIGNAL_CHAIN_BOUND, "stop-signal chain exceeds any possible actor count, the intrusive list is cyclic")
 		child := cast(^Actor(int))chain
 		next := child.stop_signal.next
 		child.stop_signal.next = reversed
@@ -1226,7 +1242,10 @@ forward_stop_signal_to_node :: proc(child: ^Actor(int)) {
 @(private)
 drain_stop_signals_to_node :: proc(actor: ^Actor(int)) {
 	chain := sync.atomic_exchange(&actor.stopped_head, nil)
+	links := 0
 	for chain != nil {
+		links += 1
+		assert(links <= STOP_SIGNAL_CHAIN_BOUND, "stop-signal chain exceeds any possible actor count, the intrusive list is cyclic")
 		child := cast(^Actor(int))chain
 		next := child.stop_signal.next
 		forward_stop_signal_to_node(child)
@@ -1236,6 +1255,11 @@ drain_stop_signals_to_node :: proc(actor: ^Actor(int)) {
 
 @(private)
 push_termination_signal :: proc(actor: ^Actor($T)) {
+	assert(
+		!sync.atomic_load(&actor.stopped_closed),
+		"push_termination_signal called twice for the same actor, its stop-signal node would be linked into two chains",
+	)
+
 	self := cast(^Actor(int))rawptr(actor)
 	sig := &actor.stop_signal
 	sig.pid = actor.pid
@@ -1786,6 +1810,9 @@ terminate_actor :: proc(
 		return false
 	}
 	err := send(to, Terminate{reason = reason}, actor, loc)
+	if err == .ACTOR_NOT_FOUND {
+		return true
+	}
 	if err != .OK {
 		log.errorf(
 			"terminate_actor failed for %s: could not deliver Terminate: %v",

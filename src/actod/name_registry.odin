@@ -67,6 +67,10 @@ registry_ensure_init :: proc(r: ^Name_Registry($T, $N), loc := #caller_location)
 	}
 
 	r.allocator = vmem.arena_allocator(&r.arena)
+	assert(
+		r.allocator.procedure != nil,
+		"registry allocator is nil, its maps would silently adopt the caller's transient allocator on first growth",
+	)
 	r.hash_to_idx = make(map[u64]int, N, r.allocator)
 	sync.atomic_store(&r.initialized, true)
 }

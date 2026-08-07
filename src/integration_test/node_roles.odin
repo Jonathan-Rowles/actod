@@ -1074,7 +1074,7 @@ run_pubsub_subscriber :: proc() {
 
 	PUBLISHER_TYPE, _ := actod.register_actor_type("pubsub_broadcast_publisher")
 
-	_ = actod.send_to("_", target_node, shared.Pubsub_Broadcast_Msg{})
+	_ = actod.send_to("connection_warmup", target_node, shared.Pubsub_Broadcast_Msg{})
 	for _ in 0 ..< 50 {
 		target_node_id, found := actod.get_node_by_name(target_node)
 		if found {

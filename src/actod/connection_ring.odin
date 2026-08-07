@@ -603,6 +603,7 @@ batch_reserve :: proc(
 batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 	slot := &ring.send_slots[slot_idx]
 	old := sync.atomic_sub(&slot.active_writers, 1)
+	assert(old >= 1, "batch_commit without a matching reserve, active_writers underflow")
 
 	if old == 1 {
 		state := sync.atomic_load(&slot.state)
@@ -647,6 +648,11 @@ submit_nbio_sends :: proc(ring: ^Connection_Ring) {
 
 	write_idx := sync.atomic_load(&ring.send_write_idx)
 	if ring.send_submit_idx >= write_idx do return
+
+	assert(
+		ring.tcp_socket != 0,
+		"submitting sends on a ring whose socket is already closed",
+	)
 
 	batch_count: u32 = 0
 	check_idx := ring.send_submit_idx
@@ -699,9 +705,10 @@ nbio_send_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring, batch_co
 	for _ in 0 ..< batch_count {
 		slot_idx := ring.send_submit_idx & ring.send_mask
 		slot := &ring.send_slots[slot_idx]
-		when ODIN_DEBUG {
-			assert(slot.active_writers == 0, "Slot still has active writers when freed")
-		}
+		assert(
+			sync.atomic_load(&slot.active_writers) == 0,
+			"send slot freed while a writer is still copying into it",
+		)
 		slot.length = 0
 		sync.atomic_store_explicit(&slot.state, .FREE, .Release)
 		ring.send_submit_idx += 1
@@ -828,7 +835,7 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 	context.logger = ctx.logger
 
 	if !ring_io_attach(ring, ctx.conn_pid) {
-		log.error("IO attach timed out, previous owner still active")
+		log.warn("IO attach timed out, previous owner still active, closing to reconnect")
 		_ = send_message(ctx.conn_pid, Close_Connection{reason = "io attach timeout"})
 		return
 	}
@@ -842,8 +849,10 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 	defer nbio.release_thread_event_loop()
 
 	if err := nbio.associate_socket(ring.tcp_socket); err != nil {
-		log.errorf("Failed to associate socket: %v", err)
-		_ = send_message(ctx.conn_pid, Close_Connection{reason = "nbio associate failed"})
+		if sync.atomic_load(&ring.io_stop) == 0 {
+			log.warnf("Failed to associate socket, closing to reconnect: %v", err)
+			_ = send_message(ctx.conn_pid, Close_Connection{reason = "nbio associate failed"})
+		}
 		return
 	}
 

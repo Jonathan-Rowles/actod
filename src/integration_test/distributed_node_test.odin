@@ -678,7 +678,7 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	start_remote :: proc(node_port: int, reply_port: int) -> (os.Process, bool) {
 		desc := os.Process_Desc {
 			command = []string{INTEGRATION_TEST_BIN},
-		stderr  = os.stderr,
+			stderr  = os.stderr,
 			env     = make_test_env(
 				[]string {
 					"ACTOD_TEST_NODE=lifecycle_server",
@@ -1864,9 +1864,21 @@ test_encrypted_distributed_burst :: proc(t: ^testing.T) {
 	adopted_rings: u32 = 0
 	if node_id, found := actod.get_node_by_name("BurstSenderNode"); found {
 		if pool := actod.get_connection_pool(node_id); pool != nil {
-			adopted_rings = actod.pool_active_count(pool)
+			for _ in 0 ..< scaled_attempts(20) {
+				adopted_rings = actod.pool_active_count(pool)
+				if adopted_rings >= 2 {
+					break
+				}
+				time.sleep(50 * time.Millisecond)
+			}
 		}
 	}
+	expectf(
+		t,
+		adopted_rings >= 2,
+		"the sender forces ring scaling, the receiving pool should have adopted extra rings, got %d",
+		adopted_rings,
+	)
 }
 
 test_encryption_mismatch_rejected :: proc(t: ^testing.T) {

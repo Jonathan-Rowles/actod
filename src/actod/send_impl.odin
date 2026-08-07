@@ -295,13 +295,17 @@ send_to_actor_impl :: proc(
 
 	when class == .System {
 		if !mpsc_push(&actor.system_mailbox, msg) {
-			log.errorf(
-				"system mailbox of %s is full (%d slots), dropping %v, the receiver is not draining",
-				actor_origin(to),
-				SYSTEM_MAILBOX_SIZE,
-				tid,
-				location = loc,
-			)
+			drops := sync.atomic_add(&actor.system_drops, 1) + 1
+			if drops == 1 || drops % 100 == 0 {
+				log.errorf(
+					"system mailbox of %s is full (%d slots), dropping %v (drop #%d), the receiver is not draining",
+					actor_origin(to),
+					SYSTEM_MAILBOX_SIZE,
+					tid,
+					drops,
+					location = loc,
+				)
+			}
 			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
 				free_message(&actor.pool, msg.content)
 			}

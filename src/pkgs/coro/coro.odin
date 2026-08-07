@@ -148,6 +148,7 @@ uninit :: proc(co: ^Coro) -> Result {
 	if co == nil {
 		return .Invalid_Coroutine
 	}
+	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow, stale pointer, or double destroy")
 	if !(co.state == .Suspended || co.state == .Dead) {
 		return .Invalid_Operation
 	}
@@ -215,6 +216,7 @@ resume :: proc(co: ^Coro) -> Result {
 	if co == nil {
 		return .Invalid_Coroutine
 	}
+	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
 	if co.state != .Suspended {
 		return .Not_Suspended
 	}
@@ -224,6 +226,7 @@ resume :: proc(co: ^Coro) -> Result {
 }
 
 resume_top_level :: proc(co: ^Coro) {
+	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
 	when ODIN_DEBUG {
 		assert(co != nil)
 		assert(co.state == .Suspended)
@@ -259,6 +262,7 @@ yield :: proc(co: ^Coro) -> Result {
 // Fast yield for worker-pool coros resumed via resume_top_level.
 // Skips nil check, state validation, prev_co tracking, and Result return.
 yield_top_level :: proc(co: ^Coro) {
+	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
 	when ODIN_DEBUG {
 		assert(co != nil)
 		assert(co.state == .Running)

@@ -606,10 +606,18 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 
 	from_handle, _ := unpack_pid(get_self_pid())
 
-	buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
+	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
+	buf := stack_buf[:]
+
+	value := msg
+	info := get_validated_message_info_ptr(T)
+	needed := 4 + NETWORK_HEADER_SIZE + info.size + calculate_variable_data_size(&value, info)
+	if needed > len(buf) {
+		buf = make([]byte, needed, context.temp_allocator)
+	}
 
 	msg_len := build_wire_format_into_buffer(
-		buf[:],
+		buf,
 		msg,
 		Handle{},
 		from_handle,
@@ -617,7 +625,11 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 		"",
 	)
 	if msg_len == 0 {
-		log.warn("Failed to build lifecycle message wire format")
+		log.warnf(
+			"Failed to build lifecycle message wire format for %v, needed %d bytes",
+			typeid_of(T),
+			needed,
+		)
 		return
 	}
 

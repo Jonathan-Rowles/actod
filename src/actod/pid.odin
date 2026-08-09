@@ -29,13 +29,11 @@ Handle :: struct {
 // Node ID 1 is reserved for the local node
 // Remote node IDs start at 2
 Node_ID :: distinct u16
-current_node_id: Node_ID = 1
 
 // Global node ID counter - starts at 2 (0 is reserved, 1 is local node)
-global_next_node_id: Node_ID = 2
 
 // PID Layout: [node_id:16][type:8][generation:16][index:24]
-pack_pid :: proc(h: Handle, node_id: Node_ID = current_node_id) -> PID {
+pack_pid :: proc(h: Handle, node_id: Node_ID = NODE.node_id) -> PID {
 	return PID(
 		(u64(node_id) << 48) |
 		(u64(h.actor_type) << 40) |
@@ -57,7 +55,7 @@ get_pid_actor_type :: #force_inline proc(pid: PID) -> Actor_Type {
 }
 
 is_local_pid :: #force_inline proc(pid: PID) -> bool {
-	return Node_ID(pid >> 48) == current_node_id
+	return Node_ID(pid >> 48) == NODE.node_id
 }
 
 get_node_id :: #force_inline proc(pid: PID) -> Node_ID {
@@ -78,7 +76,7 @@ pid_formatter :: proc(fi: ^fmt.Info, arg: any, verb: rune) -> bool {
 	h, node := unpack_pid(pid)
 
 	// Format as "idx:gen" or "node:idx:gen" for remote
-	if node == current_node_id {
+	if node == NODE.node_id {
 		fmt.fmt_int(fi, u64(h.idx), false, 32, 'v')
 		io.write_byte(fi.writer, ':')
 		fmt.fmt_int(fi, u64(h.gen), false, 32, 'v')

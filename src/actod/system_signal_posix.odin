@@ -7,7 +7,7 @@ import "core:sys/posix"
 @(private)
 setup_signal_handler :: proc() {
 	signal_handler :: proc "c" (sig: posix.Signal) {
-		sync.atomic_sema_post(&signal_wake)
+		sync.atomic_sema_post(&NODE.signal_wake)
 	}
 
 	sa_int: posix.sigaction_t

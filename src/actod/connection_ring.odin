@@ -301,7 +301,7 @@ ring_io_attach :: proc(ring: ^Connection_Ring, owner: PID) -> bool {
 			.Acquire,
 		)
 		if swapped do return true
-		time.sleep(IO_ATTACH_RETRY_DELAY)
+		runtime_sleep(IO_ATTACH_RETRY_DELAY)
 	}
 	return false
 }
@@ -429,7 +429,7 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 		}
 		sync.atomic_store(&slot.state, .READY)
 		sync.atomic_store(&ring.batch_pending, 1)
-		sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(time.now()))
+		sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
 	} else {
 		sync.atomic_store(&slot.state, .SEALED)
 	}
@@ -488,6 +488,16 @@ batch_flush :: proc(ring: ^Connection_Ring) {
 }
 
 batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
+	when ODIN_TEST {
+		drop, dup, _ := frame_tap(.Out, frame_tap_out_hash(msg_data), msg_data, ring.node_id)
+		if drop do return true
+		if dup do _ = batch_append_message_impl(ring, msg_data)
+	}
+	return batch_append_message_impl(ring, msg_data)
+}
+
+@(private = "file")
+batch_append_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	msg_len := u32(len(msg_data))
 	if msg_len == 0 {
 		return true
@@ -517,14 +527,19 @@ batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 }
 
 batch_append_message_retry :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
+	when ODIN_TEST {
+		drop, dup, _ := frame_tap(.Out, frame_tap_out_hash(msg_data), msg_data, ring.node_id)
+		if drop do return true
+		if dup do _ = batch_append_message_impl(ring, msg_data)
+	}
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		if batch_append_message(ring, msg_data) {
+		if batch_append_message_impl(ring, msg_data) {
 			return true
 		}
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
-			time.sleep(1 * time.Microsecond)
+			runtime_sleep(1 * time.Microsecond)
 		}
 	}
 	return false
@@ -621,7 +636,7 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 			}
 			sync.atomic_store(&slot.state, .READY)
 			sync.atomic_store(&ring.batch_pending, 1)
-			sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(time.now()))
+			sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
 		} else if state == .WRITING {
 			sync.atomic_store(&ring.batch_pending, 1)
 		}
@@ -688,6 +703,11 @@ submit_nbio_sends :: proc(ring: ^Connection_Ring) {
 
 	if batch_count == 0 do return
 
+	if sim_is_socket(ring.tcp_socket) {
+		sim_ring_send(ring, batch_count)
+		return
+	}
+
 	nbio.send_poly2(
 		ring.tcp_socket,
 		ring.send_bufs[:batch_count],
@@ -753,6 +773,10 @@ submit_nbio_recv :: proc(ring: ^Connection_Ring) {
 	}
 
 	recv_buf := ring.recv_buffer[write_pos:write_pos + available]
+	if sim_is_socket(ring.tcp_socket) {
+		ring.pending_recv = sim_ring_post_recv(ring, recv_buf)
+		return
+	}
 	ring.pending_recv = nbio.recv_poly(ring.tcp_socket, {recv_buf}, ring, nbio_recv_callback)
 }
 
@@ -804,6 +828,10 @@ g_nbio_probed: bool
 g_nbio_available: bool
 
 nbio_available :: proc() -> bool {
+	if NODE.config.sim_mode {
+		return true
+	}
+
 	sync.mutex_lock(&g_nbio_probe_mutex)
 	defer sync.mutex_unlock(&g_nbio_probe_mutex)
 
@@ -1069,6 +1097,16 @@ process_recv_buffer :: proc(ring: ^Connection_Ring) {
 }
 
 process_complete_message :: proc(ring: ^Connection_Ring, msg_data: []byte) {
+	when ODIN_TEST {
+		drop, dup, _ := frame_tap(.In, frame_tap_in_hash(msg_data), msg_data, ring.node_id)
+		if drop do return
+		if dup do process_complete_message_impl(ring, msg_data)
+	}
+	process_complete_message_impl(ring, msg_data)
+}
+
+@(private = "file")
+process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) {
 	header, ok := parse_network_header(msg_data)
 	if !ok {
 		log.warn("Failed to parse network header")

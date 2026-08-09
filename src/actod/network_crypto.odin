@@ -3,6 +3,7 @@ package actod
 import "core:crypto"
 import "core:crypto/aead"
 import "core:crypto/argon2id"
+import "core:crypto/ecdh"
 import "core:crypto/hash"
 import "core:crypto/hkdf"
 import "core:crypto/noise"
@@ -25,23 +26,21 @@ CLUSTER_PSK_ARGON2_MEMORY_KIB :: 65536
 CLUSTER_PSK_ARGON2_PASSES :: 3
 CLUSTER_PSK_ARGON2_PARALLELISM :: 1
 
-@(private)
-g_cluster_psk: [CLUSTER_PSK_SIZE]byte
-@(private)
-g_cluster_psk_key: [32]byte
-@(private)
-g_cluster_psk_set: bool
-@(private)
-g_cluster_psk_mutex: sync.Mutex
+Cluster_Psk_State :: struct {
+	psk:   [CLUSTER_PSK_SIZE]byte,
+	key:   [32]byte,
+	set:   bool,
+	mutex: sync.Mutex,
+}
 
 derive_cluster_psk :: proc(password: string) -> ([CLUSTER_PSK_SIZE]byte, bool) {
 	cache_key: [32]byte
 	hash.hash_string_to_buffer(.SHA256, password, cache_key[:])
 
-	sync.mutex_lock(&g_cluster_psk_mutex)
-	defer sync.mutex_unlock(&g_cluster_psk_mutex)
+	sync.mutex_lock(&NODE.cluster_psk.mutex)
+	defer sync.mutex_unlock(&NODE.cluster_psk.mutex)
 
-	if !g_cluster_psk_set || g_cluster_psk_key != cache_key {
+	if !NODE.cluster_psk.set || NODE.cluster_psk.key != cache_key {
 		params := argon2id.Parameters {
 			memory_size = CLUSTER_PSK_ARGON2_MEMORY_KIB,
 			passes      = CLUSTER_PSK_ARGON2_PASSES,
@@ -51,21 +50,21 @@ derive_cluster_psk :: proc(password: string) -> ([CLUSTER_PSK_SIZE]byte, bool) {
 			&params,
 			transmute([]byte)password,
 			transmute([]byte)string(CLUSTER_PSK_SALT),
-			g_cluster_psk[:],
+			NODE.cluster_psk.psk[:],
 			allocator = get_system_allocator(),
 		)
 		if err != nil {
 			log.errorf("Failed to derive cluster PSK: %v", err)
-			g_cluster_psk = {}
-			g_cluster_psk_key = {}
-			g_cluster_psk_set = false
+			NODE.cluster_psk.psk = {}
+			NODE.cluster_psk.key = {}
+			NODE.cluster_psk.set = false
 			return {}, false
 		}
-		g_cluster_psk_key = cache_key
-		g_cluster_psk_set = true
+		NODE.cluster_psk.key = cache_key
+		NODE.cluster_psk.set = true
 	}
 
-	return g_cluster_psk, true
+	return NODE.cluster_psk.psk, true
 }
 
 noise_handshake_begin :: proc(
@@ -74,7 +73,17 @@ noise_handshake_begin :: proc(
 	prologue: []byte,
 	psk: []byte,
 ) -> bool {
-	return noise.handshake_init(hs, initiator, prologue, nil, nil, NOISE_PROTOCOL_NAME, psk) == .Ok
+	eph_bytes: [32]byte
+	actod_rand_bytes(eph_bytes[:])
+	eph: ecdh.Private_Key
+	if !ecdh.private_key_set_bytes(&eph, .X25519, eph_bytes[:]) {
+		return false
+	}
+	crypto.zero_explicit(raw_data(eph_bytes[:]), len(eph_bytes))
+	return(
+		noise.handshake_init(hs, initiator, prologue, nil, nil, NOISE_PROTOCOL_NAME, psk, &eph) ==
+		.Ok \
+	)
 }
 
 noise_handshake_step :: proc(
@@ -254,7 +263,7 @@ replay_accept :: proc(w: ^Replay_Window, seq: u64) -> bool {
 
 generate_udp_seed :: proc() -> [UDP_SEED_SIZE]byte {
 	seed: [UDP_SEED_SIZE]byte
-	crypto.rand_bytes(seed[:])
+	actod_rand_bytes(seed[:])
 	return seed
 }
 
@@ -262,7 +271,7 @@ generate_udp_token :: proc() -> u32 {
 	buf: [4]byte
 	token: u32
 	for token == 0 {
-		crypto.rand_bytes(buf[:])
+		actod_rand_bytes(buf[:])
 		token = endian.unchecked_get_u32le(buf[:])
 	}
 	return token

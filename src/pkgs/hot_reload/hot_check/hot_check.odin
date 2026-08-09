@@ -140,6 +140,10 @@ exercise_node_api :: proc() {
 	_ = act.get_current_log_config()
 	_ = act.get_node_log_ctx()
 
+	act.sim_seed(0)
+	_ = act.sim_pump()
+	_ = act.sim_run_until_idle()
+
 	act.await_signal()
 	act.node_shutdown()
 }

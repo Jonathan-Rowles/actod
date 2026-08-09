@@ -26,6 +26,15 @@ Termination_Reason :: enum {
 @(thread_local)
 test_intercept: ^Test_Intercept
 
+@(thread_local)
+det: ^Det_State
+
+Det_State :: struct {
+	virtual_now:     time.Time,
+	virtual_tick_ns: i64,
+	rng_state:       u64,
+}
+
 Test_Intercept :: struct {
 	send_capture:            ^[dynamic]Captured_Send,
 	publish_capture:         ^[dynamic]Captured_Publish,
@@ -43,7 +52,6 @@ Test_Intercept :: struct {
 	parent_pid:              u64,
 	children_pids:           ^[dynamic]u64,
 	next_spawn_pid:          u64,
-	virtual_now:             time.Time,
 	dead_pids:               ^map[u64]bool,
 	next_ask_token:          u64,
 	current_ask_token:       u64,
@@ -329,7 +337,33 @@ intercept_cancel_timer :: proc(id: u32) -> (Send_Error, bool) {
 }
 
 intercept_now :: proc() -> (time.Time, bool) {
-	if test_intercept == nil do return {}, false
-	if test_intercept.virtual_now == {} do return {}, false
-	return test_intercept.virtual_now, true
+	if det == nil do return {}, false
+	if det.virtual_now == {} do return {}, false
+	return det.virtual_now, true
+}
+
+intercept_rand_bytes :: proc(buf: []byte) -> bool {
+	d := det
+	if d == nil || d.rng_state == 0 do return false
+	for i in 0 ..< len(buf) {
+		d.rng_state = d.rng_state * 6364136223846793005 + 1442695040888963407
+		buf[i] = u8(d.rng_state >> 33)
+	}
+	return true
+}
+
+intercept_tick_now :: proc() -> (time.Tick, bool) {
+	d := det
+	if d == nil || d.virtual_tick_ns == 0 do return {}, false
+	return time.Tick{_nsec = d.virtual_tick_ns}, true
+}
+
+intercept_sleep :: proc(dur: time.Duration) -> bool {
+	d := det
+	if d == nil || d.virtual_tick_ns == 0 do return false
+	d.virtual_tick_ns += i64(dur)
+	if d.virtual_now != {} {
+		d.virtual_now = time.time_add(d.virtual_now, dur)
+	}
+	return true
 }

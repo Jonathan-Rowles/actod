@@ -28,6 +28,8 @@ Test_Entry :: struct {
 	enable_encryption:     bool,
 	udp_port:              int,
 	expects_error_logs:    bool,
+	sim_mode:              bool,
+	quiet_logs:            bool,
 }
 
 ALL_TESTS :: []Test_Entry {
@@ -55,6 +57,25 @@ ALL_TESTS :: []Test_Entry {
 	},
 	{name = "test_registry_consistency", test_proc = test_registry_consistency},
 	{name = "test_worker_contention", test_proc = test_worker_contention, worker_count = 2},
+	{name = "test_sim_pump_basic", test_proc = test_sim_pump_basic, sim_mode = true, worker_count = 2},
+	{name = "test_sim_virtual_timer", test_proc = test_sim_virtual_timer, sim_mode = true, worker_count = 2},
+	{name = "test_sim_seeded_determinism", test_proc = test_sim_seeded_determinism, sim_mode = true, worker_count = 2},
+	{name = "test_sim_two_nodes", test_proc = test_sim_two_nodes, sim_mode = true, worker_count = 2},
+	{name = "test_sim_virtual_transport", test_proc = test_sim_virtual_transport, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_basic", test_proc = test_sim_mesh_basic, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_determinism", test_proc = test_sim_mesh_determinism, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_partition_heal", test_proc = test_sim_mesh_partition_heal, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_crash_restart", test_proc = test_sim_mesh_crash_restart, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_remote_spawn_supervision", test_proc = test_sim_mesh_remote_spawn_supervision, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_discovery", test_proc = test_sim_mesh_discovery, sim_mode = true, worker_count = 2},
+	{name = "test_sim_mesh_pool_scale_up", test_proc = test_sim_mesh_pool_scale_up, sim_mode = true, worker_count = 2},
+	{name = "test_sim_regression_stale_gossip_after_restart", test_proc = test_sim_regression_stale_gossip_after_restart, sim_mode = true, worker_count = 2},
+	{name = "test_sim_regression_relay_heals_lost_broadcast", test_proc = test_sim_regression_relay_heals_lost_broadcast, sim_mode = true, worker_count = 2},
+	{name = "test_sim_regression_relay_cannot_resurrect", test_proc = test_sim_regression_relay_cannot_resurrect, sim_mode = true, worker_count = 2},
+	{name = "test_sim_regression_pool_peer_crash", test_proc = test_sim_regression_pool_peer_crash, sim_mode = true, worker_count = 2, quiet_logs = true},
+	{name = "test_sim_regression_idle_pool_ring_parks", test_proc = test_sim_regression_idle_pool_ring_parks, sim_mode = true, worker_count = 2},
+	{name = "test_sim_regression_publish_during_scale_down", test_proc = test_sim_regression_publish_during_scale_down, sim_mode = true, worker_count = 2},
+	{name = "test_sim_vopr", test_proc = test_sim_vopr, sim_mode = true, worker_count = 2, quiet_logs = true},
 	{
 		name = "test_reclaim_churn_under_termination",
 		test_proc = test_reclaim_churn_under_termination,
@@ -349,6 +370,27 @@ ALL_TESTS :: []Test_Entry {
 		is_networked = true,
 	},
 	{
+		name = "test_frame_tap_duplicate_actor_stopped",
+		test_proc = test_frame_tap_duplicate_actor_stopped,
+		port = 17210,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_frame_tap_drops_outbound_user_message",
+		test_proc = test_frame_tap_drops_outbound_user_message,
+		port = 17230,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_frame_tap_partition_heals",
+		test_proc = test_frame_tap_partition_heals,
+		port = 17220,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
 		name = "test_node_shutdown_under_load",
 		test_proc = test_node_shutdown_under_load,
 		worker_count = ALL_CORES_WORKERS,
@@ -425,11 +467,14 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 
 	node_opts := actod.make_node_config(
 		network = network_config,
-		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Warning)),
+		actor_config = actod.make_actor_config(
+			logging = actod.make_log_config(level = .Error if entry.quiet_logs else .Warning),
+		),
 		hot_reload_dev = entry.hot_reload_dev,
 		hot_reload_watch_path = entry.hot_reload_watch_path,
 	)
 	node_opts.worker_count = resolve_worker_count(entry)
+	node_opts.sim_mode = entry.sim_mode
 
 	actod.node_init(name = node_name, opts = node_opts)
 
@@ -448,7 +493,7 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 		actod.shutdown_node()
 	}
 
-	final_count := actod.num_used(&actod.global_registry)
+	final_count := actod.num_used(&actod.NODE.actor_registry)
 	if final_count > 0 {
 		fmt.eprintf("Test %s: zombie actors detected (%d remaining)\n", entry.name, final_count)
 		return false

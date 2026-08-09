@@ -62,22 +62,27 @@ Rename_Actor :: struct {
 }
 
 Actor_Spawned_Broadcast :: struct {
-	pid:              PID,
-	name:             string,
-	actor_type:       Actor_Type,
-	parent_pid:       PID,
-	ttl:              u8,
-	source_node_name: string,
-	source_port:      u16,
-	source_ip:        u32,
+	pid:                PID,
+	name:               string,
+	actor_type:         Actor_Type,
+	parent_pid:         PID,
+	source_incarnation: u64,
+	source_seq:         u64,
+	ttl:                u8,
+	source_node_name:   string,
+	source_port:        u16,
+	source_ip:          u32,
 }
 
 Actor_Terminated_Broadcast :: struct {
-	pid:              PID,
-	name:             string,
-	reason:           Termination_Reason,
-	ttl:              u8,
-	source_node_name: string,
+	pid:                     PID,
+	name:                    string,
+	reason:                  Termination_Reason,
+	source_incarnation:      u64,
+	source_seq:              u64,
+	ttl:                     u8,
+	inferred_from_disconnect: bool,
+	source_node_name:        string,
 }
 
 Remote_Spawn_Request :: struct {
@@ -130,27 +135,32 @@ init_system_messages :: proc "contextless" () {
 	register_message_type(Reload_Behaviour)
 }
 
-Node_Behaviour :: Actor_Behaviour(Node_Data) {
+Node_Actor_Data :: struct {
+	name: string,
+}
+
+Node_Behaviour :: Actor_Behaviour(Node_Actor_Data) {
 	handle_message = handle_node_message,
 	init           = init_system,
 	terminate      = terminate_system,
 }
 
 @(private)
-init_system :: proc(data: ^Node_Data) {
-	current_node_id = 1
-	init_network(current_node_id, data.name, SYSTEM_CONFIG.loc)
-	init_udp(SYSTEM_CONFIG.loc)
+init_system :: proc(data: ^Node_Actor_Data) {
+	NODE.node_id = 1
+	init_network(NODE.node_id, data.name, NODE.config.loc)
+	init_udp(NODE.config.loc)
 }
 
 @(private)
-terminate_system :: proc(data: ^Node_Data) {
+terminate_system :: proc(data: ^Node_Actor_Data) {
 	shutdown_udp()
 	destroy_all_connection_rings()
 
 	for i in 0 ..< MAX_NODES {
 		if NODE.node_registry[i].node_name != "" {
 			delete(NODE.node_registry[i].node_name, get_system_allocator())
+			delete(NODE.node_registry[i].gossip.ahead)
 			NODE.node_registry[i] = {}
 		}
 	}
@@ -162,12 +172,31 @@ terminate_system :: proc(data: ^Node_Data) {
 	NODE.connection_actors = {}
 }
 
-Node_Data :: struct {
+Node_State :: struct {
 	pid:                      PID,
-	observer:                 PID,
+	node_id:                  Node_ID,
+	next_node_id:             Node_ID,
 	name:                     string,
 	started:                  bool,
 	shutting_down:            bool,
+	config:                   System_Config,
+	actor_registry:           PID_Map(rawptr, PID),
+	worker_pool:              Worker_Pool,
+	type_subscribers:         [MAX_ACTOR_TYPES]Type_Subscriber_List,
+	timer_registry:           Timer_Registry,
+	next_timer_id:            u32,
+	timer_pid:                PID,
+	udp:                      Udp_State,
+	observer_pid:             PID,
+	hot_reload_pid:           PID,
+	logger:                   runtime.Logger,
+	logger_data:              ^Actor_Logger_Data,
+	shutdown_deferred_frees:  [dynamic]rawptr,
+	signal_wake:              sync.Atomic_Sema,
+	reclaim:                  Reclaim_State,
+	cluster_psk:              Cluster_Psk_State,
+	incarnation:              u64,
+	gossip_seq:               u64,
 	node_registry:            [MAX_NODES]Node_Info,
 	connection_rings:         [MAX_NODES]^Connection_Ring, // NODE-owned, see get_or_create_node_ring
 	connection_pools:         [MAX_NODES]^Connection_Pool, // NODE-owned, rings park instead of freeing
@@ -180,7 +209,16 @@ Node_Data :: struct {
 	shutdown_signal_port:     int, // Port for shutdown signaling
 }
 
-NODE := Node_Data{}
+default_node: Node_State
+NODE: ^Node_State = &default_node
+
+@(init)
+init_default_node :: proc "contextless" () {
+	default_node.reclaim.epoch = 1
+	default_node.node_id = 1
+	default_node.next_node_id = 2
+	default_node.config = DEFAULT_SYSTEM_CONFIG
+}
 
 get_local_node_name :: proc() -> string {
 	return NODE.name
@@ -190,23 +228,22 @@ get_local_node_pid :: proc() -> PID {
 	return NODE.pid
 }
 
-systemLogger := runtime.Logger{}
 
 get_node_log_ctx :: proc() -> log.Logger {
-	return systemLogger
+	return NODE.logger
 }
 
-node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) {
+node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.name = name
 
 	logging_config := opts.actor_config.logging
 	logging_config.ident = name
-	systemLogger = init_logger(logging_config)
-	context.logger = systemLogger
+	NODE.logger = init_logger(logging_config)
+	context.logger = NODE.logger
 
-	SYSTEM_CONFIG = opts
-	if SYSTEM_CONFIG.loc.file_path == "" {
-		SYSTEM_CONFIG.loc = loc
+	NODE.config = opts
+	if NODE.config.loc.file_path == "" {
+		NODE.config.loc = loc
 	}
 
 	bind_addr, bind_ok := parse_bind_address(opts.network.bind_address)
@@ -253,6 +290,8 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 
 	NODE.started = true
 	NODE.shutting_down = false
+	NODE.incarnation = generate_nonzero_nonce()
+	sync.atomic_store(&NODE.gossip_seq, 0)
 	if NODE.node_name_to_id == nil {
 		NODE.node_name_to_id = make(map[string]Node_ID, get_system_allocator())
 	}
@@ -263,7 +302,7 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 	if registry_size == 0 {
 		registry_size = 256
 	}
-	init_pid_map(&global_registry, registry_size)
+	init_pid_map(&NODE.actor_registry, registry_size)
 
 	worker_count := opts.worker_count
 	if worker_count == 0 {
@@ -287,10 +326,10 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 		}
 		delete(system_config.children)
 	}
-	SYSTEM_CONFIG.actor_config.children = nil
+	NODE.config.actor_config.children = nil
 	system_config.children = system_children
 
-	NODE.pid, NODE.started = spawn(name, NODE, Node_Behaviour, system_config, 0, loc)
+	NODE.pid, NODE.started = spawn(name, Node_Actor_Data{name = NODE.name}, Node_Behaviour, system_config, 0, loc)
 	delete(system_children)
 	if !NODE.started {
 		panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
@@ -306,7 +345,7 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 }
 
 send_node_msg :: proc(content: SYSTEM_MSG, loc := #caller_location) -> bool {
-	actor, ok := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 	if !ok {
 		log.errorf(
 			"cannot deliver %v to the node actor: the node is not running, call node_init() first",
@@ -382,10 +421,10 @@ send_to_node_mailbox :: #force_inline proc(
 }
 
 @(private)
-handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
+handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 	switch v in msg {
 	case Actor_Stopped:
-		if !valid(&global_registry, from) {
+		if !valid(&NODE.actor_registry, from) {
 			log.errorf(
 				"ignoring Actor_Stopped from PID %v, which is not a valid handle (child '%s')",
 				from,
@@ -394,7 +433,7 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 			return
 		}
 
-		actor_ptr, active := get(&global_registry, from)
+		actor_ptr, active := get(&NODE.actor_registry, from)
 		if !active || actor_ptr == nil {
 			log.errorf(
 				"ignoring Actor_Stopped from PID %v (child '%s'), which is no longer in the registry",
@@ -417,16 +456,16 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 			)
 		}
 	case Remove_Child:
-		a, _ := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 		handle_remove_child(a, v)
 	case Add_Child:
-		a, _ := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 		handle_add_child(a, v)
 	case Set_Parent:
-		a, _ := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 		handle_set_parent(a, v)
 	case Get_Stats:
-		a, _ := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 		handle_get_stats_request(a, v)
 	case Terminate:
 		log.warnf(
@@ -455,13 +494,12 @@ handle_node_message :: proc(data: ^Node_Data, from: PID, msg: any) {
 }
 
 @(private)
-shutdown_deferred_frees: [dynamic]rawptr
 cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
-	if _, active := get(&global_registry, pid); !active {
+	if _, active := get(&NODE.actor_registry, pid); !active {
 		return
 	}
 
-	remove(&global_registry, pid)
+	remove(&NODE.actor_registry, pid)
 
 	actor_typed := cast(^Actor(int))actor_ptr
 	sync.atomic_store(&actor_typed.stopped_closed, true)
@@ -470,7 +508,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	}
 
 	if sync.atomic_load(&NODE.shutting_down) {
-		append(&shutdown_deferred_frees, actor_ptr)
+		append(&NODE.shutdown_deferred_frees, actor_ptr)
 		if pid == NODE.pid {
 			NODE.pid = 0
 		}
@@ -490,7 +528,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		if pool_handle_ptr^ != nil {
 			for i := 0; i < 10000; i += 1 {
 				if coro.status(pool_handle_ptr^.co) == .Dead do break
-				time.sleep(100 * time.Microsecond)
+				runtime_sleep(100 * time.Microsecond)
 			}
 		} else {
 			cleanup_actor_thread(actor_ptr)
@@ -512,7 +550,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			wake_pooled_actor(pool_handle_ptr^)
 			for i := 0; i < 10000; i += 1 {
 				if coro.status(pool_handle_ptr^.co) == .Dead do break
-				time.sleep(100 * time.Microsecond)
+				runtime_sleep(100 * time.Microsecond)
 			}
 		} else {
 			sync.atomic_sema_post(
@@ -557,7 +595,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 node_shutdown :: shutdown_node
 
 shutdown_node :: proc(loc := #caller_location) {
-	context.logger = systemLogger
+	context.logger = NODE.logger
 	if !NODE.started || NODE.pid == 0 {
 		log.debug(
 			"shutdown_node ignored: the node is not running (already shut down, or node_init was never called)",
@@ -574,7 +612,7 @@ shutdown_node :: proc(loc := #caller_location) {
 			location = loc,
 		)
 		sync.atomic_store(&NODE.shutting_down, true)
-		sync.atomic_sema_post(&signal_wake)
+		sync.atomic_sema_post(&NODE.signal_wake)
 		return
 	}
 
@@ -590,22 +628,22 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	clear_all_subscriptions()
 
-	if OBSERVER_PID != {} {
+	if NODE.observer_pid != {} {
 		stop_observer()
 	}
 
-	if HOT_RELOAD_PID != 0 {
+	if NODE.hot_reload_pid != 0 {
 		stop_hot_reload_actor()
 	}
 
 	system_actors := 1
-	if TIMER_PID != 0 {
+	if NODE.timer_pid != 0 {
 		system_actors += 1
 	}
 	if !wait_for_actors_to_clear(max_remaining = system_actors, max_wait_ms = 1000) {
 		log.warnf(
 			"shutdown: %d actors were still alive after 1000 ms and are being torn down anyway",
-			num_used(&global_registry) - system_actors,
+			num_used(&NODE.actor_registry) - system_actors,
 		)
 	}
 
@@ -614,17 +652,17 @@ shutdown_node :: proc(loc := #caller_location) {
 	cleanup_node_actor()
 	shutdown_worker_pool()
 
-	for ptr in shutdown_deferred_frees {
+	for ptr in NODE.shutdown_deferred_frees {
 		cleanup_actor_arena(ptr)
 		free(ptr, actor_system_allocator)
 	}
 
-	delete(shutdown_deferred_frees)
-	shutdown_deferred_frees = {}
+	delete(NODE.shutdown_deferred_frees)
+	NODE.shutdown_deferred_frees = {}
 
 	reclaim_drain_all()
 
-	destroy(&global_registry)
+	destroy(&NODE.actor_registry)
 
 	cleanup_logger_and_context()
 	reset_node_state()
@@ -636,7 +674,7 @@ send_terminate_to_active_actors_and_wait :: proc() {
 	actors_to_wait: [dynamic]PID
 	defer delete(actors_to_wait)
 
-	it := make_iter(&global_registry)
+	it := make_iter(&NODE.actor_registry)
 	for {
 		_, pid, ok := iter(&it)
 		if !ok do break
@@ -697,7 +735,7 @@ cleanup_node_actor :: proc() {
 
 	drain_node_stop_signals()
 
-	node_ptr, active := get(&global_registry, NODE.pid)
+	node_ptr, active := get(&NODE.actor_registry, NODE.pid)
 	if !active || node_ptr == nil do return
 
 	n, ok := get_actor_from_pointer(node_ptr, true)
@@ -713,17 +751,16 @@ cleanup_node_actor :: proc() {
 
 reset_node_state :: proc() {
 	reclaim_reset()
-	sync.atomic_store(&global_next_node_id, 2)
-	current_node_id = 1
+	sync.atomic_store(&NODE.next_node_id, 2)
+	NODE.node_id = 1
 	NODE.started = false
 	// NOTE: shutting_down stays true until node_init to prevent
 	// concurrent senders from accessing freed actor memory.
 	NODE.pid = 0
-	NODE.observer = 0
 
-	OBSERVER_PID = {}
-	TIMER_PID = 0
-	HOT_RELOAD_PID = 0
+	NODE.observer_pid = {}
+	NODE.timer_pid = 0
+	NODE.hot_reload_pid = 0
 	reset_timer_registry()
 
 	if NODE.node_name_to_id != nil {
@@ -747,10 +784,13 @@ wait_for_actors_to_clear :: proc(
 
 	for i := 0; i < iterations; i += 1 {
 		drain_node_stop_signals()
-		if num_used(&global_registry) <= max_remaining {
+		if num_used(&NODE.actor_registry) <= max_remaining {
 			return true
 		}
-		time.sleep(time.Duration(poll_interval_ms) * time.Millisecond)
+		if NODE.config.sim_mode && sim_pump() {
+			continue
+		}
+		runtime_sleep(time.Duration(poll_interval_ms) * time.Millisecond)
 	}
 
 	return false
@@ -759,7 +799,7 @@ wait_for_actors_to_clear :: proc(
 @(private)
 drain_node_stop_signals :: proc() {
 	if NODE.pid == 0 do return
-	node_ptr, active := get(&global_registry, NODE.pid)
+	node_ptr, active := get(&NODE.actor_registry, NODE.pid)
 	if !active || node_ptr == nil do return
 	node_actor, ok := get_actor_from_pointer(node_ptr, true)
 	if !ok || node_actor == nil do return
@@ -772,7 +812,7 @@ wait_for_pids :: proc(
 	max_wait_ms: int = 5000,
 	loc := #caller_location,
 ) {
-	start := time.now()
+	start := now()
 	max_wait := time.Duration(max_wait_ms) * time.Millisecond
 	poll_interval := time.Duration(poll_interval_ms) * time.Millisecond
 	co := coro.running()
@@ -782,7 +822,7 @@ wait_for_pids :: proc(
 		stuck_pid: PID = 0
 		for pid in pids {
 			if !is_local_pid(pid) do continue
-			if _, active := get(&global_registry, pid); active {
+			if _, active := get(&NODE.actor_registry, pid); active {
 				all_done = false
 				stuck_pid = pid
 				break
@@ -791,7 +831,7 @@ wait_for_pids :: proc(
 		if all_done {
 			return
 		}
-		elapsed := time.since(start)
+		elapsed := wall_since(start)
 		if elapsed > max_wait {
 			log.warnf(
 				"shutdown timed out after %d ms waiting for %s to terminate, giving up",
@@ -806,8 +846,12 @@ wait_for_pids :: proc(
 			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 			handle.wants_reschedule = true
 			coro.yield(co)
+		} else if NODE.config.sim_mode {
+			if !sim_pump() {
+				runtime_sleep(poll_interval)
+			}
 		} else {
-			time.sleep(poll_interval)
+			runtime_sleep(poll_interval)
 		}
 	}
 }
@@ -830,12 +874,9 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 	vmem.arena_destroy(arena_ptr)
 }
 
-@(private)
-signal_wake: sync.Atomic_Sema
-
 await_signal :: proc() {
 	setup_signal_handler()
-	sync.atomic_sema_wait(&signal_wake)
+	sync.atomic_sema_wait(&NODE.signal_wake)
 	if NODE.pid != 0 {
 		shutdown_node()
 	}
@@ -845,8 +886,8 @@ is_system_actod_pid :: proc(pid: PID) -> bool {
 	return(
 		pid == 0 ||
 		pid == NODE.pid ||
-		pid == OBSERVER_PID ||
-		pid == TIMER_PID ||
-		pid == HOT_RELOAD_PID \
+		pid == NODE.observer_pid ||
+		pid == NODE.timer_pid ||
+		pid == NODE.hot_reload_pid \
 	)
 }

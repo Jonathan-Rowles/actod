@@ -1,4 +1,7 @@
-.PHONY: test test-ci test-unit test-integration test-facade bench-single bench-network gen-hot-api clean
+.PHONY: test test-ci test-unit test-integration test-facade vopr vopr-deep bench-single bench-network gen-hot-api clean
+
+VOPR_COUNT ?= 200
+VOPR_DEEP_COUNT ?= 100000
 
 DEV_FLAGS := -vet -strict-style -microarch:native
 RELEASE_FLAGS := -o:aggressive -no-bounds-check -disable-assert -microarch:native
@@ -28,6 +31,17 @@ test-integration:
 	@mkdir -p bin
 	@echo "building integration tests"
 	@odin test ./src/integration_test -out:bin/integration_test $(DEV_FLAGS) $(TEST_FLAGS)
+
+vopr:
+	@mkdir -p bin
+	@odin build ./src/integration_test -out:bin/integration_test -build-mode:test $(DEV_FLAGS) $(TEST_FLAGS)
+	@echo "VOPR sweep: $(VOPR_COUNT) seeds (replay failures with ACTOD_TEST_RUN=test_sim_vopr ACTOD_VOPR_SEED=<seed> bin/integration_test)"
+	@ACTOD_TEST_RUN=test_sim_vopr ACTOD_VOPR_BASE=$$(date +%s) ACTOD_VOPR_COUNT=$(VOPR_COUNT) bin/integration_test
+
+vopr-deep:
+	@mkdir -p bin
+	@odin build ./src/integration_test -out:bin/integration_test -build-mode:test $(DEV_FLAGS) $(TEST_FLAGS)
+	@bash scripts/vopr_deep.sh $(VOPR_DEEP_COUNT)
 
 bench-single:
 	@mkdir -p bin

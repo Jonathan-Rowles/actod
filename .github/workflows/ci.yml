@@ -49,3 +49,21 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: build.bat test-ci
+
+  vopr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nasm
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Setup Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: dev-2026-07a
+
+      - name: VOPR sweep (time-seeded; on failure, replay the printed seed and commit it to VOPR_REGRESSION_SEEDS)
+        run: make vopr VOPR_COUNT=500

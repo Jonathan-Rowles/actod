@@ -11,6 +11,7 @@ Test_Harness :: struct($T: typeid) {
 	data:                    ^T,
 	behaviour:               actod.Actor_Behaviour(T),
 	intercept:               ti.Test_Intercept,
+	det:                     ti.Det_State,
 	send_capture:            [dynamic]ti.Captured_Send,
 	publish_capture:         [dynamic]ti.Captured_Publish,
 	timer_capture:           [dynamic]ti.Captured_Timer,
@@ -75,10 +76,12 @@ install_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.children_pids = &h.children_pids
 	h.intercept.dead_pids = &h.dead_pids
 	ti.test_intercept = &h.intercept
+	ti.det = &h.det
 }
 
 uninstall_intercept :: proc() {
 	ti.test_intercept = nil
+	ti.det = nil
 }
 
 
@@ -124,11 +127,11 @@ set_parent :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 }
 
 set_virtual_now :: proc(h: ^Test_Harness($T), t: time.Time) {
-	h.intercept.virtual_now = t
+	h.det.virtual_now = t
 }
 
 advance_time :: proc(h: ^Test_Harness($T), d: time.Duration) {
-	h.intercept.virtual_now = time.time_add(h.intercept.virtual_now, d)
+	h.det.virtual_now = time.time_add(h.det.virtual_now, d)
 }
 
 

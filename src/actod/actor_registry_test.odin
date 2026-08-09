@@ -691,9 +691,9 @@ get_node_id_local_test :: proc(t: ^testing.T) {
 		gen        = 1,
 		actor_type = 0,
 	}
-	pid := pack_pid(handle, current_node_id)
+	pid := pack_pid(handle, NODE.node_id)
 
-	testing.expect(t, get_node_id(pid) == current_node_id)
+	testing.expect(t, get_node_id(pid) == NODE.node_id)
 	testing.expect(t, is_local_pid(pid))
 }
 
@@ -737,10 +737,10 @@ handle_node_disconnect_removes_remote_actors_test :: proc(t: ^testing.T) {
 	defer free(test_registry)
 	clear(test_registry)
 
-	saved := global_registry
-	global_registry = test_registry^
+	saved := NODE.actor_registry
+	NODE.actor_registry = test_registry^
 	defer {
-		global_registry = saved
+		NODE.actor_registry = saved
 	}
 
 	remote_node := Node_ID(5)
@@ -753,7 +753,7 @@ handle_node_disconnect_removes_remote_actors_test :: proc(t: ^testing.T) {
 		}
 		pid := pack_pid(handle, remote_node)
 		name := fmt.tprintf("actor_%d@node5", i)
-		add_remote(&global_registry, pid, name)
+		add_remote(&NODE.actor_registry, pid, name)
 	}
 
 	other_handle := Handle {
@@ -762,12 +762,12 @@ handle_node_disconnect_removes_remote_actors_test :: proc(t: ^testing.T) {
 		actor_type = 0,
 	}
 	other_pid := pack_pid(other_handle, Node_ID(6))
-	add_remote(&global_registry, other_pid, "other@node6")
+	add_remote(&NODE.actor_registry, other_pid, "other@node6")
 
-	_, found0 := get_by_name(&global_registry, "actor_0@node5")
-	_, found1 := get_by_name(&global_registry, "actor_1@node5")
-	_, found2 := get_by_name(&global_registry, "actor_2@node5")
-	_, found_other := get_by_name(&global_registry, "other@node6")
+	_, found0 := get_by_name(&NODE.actor_registry, "actor_0@node5")
+	_, found1 := get_by_name(&NODE.actor_registry, "actor_1@node5")
+	_, found2 := get_by_name(&NODE.actor_registry, "actor_2@node5")
+	_, found_other := get_by_name(&NODE.actor_registry, "other@node6")
 	testing.expect(t, found0)
 	testing.expect(t, found1)
 	testing.expect(t, found2)
@@ -775,21 +775,21 @@ handle_node_disconnect_removes_remote_actors_test :: proc(t: ^testing.T) {
 
 	handle_node_disconnect(remote_node)
 
-	_, gone0 := get_by_name(&global_registry, "actor_0@node5")
-	_, gone1 := get_by_name(&global_registry, "actor_1@node5")
-	_, gone2 := get_by_name(&global_registry, "actor_2@node5")
+	_, gone0 := get_by_name(&NODE.actor_registry, "actor_0@node5")
+	_, gone1 := get_by_name(&NODE.actor_registry, "actor_1@node5")
+	_, gone2 := get_by_name(&NODE.actor_registry, "actor_2@node5")
 	testing.expect(t, !gone0)
 	testing.expect(t, !gone1)
 	testing.expect(t, !gone2)
 
-	_, still_there := get_by_name(&global_registry, "other@node6")
+	_, still_there := get_by_name(&NODE.actor_registry, "other@node6")
 	testing.expect(t, still_there)
 }
 
 @(test)
 handle_node_disconnect_ignores_local_node_test :: proc(t: ^testing.T) {
 	handle_node_disconnect(Node_ID(0))
-	handle_node_disconnect(current_node_id)
+	handle_node_disconnect(NODE.node_id)
 }
 
 @(test)
@@ -801,10 +801,10 @@ handle_node_disconnect_empty_registry_test :: proc(t: ^testing.T) {
 	defer free(test_registry)
 	clear(test_registry)
 
-	saved := global_registry
-	global_registry = test_registry^
+	saved := NODE.actor_registry
+	NODE.actor_registry = test_registry^
 	defer {
-		global_registry = saved
+		NODE.actor_registry = saved
 	}
 
 	handle_node_disconnect(Node_ID(99))
@@ -1030,9 +1030,9 @@ add_remote_split_brain_full_scenario_test :: proc(t: ^testing.T) {
 
 @(test)
 registry_growth_keeps_entries_stable :: proc(t: ^testing.T) {
-	saved_growth := SYSTEM_CONFIG.allow_registry_growth
-	SYSTEM_CONFIG.allow_registry_growth = true
-	defer SYSTEM_CONFIG.allow_registry_growth = saved_growth
+	saved_growth := NODE.config.allow_registry_growth
+	NODE.config.allow_registry_growth = true
+	defer NODE.config.allow_registry_growth = saved_growth
 
 	reg := new(PID_Map(rawptr, PID))
 	init_pid_map(reg, 64)

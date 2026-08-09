@@ -6,14 +6,13 @@ import "core:log"
 import "core:mem"
 import "core:os"
 import "core:strings"
-import "core:time"
 
 PANIC_MESSAGE_BUF_SIZE :: 512
 
 @(private)
 diagnostic_logger :: proc(current: log.Logger) -> log.Logger {
 	if current.procedure == nil || current.procedure == runtime.default_logger_proc {
-		return systemLogger
+		return NODE.logger
 	}
 	return current
 }
@@ -36,7 +35,7 @@ config_origin :: proc(loc: runtime.Source_Code_Location) -> string {
 
 @(private)
 actor_origin :: proc(pid: PID) -> string {
-	actor_ptr, active := get(&global_registry, pid)
+	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil {
 		return fmt.tprintf("PID %v (no longer registered)", pid)
 	}
@@ -76,9 +75,6 @@ current_actor_context: ^Actor_Context
 current_actor_file_logger: ^Actor_File_Logger
 
 @(private)
-actor_logger_data: ^Actor_Logger_Data
-
-@(private)
 actor_system_allocator: runtime.Allocator
 
 @(private)
@@ -95,12 +91,12 @@ spawning_blocking_child: bool
 @(private)
 init_logger :: proc(config: Log_Config) -> log.Logger {
 	actor_system_allocator = runtime.heap_allocator()
-	actor_logger_data = new(Actor_Logger_Data, actor_system_allocator)
+	NODE.logger_data = new(Actor_Logger_Data, actor_system_allocator)
 
-	actor_logger_data.log_config = config
-	actor_logger_data.is_node = true
+	NODE.logger_data.log_config = config
+	NODE.logger_data.is_node = true
 
-	actor_logger_data.console_logger = log.create_console_logger(
+	NODE.logger_data.console_logger = log.create_console_logger(
 		lowest = config.level,
 		opt = config.console_opts,
 		ident = NODE.name,
@@ -113,20 +109,20 @@ init_logger :: proc(config: Log_Config) -> log.Logger {
 
 	return log.Logger {
 		procedure = actor_logger_proc,
-		data = actor_logger_data,
+		data = NODE.logger_data,
 		lowest_level = config.level,
 		options = config.console_opts,
 	}
 }
 
 cleanup_logger_and_context :: proc() {
-	if actor_logger_data != nil {
-		if actor_logger_data.log_config.custom_flush != nil {
-			actor_logger_data.log_config.custom_flush()
+	if NODE.logger_data != nil {
+		if NODE.logger_data.log_config.custom_flush != nil {
+			NODE.logger_data.log_config.custom_flush()
 		}
-		log.destroy_console_logger(actor_logger_data.console_logger, actor_system_allocator)
-		free(actor_logger_data, actor_system_allocator)
-		actor_logger_data = nil
+		log.destroy_console_logger(NODE.logger_data.console_logger, actor_system_allocator)
+		free(NODE.logger_data, actor_system_allocator)
+		NODE.logger_data = nil
 	}
 
 	if current_actor_context != nil {
@@ -150,7 +146,7 @@ actor_logger_proc :: proc(
 	if data.is_node {
 		final_text = fmt.tprintf(
 			"[actod|%s] %s",
-			SYSTEM_CONFIG.network.port > 0 ? fmt.tprint(SYSTEM_CONFIG.network.port) : "local",
+			NODE.config.network.port > 0 ? fmt.tprint(NODE.config.network.port) : "local",
 			text,
 		)
 	} else {
@@ -179,7 +175,7 @@ actor_logger_proc :: proc(
 setup_actor_context :: proc(
 	pid: PID,
 	name: string,
-	config: Log_Config = SYSTEM_CONFIG.actor_config.logging,
+	config: Log_Config = NODE.config.actor_config.logging,
 	actor_allocator: mem.Allocator,
 ) -> (
 	log.Logger,
@@ -200,7 +196,7 @@ setup_actor_context :: proc(
 	actor_ctx.stats.sent_list = make([dynamic]PID, actor_allocator)
 	actor_ctx.stats.received_from = nil
 	actor_ctx.stats.sent_to = nil
-	actor_ctx.stats.start_time = time.now()
+	actor_ctx.stats.start_time = now()
 	actor_ctx.stats.max_mailbox_size = 0
 
 	current_actor_context = actor_ctx
@@ -227,7 +223,7 @@ setup_actor_context :: proc(
 
 			if name == NODE.name || pid == NODE.pid {
 				port_str :=
-					SYSTEM_CONFIG.network.port > 0 ? fmt.tprint(SYSTEM_CONFIG.network.port) : "local"
+					NODE.config.network.port > 0 ? fmt.tprint(NODE.config.network.port) : "local"
 				file_logger.ident_str = fmt.aprintf(
 					"[actod|%s]",
 					port_str,
@@ -312,16 +308,16 @@ is_log_level_enabled :: proc(level: log.Level) -> bool {
 }
 
 set_log_level :: proc(level: log.Level) {
-	if actor_logger_data != nil {
-		actor_logger_data.console_logger.lowest_level = level
-		actor_logger_data.log_config.level = level
+	if NODE.logger_data != nil {
+		NODE.logger_data.console_logger.lowest_level = level
+		NODE.logger_data.log_config.level = level
 	}
 	context.logger.lowest_level = level
 }
 
 get_current_log_config :: proc() -> Log_Config {
-	if actor_logger_data != nil {
-		return actor_logger_data.log_config
+	if NODE.logger_data != nil {
+		return NODE.logger_data.log_config
 	}
-	return SYSTEM_CONFIG.actor_config.logging
+	return NODE.config.actor_config.logging
 }

@@ -117,10 +117,11 @@ System_Config :: struct {
 	worker_count:          int, // 0 = auto (CPU count)
 	hot_reload_dev:        bool, // Spawns Hot_Reload_Actor, enables file watching + auto-reload
 	hot_reload_watch_path: string, // Override actors directory (default "" = auto-discover)
+	sim_mode:              bool,
 	loc:                   runtime.Source_Code_Location,
 }
 
-SYSTEM_CONFIG := System_Config {
+DEFAULT_SYSTEM_CONFIG := System_Config {
 	actor_registry_size = 256, // Default: 16K actors (power-of-2)
 	allow_registry_growth = true, // Enable auto-growth
 	enable_observer = false,
@@ -155,16 +156,17 @@ SYSTEM_CONFIG := System_Config {
 }
 
 make_node_config :: proc(
-	actor_registry_size: int = SYSTEM_CONFIG.actor_registry_size,
-	allow_registry_growth: bool = SYSTEM_CONFIG.allow_registry_growth,
-	enable_observer: bool = SYSTEM_CONFIG.enable_observer,
-	observer_interval: time.Duration = SYSTEM_CONFIG.observer_interval,
-	network: Network_Config = SYSTEM_CONFIG.network,
-	actor_config: Actor_Config = SYSTEM_CONFIG.actor_config,
-	blocking_child: SPAWN = SYSTEM_CONFIG.blocking_child,
-	worker_count: int = SYSTEM_CONFIG.worker_count,
-	hot_reload_dev: bool = SYSTEM_CONFIG.hot_reload_dev,
-	hot_reload_watch_path: string = SYSTEM_CONFIG.hot_reload_watch_path,
+	actor_registry_size: int = NODE.config.actor_registry_size,
+	allow_registry_growth: bool = NODE.config.allow_registry_growth,
+	enable_observer: bool = NODE.config.enable_observer,
+	observer_interval: time.Duration = NODE.config.observer_interval,
+	network: Network_Config = NODE.config.network,
+	actor_config: Actor_Config = NODE.config.actor_config,
+	blocking_child: SPAWN = NODE.config.blocking_child,
+	worker_count: int = NODE.config.worker_count,
+	hot_reload_dev: bool = NODE.config.hot_reload_dev,
+	hot_reload_watch_path: string = NODE.config.hot_reload_watch_path,
+	sim_mode: bool = NODE.config.sim_mode,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> System_Config {
 	if actor_registry_size <= 0 {
@@ -194,6 +196,7 @@ make_node_config :: proc(
 		worker_count = worker_count,
 		hot_reload_dev = hot_reload_dev,
 		hot_reload_watch_path = hot_reload_watch_path,
+		sim_mode = sim_mode,
 	}
 }
 
@@ -227,20 +230,20 @@ Actor_Config :: struct {
 // user overrides config sent to node in actor.node_init
 make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
-	spin_strategy: SPIN_STRATEGY = SYSTEM_CONFIG.actor_config.spin_strategy,
-	logging: Log_Config = SYSTEM_CONFIG.actor_config.logging,
-	message_batch: int = SYSTEM_CONFIG.actor_config.message_batch,
-	page_size: int = SYSTEM_CONFIG.actor_config.page_size,
-	arena_headroom: int = SYSTEM_CONFIG.actor_config.arena_headroom,
-	supervision_strategy: Supervision_Strategy = SYSTEM_CONFIG.actor_config.supervision_strategy,
-	restart_policy: Restart_Policy = SYSTEM_CONFIG.actor_config.restart_policy,
-	max_restarts: int = SYSTEM_CONFIG.actor_config.max_restarts,
-	restart_window: time.Duration = SYSTEM_CONFIG.actor_config.restart_window,
-	home_worker: int = SYSTEM_CONFIG.actor_config.home_worker,
-	affinity: Actor_Ref = SYSTEM_CONFIG.actor_config.affinity,
-	coro_stack_size: int = SYSTEM_CONFIG.actor_config.coro_stack_size,
-	use_dedicated_os_thread: bool = SYSTEM_CONFIG.actor_config.use_dedicated_os_thread,
-	stack_size_dedicated_os_thread: int = SYSTEM_CONFIG.actor_config.stack_size_dedicated_os_thread,
+	spin_strategy: SPIN_STRATEGY = NODE.config.actor_config.spin_strategy,
+	logging: Log_Config = NODE.config.actor_config.logging,
+	message_batch: int = NODE.config.actor_config.message_batch,
+	page_size: int = NODE.config.actor_config.page_size,
+	arena_headroom: int = NODE.config.actor_config.arena_headroom,
+	supervision_strategy: Supervision_Strategy = NODE.config.actor_config.supervision_strategy,
+	restart_policy: Restart_Policy = NODE.config.actor_config.restart_policy,
+	max_restarts: int = NODE.config.actor_config.max_restarts,
+	restart_window: time.Duration = NODE.config.actor_config.restart_window,
+	home_worker: int = NODE.config.actor_config.home_worker,
+	affinity: Actor_Ref = NODE.config.actor_config.affinity,
+	coro_stack_size: int = NODE.config.actor_config.coro_stack_size,
+	use_dedicated_os_thread: bool = NODE.config.actor_config.use_dedicated_os_thread,
+	stack_size_dedicated_os_thread: int = NODE.config.actor_config.stack_size_dedicated_os_thread,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Actor_Config {
 	if message_batch <= 0 {
@@ -310,14 +313,14 @@ Log_Config :: struct {
 }
 
 make_log_config :: proc(
-	level: log.Level = SYSTEM_CONFIG.actor_config.logging.level,
-	console_opts: log.Options = SYSTEM_CONFIG.actor_config.logging.console_opts,
-	file_opts: log.Options = SYSTEM_CONFIG.actor_config.logging.file_opts,
-	ident: string = SYSTEM_CONFIG.actor_config.logging.ident,
-	enable_file: bool = SYSTEM_CONFIG.actor_config.logging.enable_file,
-	log_path: string = SYSTEM_CONFIG.actor_config.logging.log_path,
-	custom_logger: Log_Callback = SYSTEM_CONFIG.actor_config.logging.custom_logger,
-	custom_flush: Log_Flush = SYSTEM_CONFIG.actor_config.logging.custom_flush,
+	level: log.Level = NODE.config.actor_config.logging.level,
+	console_opts: log.Options = NODE.config.actor_config.logging.console_opts,
+	file_opts: log.Options = NODE.config.actor_config.logging.file_opts,
+	ident: string = NODE.config.actor_config.logging.ident,
+	enable_file: bool = NODE.config.actor_config.logging.enable_file,
+	log_path: string = NODE.config.actor_config.logging.log_path,
+	custom_logger: Log_Callback = NODE.config.actor_config.logging.custom_logger,
+	custom_flush: Log_Flush = NODE.config.actor_config.logging.custom_flush,
 ) -> Log_Config {
 	return Log_Config {
 		level = level,

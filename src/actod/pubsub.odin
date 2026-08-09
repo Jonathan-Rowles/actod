@@ -30,7 +30,6 @@ Type_Subscriber_List :: struct {
 	remote_node_sub_count: [MAX_NODES]u32,
 }
 
-type_subscribers: [MAX_ACTOR_TYPES]Type_Subscriber_List
 
 @(private)
 add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location) -> bool {
@@ -49,7 +48,7 @@ add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location
 		return false
 	}
 
-	list := &type_subscribers[actor_type]
+	list := &NODE.type_subscribers[actor_type]
 
 	for {
 		idx := sync.atomic_load_explicit(&list.local_count, .Acquire)
@@ -84,7 +83,7 @@ remove_subscriber :: proc(actor_type: Actor_Type, pid: PID) -> bool {
 		return false
 	}
 
-	list := &type_subscribers[actor_type]
+	list := &NODE.type_subscribers[actor_type]
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 
 	for i in 0 ..< n {
@@ -218,7 +217,7 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 		return
 	}
 
-	list := &type_subscribers[actor_type]
+	list := &NODE.type_subscribers[actor_type]
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 
 	for i in 0 ..< n {
@@ -284,7 +283,7 @@ get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
 	if actor_type == ACTOR_TYPE_UNTYPED {
 		return 0
 	}
-	return sync.atomic_load_explicit(&type_subscribers[actor_type].count, .Acquire)
+	return sync.atomic_load_explicit(&NODE.type_subscribers[actor_type].count, .Acquire)
 }
 
 // Re-announce every local subscription to a peer whose connection just reached
@@ -299,7 +298,7 @@ announce_subscriptions_to_node :: proc(node_id: Node_ID) {
 		return
 	}
 	for type_idx in 1 ..< MAX_ACTOR_TYPES {
-		list := &type_subscribers[Actor_Type(type_idx)]
+		list := &NODE.type_subscribers[Actor_Type(type_idx)]
 		n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 		if n == 0 {
 			continue
@@ -332,7 +331,7 @@ handle_remote_subscribe :: proc(msg: Subscribe_Remote, from_node: Node_ID) {
 		return
 	}
 
-	list := &type_subscribers[local_type]
+	list := &NODE.type_subscribers[local_type]
 	sync.atomic_add_explicit(&list.remote_node_sub_count[from_node], 1, .Release)
 	sync.atomic_add_explicit(&list.count, 1, .Release)
 }
@@ -347,7 +346,7 @@ handle_remote_unsubscribe :: proc(msg: Unsubscribe_Remote, from_node: Node_ID) {
 		return
 	}
 
-	list := &type_subscribers[local_type]
+	list := &NODE.type_subscribers[local_type]
 	current := sync.atomic_load_explicit(&list.remote_node_sub_count[from_node], .Acquire)
 	if current > 0 {
 		sync.atomic_sub_explicit(&list.remote_node_sub_count[from_node], 1, .Release)
@@ -356,12 +355,12 @@ handle_remote_unsubscribe :: proc(msg: Unsubscribe_Remote, from_node: Node_ID) {
 }
 
 clear_subscriptions_for_node :: proc(node_id: Node_ID) {
-	if node_id == 0 || node_id == current_node_id || node_id >= MAX_NODES {
+	if node_id == 0 || node_id == NODE.node_id || node_id >= MAX_NODES {
 		return
 	}
 
 	for type_idx in 0 ..< MAX_ACTOR_TYPES {
-		list := &type_subscribers[Actor_Type(type_idx)]
+		list := &NODE.type_subscribers[Actor_Type(type_idx)]
 		remote_count := sync.atomic_load_explicit(&list.remote_node_sub_count[node_id], .Acquire)
 		if remote_count > 0 {
 			sync.atomic_store_explicit(&list.remote_node_sub_count[node_id], 0, .Release)
@@ -372,7 +371,7 @@ clear_subscriptions_for_node :: proc(node_id: Node_ID) {
 
 clear_all_subscriptions :: proc() {
 	for type_idx in 0 ..< MAX_ACTOR_TYPES {
-		list := &type_subscribers[Actor_Type(type_idx)]
+		list := &NODE.type_subscribers[Actor_Type(type_idx)]
 		for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
 			sync.atomic_store_explicit(cast(^u64)&list.subscribers[i], 0, .Release)
 		}

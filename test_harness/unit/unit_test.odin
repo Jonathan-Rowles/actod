@@ -344,7 +344,7 @@ test_set_virtual_now :: proc(t: ^testing.T) {
 		_nsec = 5_000_000_000,
 	}
 	set_virtual_now(&h, now)
-	testing.expect_value(t, h.intercept.virtual_now, now)
+	testing.expect_value(t, h.det.virtual_now, now)
 }
 
 @(test)
@@ -359,7 +359,7 @@ test_advance_time :: proc(t: ^testing.T) {
 	expected := time.Time {
 		_nsec = 3_000_000_000,
 	}
-	testing.expect_value(t, h.intercept.virtual_now, expected)
+	testing.expect_value(t, h.det.virtual_now, expected)
 }
 
 timer_state :: struct {

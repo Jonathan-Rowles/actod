@@ -38,40 +38,37 @@ Udp_State :: struct {
 }
 
 @(private)
-g_udp: Udp_State
-
-@(private)
 Udp_Recv_Context :: struct {
 	allocator: runtime.Allocator,
 	logger:    runtime.Logger,
 }
 
 udp_local_enabled :: #force_inline proc() -> bool {
-	return g_udp.enabled
+	return NODE.udp.enabled
 }
 
 udp_max_frame_bytes :: proc() -> int {
-	if !g_udp.enabled {
+	if !NODE.udp.enabled {
 		return 0
 	}
-	limit := SYSTEM_CONFIG.network.udp_max_datagram
+	limit := NODE.config.network.udp_max_datagram
 	if limit <= 0 || limit > UDP_MAX_DATAGRAM_HARD {
 		limit = UDP_MAX_DATAGRAM_HARD
 	}
 	overhead := UDP_HEADER_PLAIN
-	if SYSTEM_CONFIG.network.enable_encryption {
+	if NODE.config.network.enable_encryption {
 		overhead = UDP_HEADER_SEALED + UDP_TAG_SIZE
 	}
 	return min(limit - overhead, UDP_FRAME_BUFFER)
 }
 
 init_udp :: proc(loc := #caller_location) -> bool {
-	port := SYSTEM_CONFIG.network.udp_port
-	if port <= 0 {
+	port := NODE.config.network.udp_port
+	if port <= 0 || NODE.config.sim_mode {
 		return true
 	}
 
-	if !SYSTEM_CONFIG.network.enable_encryption {
+	if !NODE.config.network.enable_encryption {
 		log.warnf(
 			"UDP lane on port %d disabled: enable_encryption is required (plaintext UDP is unauthenticated); set enable_encryption = true in make_network_config or send_unreliable will fall back to TCP",
 			port,
@@ -80,7 +77,7 @@ init_udp :: proc(loc := #caller_location) -> bool {
 		return true
 	}
 
-	bind_addr, _ := parse_bind_address(SYSTEM_CONFIG.network.bind_address)
+	bind_addr, _ := parse_bind_address(NODE.config.network.bind_address)
 	recv_sock, recv_err := net.make_bound_udp_socket(bind_addr, port)
 	if recv_err != nil {
 		log.errorf(
@@ -130,14 +127,14 @@ init_udp :: proc(loc := #caller_location) -> bool {
 		return false
 	}
 
-	g_udp.recv_socket = recv_sock
-	g_udp.send_socket = send_sock
-	g_udp.recv_ctx = ctx
-	sync.atomic_store(&g_udp.running, 1)
-	g_udp.enabled = true
+	NODE.udp.recv_socket = recv_sock
+	NODE.udp.send_socket = send_sock
+	NODE.udp.recv_ctx = ctx
+	sync.atomic_store(&NODE.udp.running, 1)
+	NODE.udp.enabled = true
 
 	t.user_args[0] = ctx
-	g_udp.recv_thread = t
+	NODE.udp.recv_thread = t
 	thread.start(t)
 
 	log.infof("UDP lane listening on port %d", port)
@@ -145,31 +142,31 @@ init_udp :: proc(loc := #caller_location) -> bool {
 }
 
 shutdown_udp :: proc() {
-	if !g_udp.enabled {
+	if !NODE.udp.enabled {
 		return
 	}
-	g_udp.enabled = false
-	sync.atomic_store(&g_udp.running, 0)
+	NODE.udp.enabled = false
+	sync.atomic_store(&NODE.udp.running, 0)
 
-	net.close(g_udp.recv_socket)
-	if g_udp.recv_thread != nil {
-		thread.join(g_udp.recv_thread)
+	net.close(NODE.udp.recv_socket)
+	if NODE.udp.recv_thread != nil {
+		thread.join(NODE.udp.recv_thread)
 		prev_allocator := context.allocator
 		context.allocator = get_system_allocator()
-		thread.destroy(g_udp.recv_thread)
+		thread.destroy(NODE.udp.recv_thread)
 		context.allocator = prev_allocator
-		g_udp.recv_thread = nil
+		NODE.udp.recv_thread = nil
 	}
-	if g_udp.recv_ctx != nil {
-		free(g_udp.recv_ctx, get_system_allocator())
-		g_udp.recv_ctx = nil
+	if NODE.udp.recv_ctx != nil {
+		free(NODE.udp.recv_ctx, get_system_allocator())
+		NODE.udp.recv_ctx = nil
 	}
-	net.close(g_udp.send_socket)
-	g_udp.recv_socket = {}
-	g_udp.send_socket = {}
+	net.close(NODE.udp.send_socket)
+	NODE.udp.recv_socket = {}
+	NODE.udp.send_socket = {}
 
 	for i in 0 ..< MAX_NODES {
-		g_udp.peers[i] = {}
+		NODE.udp.peers[i] = {}
 	}
 }
 
@@ -184,7 +181,7 @@ udp_register_peer :: proc(
 	if node_id == 0 || node_id >= MAX_NODES {
 		return
 	}
-	peer := &g_udp.peers[node_id]
+	peer := &NODE.udp.peers[node_id]
 	gen := sync.atomic_load(&peer.generation)
 	sync.atomic_store_explicit(&peer.generation, gen + 1, .Release)
 
@@ -203,7 +200,7 @@ udp_clear_peer :: proc(node_id: Node_ID) {
 	if node_id == 0 || node_id >= MAX_NODES {
 		return
 	}
-	peer := &g_udp.peers[node_id]
+	peer := &NODE.udp.peers[node_id]
 	if !peer.active {
 		return
 	}
@@ -222,14 +219,14 @@ udp_clear_peer :: proc(node_id: Node_ID) {
 // Safe from any producer thread. A sequence number consumed under a torn
 // generation is discarded, never sent, so (key, nonce) pairs are never reused.
 udp_try_send :: proc(node_id: Node_ID, frame_with_size: []byte) -> bool {
-	if !g_udp.enabled || node_id == 0 || node_id >= MAX_NODES {
+	if !NODE.udp.enabled || node_id == 0 || node_id >= MAX_NODES {
 		return false
 	}
 	if len(frame_with_size) > UDP_FRAME_BUFFER {
 		return false
 	}
 
-	peer := &g_udp.peers[node_id]
+	peer := &NODE.udp.peers[node_id]
 
 	for _ in 0 ..< UDP_SNAPSHOT_RETRIES {
 		g1 := sync.atomic_load_explicit(&peer.generation, .Acquire)
@@ -284,7 +281,7 @@ udp_try_send :: proc(node_id: Node_ID, frame_with_size: []byte) -> bool {
 			total = UDP_HEADER_PLAIN + len(frame_with_size)
 		}
 
-		_, err := net.send_udp(g_udp.send_socket, out[:total], endpoint)
+		_, err := net.send_udp(NODE.udp.send_socket, out[:total], endpoint)
 		return err == nil
 	}
 
@@ -302,7 +299,7 @@ udp_snapshot_for_recv :: proc(
 	found: bool,
 ) {
 	for i in 1 ..< MAX_NODES {
-		peer := &g_udp.peers[i]
+		peer := &NODE.udp.peers[i]
 		g1 := sync.atomic_load_explicit(&peer.generation, .Acquire)
 		if g1 & 1 != 0 || !peer.active || peer.token_in != token {
 			continue
@@ -364,10 +361,10 @@ udp_recv_loop :: proc(t: ^thread.Thread) {
 	replay_windows: [MAX_NODES]Replay_Window
 	replay_gens: [MAX_NODES]u32
 
-	for sync.atomic_load(&g_udp.running) != 0 {
-		n, _, err := net.recv_udp(g_udp.recv_socket, recv_buf[:])
+	for sync.atomic_load(&NODE.udp.running) != 0 {
+		n, _, err := net.recv_udp(NODE.udp.recv_socket, recv_buf[:])
 		if err != nil {
-			if sync.atomic_load(&g_udp.running) == 0 {
+			if sync.atomic_load(&NODE.udp.running) == 0 {
 				break
 			}
 			continue

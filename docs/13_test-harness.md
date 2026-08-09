@@ -1,6 +1,8 @@
 # Test Harness
 
-Actod provides two testing tools: a **unit test harness** for isolated single-actor testing, and a **simulation framework** for multi-actor scenarios with fault injection.
+Actod provides three testing tools: a **unit test harness** for isolated single-actor testing, a **simulation framework** for multi-actor scenarios with fault injection, and **deterministic simulation testing (DST)** that runs the real runtime, including the node-to-node mesh, under a seeded single-threaded scheduler.
+
+The first two test *your actor logic* against a model of the runtime. DST tests *the runtime itself* (and your actors on top of it): real mailboxes, real supervision, real wire encode/decode, real handshakes, on a virtual clock and a virtual transport.
 
 ## Running Tests
 
@@ -207,6 +209,41 @@ handle_message = proc(d: ^My_Data, from: act.PID, msg: any) {
 ```
 
 If you use `time.now()` directly, virtual time won't work and your tests will depend on real elapsed time.
+
+## Deterministic Simulation Testing
+
+A node started with `sim_mode = true` creates **zero OS threads**. Workers, timers, and network IO all run inline when you pump the node from the calling thread:
+
+```odin
+act.node_init("test", act.make_node_config(sim_mode = true, worker_count = 2))
+
+pid, _ := act.spawn("counter", Counter{}, counter_behaviour)
+act.send_message(pid, Increment{})
+
+act.sim_run_until_idle()   // run every ready actor until nothing is runnable
+```
+
+Because everything happens on one thread, execution is deterministic. `act.sim_seed(n)` makes the scheduler pick the next runnable actor from a seeded RNG instead of round-robin, so one scenario can be replayed under many different interleavings, and any interleaving can be replayed exactly by reusing its seed.
+
+Under `sim_mode`, real networking runs over an in-process byte pipe instead of the kernel: the wire format, handshake, authentication, partial-frame reassembly, and connection lifecycle are the production code paths, but delivery order and timing are under test control, and the virtual clock (`act.now()`) compresses timer races (heartbeat timeouts vs reconnect backoff vs restart windows) into microseconds.
+
+### What DST does not cover
+
+- **Lock-free memory ordering.** Serialized execution cannot produce fence bugs or MPSC races. That layer is owned by ThreadSanitizer and release-build stress tests on real threads.
+- **The kernel boundary.** The virtual transport is a byte stream with scriptable delivery; io_uring quirks and real TCP timing are out of scope. The multi-process integration tests remain the reality check.
+
+### The VOPR (internal)
+
+The repository's own DST harness lives in the integration suite: a multi-node **sim mesh** (N real nodes on one thread, with scripted partitions, crashes, restarts, clock jumps, and per-link frame faults) and the **VOPR**, a seed-driven scenario fuzzer in the style of FoundationDB and TigerBeetle. Each seed generates an entire scenario; invariants (no duplicated delivery, no phantom messages, no livelock, reconnect and gossip convergence) are checked as it runs.
+
+```bash
+make vopr                  # sweep 200 fresh seeds (~16s)
+make vopr VOPR_COUNT=10000 # deep local sweep before merging risky changes
+```
+
+A failure prints the seed and a replay one-liner; a replay under the same binary and profile is deterministic (cross-binary replays are not: any change to the op generator re-maps what every seed decodes to). Determinism is proven within a process by trace-equality tests; cross-process identity additionally requires the scenario to be the first mesh in its process, which the seed-replay path guarantees. `ACTOD_VOPR_VERBOSE=1` prints the generated op script with full logging. Failing seeds get committed to `VOPR_REGRESSION_SEEDS` so they keep running in `make test`, but because generator changes re-map seeds, every VOPR-found fix is durably pinned by a dedicated deterministic test in `sim_regression_test.odin` as well. CI runs a 500-seed sweep on every push to `main` and on every pull request.
+
+These APIs (`sim_mesh_create`, `frame_tap_add`, the trace hook) are package-internal for now; the facade exposes `sim_mode`, `sim_pump`, `sim_seed`, and `sim_run_until_idle`. A user-facing mesh API (embedded multi-node tests in your own suite) is planned.
 
 ---
 [< Actor Registry](12_actor-registry.md) | [Delivery Semantics >](14_delivery-semantics.md)

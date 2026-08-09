@@ -278,7 +278,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 wait_for_actors_cleanup :: proc() {
 	max_wait := 50
 	for attempt in 0 ..< max_wait {
-		total := actod.num_used(&actod.global_registry)
+		total := actod.num_used(&actod.NODE.actor_registry)
 		if total <= 3 do break
 		time.sleep(100 * time.Millisecond)
 		if attempt == max_wait - 1 {

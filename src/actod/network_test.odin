@@ -50,8 +50,8 @@ test_node_registry :: proc(t: ^testing.T) {
 		port    = 9001,
 	}
 
-	current_node_id = 1
-	sync.atomic_store(&global_next_node_id, 2)
+	NODE.node_id = 1
+	sync.atomic_store(&NODE.next_node_id, 2)
 
 	node_id, ok := register_node("remote_node", test_addr, .TCP_Custom_Protocol)
 	testing.expect(t, ok, "Failed to register node")
@@ -96,7 +96,7 @@ test_pid_packing_unpacking :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, unpacked_node_id == node_id, "Node ID mismatch")
 
-	local_pid := pack_pid(handle, current_node_id)
+	local_pid := pack_pid(handle, NODE.node_id)
 	remote_pid := pack_pid(handle, 999)
 
 	testing.expect(t, is_local_pid(local_pid), "Local PID not recognized")
@@ -181,8 +181,8 @@ test_get_node_by_name :: proc(t: ^testing.T) {
 		port    = 9002,
 	}
 
-	current_node_id = 1
-	sync.atomic_store(&global_next_node_id, 2)
+	NODE.node_id = 1
+	sync.atomic_store(&NODE.next_node_id, 2)
 
 	node_id, ok := register_node("test_remote", test_addr, .TCP_Custom_Protocol)
 	testing.expect(t, ok, "Failed to register node")
@@ -298,8 +298,8 @@ test_register_node_deduplication :: proc(t: ^testing.T) {
 	network_test_setup()
 	defer network_test_remove_nodes("dedup_node")
 
-	current_node_id = 1
-	sync.atomic_store(&global_next_node_id, 2)
+	NODE.node_id = 1
+	sync.atomic_store(&NODE.next_node_id, 2)
 
 	addr := net.Endpoint {
 		address = net.IP4_Address{10, 0, 0, 1},
@@ -314,7 +314,7 @@ test_register_node_deduplication :: proc(t: ^testing.T) {
 	testing.expect(t, !ok2, "Second registration should return false (not new)")
 	testing.expect(t, id2 == id1, "Should return same ID for duplicate name")
 
-	next := sync.atomic_load(&global_next_node_id)
+	next := sync.atomic_load(&NODE.next_node_id)
 	testing.expect(t, next == id1 + 1, "Should not have consumed extra node ID")
 
 	unregister_node(id1)
@@ -365,8 +365,8 @@ test_node_directory_serialization :: proc(t: ^testing.T) {
 	defer network_test_remove_nodes("node_alpha", "node_beta")
 
 	NODE.name = "local_node"
-	current_node_id = 1
-	sync.atomic_store(&global_next_node_id, 2)
+	NODE.node_id = 1
+	sync.atomic_store(&NODE.next_node_id, 2)
 
 	handle_node_directory(buf)
 

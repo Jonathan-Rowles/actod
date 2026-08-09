@@ -136,19 +136,19 @@ wait_for_actor_state :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 	start := time.now()
 	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
-	if _, ok := actod.get(&actod.global_registry, pid); ok {
+	if _, ok := actod.get(&actod.NODE.actor_registry, pid); ok {
 		return true
 	}
 
 	for i := 0; i < 20; i += 1 {
-		if _, ok := actod.get(&actod.global_registry, pid); ok {
+		if _, ok := actod.get(&actod.NODE.actor_registry, pid); ok {
 			return true
 		}
 		time.sleep(2 * time.Millisecond)
 	}
 
 	for time.diff(time.now(), deadline) > 0 {
-		if _, ok := actod.get(&actod.global_registry, pid); ok {
+		if _, ok := actod.get(&actod.NODE.actor_registry, pid); ok {
 			return true
 		}
 		time.sleep(5 * time.Millisecond)
@@ -194,19 +194,19 @@ wait_for_actor_invalid :: proc(pid: actod.PID, timeout_ms: int) -> bool {
 	start := time.now()
 	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
 
-	if !actod.valid(&actod.global_registry, pid) {
+	if !actod.valid(&actod.NODE.actor_registry, pid) {
 		return true
 	}
 
 	for i := 0; i < 20; i += 1 {
-		if !actod.valid(&actod.global_registry, pid) {
+		if !actod.valid(&actod.NODE.actor_registry, pid) {
 			return true
 		}
 		time.sleep(2 * time.Millisecond)
 	}
 
 	for time.diff(time.now(), deadline) > 0 {
-		if !actod.valid(&actod.global_registry, pid) {
+		if !actod.valid(&actod.NODE.actor_registry, pid) {
 			return true
 		}
 		time.sleep(5 * time.Millisecond)
@@ -621,14 +621,14 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 
 	expect(
 		t,
-		actod.valid(&actod.global_registry, supervisor_pid),
+		actod.valid(&actod.NODE.actor_registry, supervisor_pid),
 		"Supervisor should still be running",
 	)
 
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 
 	for i := 0; i < 20; i += 1 {
-		if !actod.valid(&actod.global_registry, supervisor_pid) {
+		if !actod.valid(&actod.NODE.actor_registry, supervisor_pid) {
 			break
 		}
 		time.sleep(50 * time.Millisecond)
@@ -700,7 +700,7 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 
 	for i := 0; i < 20; i += 1 {
-		if !actod.valid(&actod.global_registry, supervisor_pid) {
+		if !actod.valid(&actod.NODE.actor_registry, supervisor_pid) {
 			break
 		}
 		time.sleep(50 * time.Millisecond)
@@ -833,7 +833,7 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 
 	for i := 0; i < 20; i += 1 {
-		if !actod.valid(&actod.global_registry, supervisor_pid) {
+		if !actod.valid(&actod.NODE.actor_registry, supervisor_pid) {
 			break
 		}
 		time.sleep(50 * time.Millisecond)
@@ -936,7 +936,7 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 		verify_child_count(t, supervisor_pid, 2)
 
 		for i := 0; i < 50; i += 1 {
-			if !actod.valid(&actod.global_registry, middle_child) {
+			if !actod.valid(&actod.NODE.actor_registry, middle_child) {
 				break
 			}
 			time.sleep(10 * time.Millisecond)
@@ -944,7 +944,7 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 
 		expect(
 			t,
-			!actod.valid(&actod.global_registry, middle_child),
+			!actod.valid(&actod.NODE.actor_registry, middle_child),
 			"Removed child should be invalid",
 		)
 

@@ -135,8 +135,10 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	udp_port: u16 = 4243
 	nonce: u64 = 0x123456789ABCDEF0
 	join_token: u64 = 0x0FEDCBA987654321
+	incarnation: u64 = 0x1122334455667788
+	gossip_seq: u64 = 42
 
-	payload := make([]byte, 1 + 4 + 1 + 2 + 2 + (2 + len(node_name)) + 8 + 8)
+	payload := make([]byte, 1 + 4 + 1 + 2 + 2 + (2 + len(node_name)) + 8 + 8 + 8 + 8)
 	defer delete(payload)
 
 	w := Ctrl_Writer {
@@ -150,6 +152,8 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	ctrl_put_str(&w, node_name)
 	ctrl_put_u64(&w, nonce)
 	ctrl_put_u64(&w, join_token)
+	ctrl_put_u64(&w, incarnation)
+	ctrl_put_u64(&w, gossip_seq)
 
 	info, ok := parse_hello(payload[:w.pos])
 	testing.expect(t, ok, "parse_hello should succeed")
@@ -159,6 +163,8 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	testing.expect(t, info.udp_port == udp_port, "UDP port mismatch")
 	testing.expect(t, info.nonce == nonce, "Nonce mismatch")
 	testing.expect(t, info.join_token == join_token, "Join token mismatch")
+	testing.expect(t, info.incarnation == incarnation, "Incarnation mismatch")
+	testing.expect(t, info.gossip_seq == gossip_seq, "Gossip seq mismatch")
 	testing.expect(t, info.encrypted, "Encrypted flag mismatch")
 	testing.expect(t, info.pool_join, "Pool-join flag mismatch")
 }

@@ -1,5 +1,6 @@
 package actod
 
+import "base:builtin"
 import "base:intrinsics"
 import "core:log"
 import "core:mem"
@@ -15,7 +16,6 @@ MAX_NODES :: 256
 NAME_BUCKET_COUNT :: 4096
 NAME_BUCKET_TOMBSTONE :: 0xFFFFFFFF
 
-global_registry: PID_Map(rawptr, PID)
 
 @(private)
 PID_Map :: struct($T: typeid, $HT: typeid) {
@@ -75,7 +75,7 @@ init_pid_map :: proc(m: ^PID_Map($T, $HT), initial_capacity: int) {
 
 @(private)
 try_grow_registry :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> bool {
-	if !SYSTEM_CONFIG.allow_registry_growth {
+	if !NODE.config.allow_registry_growth {
 		log.errorf(
 			"actor registry is full (capacity=%d) and allow_registry_growth is disabled. Raise actor_registry_size in make_node_config() or enable growth",
 			m.capacity,
@@ -518,15 +518,15 @@ remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT) -> bool {
 }
 
 handle_node_disconnect :: proc(node_id: Node_ID) {
-	if node_id == 0 || node_id == current_node_id {
+	if node_id == 0 || node_id == NODE.node_id {
 		return
 	}
 
-	num_items := sync.atomic_load_explicit(&global_registry.num_items, .Acquire)
+	num_items := sync.atomic_load_explicit(&NODE.actor_registry.num_items, .Acquire)
 	removed: int
 
 	for i in 1 ..< num_items {
-		entry := &global_registry.items[i]
+		entry := &NODE.actor_registry.items[i]
 
 		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
 		if (seq & 1) == 0 {
@@ -536,7 +536,7 @@ handle_node_disconnect :: proc(node_id: Node_ID) {
 		pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
 
 		if get_node_id(pid) == node_id {
-			if remove_remote(&global_registry, pid) {
+			if remove_remote(&NODE.actor_registry, pid) {
 				removed += 1
 			}
 		}
@@ -850,7 +850,7 @@ get_valid_actor :: proc(
 ) {
 	if pid == 0 do return nil, nil, false
 
-	actor_ptr, active := get(&global_registry, pid)
+	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return nil, nil, false
 
 	actor_ref, ok := get_actor_from_pointer(actor_ptr, system_operation)
@@ -878,7 +878,7 @@ collect_actors :: proc(
 			ptr: rawptr,
 		}, allocator)
 
-	it := make_iter(&global_registry)
+	it := make_iter(&NODE.actor_registry)
 	for {
 		_, pid, ok := iter(&it)
 		if !ok do break
@@ -956,7 +956,7 @@ register_node_entry :: proc(
 	}
 
 	for {
-		node_id := sync.atomic_load(&global_next_node_id)
+		node_id := sync.atomic_load(&NODE.next_node_id)
 		if node_id >= MAX_NODES {
 			log.errorf(
 				"register_node('%s') failed: this node already knows the maximum of %d peers",
@@ -967,14 +967,14 @@ register_node_entry :: proc(
 			return 0, false
 		}
 		if _, ok := sync.atomic_compare_exchange_strong(
-			&global_next_node_id,
+			&NODE.next_node_id,
 			node_id,
 			node_id + 1,
 		); ok {
 			break
 		}
 	}
-	node_id := sync.atomic_load(&global_next_node_id) - 1
+	node_id := sync.atomic_load(&NODE.next_node_id) - 1
 
 	cloned_name := strings.clone(name, get_system_allocator())
 
@@ -1002,6 +1002,88 @@ get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
 	return info, true
 }
 
+set_node_incarnation :: proc(node_id: Node_ID, incarnation: u64) {
+	if node_id == 0 || node_id >= MAX_NODES {
+		return
+	}
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	if NODE.node_registry[node_id].node_name != "" {
+		NODE.node_registry[node_id].incarnation = incarnation
+	}
+}
+
+gossip_seq_covered :: proc(node_id: Node_ID, seq: u64) -> bool {
+	if node_id == 0 || node_id >= MAX_NODES || seq == 0 {
+		return false
+	}
+	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
+	window := &NODE.node_registry[node_id].gossip
+	if seq < window.next_seq {
+		return true
+	}
+	for applied in window.ahead {
+		if applied == seq {
+			return true
+		}
+	}
+	return false
+}
+
+gossip_seq_record :: proc(node_id: Node_ID, seq: u64) {
+	if node_id == 0 || node_id >= MAX_NODES || seq == 0 {
+		return
+	}
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	window := &NODE.node_registry[node_id].gossip
+	if window.next_seq == 0 {
+		window.next_seq = 1
+	}
+	if seq < window.next_seq {
+		return
+	}
+	if seq == window.next_seq {
+		window.next_seq += 1
+	} else {
+		for applied in window.ahead {
+			if applied == seq {
+				return
+			}
+		}
+		if window.ahead == nil {
+			window.ahead = make([dynamic]u64, get_system_allocator())
+		}
+		append(&window.ahead, seq)
+	}
+	for {
+		drained := false
+		for applied, idx in window.ahead {
+			if applied == window.next_seq {
+				unordered_remove(&window.ahead, idx)
+				window.next_seq += 1
+				drained = true
+				break
+			}
+		}
+		if !drained {
+			break
+		}
+	}
+}
+
+gossip_seq_reset :: proc(node_id: Node_ID, frontier: u64) {
+	if node_id == 0 || node_id >= MAX_NODES {
+		return
+	}
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	window := &NODE.node_registry[node_id].gossip
+	window.next_seq = frontier + 1
+	builtin.clear(&window.ahead)
+}
+
 // Rings are NODE-owned singletons: created once per node, adopted by
 // connection actors, freed only in destroy_all_connection_rings at shutdown.
 // Producers may therefore hold a ring pointer across connection churn.
@@ -1025,7 +1107,7 @@ get_or_create_node_ring :: proc(
 
 	new_ring := create_connection_ring(
 		config,
-		SYSTEM_CONFIG.network.enable_encryption,
+		NODE.config.network.enable_encryption,
 		get_system_allocator(),
 	)
 	if new_ring == nil {
@@ -1112,7 +1194,7 @@ destroy_ring_if_quiesced :: proc(ring: ^Connection_Ring, node_id: int) -> bool {
 			released = true
 			break
 		}
-		time.sleep(1 * time.Millisecond)
+		runtime_sleep(1 * time.Millisecond)
 	}
 	if !released || ring.io_thread != nil {
 		log.errorf("Leaking connection ring for node %d: IO thread never cleaned up", node_id)
@@ -1193,6 +1275,6 @@ unregister_node :: proc(node_id: Node_ID) {
 		_ = send_message(conn_pid, Terminate{})
 
 		// TODO: be more deterministic
-		time.sleep(10 * time.Millisecond)
+		runtime_sleep(10 * time.Millisecond)
 	}
 }

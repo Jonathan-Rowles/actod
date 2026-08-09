@@ -50,7 +50,7 @@ broadcast_any :: proc(content: any, loc := #caller_location) {
 		return
 	}
 
-	list := &type_subscribers[actor_type]
+	list := &NODE.type_subscribers[actor_type]
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 
 	for i in 0 ..< n {
@@ -189,7 +189,7 @@ spawn_from_raw :: proc(
 	}
 
 	if parent_pid > 0 {
-		_, ok := get(&global_registry, parent_pid)
+		_, ok := get(&NODE.actor_registry, parent_pid)
 		if !ok {
 			panic_at(
 				loc,
@@ -222,12 +222,12 @@ spawn_from_raw :: proc(
 	init_mpsc_external(&actor.mailbox, mailbox_entries)
 	init_pool(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(DEFAULT_MAIL_BOX_SIZE))
 
-	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
+	pid, ok := add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
 		log.errorf(
 			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size or enable allow_registry_growth in make_node_config()",
 			name,
-			global_registry.num_items,
+			NODE.actor_registry.num_items,
 			location = loc,
 		)
 		vmem.arena_destroy(&actor.arena)
@@ -245,7 +245,7 @@ spawn_from_raw :: proc(
 	started: bool = false
 	actor.started = &started
 
-	if !opts.use_dedicated_os_thread && !opts.blocking && worker_pool.initialized {
+	if !opts.use_dedicated_os_thread && !opts.blocking && NODE.worker_pool.initialized {
 		handle := new(Pooled_Actor_Handle, actor.allocator)
 		handle.actor_ptr = actor
 		handle.mailbox = &actor.mailbox
@@ -269,7 +269,7 @@ spawn_from_raw :: proc(
 				co_res,
 				location = loc,
 			)
-			remove(&global_registry, pid)
+			remove(&NODE.actor_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -279,28 +279,28 @@ spawn_from_raw :: proc(
 
 		idx: int
 		if actor.opts.home_worker >= 0 {
-			if actor.opts.home_worker >= worker_pool.worker_count {
+			if actor.opts.home_worker >= NODE.worker_pool.worker_count {
 				panic_at(
 					loc,
 					"spawn('%s'): home_worker=%d but this node has only %d workers (valid indices 0-%d)%s",
 					name,
 					actor.opts.home_worker,
-					worker_pool.worker_count,
-					worker_pool.worker_count - 1,
+					NODE.worker_pool.worker_count,
+					NODE.worker_pool.worker_count - 1,
 					config_origin(actor.opts.loc),
 				)
 			}
 			idx = actor.opts.home_worker
 		} else {
-			idx = sync.atomic_add(&worker_pool.next_worker, 1) % worker_pool.worker_count
+			idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
 			if current_worker != nil &&
-			   &worker_pool.workers[idx] == current_worker &&
-			   worker_pool.worker_count > 1 {
-				idx = sync.atomic_add(&worker_pool.next_worker, 1) % worker_pool.worker_count
+			   &NODE.worker_pool.workers[idx] == current_worker &&
+			   NODE.worker_pool.worker_count > 1 {
+				idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
 			}
 		}
-		handle.home_worker = &worker_pool.workers[idx]
-		set_entry_home_worker(&global_registry, actor.pid, idx)
+		handle.home_worker = &NODE.worker_pool.workers[idx]
+		set_entry_home_worker(&NODE.actor_registry, actor.pid, idx)
 		sync.atomic_store(&handle.in_ready_queue, true)
 		mpsc_push(&handle.home_worker.ready_queue, rawptr(handle))
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)
@@ -316,7 +316,7 @@ spawn_from_raw :: proc(
 				pid,
 				location = loc,
 			)
-			remove(&global_registry, pid)
+			remove(&NODE.actor_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -459,7 +459,6 @@ Hot_Reload_Actor_Data :: struct {
 	collection_dep_map: map[string][dynamic]string, // collection_dep_path -> [actor_pkg_paths]
 }
 
-HOT_RELOAD_PID: PID
 
 @(private)
 spawn_hot_reload_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
@@ -487,24 +486,24 @@ start_hot_reload_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 		parent_pid = parent_pid,
 	)
 	if ok {
-		HOT_RELOAD_PID = pid
+		NODE.hot_reload_pid = pid
 	}
 	return pid, ok
 }
 
 stop_hot_reload_actor :: proc() {
-	if HOT_RELOAD_PID != 0 {
-		_ = terminate_actor(HOT_RELOAD_PID)
-		wait_for_pids([]PID{HOT_RELOAD_PID})
-		HOT_RELOAD_PID = 0
+	if NODE.hot_reload_pid != 0 {
+		_ = terminate_actor(NODE.hot_reload_pid)
+		wait_for_pids([]PID{NODE.hot_reload_pid})
+		NODE.hot_reload_pid = 0
 	}
 }
 
 @(private)
 hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 	watch_path: string
-	if SYSTEM_CONFIG.hot_reload_watch_path != "" {
-		watch_path = SYSTEM_CONFIG.hot_reload_watch_path
+	if NODE.config.hot_reload_watch_path != "" {
+		watch_path = NODE.config.hot_reload_watch_path
 	} else {
 		found: bool
 		watch_path, found = hot_reload.discover_actors_dir(".")
@@ -544,7 +543,7 @@ hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 		}
 		msg.package_path = path_buf
 
-		_ = send_message(HOT_RELOAD_PID, msg)
+		_ = send_message(NODE.hot_reload_pid, msg)
 	}
 
 	w, ok := hot_reload.create_watcher(watcher_callback, nil)
@@ -1447,7 +1446,7 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 
 		live_pids: [dynamic]PID
 		for pid in meta.actor_pids {
-			if _, active := get(&global_registry, pid); active {
+			if _, active := get(&NODE.actor_registry, pid); active {
 				err := send_reload_behaviour(pid, actor_gen)
 				if err == .OK {
 					append(&live_pids, pid)
@@ -1479,7 +1478,7 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 }
 
 register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
-	if !SYSTEM_CONFIG.hot_reload_dev || is_system_actod_pid(pid) || name == get_local_node_name() do return
+	if !NODE.config.hot_reload_dev || is_system_actod_pid(pid) || name == get_local_node_name() do return
 
 	msg: Register_Hot_Actor
 	msg.pid = pid
@@ -1548,7 +1547,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 
 	msg.state_size = size_of(T)
 
-	_ = send_message(HOT_RELOAD_PID, msg)
+	_ = send_message(NODE.hot_reload_pid, msg)
 }
 
 @(private)

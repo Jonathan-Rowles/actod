@@ -18,7 +18,7 @@ INTEGRATION_TEST_TIMEOUT :: time.Duration(INTEGRATION_TEST_TIMEOUT_MS) * time.Mi
 wait_for_node :: proc() {
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if actod.NODE.started && actod.NODE.pid != 0 {
-			_, ok := actod.get(&actod.global_registry, actod.NODE.pid)
+			_, ok := actod.get(&actod.NODE.actor_registry, actod.NODE.pid)
 			if ok {
 				break
 			}
@@ -184,7 +184,7 @@ pipeline_actor_handle_message :: proc(data: ^Pipeline_Actor_Data, from: actod.PI
 			mut_msg.hops = mut_msg.hops + 1
 			err := actod.send_message(data.next_pid, mut_msg)
 			if err != actod.Send_Error.OK {
-				valid := actod.valid(&actod.global_registry, data.next_pid)
+				valid := actod.valid(&actod.NODE.actor_registry, data.next_pid)
 				fmt.printf(
 					"ERROR: Actor %d failed to send to next_pid %v (valid=%v)\n",
 					data.id,
@@ -198,7 +198,7 @@ pipeline_actor_handle_message :: proc(data: ^Pipeline_Actor_Data, from: actod.PI
 		} else {
 			err := actod.send_message(mut_msg.origin, mut_msg)
 			if err != actod.Send_Error.OK {
-				origin_valid := actod.valid(&actod.global_registry, mut_msg.origin)
+				origin_valid := actod.valid(&actod.NODE.actor_registry, mut_msg.origin)
 				fmt.printf(
 					"ERROR: Actor %d failed to send to origin %v (valid=%v)\n",
 					data.id,
@@ -295,7 +295,7 @@ test_actor_lifecycle :: proc(t: ^testing.T) {
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_removed := true
 		for pid in actors {
-			if actod.valid(&actod.global_registry, pid) {
+			if actod.valid(&actod.NODE.actor_registry, pid) {
 				all_removed = false
 				break
 			}
@@ -405,7 +405,7 @@ test_pipeline_pattern :: proc(t: ^testing.T) {
 
 	for i in 0 ..< pipeline_length {
 		pid := pipeline_actors[i]
-		valid := actod.valid(&actod.global_registry, pid)
+		valid := actod.valid(&actod.NODE.actor_registry, pid)
 		expect(t, valid, fmt.tprintf("Pipeline actor %d (PID %v) not valid", i, pid))
 
 		err := actod.send_message(pid, "test")
@@ -558,7 +558,7 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 		for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 			all_removed := true
 			for pid in actors {
-				if actod.valid(&actod.global_registry, pid) {
+				if actod.valid(&actod.NODE.actor_registry, pid) {
 					all_removed = false
 					break
 				}
@@ -586,7 +586,7 @@ test_concurrent_actor_operations :: proc(t: ^testing.T) {
 	spawned := sync.atomic_load(&global_test_state.actors_spawned)
 	terminated := sync.atomic_load(&global_test_state.actors_terminated)
 	if terminated < expected_spawned {
-		registry_count := actod.num_used(&actod.global_registry)
+		registry_count := actod.num_used(&actod.NODE.actor_registry)
 		fmt.printf(
 			"Warning: Not all actors terminated - spawned=%d, terminated=%d, expected=%d, registry=%d\n",
 			spawned,
@@ -813,14 +813,14 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 		time.sleep(time.Millisecond)
 	}
 
-	initial_registry_count := actod.num_used(&actod.global_registry)
+	initial_registry_count := actod.num_used(&actod.NODE.actor_registry)
 
 	for pid in actors {
 		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 	}
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		current_count := actod.num_used(&actod.global_registry)
+		current_count := actod.num_used(&actod.NODE.actor_registry)
 		if current_count == initial_registry_count - actor_count {
 			break
 		}
@@ -830,7 +830,7 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_invalid := true
 		for pid in actors {
-			if actod.valid(&actod.global_registry, pid) {
+			if actod.valid(&actod.NODE.actor_registry, pid) {
 				all_invalid = false
 				break
 			}
@@ -844,12 +844,12 @@ test_pool_cleanup_on_actor_termination :: proc(t: ^testing.T) {
 	for pid in actors {
 		expect(
 			t,
-			!actod.valid(&actod.global_registry, pid),
+			!actod.valid(&actod.NODE.actor_registry, pid),
 			"Actor still valid after termination",
 		)
 	}
 
-	final_count := actod.num_used(&actod.global_registry)
+	final_count := actod.num_used(&actod.NODE.actor_registry)
 	expect_value(t, final_count, initial_registry_count - actor_count)
 
 	expect_value(t, sync.atomic_load(&global_test_state.messages_sent), expected_messages)
@@ -868,7 +868,7 @@ test_registry_consistency :: proc(t: ^testing.T) {
 	defer delete(actors)
 
 	for i in 0 ..< iterations {
-		initial_count := actod.num_used(&actod.global_registry)
+		initial_count := actod.num_used(&actod.NODE.actor_registry)
 
 		data := Lifecycle_Actor_Data {
 			id = i,
@@ -881,17 +881,17 @@ test_registry_consistency :: proc(t: ^testing.T) {
 		append(&actors, pid)
 
 		for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-			after_spawn := actod.num_used(&actod.global_registry)
+			after_spawn := actod.num_used(&actod.NODE.actor_registry)
 			if after_spawn > initial_count {
 				break
 			}
 			time.sleep(time.Millisecond)
 		}
 
-		after_spawn := actod.num_used(&actod.global_registry)
+		after_spawn := actod.num_used(&actod.NODE.actor_registry)
 		expect(t, after_spawn > initial_count, "Registry not updated after spawn")
 
-		expect(t, actod.valid(&actod.global_registry, pid), "Actor not valid after spawn")
+		expect(t, actod.valid(&actod.NODE.actor_registry, pid), "Actor not valid after spawn")
 	}
 
 	for i in 0 ..< len(actors) {
@@ -918,7 +918,7 @@ test_registry_consistency :: proc(t: ^testing.T) {
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_terminated := true
 		for pid in actors {
-			if actod.valid(&actod.global_registry, pid) {
+			if actod.valid(&actod.NODE.actor_registry, pid) {
 				all_terminated = false
 				break
 			}
@@ -1481,7 +1481,7 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 		intrinsics.cpu_relax()
 	}
 
-	initial_registry_count := actod.num_used(&actod.global_registry)
+	initial_registry_count := actod.num_used(&actod.NODE.actor_registry)
 	expect(t, int(initial_registry_count) > actor_count, "Registry should have actors")
 	messages_before_shutdown := sync.atomic_load(&global_test_state.messages_received)
 
@@ -1507,20 +1507,20 @@ test_node_shutdown_under_load :: proc(t: ^testing.T) {
 		"Node should not be marked as started after shutdown",
 	)
 
-	final_registry_count := actod.num_used(&actod.global_registry)
+	final_registry_count := actod.num_used(&actod.NODE.actor_registry)
 	expect_value(t, final_registry_count, 0)
 
 	for pid in actors {
 		expect(
 			t,
-			!actod.valid(&actod.global_registry, pid),
+			!actod.valid(&actod.NODE.actor_registry, pid),
 			"Actor should not be valid after shutdown",
 		)
 	}
 
 	expect(
 		t,
-		!actod.valid(&actod.global_registry, node_pid),
+		!actod.valid(&actod.NODE.actor_registry, node_pid),
 		"Node actor should not be valid after shutdown",
 	)
 
@@ -1657,7 +1657,7 @@ test_union_message_handling :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(collector)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		if !actod.valid(&actod.global_registry, union_actor) {
+		if !actod.valid(&actod.NODE.actor_registry, union_actor) {
 			break
 		}
 		time.sleep(time.Millisecond)
@@ -1751,7 +1751,7 @@ test_worker_contention :: proc(t: ^testing.T) {
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		all_done := true
 		for i in 0 ..< CONTENTION_ACTOR_COUNT {
-			if actod.valid(&actod.global_registry, contention_pids[i]) {
+			if actod.valid(&actod.NODE.actor_registry, contention_pids[i]) {
 				all_done = false
 				break
 			}
@@ -1882,7 +1882,7 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(pub_pid)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		if !actod.valid(&actod.global_registry, pub_pid) {
+		if !actod.valid(&actod.NODE.actor_registry, pub_pid) {
 			break
 		}
 		time.sleep(time.Millisecond)
@@ -1918,7 +1918,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(sub_pid)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		if !actod.valid(&actod.global_registry, sub_pid) {
+		if !actod.valid(&actod.NODE.actor_registry, sub_pid) {
 			break
 		}
 		time.sleep(time.Millisecond)
@@ -1946,7 +1946,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(pub_pid)
 
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		if !actod.valid(&actod.global_registry, pub_pid) {
+		if !actod.valid(&actod.NODE.actor_registry, pub_pid) {
 			break
 		}
 		time.sleep(time.Millisecond)

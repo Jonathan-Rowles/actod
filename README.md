@@ -159,6 +159,8 @@ sim.add_fault(&s, {
 })
 ```
 
+**Deterministic simulation testing.** A node started with `sim_mode = true` runs with zero OS threads and is stepped from the calling thread; a seeded scheduler makes every interleaving replayable from its seed. The runtime itself is tested this way: multiple real nodes on one thread, real handshakes and wire format over a virtual transport, a virtual clock that compresses timer races into microseconds, and a seed-driven scenario fuzzer (the VOPR, in the FoundationDB/TigerBeetle tradition) that generates partitions, crashes, restarts, clock jumps, and per-link frame faults, checking delivery and convergence invariants as it runs. Any failure replays deterministically from its printed seed under the same binary and profile. See [Test Harness](docs/13_test-harness.md).
+
 ---
 
 ## Memory model

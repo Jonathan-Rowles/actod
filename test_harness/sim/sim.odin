@@ -41,6 +41,7 @@ Sim :: struct {
 	subscribe_cap:   [dynamic]ti.Captured_Subscribe,
 	children_pids:   [dynamic]u64,
 	intercept:       ti.Test_Intercept,
+	det:             ti.Det_State,
 	all_spawns:      [dynamic]ti.Captured_Spawn,
 	faults:          [MAX_SIM_FAULTS]Fault_Rule,
 	fault_count:     int,
@@ -232,16 +233,18 @@ install_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.parent_pid = actor.parent_pid
 	s.intercept.next_timer_id = s.next_timer_id
 	s.intercept.next_spawn_pid = s.next_pid
-	s.intercept.virtual_now = s.clock
+	s.det.virtual_now = s.clock
 	s.intercept.next_ask_token = s.next_ask_token
 	s.intercept.current_ask_token = 0
 	s.intercept.current_ask_from = 0
 	s.intercept.current_reply_token = 0
 	ti.test_intercept = &s.intercept
+	ti.det = &s.det
 }
 
 uninstall_intercept :: proc() {
 	ti.test_intercept = nil
+	ti.det = nil
 }
 
 enqueue :: proc(s: ^Sim, to, from: u64, data: rawptr, type_id: typeid) {
@@ -536,7 +539,7 @@ cancel_timer :: proc(s: ^Sim, id: u32) {
 
 advance_time :: proc(s: ^Sim, d: time.Duration) {
 	s.clock = time.time_add(s.clock, d)
-	s.intercept.virtual_now = s.clock
+	s.det.virtual_now = s.clock
 	fire_expired_timers(s)
 	fire_expired_asks(s)
 }

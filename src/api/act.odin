@@ -60,16 +60,17 @@ Stats_Response :: actod.Stats_Response
 
 @(hot = "skip")
 make_node_config :: proc(
-	actor_registry_size: int = actod.SYSTEM_CONFIG.actor_registry_size,
-	allow_registry_growth: bool = actod.SYSTEM_CONFIG.allow_registry_growth,
-	enable_observer: bool = actod.SYSTEM_CONFIG.enable_observer,
-	observer_interval: time.Duration = actod.SYSTEM_CONFIG.observer_interval,
-	network: Network_Config = actod.SYSTEM_CONFIG.network,
-	actor_config: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
-	blocking_child: SPAWN = actod.SYSTEM_CONFIG.blocking_child,
-	worker_count: int = actod.SYSTEM_CONFIG.worker_count,
-	hot_reload_dev: bool = actod.SYSTEM_CONFIG.hot_reload_dev,
-	hot_reload_watch_path: string = actod.SYSTEM_CONFIG.hot_reload_watch_path,
+	actor_registry_size: int = actod.NODE.config.actor_registry_size,
+	allow_registry_growth: bool = actod.NODE.config.allow_registry_growth,
+	enable_observer: bool = actod.NODE.config.enable_observer,
+	observer_interval: time.Duration = actod.NODE.config.observer_interval,
+	network: Network_Config = actod.NODE.config.network,
+	actor_config: Actor_Config = actod.NODE.config.actor_config,
+	blocking_child: SPAWN = actod.NODE.config.blocking_child,
+	worker_count: int = actod.NODE.config.worker_count,
+	hot_reload_dev: bool = actod.NODE.config.hot_reload_dev,
+	hot_reload_watch_path: string = actod.NODE.config.hot_reload_watch_path,
+	sim_mode: bool = actod.NODE.config.sim_mode,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> System_Config {
 	return actod.make_node_config(
@@ -83,6 +84,7 @@ make_node_config :: proc(
 		worker_count,
 		hot_reload_dev,
 		hot_reload_watch_path,
+		sim_mode,
 		loc,
 	)
 }
@@ -107,20 +109,20 @@ return hot_api.make_actor_config(children, spin_strategy, logging, message_batch
 `)
 make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
-	spin_strategy: Spin_Strategy = actod.SYSTEM_CONFIG.actor_config.spin_strategy,
-	logging: Log_Config = actod.SYSTEM_CONFIG.actor_config.logging,
-	message_batch: int = actod.SYSTEM_CONFIG.actor_config.message_batch,
-	page_size: int = actod.SYSTEM_CONFIG.actor_config.page_size,
-	arena_headroom: int = actod.SYSTEM_CONFIG.actor_config.arena_headroom,
-	supervision_strategy: Supervision_Strategy = actod.SYSTEM_CONFIG.actor_config.supervision_strategy,
-	restart_policy: Restart_Policy = actod.SYSTEM_CONFIG.actor_config.restart_policy,
-	max_restarts: int = actod.SYSTEM_CONFIG.actor_config.max_restarts,
-	restart_window: time.Duration = actod.SYSTEM_CONFIG.actor_config.restart_window,
-	home_worker: int = actod.SYSTEM_CONFIG.actor_config.home_worker,
-	affinity: Actor_Ref = actod.SYSTEM_CONFIG.actor_config.affinity,
-	coro_stack_size: int = actod.SYSTEM_CONFIG.actor_config.coro_stack_size,
-	use_dedicated_os_thread: bool = actod.SYSTEM_CONFIG.actor_config.use_dedicated_os_thread,
-	stack_size_dedicated_os_thread: int = actod.SYSTEM_CONFIG.actor_config.stack_size_dedicated_os_thread,
+	spin_strategy: Spin_Strategy = actod.NODE.config.actor_config.spin_strategy,
+	logging: Log_Config = actod.NODE.config.actor_config.logging,
+	message_batch: int = actod.NODE.config.actor_config.message_batch,
+	page_size: int = actod.NODE.config.actor_config.page_size,
+	arena_headroom: int = actod.NODE.config.actor_config.arena_headroom,
+	supervision_strategy: Supervision_Strategy = actod.NODE.config.actor_config.supervision_strategy,
+	restart_policy: Restart_Policy = actod.NODE.config.actor_config.restart_policy,
+	max_restarts: int = actod.NODE.config.actor_config.max_restarts,
+	restart_window: time.Duration = actod.NODE.config.actor_config.restart_window,
+	home_worker: int = actod.NODE.config.actor_config.home_worker,
+	affinity: Actor_Ref = actod.NODE.config.actor_config.affinity,
+	coro_stack_size: int = actod.NODE.config.actor_config.coro_stack_size,
+	use_dedicated_os_thread: bool = actod.NODE.config.actor_config.use_dedicated_os_thread,
+	stack_size_dedicated_os_thread: int = actod.NODE.config.actor_config.stack_size_dedicated_os_thread,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Actor_Config {
 	return actod.make_actor_config(
@@ -176,14 +178,14 @@ make_network_config :: proc(
 
 @(hot = "skip")
 make_log_config :: proc(
-	level: Log_Level = actod.SYSTEM_CONFIG.actor_config.logging.level,
-	console_opts: Log_Options = actod.SYSTEM_CONFIG.actor_config.logging.console_opts,
-	file_opts: Log_Options = actod.SYSTEM_CONFIG.actor_config.logging.file_opts,
-	ident: string = actod.SYSTEM_CONFIG.actor_config.logging.ident,
-	enable_file: bool = actod.SYSTEM_CONFIG.actor_config.logging.enable_file,
-	log_path: string = actod.SYSTEM_CONFIG.actor_config.logging.log_path,
-	custom_logger: Log_Callback = actod.SYSTEM_CONFIG.actor_config.logging.custom_logger,
-	custom_flush: Log_Flush = actod.SYSTEM_CONFIG.actor_config.logging.custom_flush,
+	level: Log_Level = actod.NODE.config.actor_config.logging.level,
+	console_opts: Log_Options = actod.NODE.config.actor_config.logging.console_opts,
+	file_opts: Log_Options = actod.NODE.config.actor_config.logging.file_opts,
+	ident: string = actod.NODE.config.actor_config.logging.ident,
+	enable_file: bool = actod.NODE.config.actor_config.logging.enable_file,
+	log_path: string = actod.NODE.config.actor_config.logging.log_path,
+	custom_logger: Log_Callback = actod.NODE.config.actor_config.logging.custom_logger,
+	custom_flush: Log_Flush = actod.NODE.config.actor_config.logging.custom_flush,
 ) -> Log_Config {
 	return actod.make_log_config(
 		level,
@@ -208,7 +210,7 @@ make_children :: proc(spawns: ..SPAWN) -> [dynamic]SPAWN {
 @(hot = "skip")
 node_init :: proc(
 	name: string,
-	opts: System_Config = actod.SYSTEM_CONFIG,
+	opts: System_Config = actod.NODE.config,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) {
 	actod.node_init(name, opts, loc)
@@ -224,6 +226,21 @@ node_shutdown :: proc(loc: runtime.Source_Code_Location = #caller_location) {
 @(hot = "skip")
 await_signal :: proc() {
 	actod.await_signal()
+}
+
+@(hot = "skip")
+sim_pump :: proc() -> bool {
+	return actod.sim_pump()
+}
+
+@(hot = "skip")
+sim_seed :: proc(seed: u64) {
+	actod.sim_seed(seed)
+}
+
+@(hot = "skip")
+sim_run_until_idle :: proc(max_steps: int = 1_000_000) -> int {
+	return actod.sim_run_until_idle(max_steps)
 }
 
 get_local_node_pid :: proc() -> PID {
@@ -256,7 +273,7 @@ spawn_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	opts: Actor_Config = actod.NODE.config.actor_config,
 	parent_pid: PID = 0,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> (
@@ -277,7 +294,7 @@ spawn_sized :: proc(
 	data: $T,
 	behaviour: Actor_Behaviour(T),
 	$MAILBOX_SIZE: int,
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	opts: Actor_Config = actod.NODE.config.actor_config,
 	parent_pid: PID = 0,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> (
@@ -316,7 +333,7 @@ spawn_child_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	opts: Actor_Config = actod.NODE.config.actor_config,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> (
 	PID,
@@ -335,7 +352,7 @@ spawn_child_sized :: proc(
 	data: $T,
 	behaviour: Actor_Behaviour(T),
 	$MAILBOX_SIZE: int,
-	opts: Actor_Config = actod.SYSTEM_CONFIG.actor_config,
+	opts: Actor_Config = actod.NODE.config.actor_config,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> (
 	PID,
@@ -636,7 +653,7 @@ get_actor_type :: proc(pid: PID) -> Actor_Type {
 	return actod.get_pid_actor_type(pid)
 }
 
-pack_pid :: proc(h: Handle, node_id: Node_ID = actod.current_node_id) -> PID {
+pack_pid :: proc(h: Handle, node_id: Node_ID = actod.NODE.node_id) -> PID {
 	return actod.pack_pid(h, node_id)
 }
 
@@ -941,7 +958,7 @@ get_current_log_config :: proc() -> Log_Config {
 // The system-level logger, for logging outside any actor.
 @(hot = "skip")
 get_node_log_ctx :: proc() -> log.Logger {
-	return actod.systemLogger
+	return actod.NODE.logger
 }
 
 // Deprecated names, kept for compatibility.

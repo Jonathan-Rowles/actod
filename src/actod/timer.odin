@@ -59,8 +59,6 @@ Timer_Registry :: struct {
 	lock:      sync.Mutex,
 }
 
-timer_registry: Timer_Registry
-next_timer_id: u32
 
 @(private)
 Timer_Thread_Context :: struct {
@@ -78,7 +76,6 @@ Timer_Actor_Data :: struct {
 	thread_ctx:   ^Timer_Thread_Context,
 }
 
-TIMER_PID: PID
 
 @(private)
 timer_heap_less :: proc(a, b: Timer_Entry) -> bool {
@@ -87,8 +84,8 @@ timer_heap_less :: proc(a, b: Timer_Entry) -> bool {
 
 @(private)
 timer_heap_swap :: proc(q: []Timer_Entry, i, j: int) {
-	timer_registry.index_map[Timer_Key{q[i].id, q[i].owner}] = j
-	timer_registry.index_map[Timer_Key{q[j].id, q[j].owner}] = i
+	NODE.timer_registry.index_map[Timer_Key{q[i].id, q[i].owner}] = j
+	NODE.timer_registry.index_map[Timer_Key{q[j].id, q[j].owner}] = i
 	q[i], q[j] = q[j], q[i]
 }
 
@@ -101,11 +98,11 @@ init_timer_messages :: proc "contextless" () {
 }
 
 reset_timer_registry :: proc() {
-	sync.mutex_lock(&timer_registry.lock)
-	defer sync.mutex_unlock(&timer_registry.lock)
-	pq.destroy(&timer_registry.heap)
-	delete(timer_registry.index_map)
-	timer_registry.index_map = {}
+	sync.mutex_lock(&NODE.timer_registry.lock)
+	defer sync.mutex_unlock(&NODE.timer_registry.lock)
+	pq.destroy(&NODE.timer_registry.heap)
+	delete(NODE.timer_registry.index_map)
+	NODE.timer_registry.index_map = {}
 }
 
 @(private)
@@ -113,7 +110,7 @@ spawn_timer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 	pid, ok := start_timer_actor(parent_pid)
 	if !ok {
 		panic_at(
-			SYSTEM_CONFIG.loc,
+			NODE.config.loc,
 			"node startup failed: the timer actor could not be spawned, set_timer and cancel_timer would never fire",
 		)
 	}
@@ -121,9 +118,56 @@ spawn_timer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 }
 
 @(private)
+fire_due_timers :: proc() -> int {
+	fire_time := now()
+	fired_buf: [MAX_FIRE_BATCH]Fired_Timer
+	fired_count := 0
+	reg := &NODE.timer_registry
+
+	sync.mutex_lock(&reg.lock)
+	for pq.len(reg.heap) > 0 && fired_count < MAX_FIRE_BATCH {
+		top := pq.peek(reg.heap)
+		if time.diff(fire_time, top.next_fire) > 0 {
+			break
+		}
+
+		entry, _ := pq.pop_safe(&reg.heap)
+		delete_key(&reg.index_map, Timer_Key{entry.id, entry.owner})
+
+		if entry.repeat {
+			entry.next_fire = time.time_add(entry.next_fire, entry.interval)
+			if time.diff(fire_time, entry.next_fire) <= 0 {
+				entry.next_fire = time.time_add(fire_time, entry.interval)
+			}
+			reg.index_map[Timer_Key{entry.id, entry.owner}] = pq.len(reg.heap)
+			pq.push(&reg.heap, entry)
+		}
+
+		fired_buf[fired_count] = Fired_Timer {
+			owner = entry.owner,
+			id    = entry.id,
+		}
+		fired_count += 1
+	}
+	sync.mutex_unlock(&reg.lock)
+
+	for i in 0 ..< fired_count {
+		if NODE.config.sim_mode {
+			sim_trace_record(.Timer_Fire, u64(fired_buf[i].owner), u64(fired_buf[i].id))
+		}
+		_ = send_message(fired_buf[i].owner, Timer_Tick{id = fired_buf[i].id})
+	}
+	return fired_count
+}
+
+@(private)
 timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 	sync.atomic_store(&data.should_stop, 0)
-	pq.init(&timer_registry.heap, timer_heap_less, timer_heap_swap)
+	pq.init(&NODE.timer_registry.heap, timer_heap_less, timer_heap_swap)
+
+	if NODE.config.sim_mode {
+		return
+	}
 
 	ctx := new(Timer_Thread_Context)
 	ctx.data = data
@@ -140,7 +184,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 		context.allocator = ctx.allocator
 		context.logger = ctx.logger
 		data := ctx.data
-		reg := &timer_registry
+		reg := &NODE.timer_registry
 
 		for sync.atomic_load(&data.should_stop) == 0 {
 			sync.mutex_lock(&reg.lock)
@@ -148,7 +192,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 			sleep_duration: time.Duration
 			if heap_len > 0 {
 				top := pq.peek(reg.heap)
-				sleep_duration = time.diff(time.now(), top.next_fire)
+				sleep_duration = time.diff(now(), top.next_fire)
 				if sleep_duration < 0 {
 					sleep_duration = 0
 				}
@@ -168,40 +212,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 				break
 			}
 
-			now := time.now()
-			fired_buf: [MAX_FIRE_BATCH]Fired_Timer
-			fired_count := 0
-
-			sync.mutex_lock(&reg.lock)
-			for pq.len(reg.heap) > 0 && fired_count < MAX_FIRE_BATCH {
-				top := pq.peek(reg.heap)
-				if time.diff(now, top.next_fire) > 0 {
-					break
-				}
-
-				entry, _ := pq.pop_safe(&reg.heap)
-				delete_key(&reg.index_map, Timer_Key{entry.id, entry.owner})
-
-				if entry.repeat {
-					entry.next_fire = time.time_add(entry.next_fire, entry.interval)
-					if time.diff(now, entry.next_fire) <= 0 {
-						entry.next_fire = time.time_add(now, entry.interval)
-					}
-					reg.index_map[Timer_Key{entry.id, entry.owner}] = pq.len(reg.heap)
-					pq.push(&reg.heap, entry)
-				}
-
-				fired_buf[fired_count] = Fired_Timer {
-					owner = entry.owner,
-					id    = entry.id,
-				}
-				fired_count += 1
-			}
-			sync.mutex_unlock(&reg.lock)
-
-			for i in 0 ..< fired_count {
-				_ = send_message(fired_buf[i].owner, Timer_Tick{id = fired_buf[i].id})
-			}
+			fire_due_timers()
 		}
 	}
 
@@ -238,10 +249,10 @@ timer_actor_terminate :: proc(data: ^Timer_Actor_Data) {
 timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any) {
 	switch v in msg {
 	case Start_Timer:
-		sync.mutex_lock(&timer_registry.lock)
-		defer sync.mutex_unlock(&timer_registry.lock)
+		sync.mutex_lock(&NODE.timer_registry.lock)
+		defer sync.mutex_unlock(&NODE.timer_registry.lock)
 
-		if pq.len(timer_registry.heap) >= MAX_TIMERS {
+		if pq.len(NODE.timer_registry.heap) >= MAX_TIMERS {
 			log.errorf(
 				"Timer capacity exceeded (%d, MAX_TIMERS), dropping timer id=%d requested by %s",
 				MAX_TIMERS,
@@ -252,9 +263,9 @@ timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any)
 		}
 
 		key := Timer_Key{v.id, from}
-		if key in timer_registry.index_map {
+		if key in NODE.timer_registry.index_map {
 			panic_at(
-				SYSTEM_CONFIG.loc,
+				NODE.config.loc,
 				"Duplicate timer: id=%d is already registered for owner %s",
 				v.id,
 				actor_origin(from),
@@ -265,36 +276,36 @@ timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any)
 			id        = v.id,
 			owner     = from,
 			interval  = v.interval,
-			next_fire = time.time_add(time.now(), v.interval),
+			next_fire = time.time_add(now(), v.interval),
 			repeat    = v.repeat,
 		}
-		timer_registry.index_map[key] = pq.len(timer_registry.heap)
-		pq.push(&timer_registry.heap, entry)
+		NODE.timer_registry.index_map[key] = pq.len(NODE.timer_registry.heap)
+		pq.push(&NODE.timer_registry.heap, entry)
 
 		sync.sema_post(&data.wake_sema)
 
 	case Cancel_Timer:
-		sync.mutex_lock(&timer_registry.lock)
-		defer sync.mutex_unlock(&timer_registry.lock)
+		sync.mutex_lock(&NODE.timer_registry.lock)
+		defer sync.mutex_unlock(&NODE.timer_registry.lock)
 
 		key := Timer_Key{v.id, from}
-		if idx, ok := timer_registry.index_map[key]; ok {
-			pq.remove(&timer_registry.heap, idx)
-			delete_key(&timer_registry.index_map, key)
+		if idx, ok := NODE.timer_registry.index_map[key]; ok {
+			pq.remove(&NODE.timer_registry.heap, idx)
+			delete_key(&NODE.timer_registry.index_map, key)
 		}
 
 		sync.sema_post(&data.wake_sema)
 
 	case Cancel_All_Timers:
-		sync.mutex_lock(&timer_registry.lock)
-		defer sync.mutex_unlock(&timer_registry.lock)
+		sync.mutex_lock(&NODE.timer_registry.lock)
+		defer sync.mutex_unlock(&NODE.timer_registry.lock)
 
 		i := 0
-		for i < pq.len(timer_registry.heap) {
-			entry := timer_registry.heap.queue[i]
+		for i < pq.len(NODE.timer_registry.heap) {
+			entry := NODE.timer_registry.heap.queue[i]
 			if entry.owner == v.owner {
-				pq.remove(&timer_registry.heap, i)
-				delete_key(&timer_registry.index_map, Timer_Key{entry.id, entry.owner})
+				pq.remove(&NODE.timer_registry.heap, i)
+				delete_key(&NODE.timer_registry.index_map, Timer_Key{entry.id, entry.owner})
 			} else {
 				i += 1
 			}
@@ -317,7 +328,7 @@ start_timer_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 		parent_pid = parent_pid,
 	)
 	if ok {
-		TIMER_PID = pid
+		NODE.timer_pid = pid
 	} else {
 		log.error(
 			"start_timer_actor failed: could not spawn the timer actor, set_timer and cancel_timer will fail and no Timer_Tick will ever be delivered",
@@ -327,10 +338,10 @@ start_timer_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 }
 
 stop_timer_actor :: proc() {
-	if TIMER_PID != 0 {
-		_ = terminate_actor(TIMER_PID)
-		wait_for_pids([]PID{TIMER_PID})
-		TIMER_PID = 0
+	if NODE.timer_pid != 0 {
+		_ = terminate_actor(NODE.timer_pid)
+		wait_for_pids([]PID{NODE.timer_pid})
+		NODE.timer_pid = 0
 	}
 }
 
@@ -345,12 +356,12 @@ set_timer :: proc(
 ) {
 	when ODIN_TEST {if id, err, ok := ti.intercept_set_timer(interval, repeat); ok do return id, Send_Error(err)}
 
-	id := sync.atomic_add(&next_timer_id, 1) + 1
+	id := sync.atomic_add(&NODE.next_timer_id, 1) + 1
 	if current_actor_context != nil {
 		append(&current_actor_context.timers, Timer_Registration(id))
 	}
 
-	if TIMER_PID == 0 {
+	if NODE.timer_pid == 0 {
 		log.errorf(
 			"set_timer failed: the timer actor is not running, timer id=%d will never fire, start the node with node_init or call start_timer_actor",
 			id,
@@ -360,7 +371,7 @@ set_timer :: proc(
 	}
 
 	err := send_message(
-		TIMER_PID,
+		NODE.timer_pid,
 		Start_Timer{id = id, interval = interval, repeat = repeat},
 		loc,
 	)
@@ -402,7 +413,7 @@ cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 		}
 	}
 
-	if TIMER_PID == 0 {
+	if NODE.timer_pid == 0 {
 		log.errorf(
 			"cancel_timer failed: the timer actor is not running, timer id=%d was not cancelled",
 			id,
@@ -411,7 +422,7 @@ cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 		return .ACTOR_NOT_FOUND
 	}
 
-	err := send_message(TIMER_PID, Cancel_Timer{id = id}, loc)
+	err := send_message(NODE.timer_pid, Cancel_Timer{id = id}, loc)
 	if err == .SYSTEM_SHUTTING_DOWN {
 		log.debugf(
 			"cancel_timer skipped during shutdown, timer id=%d dies with the timer actor",

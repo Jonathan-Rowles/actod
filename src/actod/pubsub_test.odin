@@ -6,7 +6,7 @@ import "core:thread"
 
 @(private)
 clear_type_subscribers :: proc(actor_type: Actor_Type) {
-	list := &type_subscribers[actor_type]
+	list := &NODE.type_subscribers[actor_type]
 	for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
 		sync.atomic_store_explicit(cast(^u64)&list.subscribers[i], 0, .Release)
 	}
@@ -31,7 +31,7 @@ test_add_subscriber :: proc(t: ^testing.T) {
 	testing.expect(t, count == 1, "subscriber count should be 1")
 
 	stored := PID(
-		sync.atomic_load_explicit(cast(^u64)&type_subscribers[test_type].subscribers[0], .Acquire),
+		sync.atomic_load_explicit(cast(^u64)&NODE.type_subscribers[test_type].subscribers[0], .Acquire),
 	)
 	testing.expect(t, stored == test_pid, "stored PID should match")
 }
@@ -64,7 +64,7 @@ test_remove_subscriber :: proc(t: ^testing.T) {
 	testing.expect(t, get_subscriber_count(test_type) == 0, "count should be 0")
 
 	stored := PID(
-		sync.atomic_load_explicit(cast(^u64)&type_subscribers[test_type].subscribers[0], .Acquire),
+		sync.atomic_load_explicit(cast(^u64)&NODE.type_subscribers[test_type].subscribers[0], .Acquire),
 	)
 	testing.expect(t, stored == 0, "slot should be cleared")
 }
@@ -136,7 +136,7 @@ test_clear_subscriptions_for_node :: proc(t: ^testing.T) {
 
 	add_subscriber(test_type, local_pid)
 
-	list := &type_subscribers[test_type]
+	list := &NODE.type_subscribers[test_type]
 	sync.atomic_add_explicit(&list.remote_node_sub_count[remote_node], 1, .Release)
 	sync.atomic_add_explicit(&list.count, 1, .Release)
 	sync.atomic_add_explicit(&list.remote_node_sub_count[remote_node], 1, .Release)
@@ -190,7 +190,7 @@ test_slot_reuse_after_remove :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "should be able to add after remove")
 
 	stored := PID(
-		sync.atomic_load_explicit(cast(^u64)&type_subscribers[test_type].subscribers[0], .Acquire),
+		sync.atomic_load_explicit(cast(^u64)&NODE.type_subscribers[test_type].subscribers[0], .Acquire),
 	)
 	testing.expect(t, stored == pid2, "pid2 should be at slot 0")
 }
@@ -209,7 +209,7 @@ test_subscriber_compact_ordering :: proc(t: ^testing.T) {
 
 	remove_subscriber(test_type, pids[2])
 
-	list := &type_subscribers[test_type]
+	list := &NODE.type_subscribers[test_type]
 	local_n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 	testing.expect(t, local_n == 4, "local_count should be 4")
 
@@ -293,7 +293,7 @@ test_concurrent_subscribe :: proc(t: ^testing.T) {
 	for i in 0 ..< u32(PUBSUB_TEST_THREADS) {
 		pid := PID(
 			sync.atomic_load_explicit(
-				cast(^u64)&type_subscribers[test_type].subscribers[i],
+				cast(^u64)&NODE.type_subscribers[test_type].subscribers[i],
 				.Acquire,
 			),
 		)
@@ -522,9 +522,9 @@ test_clear_node_does_not_affect_local :: proc(t: ^testing.T) {
 	test_type := Actor_Type(60)
 	defer clear_type_subscribers(test_type)
 
-	saved := current_node_id
-	current_node_id = 1
-	defer {current_node_id = saved}
+	saved := NODE.node_id
+	NODE.node_id = 1
+	defer {NODE.node_id = saved}
 
 	local_pid := PID(0x0001_3C_0001_000001)
 	add_subscriber(test_type, local_pid)

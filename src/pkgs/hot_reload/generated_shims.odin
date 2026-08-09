@@ -242,6 +242,7 @@ System_Config :: struct {
 	worker_count:          int,
 	hot_reload_dev:        bool,
 	hot_reload_watch_path: string,
+	sim_mode:              bool,
 	loc:                   runtime.Source_Code_Location,
 }
 
@@ -295,6 +296,7 @@ Hot_API :: struct {
 		worker_count: int,
 		hot_reload_dev: bool,
 		hot_reload_watch_path: string,
+		sim_mode: bool,
 		loc: runtime.Source_Code_Location,
 	) -> System_Config,
 	make_actor_config:         proc(
@@ -342,6 +344,9 @@ Hot_API :: struct {
 	node_init:                 proc(name: string, opts: System_Config, loc: runtime.Source_Code_Location),
 	node_shutdown:             proc(loc: runtime.Source_Code_Location),
 	await_signal:              proc(),
+	sim_pump:                  proc() -> bool,
+	sim_seed:                  proc(seed: u64),
+	sim_run_until_idle:        proc(max_steps: int) -> int,
 	get_local_node_pid:        proc() -> PID,
 	get_local_node_name:       proc() -> string,
 	register_spawn_func:       proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location) -> bool,
@@ -442,8 +447,8 @@ Hot_API :: struct {
 @(export)
 hot_api: ^Hot_API
 
-make_node_config :: proc(actor_registry_size: int = 0, allow_registry_growth: bool = false, enable_observer: bool = false, observer_interval: time.Duration = {}, network: Network_Config = {}, actor_config: Actor_Config = {}, blocking_child: SPAWN = {}, worker_count: int = 0, hot_reload_dev: bool = false, hot_reload_watch_path: string = "", loc: runtime.Source_Code_Location = #caller_location) -> System_Config {
-	return hot_api.make_node_config(actor_registry_size, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, loc)
+make_node_config :: proc(actor_registry_size: int = 0, allow_registry_growth: bool = false, enable_observer: bool = false, observer_interval: time.Duration = {}, network: Network_Config = {}, actor_config: Actor_Config = {}, blocking_child: SPAWN = {}, worker_count: int = 0, hot_reload_dev: bool = false, hot_reload_watch_path: string = "", sim_mode: bool = false, loc: runtime.Source_Code_Location = #caller_location) -> System_Config {
+	return hot_api.make_node_config(actor_registry_size, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, sim_mode, loc)
 }
 
 make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, message_batch: int = 64, page_size: int = 65536, arena_headroom: int = 16777216, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
@@ -468,6 +473,18 @@ node_shutdown :: proc(loc: runtime.Source_Code_Location = #caller_location) {
 
 await_signal :: proc() {
 	hot_api.await_signal()
+}
+
+sim_pump :: proc() -> bool {
+	return hot_api.sim_pump()
+}
+
+sim_seed :: proc(seed: u64) {
+	hot_api.sim_seed(seed)
+}
+
+sim_run_until_idle :: proc(max_steps: int = 1_000_000) -> int {
+	return hot_api.sim_run_until_idle(max_steps)
 }
 
 get_local_node_pid :: proc() -> PID {

@@ -20,7 +20,8 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 	system_mailbox:   ^MPSC_Queue(Message, SYSTEM_MAILBOX_SIZE),
 	home_worker:      ^Worker,
 	wants_reschedule: bool,
-	_pad0:            [7]byte,
+	transport_parked: bool,
+	_pad0:            [6]byte,
 	in_ready_queue:   bool,
 	_pad1:            [CACHE_LINE_SIZE - 1]byte,
 	main_fn:          proc(_: rawptr),
@@ -45,10 +46,10 @@ Worker_Pool :: struct {
 	workers:      []Worker,
 	worker_count: int,
 	next_worker:  int,
+	sim_cursor:   int,
 	initialized:  bool,
 }
 
-worker_pool: Worker_Pool
 
 @(thread_local)
 current_worker: ^Worker
@@ -56,34 +57,36 @@ current_worker: ^Worker
 init_worker_pool :: proc(count: int) {
 	if count <= 0 do return
 
-	worker_pool.workers = make([]Worker, count, get_system_allocator())
-	worker_pool.worker_count = count
+	NODE.worker_pool.workers = make([]Worker, count, get_system_allocator())
+	NODE.worker_pool.worker_count = count
 
 	for i in 0 ..< count {
-		w := &worker_pool.workers[i]
+		w := &NODE.worker_pool.workers[i]
 		w.id = i
 		init_mpsc(&w.ready_queue)
 		sync.atomic_store(&w.running, true)
 
-		w.thread = threads_act.create_thread_with_stack_size(w, proc(data: rawptr) {
-				worker_loop(cast(^Worker)data)
-			}, 128 * 1024)
-		threads_act.set_thread_affinity(w.thread, i)
+		if !NODE.config.sim_mode {
+			w.thread = threads_act.create_thread_with_stack_size(w, proc(data: rawptr) {
+					worker_loop(cast(^Worker)data)
+				}, 128 * 1024)
+			threads_act.set_thread_affinity(w.thread, i)
+		}
 	}
 
-	worker_pool.initialized = true
+	NODE.worker_pool.initialized = true
 }
 
 shutdown_worker_pool :: proc() {
-	if !worker_pool.initialized do return
+	if !NODE.worker_pool.initialized do return
 
-	for i in 0 ..< worker_pool.worker_count {
-		sync.atomic_store(&worker_pool.workers[i].running, false)
-		sync.atomic_sema_post(&worker_pool.workers[i].wake_sema)
+	for i in 0 ..< NODE.worker_pool.worker_count {
+		sync.atomic_store(&NODE.worker_pool.workers[i].running, false)
+		sync.atomic_sema_post(&NODE.worker_pool.workers[i].wake_sema)
 	}
 
-	for i in 0 ..< worker_pool.worker_count {
-		w := &worker_pool.workers[i]
+	for i in 0 ..< NODE.worker_pool.worker_count {
+		w := &NODE.worker_pool.workers[i]
 		if w.thread != nil {
 			thread.join(w.thread)
 			thread.destroy(w.thread)
@@ -91,8 +94,8 @@ shutdown_worker_pool :: proc() {
 		}
 	}
 
-	delete(worker_pool.workers, actor_system_allocator)
-	worker_pool = {}
+	delete(NODE.worker_pool.workers, actor_system_allocator)
+	NODE.worker_pool = {}
 }
 
 wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
@@ -134,7 +137,12 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 
 	coro.resume_top_level(handle.co)
 
+	current_actor_context = nil
+	current_actor_file_logger = nil
+
 	if coro.status(handle.co) == .Dead {
+	} else if handle.transport_parked {
+		sync.atomic_store_explicit(&handle.in_ready_queue, false, .Release)
 	} else if handle.wants_reschedule || has_pending_messages(handle) {
 		handle.wants_reschedule = false
 		mpsc_push(&worker.ready_queue, rawptr(handle))

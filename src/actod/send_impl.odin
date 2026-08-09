@@ -6,7 +6,6 @@ import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:sync"
-import "core:time"
 
 Msg_Class :: enum u8 {
 	User,
@@ -130,7 +129,7 @@ send_user_backpressure_loop :: proc(
 	msg_ready := initial_msg_ready
 	observed_read: u64
 	have_observation := false
-	loop_start := time.tick_now()
+	loop_start := mono_now()
 	stall_start := loop_start
 
 	for {
@@ -138,12 +137,16 @@ send_user_backpressure_loop :: proc(
 			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 			handle.wants_reschedule = true
 			coro.yield(co)
+		} else if NODE.config.sim_mode {
+			if !sim_pump() {
+				runtime_sleep(SEND_RETRY_DELAY)
+			}
 		} else {
-			time.sleep(SEND_RETRY_DELAY)
+			runtime_sleep(SEND_RETRY_DELAY)
 		}
 
 		reclaim_pin()
-		fresh, ok := get_relaxed(&global_registry, to)
+		fresh, ok := get_relaxed(&NODE.actor_registry, to)
 		if !ok || fresh == nil {
 			reclaim_unpin()
 			return .ACTOR_NOT_FOUND
@@ -211,8 +214,8 @@ send_user_backpressure_loop :: proc(
 		if !have_observation || current_read != observed_read {
 			observed_read = current_read
 			have_observation = true
-			stall_start = time.tick_now()
-		} else if time.tick_since(stall_start) > SEND_STALL_TIMEOUT {
+			stall_start = mono_now()
+		} else if mono_since(stall_start) > SEND_STALL_TIMEOUT {
 			release_undelivered(target, msg, msg_ready)
 			reclaim_unpin()
 			log.errorf(
@@ -225,7 +228,7 @@ send_user_backpressure_loop :: proc(
 			return .RECEIVER_BACKLOGGED
 		}
 
-		if time.tick_since(loop_start) > SEND_MAX_BLOCK_TIMEOUT {
+		if mono_since(loop_start) > SEND_MAX_BLOCK_TIMEOUT {
 			release_undelivered(target, msg, msg_ready)
 			reclaim_unpin()
 			log.debugf(
@@ -348,7 +351,7 @@ send_message_impl :: proc(
 		return send_remote_impl(to, data, info, sys_flags, loc, token)
 	}
 
-	actor_ptr, home_worker, ok := get_relaxed_loc(&global_registry, to)
+	actor_ptr, home_worker, ok := get_relaxed_loc(&NODE.actor_registry, to)
 	if !ok || actor_ptr == nil {
 		return .ACTOR_NOT_FOUND
 	}
@@ -385,7 +388,7 @@ send_self_impl :: proc(
 		log_send_outside_actor("send_self", tid, loc)
 		return .ACTOR_NOT_FOUND
 	}
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
@@ -405,7 +408,7 @@ send_message_to_parent_impl :: proc(
 		log_send_outside_actor("send_message_to_parent", tid, loc)
 		return .ACTOR_NOT_FOUND
 	}
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
@@ -421,7 +424,7 @@ send_message_to_parent_impl :: proc(
 	if !is_local_pid(actor.parent) {
 		return send_message_impl(actor.parent, data, size, tid, info, class, loc)
 	}
-	parent_actor, got_parent := get_actor_from_pointer(get(&global_registry, actor.parent))
+	parent_actor, got_parent := get_actor_from_pointer(get(&NODE.actor_registry, actor.parent))
 	if !got_parent {
 		log.errorf(
 			"send_message_to_parent(%v) failed: parent %v of actor '%s' is no longer alive",
@@ -448,7 +451,7 @@ send_message_to_children_impl :: proc(
 		log_send_outside_actor("send_message_to_children", tid, loc)
 		return .ACTOR_NOT_FOUND
 	}
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
@@ -460,7 +463,7 @@ send_message_to_children_impl :: proc(
 			}
 			continue
 		}
-		child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
+		child_actor, child_ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
 		if !child_ok {
 			log.errorf(
 				"send_message_to_children(%v) stopped: child %v of actor '%s' is no longer alive",

@@ -62,7 +62,7 @@ test_actor_panic_recovery :: proc(t: ^testing.T) {
 
 	expect(
 		t,
-		actod.valid(&actod.global_registry, echo_pid),
+		actod.valid(&actod.NODE.actor_registry, echo_pid),
 		"Echo actor should still be alive",
 	)
 	err2 := actod.send_message(echo_pid, "ping")

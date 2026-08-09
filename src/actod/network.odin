@@ -1,5 +1,6 @@
 package actod
 
+import "../pkgs/coro"
 import "base:intrinsics"
 import "base:runtime"
 import "core:encoding/endian"
@@ -17,7 +18,7 @@ RING_SEND_YIELD_RETRIES :: 256
 
 generate_nonce :: proc() -> u64 {
 	nonce: u64
-	platform_gen_random(&nonce, size_of(u64))
+	actod_rand_bytes((cast([^]u8)&nonce)[:size_of(u64)])
 	return nonce
 }
 
@@ -30,6 +31,9 @@ generate_nonzero_nonce :: proc() -> u64 {
 }
 
 set_tcp_nodelay :: proc(sock: net.TCP_Socket, enabled: bool = true) -> bool {
+	if sim_is_socket(sock) {
+		return true
+	}
 	val: i32 = enabled ? 1 : 0
 	result := platform_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, size_of(i32))
 	return result == 0
@@ -40,6 +44,9 @@ set_socket_buffers :: proc(
 	recv_size: int = 4 * 1024 * 1024,
 	send_size: int = 4 * 1024 * 1024,
 ) -> bool {
+	if sim_is_socket(sock) {
+		return true
+	}
 	recv_val: i32 = i32(recv_size)
 	send_val: i32 = i32(send_size)
 	r1 := platform_setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &recv_val, size_of(i32))
@@ -48,6 +55,9 @@ set_socket_buffers :: proc(
 }
 
 set_recv_timeout :: proc(sock: net.TCP_Socket, seconds: i64) -> bool {
+	if sim_is_socket(sock) {
+		return true
+	}
 	return platform_set_recv_timeout(sock, seconds)
 }
 
@@ -62,9 +72,16 @@ Transport_Strategy :: enum {
 }
 
 Node_Info :: struct {
-	node_name: string,
-	address:   net.Endpoint,
-	transport: Transport_Strategy,
+	node_name:   string,
+	address:     net.Endpoint,
+	transport:   Transport_Strategy,
+	incarnation: u64,
+	gossip:      Gossip_Window,
+}
+
+Gossip_Window :: struct {
+	next_seq: u64,
+	ahead:    [dynamic]u64,
 }
 
 @(private)
@@ -92,8 +109,8 @@ address_is_loopback :: proc(addr: net.Address) -> bool {
 
 @(private)
 get_auth_password :: proc() -> string {
-	if SYSTEM_CONFIG.network.auth_password != "" {
-		return SYSTEM_CONFIG.network.auth_password
+	if NODE.config.network.auth_password != "" {
+		return NODE.config.network.auth_password
 	}
 	if env_pass := os.get_env("ACTOD_AUTH_PASSWORD", context.temp_allocator); env_pass != "" {
 		return env_pass
@@ -104,10 +121,10 @@ get_auth_password :: proc() -> string {
 init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_location) {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	local_addr: net.Endpoint
-	if SYSTEM_CONFIG.network.port > 0 {
+	if NODE.config.network.port > 0 {
 		local_addr = net.Endpoint {
 			address = net.IP4_Loopback,
-			port    = SYSTEM_CONFIG.network.port,
+			port    = NODE.config.network.port,
 		}
 	}
 	cloned_name := strings.clone(NODE.name, get_system_allocator())
@@ -120,7 +137,12 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	sync.rw_mutex_unlock(&NODE.node_registry_lock)
 
 
-	if SYSTEM_CONFIG.network.port == 0 {
+	if NODE.config.network.port == 0 {
+		return
+	}
+
+	if NODE.config.sim_mode {
+		sim_listen(NODE.config.network.port)
 		return
 	}
 
@@ -131,7 +153,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	if NODE.network_listener_thread != nil {
 		log.warnf(
 			"Network listener is already running on port %d; node_init was called twice without a matching shutdown",
-			SYSTEM_CONFIG.network.port,
+			NODE.config.network.port,
 			location = loc,
 		)
 		return
@@ -209,10 +231,10 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	}
 
 	ctx := new(Listener_Context)
-	ctx.bind_addr, _ = parse_bind_address(SYSTEM_CONFIG.network.bind_address)
-	ctx.port = SYSTEM_CONFIG.network.port
+	ctx.bind_addr, _ = parse_bind_address(NODE.config.network.bind_address)
+	ctx.port = NODE.config.network.port
 	ctx.logger = context.logger
-	ctx.loc = SYSTEM_CONFIG.loc
+	ctx.loc = NODE.config.loc
 
 	NODE.network_listener_thread = thread.create(listener_proc)
 	if NODE.network_listener_thread != nil {
@@ -222,7 +244,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 		free(ctx)
 		log.errorf(
 			"Failed to create the network listener thread for port %d; this node will not accept incoming connections",
-			SYSTEM_CONFIG.network.port,
+			NODE.config.network.port,
 			location = loc,
 		)
 	}
@@ -245,16 +267,16 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 		state                   = .Disconnected,
 		address                 = addr,
 		tcp_socket              = sock,
-		heartbeat_interval      = SYSTEM_CONFIG.network.heartbeat_interval,
-		heartbeat_timeout       = SYSTEM_CONFIG.network.heartbeat_timeout,
-		reconnect_initial_delay = SYSTEM_CONFIG.network.reconnect_initial_delay,
-		reconnect_retry_delay   = SYSTEM_CONFIG.network.reconnect_retry_delay,
+		heartbeat_interval      = NODE.config.network.heartbeat_interval,
+		heartbeat_timeout       = NODE.config.network.heartbeat_timeout,
+		reconnect_initial_delay = NODE.config.network.reconnect_initial_delay,
+		reconnect_retry_delay   = NODE.config.network.reconnect_retry_delay,
 		auth_password           = get_auth_password(),
 		is_incoming             = true,
-		ring_config             = SYSTEM_CONFIG.network.connection_ring,
+		ring_config             = NODE.config.network.connection_ring,
 	}
 
-	actor_name := fmt.tprintf("incoming_%v_%d", addr, time.to_unix_nanoseconds(time.now()))
+	actor_name := fmt.tprintf("incoming_%v_%d", addr, time.to_unix_nanoseconds(now()))
 
 	conn_config := make_actor_config(restart_policy = .TRANSIENT, use_dedicated_os_thread = true)
 
@@ -278,6 +300,10 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
 	if len(data) == 0 {
 		return true
+	}
+
+	if sim_is_socket(socket) {
+		return sim_stream_write(socket, data)
 	}
 
 	total_sent := 0
@@ -329,6 +355,10 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []
 // dribble one byte per timeout window forever, so a total wall-clock deadline
 // is required to defeat slowloris-style handshake stalls.
 tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time) -> bool {
+	if sim_is_socket(sock) {
+		return sim_stream_read_exactly(sock, buf, deadline)
+	}
+
 	total := 0
 	for total < len(buf) {
 		n, err := net.recv_tcp(sock, buf[total:])
@@ -336,7 +366,7 @@ tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time)
 			return false
 		}
 		total += n
-		if total < len(buf) && time.diff(deadline, time.now()) > 0 {
+		if total < len(buf) && time.diff(deadline, now()) > 0 {
 			return false
 		}
 	}
@@ -345,6 +375,11 @@ tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time)
 
 
 stop_network_listener :: proc() {
+	if NODE.config.sim_mode {
+		sim_stop_listening(NODE.config.network.port)
+		return
+	}
+
 	if NODE.network_listener_thread != nil {
 		sync.atomic_store(&NODE.network_listener_running, 0)
 
@@ -389,7 +424,7 @@ deliver_to_target :: #force_inline proc(
 			return false
 		}
 	} else {
-		to_pid = pack_pid(to_handle, current_node_id)
+		to_pid = pack_pid(to_handle, NODE.node_id)
 	}
 
 	type_info, type_ok := get_type_info_by_hash(type_hash)
@@ -430,7 +465,7 @@ deliver_broadcast_locally :: proc(
 	}
 
 	from_pid := pack_pid(from_handle, remote_node_id)
-	list := &type_subscribers[local_type]
+	list := &NODE.type_subscribers[local_type]
 
 	for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
@@ -466,7 +501,7 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 	)
 
 	if existing_pid != 0 {
-		actor_ptr, actor_exists := get(&global_registry, existing_pid)
+		actor_ptr, actor_exists := get(&NODE.actor_registry, existing_pid)
 		if actor_exists && actor_ptr != nil {
 			_ = send_message(
 				existing_pid,
@@ -477,7 +512,7 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		sync.atomic_store_explicit(cast(^u64)&NODE.connection_actors[node_id], u64(0), .Release)
 	}
 
-	if get_or_create_node_ring(node_id, SYSTEM_CONFIG.network.connection_ring) == nil {
+	if get_or_create_node_ring(node_id, NODE.config.network.connection_ring) == nil {
 		return 0
 	}
 
@@ -486,12 +521,12 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		node_name               = node_info.node_name,
 		state                   = .Disconnected,
 		address                 = node_info.address,
-		heartbeat_interval      = SYSTEM_CONFIG.network.heartbeat_interval,
-		heartbeat_timeout       = SYSTEM_CONFIG.network.heartbeat_timeout,
-		reconnect_initial_delay = SYSTEM_CONFIG.network.reconnect_initial_delay,
-		reconnect_retry_delay   = SYSTEM_CONFIG.network.reconnect_retry_delay,
+		heartbeat_interval      = NODE.config.network.heartbeat_interval,
+		heartbeat_timeout       = NODE.config.network.heartbeat_timeout,
+		reconnect_initial_delay = NODE.config.network.reconnect_initial_delay,
+		reconnect_retry_delay   = NODE.config.network.reconnect_retry_delay,
 		auth_password           = get_auth_password(),
-		ring_config             = SYSTEM_CONFIG.network.connection_ring,
+		ring_config             = NODE.config.network.connection_ring,
 	}
 
 	conn_config := make_actor_config(
@@ -565,21 +600,23 @@ broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, 
 		return
 	}
 
-	if pid == NODE.pid || pid == OBSERVER_PID {
+	if pid == NODE.pid || pid == NODE.observer_pid {
 		return
 	}
 
-	local_info := NODE.node_registry[current_node_id]
+	local_info := NODE.node_registry[NODE.node_id]
 
 	msg := Actor_Spawned_Broadcast {
-		pid              = pid,
-		name             = name,
-		actor_type       = actor_type,
-		parent_pid       = parent_pid,
-		ttl              = DEFAULT_BROADCAST_TTL,
-		source_node_name = NODE.name,
-		source_port      = u16(local_info.address.port),
-		source_ip        = ipv4_to_u32(local_info.address.address),
+		pid                = pid,
+		name               = name,
+		actor_type         = actor_type,
+		parent_pid         = parent_pid,
+		source_incarnation = NODE.incarnation,
+		source_seq         = sync.atomic_add(&NODE.gossip_seq, 1) + 1,
+		ttl                = DEFAULT_BROADCAST_TTL,
+		source_node_name   = NODE.name,
+		source_port        = u16(local_info.address.port),
+		source_ip          = ipv4_to_u32(local_info.address.address),
 	}
 
 	broadcast_to_all_nodes(msg)
@@ -590,16 +627,18 @@ broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_R
 		return
 	}
 
-	if pid == NODE.pid || pid == OBSERVER_PID {
+	if pid == NODE.pid || pid == NODE.observer_pid {
 		return
 	}
 
 	msg := Actor_Terminated_Broadcast {
-		pid              = pid,
-		name             = name,
-		reason           = reason,
-		ttl              = DEFAULT_BROADCAST_TTL,
-		source_node_name = NODE.name,
+		pid                = pid,
+		name               = name,
+		reason             = reason,
+		source_incarnation = NODE.incarnation,
+		source_seq         = sync.atomic_add(&NODE.gossip_seq, 1) + 1,
+		ttl                = DEFAULT_BROADCAST_TTL,
+		source_node_name   = NODE.name,
 	}
 
 	broadcast_to_all_nodes(msg)
@@ -817,7 +856,7 @@ spawn_remote_impl :: proc(
 	}
 	send_lifecycle_message(ring, request)
 
-	if !sync.atomic_sema_wait_with_timeout(&pending.sema, timeout) {
+	if !spawn_response_wait(&pending.sema, timeout) {
 		log.errorf(
 			"Remote spawn of '%s' via '%s' on node '%s' timed out after %v; the node may be unreachable or not draining its ring",
 			actor_name,
@@ -882,6 +921,32 @@ spawn_remote_impl :: proc(
 	}
 
 	return child_pid, true
+}
+
+@(private)
+spawn_response_wait :: proc(sema: ^sync.Atomic_Sema, timeout: time.Duration) -> bool {
+	if !NODE.config.sim_mode {
+		return sync.atomic_sema_wait_with_timeout(sema, timeout)
+	}
+	deadline := time.time_add(now(), timeout)
+	co := coro.running()
+	for _ in 0 ..< 1_000_000 {
+		if sync.atomic_sema_wait_with_timeout(sema, time.Microsecond) {
+			return true
+		}
+		if time.diff(deadline, now()) > 0 {
+			return false
+		}
+		if co != nil {
+			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
+			handle.wants_reschedule = true
+			coro.yield(co)
+		} else if !sim_pump_any() {
+			runtime_sleep(1 * time.Millisecond)
+			sim_wake_transport_waiters()
+		}
+	}
+	return false
 }
 
 @(private)

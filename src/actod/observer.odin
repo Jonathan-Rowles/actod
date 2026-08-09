@@ -120,14 +120,13 @@ Observer_Behaviour := Actor_Behaviour(Observer_Data) {
 
 @(private)
 spawn_observer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
-	pid, ok := start_observer(SYSTEM_CONFIG.observer_interval)
+	pid, ok := start_observer(NODE.config.observer_interval)
 	if !ok {
 		panic_at(
-			SYSTEM_CONFIG.loc,
+			NODE.config.loc,
 			"node startup failed: the observer actor could not be spawned, disable it with enable_observer = false in make_node_config if it is not needed",
 		)
 	}
-	NODE.observer = pid
 	return pid, ok
 }
 
@@ -137,7 +136,7 @@ init_observer :: proc(data: ^Observer_Data) {
 
 	data.active_stats = make(map[PID]Actor_Stats)
 	data.terminated_stats = make([dynamic]Actor_Stats)
-	data.last_collection = time.now()
+	data.last_collection = now()
 }
 
 @(private)
@@ -172,7 +171,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 		data.collection_interval = m.interval
 		data.auto_collect = m.interval > 0
 		if data.auto_collect {
-			data.next_collection = time.time_add(time.now(), m.interval)
+			data.next_collection = time.time_add(now(), m.interval)
 			timer_id, timer_err := set_timer(m.interval, true)
 			if timer_err != .OK {
 				log.errorf(
@@ -244,7 +243,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 		if m.id == data.collection_timer_id && data.auto_collect {
 			collect_all_stats(data)
 			broadcast_stats_snapshot(data)
-			data.last_collection = time.now()
+			data.last_collection = now()
 		}
 	}
 }
@@ -334,9 +333,9 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 @(private)
 collect_all_stats :: proc(data: ^Observer_Data) {
 	data.collection_count += 1
-	data.last_collection = time.now()
+	data.last_collection = now()
 
-	it := make_iter(&global_registry)
+	it := make_iter(&NODE.actor_registry)
 	actor_count := 0
 	for {
 		_, pid, ok := iter(&it)
@@ -344,8 +343,8 @@ collect_all_stats :: proc(data: ^Observer_Data) {
 			break
 		}
 
-		actor := get(&global_registry, pid)
-		if actor == nil || pid == NODE.pid || pid == OBSERVER_PID {
+		actor := get(&NODE.actor_registry, pid)
+		if actor == nil || pid == NODE.pid || pid == NODE.observer_pid {
 			continue
 		}
 
@@ -353,7 +352,7 @@ collect_all_stats :: proc(data: ^Observer_Data) {
 
 
 		msg := Get_Stats {
-			requester = OBSERVER_PID,
+			requester = NODE.observer_pid,
 		}
 
 		_ = send_message(pid, msg)
@@ -376,7 +375,6 @@ terminate_observer :: proc(data: ^Observer_Data) {
 	}
 }
 
-OBSERVER_PID: PID
 
 start_observer :: proc(
 	collection_interval: time.Duration = 0,
@@ -386,13 +384,13 @@ start_observer :: proc(
 	bool,
 ) {
 	context.logger = diagnostic_logger(context.logger)
-	if OBSERVER_PID != {} {
+	if NODE.observer_pid != {} {
 		log.warnf(
 			"Observer already started with PID %v, this start_observer call had no effect and the existing observer was returned",
-			OBSERVER_PID,
+			NODE.observer_pid,
 			location = loc,
 		)
-		return OBSERVER_PID, true
+		return NODE.observer_pid, true
 	}
 
 	if OBSERVER_TYPE == ACTOR_TYPE_UNTYPED {
@@ -414,7 +412,7 @@ start_observer :: proc(
 		"observer",
 		observer_data,
 		behaviour,
-		SYSTEM_CONFIG.actor_config,
+		NODE.config.actor_config,
 		parent_pid = NODE.pid,
 	)
 	if !ok {
@@ -425,20 +423,20 @@ start_observer :: proc(
 		return PID{}, false
 	}
 
-	OBSERVER_PID = pid
+	NODE.observer_pid = pid
 
 	if collection_interval > 0 {
-		_ = send_message(OBSERVER_PID, Set_Collection_Interval{interval = collection_interval})
+		_ = send_message(NODE.observer_pid, Set_Collection_Interval{interval = collection_interval})
 	}
 
-	SYSTEM_CONFIG.enable_observer = true
+	NODE.config.enable_observer = true
 
 	return pid, ok
 }
 
 stop_observer :: proc() {
-	if OBSERVER_PID != {} {
-		a_ptr, ok := get(&global_registry, OBSERVER_PID)
+	if NODE.observer_pid != {} {
+		a_ptr, ok := get(&NODE.actor_registry, NODE.observer_pid)
 		if !ok {
 			return
 		}
@@ -449,26 +447,26 @@ stop_observer :: proc() {
 				if mpsc_size(&a.mailbox) == 0 {
 					break
 				}
-				time.sleep(10 * time.Millisecond)
+				runtime_sleep(10 * time.Millisecond)
 			}
 		} else {
 			log.warnf(
 				"stop_observer: observer PID %v is registered but its actor could not be resolved, terminating without draining its mailbox",
-				OBSERVER_PID,
+				NODE.observer_pid,
 			)
 		}
 
-		_ = terminate_actor(OBSERVER_PID, .SHUTDOWN)
+		_ = terminate_actor(NODE.observer_pid, .SHUTDOWN)
 		for i := 0; i < 100; i += 1 {
-			if _, active := get(&global_registry, OBSERVER_PID); !active {
+			if _, active := get(&NODE.actor_registry, NODE.observer_pid); !active {
 				break
 			}
-			time.sleep(10 * time.Millisecond)
+			runtime_sleep(10 * time.Millisecond)
 		}
-		OBSERVER_PID = {}
+		NODE.observer_pid = {}
 	}
 
-	SYSTEM_CONFIG.enable_observer = false
+	NODE.config.enable_observer = false
 }
 
 @(private)
@@ -491,19 +489,19 @@ log_observer_send_failed :: proc(
 	log.errorf(
 		"%s failed: could not reach the observer actor (PID %v): %v",
 		proc_name,
-		OBSERVER_PID,
+		NODE.observer_pid,
 		err,
 		location = loc,
 	)
 }
 
 trigger_stats_collection :: proc(loc := #caller_location) -> bool {
-	if OBSERVER_PID == {} {
+	if NODE.observer_pid == {} {
 		log_observer_not_started("trigger_stats_collection", loc)
 		return false
 	}
 	msg := Trigger_Collection{}
-	err := send_message(OBSERVER_PID, msg)
+	err := send_message(NODE.observer_pid, msg)
 	if err != .OK {
 		log_observer_send_failed("trigger_stats_collection", err, loc)
 	}
@@ -512,7 +510,7 @@ trigger_stats_collection :: proc(loc := #caller_location) -> bool {
 
 
 request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_location) -> bool {
-	if OBSERVER_PID == {} {
+	if NODE.observer_pid == {} {
 		log_observer_not_started("request_actor_stats", loc)
 		return false
 	}
@@ -522,7 +520,7 @@ request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_locat
 		requester = requester,
 	}
 
-	err := send_message(OBSERVER_PID, request)
+	err := send_message(NODE.observer_pid, request)
 	if err != .OK {
 		log_observer_send_failed("request_actor_stats", err, loc)
 	}
@@ -531,7 +529,7 @@ request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_locat
 
 
 request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
-	if OBSERVER_PID == {} {
+	if NODE.observer_pid == {} {
 		log_observer_not_started("request_all_stats", loc)
 		return false
 	}
@@ -540,7 +538,7 @@ request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
 		requester = requester,
 	}
 
-	err := send_message(OBSERVER_PID, request)
+	err := send_message(NODE.observer_pid, request)
 	if err != .OK {
 		log_observer_send_failed("request_all_stats", err, loc)
 	}
@@ -548,14 +546,14 @@ request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
 }
 
 set_stats_collection_interval :: proc(interval: time.Duration, loc := #caller_location) -> bool {
-	if OBSERVER_PID == {} {
+	if NODE.observer_pid == {} {
 		log_observer_not_started("set_stats_collection_interval", loc)
 		return false
 	}
 	msg := Set_Collection_Interval {
 		interval = interval,
 	}
-	err := send_message(OBSERVER_PID, msg)
+	err := send_message(NODE.observer_pid, msg)
 	if err != .OK {
 		log_observer_send_failed("set_stats_collection_interval", err, loc)
 	}
@@ -563,12 +561,12 @@ set_stats_collection_interval :: proc(interval: time.Duration, loc := #caller_lo
 }
 
 clear_terminated_stats :: proc(loc := #caller_location) -> bool {
-	if OBSERVER_PID == {} {
+	if NODE.observer_pid == {} {
 		log_observer_not_started("clear_terminated_stats", loc)
 		return false
 	}
 	msg := Clear_Terminated_Stats{}
-	err := send_message(OBSERVER_PID, msg)
+	err := send_message(NODE.observer_pid, msg)
 	if err != .OK {
 		log_observer_send_failed("clear_terminated_stats", err, loc)
 	}

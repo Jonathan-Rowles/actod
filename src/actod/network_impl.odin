@@ -156,6 +156,29 @@ send_to_connection_ring_impl :: proc(
 	loc := #caller_location,
 	token: u64 = 0,
 ) -> Send_Error {
+	when ODIN_TEST {
+		drop, dup, corrupt := frame_tap(.Out, info.type_hash, nil, ring != nil ? ring.node_id : 0)
+		if drop do return .OK
+		if dup {
+			_ = send_to_connection_ring_body(ring, to, data, info, base_flags, false, loc, token)
+		}
+		return send_to_connection_ring_body(ring, to, data, info, base_flags, corrupt, loc, token)
+	} else {
+		return send_to_connection_ring_body(ring, to, data, info, base_flags, false, loc, token)
+	}
+}
+
+@(private)
+send_to_connection_ring_body :: proc(
+	ring: ^Connection_Ring,
+	to: PID,
+	data: rawptr,
+	info: ^Message_Type_Info,
+	base_flags: Network_Message_Flags,
+	corrupt: bool,
+	loc := #caller_location,
+	token: u64 = 0,
+) -> Send_Error {
 	if ring == nil {
 		log.errorf(
 			"Cannot send '%s' to %v: there is no connection ring for that node",
@@ -212,6 +235,12 @@ send_to_connection_ring_impl :: proc(
 		assert(msg_len == exact_size, "wire format size mismatch in send_to_connection_ring_impl")
 	}
 
+	when ODIN_TEST {
+		if corrupt && len(dst) > 0 {
+			dst[len(dst) - 1] ~= 0xFF
+		}
+	}
+
 	batch_commit(ring, sid)
 	return .OK
 }
@@ -222,6 +251,52 @@ send_to_connection_ring_by_name_impl :: proc(
 	data: rawptr,
 	info: ^Message_Type_Info,
 	base_flags: Network_Message_Flags,
+	loc := #caller_location,
+) -> Send_Error {
+	when ODIN_TEST {
+		drop, dup, corrupt := frame_tap(.Out, info.type_hash, nil, ring != nil ? ring.node_id : 0)
+		if drop do return .OK
+		if dup {
+			_ = send_to_connection_ring_by_name_body(
+				ring,
+				actor_name,
+				data,
+				info,
+				base_flags,
+				false,
+				loc,
+			)
+		}
+		return send_to_connection_ring_by_name_body(
+			ring,
+			actor_name,
+			data,
+			info,
+			base_flags,
+			corrupt,
+			loc,
+		)
+	} else {
+		return send_to_connection_ring_by_name_body(
+			ring,
+			actor_name,
+			data,
+			info,
+			base_flags,
+			false,
+			loc,
+		)
+	}
+}
+
+@(private)
+send_to_connection_ring_by_name_body :: proc(
+	ring: ^Connection_Ring,
+	actor_name: string,
+	data: rawptr,
+	info: ^Message_Type_Info,
+	base_flags: Network_Message_Flags,
+	corrupt: bool,
 	loc := #caller_location,
 ) -> Send_Error {
 	if ring == nil {
@@ -288,6 +363,12 @@ send_to_connection_ring_by_name_impl :: proc(
 		)
 	}
 
+	when ODIN_TEST {
+		if corrupt && len(dst) > 0 {
+			dst[len(dst) - 1] ~= 0xFF
+		}
+	}
+
 	batch_commit(ring, sid)
 	return .OK
 }
@@ -336,7 +417,7 @@ send_remote_impl :: proc(
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
-			time.sleep(1 * time.Microsecond)
+			runtime_sleep(1 * time.Microsecond)
 		}
 	}
 	log.warnf(
@@ -389,7 +470,7 @@ send_remote_by_name_impl :: proc(
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
-			time.sleep(1 * time.Microsecond)
+			runtime_sleep(1 * time.Microsecond)
 		}
 	}
 	log.warnf(

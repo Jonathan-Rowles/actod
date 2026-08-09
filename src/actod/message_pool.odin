@@ -89,7 +89,7 @@ Pool :: struct {
 init_pool :: proc(
 	pool: ^Pool,
 	allocator: mem.Allocator,
-	page_size: int = SYSTEM_CONFIG.actor_config.page_size,
+	page_size: int = NODE.config.actor_config.page_size,
 	max_pages: int = DEFAULT_MAIL_BOX_SIZE + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE,
 ) {
 	pool.page_size = page_size

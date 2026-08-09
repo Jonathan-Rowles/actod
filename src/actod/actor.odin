@@ -217,7 +217,7 @@ spawn_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
-	opts := SYSTEM_CONFIG.actor_config,
+	opts := NODE.config.actor_config,
 	parent_pid: PID = 0,
 	loc := #caller_location,
 ) -> (
@@ -233,7 +233,7 @@ spawn_sized :: proc(
 	data: $T,
 	behaviour: Actor_Behaviour(T),
 	$MAILBOX_SIZE: int,
-	opts := SYSTEM_CONFIG.actor_config,
+	opts := NODE.config.actor_config,
 	parent_pid: PID = 0,
 	loc := #caller_location,
 ) -> (
@@ -249,7 +249,7 @@ spawn_impl :: proc(
 	data: $T,
 	behaviour: Actor_Behaviour(T),
 	mailbox_size: int,
-	opts := SYSTEM_CONFIG.actor_config,
+	opts := NODE.config.actor_config,
 	parent_pid: PID = 0,
 	loc := #caller_location,
 ) -> (
@@ -350,7 +350,7 @@ spawn_impl :: proc(
 
 	if parent_pid > 0 {
 		if is_local_pid(parent_pid) {
-			_, ok := get(&global_registry, parent_pid)
+			_, ok := get(&NODE.actor_registry, parent_pid)
 
 			if !ok {
 				panic_at(
@@ -388,12 +388,12 @@ spawn_impl :: proc(
 	init_mpsc_external(&actor.mailbox, mailbox_entries)
 	init_pool(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(mailbox_size))
 
-	pid, ok := add(&global_registry, rawptr(actor), name, behaviour.actor_type, loc)
+	pid, ok := add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
 		log.errorf(
 			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size or enable allow_registry_growth in make_node_config()",
 			name,
-			global_registry.num_items,
+			NODE.actor_registry.num_items,
 			location = loc,
 		)
 		vmem.arena_destroy(&actor.arena)
@@ -407,7 +407,7 @@ spawn_impl :: proc(
 	actor.child_restarts = make(map[PID]Restart_Info, actor.allocator)
 
 	if parent_pid > 0 && is_local_pid(parent_pid) {
-		parent_ptr := get(&global_registry, parent_pid)
+		parent_ptr := get(&NODE.actor_registry, parent_pid)
 		if parent_ptr != nil {
 			parent_actor := cast(^Actor(int))parent_ptr
 			if parent_actor.children == nil {
@@ -416,8 +416,8 @@ spawn_impl :: proc(
 			append(&parent_actor.children, pid)
 			parent_actor.child_restarts[pid] = Restart_Info {
 				count         = 0,
-				first_restart = time.now(),
-				last_restart  = time.now(),
+				first_restart = now(),
+				last_restart  = now(),
 				child_index   = len(parent_actor.children) - 1,
 				node_id       = 0,
 			}
@@ -445,7 +445,11 @@ spawn_impl :: proc(
 	started: bool = false
 	actor.started = &started
 
-	if !opts.use_dedicated_os_thread && !opts.blocking && worker_pool.initialized {
+	pool_this_actor := !opts.use_dedicated_os_thread && !opts.blocking
+	if NODE.config.sim_mode {
+		pool_this_actor = true
+	}
+	if pool_this_actor && NODE.worker_pool.initialized {
 		handle := new(Pooled_Actor_Handle, actor.allocator)
 		handle.actor_ptr = actor
 		handle.mailbox = &actor.mailbox
@@ -469,7 +473,7 @@ spawn_impl :: proc(
 				co_res,
 				location = loc,
 			)
-			remove(&global_registry, pid)
+			remove(&NODE.actor_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -479,26 +483,26 @@ spawn_impl :: proc(
 
 		idx := -1
 		if actor.opts.home_worker >= 0 {
-			if actor.opts.home_worker >= worker_pool.worker_count {
+			if actor.opts.home_worker >= NODE.worker_pool.worker_count {
 				panic_at(
 					loc,
 					"spawn('%s'): home_worker=%d but this node has only %d workers (valid indices 0-%d)%s",
 					name,
 					actor.opts.home_worker,
-					worker_pool.worker_count,
-					worker_pool.worker_count - 1,
+					NODE.worker_pool.worker_count,
+					NODE.worker_pool.worker_count - 1,
 					config_origin(actor.opts.loc),
 				)
 			}
 			idx = actor.opts.home_worker
 		} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity);
 		   affinity_ok {
-			affinity_actor := get(&global_registry, affinity_pid)
+			affinity_actor := get(&NODE.actor_registry, affinity_pid)
 			if affinity_actor != nil {
 				affinity_handle := (cast(^Actor(int))affinity_actor).pool_handle
 				if affinity_handle != nil && affinity_handle.home_worker != nil {
-					for i in 0 ..< worker_pool.worker_count {
-						if &worker_pool.workers[i] == affinity_handle.home_worker {
+					for i in 0 ..< NODE.worker_pool.worker_count {
+						if &NODE.worker_pool.workers[i] == affinity_handle.home_worker {
 							idx = i
 							break
 						}
@@ -507,15 +511,15 @@ spawn_impl :: proc(
 			}
 		}
 		if idx < 0 {
-			idx = sync.atomic_add(&worker_pool.next_worker, 1) % worker_pool.worker_count
+			idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
 			if current_worker != nil &&
-			   &worker_pool.workers[idx] == current_worker &&
-			   worker_pool.worker_count > 1 {
-				idx = sync.atomic_add(&worker_pool.next_worker, 1) % worker_pool.worker_count
+			   &NODE.worker_pool.workers[idx] == current_worker &&
+			   NODE.worker_pool.worker_count > 1 {
+				idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
 			}
 		}
-		handle.home_worker = &worker_pool.workers[idx]
-		set_entry_home_worker(&global_registry, pid, idx)
+		handle.home_worker = &NODE.worker_pool.workers[idx]
+		set_entry_home_worker(&NODE.actor_registry, pid, idx)
 		sync.atomic_store(&handle.in_ready_queue, true)
 		mpsc_push(&handle.home_worker.ready_queue, rawptr(handle))
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)
@@ -531,7 +535,7 @@ spawn_impl :: proc(
 				pid,
 				location = loc,
 			)
-			remove(&global_registry, pid)
+			remove(&NODE.actor_registry, pid)
 			vmem.arena_destroy(&actor.arena)
 			free(actor, actor_system_allocator)
 			return 0, false
@@ -547,7 +551,11 @@ spawn_impl :: proc(
 		}
 	} else {
 		for !sync.atomic_load_explicit(&started, .Acquire) {
-			intrinsics.cpu_relax()
+			if NODE.config.sim_mode {
+				sim_pump()
+			} else {
+				intrinsics.cpu_relax()
+			}
 		}
 	}
 
@@ -566,7 +574,7 @@ spawn_child_default :: proc(
 	name: string,
 	data: $T,
 	behaviour: Actor_Behaviour(T),
-	opts := SYSTEM_CONFIG.actor_config,
+	opts := NODE.config.actor_config,
 	loc := #caller_location,
 ) -> (
 	PID,
@@ -595,7 +603,7 @@ spawn_child_sized :: proc(
 	data: $T,
 	behaviour: Actor_Behaviour(T),
 	$MAILBOX_SIZE: int,
-	opts := SYSTEM_CONFIG.actor_config,
+	opts := NODE.config.actor_config,
 	loc := #caller_location,
 ) -> (
 	PID,
@@ -780,8 +788,8 @@ spawn_initial_children :: proc(actor: ^Actor($T)) {
 
 		actor.child_restarts[pid] = Restart_Info {
 			count         = 0,
-			first_restart = time.now(),
-			last_restart  = time.now(),
+			first_restart = now(),
+			last_restart  = now(),
 			child_index   = idx,
 			node_id       = child_node_id,
 		}
@@ -827,13 +835,13 @@ call_init_handler :: proc(actor: ^Actor($T)) {
 	if actor.behaviour.init != nil do actor.behaviour.init(actor.data)
 	if actor.pool_handle != nil {
 		worker_idx := -1
-		for i in 0 ..< worker_pool.worker_count {
-			if &worker_pool.workers[i] == actor.pool_handle.home_worker {
+		for i in 0 ..< NODE.worker_pool.worker_count {
+			if &NODE.worker_pool.workers[i] == actor.pool_handle.home_worker {
 				worker_idx = i
 				break
 			}
 		}
-		log.infof("Started on worker %d/%d", worker_idx, worker_pool.worker_count)
+		log.infof("Started on worker %d/%d", worker_idx, NODE.worker_pool.worker_count)
 	} else {
 		log.infof("Started on dedicated thread")
 	}
@@ -1068,14 +1076,14 @@ notify_termination :: proc(actor: ^Actor($T)) {
 			topic_remove_subscriber(sub.topic, sub.pid)
 		}
 
-		if TIMER_PID != 0 && actor.pid != TIMER_PID && len(current_actor_context.timers) > 0 {
-			if _, timer_active := get(&global_registry, TIMER_PID); timer_active {
+		if NODE.timer_pid != 0 && actor.pid != NODE.timer_pid && len(current_actor_context.timers) > 0 {
+			if _, timer_active := get(&NODE.actor_registry, NODE.timer_pid); timer_active {
 				timer_actor, timer_ok := get_actor_from_pointer(
-					get(&global_registry, TIMER_PID),
+					get(&NODE.actor_registry, NODE.timer_pid),
 					true,
 				)
 				if timer_ok {
-					send(TIMER_PID, Cancel_All_Timers{owner = actor.pid}, timer_actor)
+					send(NODE.timer_pid, Cancel_All_Timers{owner = actor.pid}, timer_actor)
 				}
 			}
 		}
@@ -1089,11 +1097,11 @@ notify_termination :: proc(actor: ^Actor($T)) {
 		}
 	}
 
-	if _, active := get(&global_registry, OBSERVER_PID); !active {
+	if _, active := get(&NODE.actor_registry, NODE.observer_pid); !active {
 		return
 	}
 
-	if actor.pid == OBSERVER_PID && NODE.shutting_down {
+	if actor.pid == NODE.observer_pid && NODE.shutting_down {
 		return
 	}
 
@@ -1105,12 +1113,12 @@ notify_termination :: proc(actor: ^Actor($T)) {
 		messages_received  = current_actor_context.stats.messages_received,
 		messages_sent      = current_actor_context.stats.messages_sent,
 		start_time         = current_actor_context.stats.start_time,
-		uptime             = time.since(current_actor_context.stats.start_time),
-		last_update        = time.now(),
+		uptime             = wall_since(current_actor_context.stats.start_time),
+		last_update        = now(),
 		max_mailbox_size   = current_actor_context.stats.max_mailbox_size,
 		state              = sync.atomic_load(&actor.state),
 		terminated         = true,
-		termination_time   = time.now(),
+		termination_time   = now(),
 		termination_reason = actor.termination_reason,
 	}
 
@@ -1142,9 +1150,9 @@ notify_termination :: proc(actor: ^Actor($T)) {
 	response := Stats_Response {
 		stats = final_stats,
 	}
-	observer_actor, ok := get_actor_from_pointer(get(&global_registry, OBSERVER_PID), true)
+	observer_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, NODE.observer_pid), true)
 	if ok {
-		send(OBSERVER_PID, response, observer_actor)
+		send(NODE.observer_pid, response, observer_actor)
 	} else {
 		delete(final_stats.sent_to)
 		delete(final_stats.received_from)
@@ -1226,7 +1234,7 @@ forward_stop_signal_to_node :: proc(child: ^Actor(int)) {
 	if NODE.pid == 0 || NODE.pid == child.stop_signal.pid {
 		return
 	}
-	node_actor, ok := get_actor_from_pointer(get(&global_registry, NODE.pid), true)
+	node_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 	if !ok || node_actor == nil {
 		log.debugf(
 			"no node actor to receive the stop signal of %d (%v)",
@@ -1299,7 +1307,7 @@ push_termination_signal :: proc(actor: ^Actor($T)) {
 		actor.termination_reason != .KILLED
 
 	if deliver_to_parent {
-		parent_actor, ok := get_actor_from_pointer(get(&global_registry, actor.parent), true)
+		parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, actor.parent), true)
 		if ok && parent_actor != nil {
 			parent_state := sync.atomic_load(&parent_actor.state)
 			if parent_state != .STOPPING &&
@@ -1606,12 +1614,12 @@ retry_local_send_loop :: proc(
 	msg := msg
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 	observed_read := initial_read
-	stall_start := time.tick_now()
+	stall_start := mono_now()
 	for {
 		handle.wants_reschedule = true
 		coro.yield(co)
 		reclaim_pin()
-		fresh, ok := get_relaxed(&global_registry, to)
+		fresh, ok := get_relaxed(&NODE.actor_registry, to)
 		if !ok || fresh == nil {
 			reclaim_unpin()
 			return .ACTOR_NOT_FOUND
@@ -1641,8 +1649,8 @@ retry_local_send_loop :: proc(
 		}
 		if target.local_read != observed_read {
 			observed_read = target.local_read
-			stall_start = time.tick_now()
-		} else if time.tick_since(stall_start) > SEND_STALL_TIMEOUT {
+			stall_start = mono_now()
+		} else if mono_since(stall_start) > SEND_STALL_TIMEOUT {
 			release_undelivered(target, &msg, true)
 			reclaim_unpin()
 			log.errorf(
@@ -1788,7 +1796,7 @@ terminate_actor :: proc(
 	}
 
 	is_system_op := reason == .SHUTDOWN
-	actor_ptr := get(&global_registry, to)
+	actor_ptr := get(&NODE.actor_registry, to)
 
 	if actor_ptr == nil {
 		return true
@@ -1833,7 +1841,7 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (
 		panic_at(loc, "add_child(parent=%v): child_spawn must not be nil", parent)
 	}
 
-	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
 	if !ok {
 		log.errorf(
 			"add_child failed: parent %v is not a live actor (never spawned, already terminated, or a stale PID)",
@@ -1886,7 +1894,7 @@ add_child_existing :: proc(
 		)
 	}
 
-	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
 	if !ok {
 		log.errorf(
 			"add_child_existing failed: parent %v is not a live actor (never spawned, already terminated, or a stale PID)",
@@ -1921,7 +1929,7 @@ add_child_existing :: proc(
 @(require_results)
 remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
-	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
 	if !ok {
 		log.errorf(
 			"remove_child(child=%v) failed: parent %v is not a live actor",
@@ -1953,7 +1961,7 @@ remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 // Get list of children for an actor
 // remote??
 get_children :: proc(parent: PID) -> []PID {
-	parent_actor, ok := get_actor_from_pointer(get(&global_registry, parent))
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
 	if !ok {
 		return nil
 	}
@@ -1965,14 +1973,14 @@ get_children :: proc(parent: PID) -> []PID {
 }
 
 get_parent_pid :: proc() -> PID {
-	actor, ok := get_actor_from_pointer(get(&global_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
 	if !ok do return 0
 	return actor.parent
 }
 
 // remote??
 get_actor_name :: #force_inline proc(pid: PID) -> string {
-	actor_ptr, active := get(&global_registry, pid)
+	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return "<unknown>"
 
 	name_offset := offset_of(Actor(int), name)
@@ -1984,11 +1992,11 @@ get_actor_name :: #force_inline proc(pid: PID) -> string {
 get_actor_pid :: #force_inline proc(name: string) -> (PID, bool) {
 	when ODIN_TEST {if pid, found, ok := ti.intercept_get_actor_pid(name); ok do return PID(pid), found}
 
-	return get_by_name(&global_registry, name)
+	return get_by_name(&NODE.actor_registry, name)
 }
 
 get_actor_parent :: #force_inline proc(pid: PID) -> PID {
-	actor_ptr, active := get(&global_registry, pid)
+	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return 0
 	parent_offset := offset_of(Actor(int), parent)
 	parent_ptr := cast(^PID)(uintptr(actor_ptr) + parent_offset)
@@ -2000,7 +2008,7 @@ get_actor_parent :: #force_inline proc(pid: PID) -> PID {
 // alive; callers doing field reads via offset_of(Actor(T), ...) must not
 // retain it past the operation. Returns nil for remote PIDs.
 get_actor_ptr :: #force_inline proc(pid: PID) -> rawptr {
-	ptr, _ := get(&global_registry, pid)
+	ptr, _ := get(&NODE.actor_registry, pid)
 	return ptr
 }
 
@@ -2015,7 +2023,7 @@ get_self_pid :: #force_inline proc() -> PID {
 	when ODIN_TEST {if pid, ok := ti.intercept_get_self_pid(); ok do return PID(pid)}
 
 	if current_actor_context != nil do return current_actor_context.pid
-	return pack_pid(Handle{idx = 0, gen = 0, actor_type = 0}, current_node_id)
+	return pack_pid(Handle{idx = 0, gen = 0, actor_type = 0}, NODE.node_id)
 }
 
 self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_location) -> bool {
@@ -2037,7 +2045,7 @@ rename_actor :: proc(pid: PID, new_name: string, loc := #caller_location) -> boo
 	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if ti.intercept_rename_actor(u64(pid), new_name) do return true}
 
-	actor, ok := get_actor_from_pointer(get(&global_registry, pid), true)
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, pid), true)
 	if !ok {
 		log.errorf(
 			"rename_actor(%v, '%s') failed: no live actor with that PID",
@@ -2370,7 +2378,7 @@ send_from_payload :: #force_inline proc(
 	info: ^Message_Type_Info,
 	token: u64 = 0,
 ) -> Send_Error {
-	actor, ok := get_actor_from_pointer(get(&global_registry, to_pid))
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, to_pid))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
@@ -2397,7 +2405,7 @@ send_system_from_payload :: #force_inline proc(
 	payload: []byte,
 	info: ^Message_Type_Info,
 ) -> Send_Error {
-	actor, ok := get_actor_from_pointer(get(&global_registry, to_pid))
+	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, to_pid))
 	if !ok {
 		return .ACTOR_NOT_FOUND
 	}
@@ -2483,7 +2491,7 @@ handle_remove_child :: proc(actor: ^Actor($T), msg: Remove_Child) {
 				}
 			}
 
-			child_actor, ok := get_actor_from_pointer(get(&global_registry, child_pid))
+			child_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
 			if ok {
 				term_msg := Terminate {
 					reason = .SHUTDOWN,
@@ -2516,7 +2524,7 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 		}
 
 		if is_local_pid(child_pid) {
-			child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
+			child_actor, child_ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
 			if !child_ok {
 				log.errorf("Cannot adopt child %d - actor not found", child_pid)
 				return
@@ -2561,8 +2569,8 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 
 	actor.child_restarts[child_pid] = Restart_Info {
 		count                = 0,
-		first_restart        = time.now(),
-		last_restart         = time.now(),
+		first_restart        = now(),
+		last_restart         = now(),
 		child_index          = child_index,
 		spawn_func_name_hash = msg.spawn_func_name_hash,
 		node_id              = child_node_id,
@@ -2586,7 +2594,7 @@ handle_set_parent :: proc(actor: ^Actor($T), msg: Set_Parent) {
 
 	// If we had an old parent, notify it to remove us
 	if old_parent != 0 {
-		old_parent_actor, ok := get_actor_from_pointer(get(&global_registry, old_parent))
+		old_parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, old_parent))
 		if ok {
 			remove_msg := Remove_Child {
 				child_pid = actor.pid,
@@ -2603,7 +2611,7 @@ handle_set_parent :: proc(actor: ^Actor($T), msg: Set_Parent) {
 	}
 
 	// If we have a new parent, notify it to add us
-	new_parent_actor, ok := get_actor_from_pointer(get(&global_registry, msg.new_parent))
+	new_parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, msg.new_parent))
 	if !ok {
 		actor.parent = old_parent
 		log.errorf(
@@ -2691,7 +2699,7 @@ handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
 		return
 	}
 
-	now := time.now()
+	now := now()
 	if time.diff(restart_info.first_restart, now) > actor.opts.restart_window {
 		restart_info.count = 0
 		restart_info.first_restart = now
@@ -2774,7 +2782,7 @@ restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
 	new_pid: PID
 	ok: bool
 
-	remote_child := restart_info.node_id != 0 && restart_info.node_id != current_node_id
+	remote_child := restart_info.node_id != 0 && restart_info.node_id != NODE.node_id
 
 	if remote_child && restart_info.spawn_func_name_hash != 0 {
 		// Adopted remote child with no local spawn closure: respawn by registered name.
@@ -2834,7 +2842,7 @@ restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
 
 @(private)
 track_message_received :: proc(from: PID) {
-	if SYSTEM_CONFIG.enable_observer {
+	if NODE.config.enable_observer {
 		current_actor_context.stats.messages_received += 1
 		if from != 0 do append(&current_actor_context.stats.received_list, from)
 	}
@@ -2842,7 +2850,7 @@ track_message_received :: proc(from: PID) {
 
 @(private)
 track_max_mailbox_size :: proc(mailbox: ^ACTOR_MAILBOX) {
-	if SYSTEM_CONFIG.enable_observer {
+	if NODE.config.enable_observer {
 		current_size := mpsc_size(mailbox)
 		if current_size > current_actor_context.stats.max_mailbox_size {
 			current_actor_context.stats.max_mailbox_size = current_size
@@ -2865,8 +2873,8 @@ collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 		stats.messages_received = current_actor_context.stats.messages_received
 		stats.messages_sent = current_actor_context.stats.messages_sent
 		stats.start_time = current_actor_context.stats.start_time
-		stats.uptime = time.since(current_actor_context.stats.start_time)
-		stats.last_update = time.now()
+		stats.uptime = wall_since(current_actor_context.stats.start_time)
+		stats.last_update = now()
 		stats.max_mailbox_size = current_actor_context.stats.max_mailbox_size
 
 		stats.mailbox_size = mpsc_size(&actor.mailbox)
@@ -2903,7 +2911,7 @@ collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 
 @(private)
 handle_set_message_stats :: #force_inline proc(from: PID, to: PID) {
-	if SYSTEM_CONFIG.enable_observer {
+	if NODE.config.enable_observer {
 		if current_actor_context != nil && current_actor_context.pid == from {
 			current_actor_context.stats.messages_sent += 1
 			append(&current_actor_context.stats.sent_list, to)
@@ -2925,7 +2933,7 @@ handle_get_stats_request :: proc(actor: ^Actor($T), request: Get_Stats) {
 		stats = stats,
 	}
 
-	requester_actor, ok := get_actor_from_pointer(get(&global_registry, request.requester))
+	requester_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, request.requester))
 	if ok {
 		send(request.requester, response, requester_actor)
 	} else {
@@ -2944,7 +2952,7 @@ handle_rename_actor :: proc(actor: ^Actor($T), msg: Rename_Actor) {
 	actor.name = strings.clone(msg.new_name, actor.allocator)
 	current_actor_context.name = actor.name
 
-	pid_map_rename(&global_registry, actor.pid, msg.new_name)
+	pid_map_rename(&NODE.actor_registry, actor.pid, msg.new_name)
 
 	h, _ := unpack_pid(current_actor_context.pid)
 	log.infof("Actor [%s|%v:%v] renamed to '%s'", old_name, h.idx, h.gen, msg.new_name)

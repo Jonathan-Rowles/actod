@@ -53,7 +53,7 @@ HR_V1_Behaviour :: actod.Actor_Behaviour(HR_Counter_State) {
 }
 
 hr_read_count :: proc(pid: actod.PID) -> (i32, bool) {
-	actor_ptr, active := actod.get(&actod.global_registry, pid)
+	actor_ptr, active := actod.get(&actod.NODE.actor_registry, pid)
 	if !active || actor_ptr == nil {
 		return 0, false
 	}
@@ -204,7 +204,7 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 
 	time.sleep(10 * time.Millisecond)
 
-	actor_ptr, active := actod.get(&actod.global_registry, pid)
+	actor_ptr, active := actod.get(&actod.NODE.actor_registry, pid)
 	expect(t, active, "actor should be active")
 	if !active do return
 

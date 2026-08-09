@@ -11,7 +11,7 @@ setup_signal_handler :: proc() {
 	handler :: proc "system" (ctrl_type: win32.DWORD) -> win32.BOOL {
 		switch ctrl_type {
 		case win32.CTRL_C_EVENT, win32.CTRL_CLOSE_EVENT, win32.CTRL_SHUTDOWN_EVENT:
-			sync.atomic_sema_post(&signal_wake)
+			sync.atomic_sema_post(&NODE.signal_wake)
 			return true
 		}
 		return false
@@ -34,10 +34,10 @@ setup_signal_handler :: proc() {
 				avail: u32
 				ok := win32.PeekNamedPipe(stdin_handle, nil, 0, nil, &avail, nil)
 				if !ok {
-					sync.atomic_sema_post(&signal_wake)
+					sync.atomic_sema_post(&NODE.signal_wake)
 					return
 				}
-				time.sleep(200 * time.Millisecond)
+				runtime_sleep(200 * time.Millisecond)
 			}
 		case:
 			return

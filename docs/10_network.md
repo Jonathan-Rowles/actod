@@ -164,6 +164,8 @@ Node A spawns "worker-1"
 
 The same applies to termination. Proxy entries are cleaned up across the entire mesh, not just direct peers. Duplicate broadcasts are ignored (if the actor is already registered or already removed).
 
+Gossip is trusted per **incarnation** and deduplicated per **event**: every node generates a random incarnation id at boot and stamps each lifecycle broadcast it originates with the incarnation plus a dense per-event sequence number; the handshake carries both the incarnation and the current sequence frontier. A relayed broadcast stamped with a different incarnation than the one learned from that node's last handshake is dropped, so gossip from a crashed incarnation, however delayed by partitions, can never evict a restarted node's fresh actors. A relayed event whose sequence number the receiver has already covered (directly, or via the handshake snapshot's frontier) is likewise dropped, so a partition-delayed relay of a spawn the source has since terminated can never resurrect the dead proxy; an uncovered relay is a genuine heal of a lost direct broadcast and is applied and forwarded. Broadcasts arriving on the source's own connection are always authoritative and refresh the stored incarnation. Death detection is the one hearsay case: when a peer infers terminations from a lost connection, nodes that still hold a live connection to the affected node ignore the inference and trust their own view.
+
 ## PID Routing
 
 PIDs encode the node ID in the upper 16 bits:

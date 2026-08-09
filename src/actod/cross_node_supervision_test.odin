@@ -6,9 +6,9 @@ import "core:time"
 
 @(test)
 test_is_local_pid_local :: proc(t: ^testing.T) {
-	saved := current_node_id
-	defer {current_node_id = saved}
-	current_node_id = 1
+	saved := NODE.node_id
+	defer {NODE.node_id = saved}
+	NODE.node_id = 1
 
 	handle := Handle {
 		idx        = 5,
@@ -23,9 +23,9 @@ test_is_local_pid_local :: proc(t: ^testing.T) {
 
 @(test)
 test_is_local_pid_remote :: proc(t: ^testing.T) {
-	saved := current_node_id
-	defer {current_node_id = saved}
-	current_node_id = 1
+	saved := NODE.node_id
+	defer {NODE.node_id = saved}
+	NODE.node_id = 1
 
 	handle := Handle {
 		idx        = 5,

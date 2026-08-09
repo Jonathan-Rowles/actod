@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+Three cross-node supervision and pub/sub fixes
+
 Network listeners now bind loopback by default (config-breaking for
 multi-machine meshes, which must now opt in): `make_network_config` has a
 `bind_address` field defaulting to `"127.0.0.1"`, applied to both the TCP

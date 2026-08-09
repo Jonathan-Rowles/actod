@@ -673,6 +673,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	send_node_directory(data)
 	send_udp_info(data)
 	try_activate_udp(data)
+	announce_subscriptions_to_node(data.node_id)
 
 	if data.heartbeat_interval > 0 {
 		data.heartbeat_timer_id, _ = set_timer(data.heartbeat_interval, true)

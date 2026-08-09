@@ -811,7 +811,7 @@ nbio_available :: proc() -> bool {
 		g_nbio_probed = true
 		if err := nbio.acquire_thread_event_loop(); err != nil {
 			log.errorf(
-				"Async IO backend (nbio/io_uring) unavailable on this host: %v. actod networking requires io_uring support (recent Linux kernel); remote messaging is disabled. Set network.port = 0 for a local-only node, or run on a host with io_uring.",
+				"Async IO backend (nbio/io_uring) unavailable on this host: %v. actod networking requires io_uring support (recent Linux kernel); remote messaging is disabled. Set network.port = 0 for a local-only node, or run on a host with io_uring. If the error is Allocation_Failed, the io_uring queues exceeded RLIMIT_MEMLOCK (ulimit -l): rebuild with -define:ODIN_NBIO_QUEUE_SIZE=256 or raise the limit.",
 				err,
 			)
 			g_nbio_available = false
@@ -842,7 +842,10 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 	defer ring_io_release(ring)
 
 	if err := nbio.acquire_thread_event_loop(); err != nil {
-		log.errorf("Failed to acquire NBIO event loop: %v", err)
+		log.errorf(
+			"Failed to acquire NBIO event loop: %v. Each connection's IO thread creates an io_uring instance whose queues count against RLIMIT_MEMLOCK (ulimit -l), so this typically means the process holds too many connections for the limit. Rebuild with -define:ODIN_NBIO_QUEUE_SIZE=256 (default 2048) to shrink each instance, or raise the memlock limit.",
+			err,
+		)
 		_ = send_message(ctx.conn_pid, Close_Connection{reason = "nbio unavailable"})
 		return
 	}

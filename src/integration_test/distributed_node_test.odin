@@ -2005,3 +2005,147 @@ test_udp_fallback_to_tcp :: proc(t: ^testing.T) {
 	success := sync.sema_wait_with_timeout(&done, scaled_timeout(10 * time.Second))
 	expect(t, success, "send_unreliable must fall back to TCP when the peer has no UDP lane")
 }
+
+test_remote_spawn_parent_link :: proc(t: ^testing.T) {
+	_ = actod.register_spawn_func("hello_probe", spawn_hello_probe)
+
+	child_msg := sync.Sema{}
+	child_gone := sync.Sema{}
+
+	Remote_Parent_Data :: struct {
+		child_msg:  ^sync.Sema,
+		child_gone: ^sync.Sema,
+	}
+
+	parent_behaviour := actod.Actor_Behaviour(Remote_Parent_Data) {
+		handle_message = proc(data: ^Remote_Parent_Data, from: actod.PID, msg: any) {
+			switch m in msg {
+			case string:
+				if m == "go" {
+					_, spawned := actod.spawn_remote(
+						"hello_probe",
+						"hp1",
+						"SupervisionNode",
+						actod.get_self_pid(),
+					)
+					if !spawned {
+						fmt.println("spawn_remote hello_probe failed")
+					}
+				}
+			case shared.Two_Node_Message:
+				sync.sema_post(data.child_msg)
+			}
+		},
+		on_child_terminated = proc(
+			data: ^Remote_Parent_Data,
+			child_pid: actod.PID,
+			reason: actod.Termination_Reason,
+			will_restart: bool,
+		) {
+			sync.sema_post(data.child_gone)
+		},
+	}
+
+	parent_pid, parent_ok := actod.spawn(
+		"remote_probe_parent",
+		Remote_Parent_Data{child_msg = &child_msg, child_gone = &child_gone},
+		parent_behaviour,
+	)
+	expect(t, parent_ok, "Should spawn the local parent")
+
+	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
+	if !start_ok {
+		expect(t, false, "Failed to start the supervision server")
+		return
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	time.sleep(200 * time.Millisecond)
+
+	remote_addr := net.Endpoint {
+		address = net.IP4_Loopback,
+		port    = test_base_port + 1,
+	}
+	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
+	expect(t, reg_ok, "Failed to register remote node")
+
+	time.sleep(300 * time.Millisecond)
+
+	_ = actod.send_message(parent_pid, "go")
+
+	got_msg := sync.sema_wait_with_timeout(&child_msg, scaled_timeout(5 * time.Second))
+	expect(t, got_msg, "The remote child's send_message_to_parent must reach the local parent")
+
+	got_term := sync.sema_wait_with_timeout(&child_gone, scaled_timeout(5 * time.Second))
+	expect(t, got_term, "on_child_terminated must fire when the remote child self-terminates")
+
+	_ = actod.terminate_actor(parent_pid)
+	time.sleep(100 * time.Millisecond)
+}
+
+test_pubsub_subscribe_before_connect :: proc(t: ^testing.T) {
+	publisher_type, _ := actod.register_actor_type("pubsub_broadcast_publisher")
+	got_broadcast := sync.Sema{}
+
+	Late_Sub_Data :: struct {
+		got_broadcast:  ^sync.Sema,
+		publisher_type: actod.Actor_Type,
+	}
+
+	sub_behaviour := actod.Actor_Behaviour(Late_Sub_Data) {
+		init = proc(data: ^Late_Sub_Data) {
+			_, _ = actod.subscribe_type(data.publisher_type)
+		},
+		handle_message = proc(data: ^Late_Sub_Data, from: actod.PID, msg: any) {
+			switch _ in msg {
+			case shared.Pubsub_Broadcast_Msg:
+				sync.sema_post(data.got_broadcast)
+			}
+		},
+	}
+
+	sub_pid, sub_ok := actod.spawn(
+		"late_subscriber",
+		Late_Sub_Data{got_broadcast = &got_broadcast, publisher_type = publisher_type},
+		sub_behaviour,
+	)
+	expect(t, sub_ok, "Should spawn the subscriber")
+
+	time.sleep(200 * time.Millisecond)
+
+	remote_desc := os.Process_Desc {
+		command = []string{INTEGRATION_TEST_BIN},
+		stderr  = os.stderr,
+		env     = make_test_env(
+			[]string {
+				"ACTOD_TEST_NODE=latecomer_publisher",
+				"TARGET_NODE=TestNode1",
+				fmt.tprintf("TARGET_PORT=%d", test_base_port),
+				"AUTH_PASSWORD=test_dist_password",
+			},
+		),
+	}
+
+	remote_process, remote_err := os.process_start(remote_desc)
+	if remote_err != nil {
+		expect(t, false, "Failed to start the latecomer publisher")
+		return
+	}
+	defer {
+		_ = os.process_kill(remote_process)
+		_, _ = os.process_wait(remote_process)
+	}
+
+	delivered := sync.sema_wait_with_timeout(&got_broadcast, scaled_timeout(8 * time.Second))
+	expect(
+		t,
+		delivered,
+		"A subscriber that existed before the publisher's node connected must receive broadcasts",
+	)
+
+	_ = actod.terminate_actor(sub_pid)
+	time.sleep(100 * time.Millisecond)
+}

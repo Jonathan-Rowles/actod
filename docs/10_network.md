@@ -189,13 +189,19 @@ sub, ok := act.subscribe_type(LOGGER_TYPE)
 act.broadcast(Log_Entry{text = "hello from B"})
 ```
 
-Subscription state is synced between nodes. Each node tracks remote subscriber counts per actor type.
+Subscription state is synced between nodes. Each node tracks remote subscriber counts per actor type. Subscriptions are announced when they are created and re-announced to every peer whose connection completes a handshake, so subscribers are seen by broadcaster nodes that connect (or reconnect) later.
 
 ## Failure Handling
 
 - **Heartbeats**: Sent at `heartbeat_interval` (default 30s). Node marked dead after `heartbeat_timeout` (default 90s).
 - **Reconnection**: Automatic with exponential backoff. `reconnect_initial_delay` (2s) then `reconnect_retry_delay` (3s) between attempts.
 - **Cleanup**: Remote actor proxies are removed from the registry when a node disconnects. Local actors sending to dead remotes get `NODE_DISCONNECTED` errors.
+
+## Fan-Out and RLIMIT_MEMLOCK (Linux)
+
+Each peer connection runs an IO thread with its own io_uring instance, whose queues count against the process's locked-memory limit (`ulimit -l`, commonly 8MB). With the default nbio queue size (`ODIN_NBIO_QUEUE_SIZE=2048`), a process holding roughly 6 or more connection rings can fail `io_uring_setup` with `Allocation_Failed`; the connection then closes and reconnects in a loop, dropping buffered sends after they returned `.OK`.
+
+If a node talks to many peers (high mesh fan-out), either build with `-define:ODIN_NBIO_QUEUE_SIZE=256` (a 10-node full mesh runs comfortably at this setting) or raise the memlock limit. The runtime error message names both options when it happens.
 
 ## API
 

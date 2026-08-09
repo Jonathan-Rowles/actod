@@ -2790,7 +2790,14 @@ restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
 			return
 		}
 
-		new_pid, ok = spawn_remote(spawn_func_name, get_actor_name(old_pid), node_name, actor.pid)
+		new_pid, ok = spawn_remote_impl(
+			spawn_func_name,
+			get_actor_name(old_pid),
+			node_name,
+			actor.pid,
+			SPAWN_REMOTE_TIMEOUT,
+			false,
+		)
 	} else {
 		// Local child, or a remote child added via a SPAWN closure that spawns it remotely.
 		new_pid, ok = actor.opts.children[child_index]("", actor.pid)

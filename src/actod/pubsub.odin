@@ -287,6 +287,40 @@ get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
 	return sync.atomic_load_explicit(&type_subscribers[actor_type].count, .Acquire)
 }
 
+// Re-announce every local subscription to a peer whose connection just reached
+// Ready. Subscribe_Remote otherwise only goes out at subscribe time, so a peer
+// that connected later (or reconnected, which cleared its counts) would never
+// learn about existing subscribers. A subscription created during the Ready
+// transition can be announced twice; the count-based bookkeeping then over-counts
+// by one until the next disconnect clears it, which costs a no-op wire broadcast.
+announce_subscriptions_to_node :: proc(node_id: Node_ID) {
+	ring := get_connection_ring(node_id)
+	if ring == nil {
+		return
+	}
+	for type_idx in 1 ..< MAX_ACTOR_TYPES {
+		list := &type_subscribers[Actor_Type(type_idx)]
+		n := sync.atomic_load_explicit(&list.local_count, .Acquire)
+		if n == 0 {
+			continue
+		}
+		type_hash, hash_ok := get_actor_type_hash(Actor_Type(type_idx))
+		if !hash_ok {
+			continue
+		}
+		for i in 0 ..< n {
+			pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
+			if pid == 0 {
+				continue
+			}
+			send_lifecycle_message(
+				ring,
+				Subscribe_Remote{subscriber_pid = pid, type_name_hash = type_hash},
+			)
+		}
+	}
+}
+
 handle_remote_subscribe :: proc(msg: Subscribe_Remote, from_node: Node_ID) {
 	local_type, found := get_actor_type_by_hash(msg.type_name_hash)
 	if !found {

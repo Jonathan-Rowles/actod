@@ -418,6 +418,9 @@ send_message_to_parent_impl :: proc(
 		)
 		return .ACTOR_NOT_FOUND
 	}
+	if !is_local_pid(actor.parent) {
+		return send_message_impl(actor.parent, data, size, tid, info, class, loc)
+	}
 	parent_actor, got_parent := get_actor_from_pointer(get(&global_registry, actor.parent))
 	if !got_parent {
 		log.errorf(
@@ -450,6 +453,13 @@ send_message_to_children_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 	for child_pid in actor.children {
+		if !is_local_pid(child_pid) {
+			err := send_message_impl(child_pid, data, size, tid, info, class, loc)
+			if err != .OK {
+				return err
+			}
+			continue
+		}
 		child_actor, child_ok := get_actor_from_pointer(get(&global_registry, child_pid))
 		if !child_ok {
 			log.errorf(

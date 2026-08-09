@@ -335,6 +335,20 @@ ALL_TESTS :: []Test_Entry {
 		is_networked = true,
 	},
 	{
+		name = "test_remote_spawn_parent_link",
+		test_proc = test_remote_spawn_parent_link,
+		port = 17190,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_pubsub_subscribe_before_connect",
+		test_proc = test_pubsub_subscribe_before_connect,
+		port = 17200,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
 		name = "test_node_shutdown_under_load",
 		test_proc = test_node_shutdown_under_load,
 		worker_count = ALL_CORES_WORKERS,

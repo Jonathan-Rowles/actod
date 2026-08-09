@@ -722,6 +722,26 @@ spawn_remote :: proc(
 	PID,
 	bool,
 ) {
+	return spawn_remote_impl(spawn_func_name, actor_name, target_node, parent_pid, timeout, true, loc)
+}
+
+// register_with_parent sends Add_Child to parent_pid so the parent supervises the
+// remote child (children list, child_restarts, on_child_terminated). restart_child
+// passes false: it already re-links the restarted pid in place, and the redundant
+// Add_Child would only trip the duplicate-child guard.
+@(private)
+spawn_remote_impl :: proc(
+	spawn_func_name: string,
+	actor_name: string,
+	target_node: string,
+	parent_pid: PID,
+	timeout: time.Duration,
+	register_with_parent: bool,
+	loc := #caller_location,
+) -> (
+	PID,
+	bool,
+) {
 	context.logger = diagnostic_logger(context.logger)
 	_, registered := get_spawn_func_by_hash(fnv1a_hash(spawn_func_name))
 	if !registered {
@@ -841,7 +861,27 @@ spawn_remote :: proc(
 	sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 
 	remote_handle, _ := unpack_pid(response.pid)
-	return pack_pid(remote_handle, node_id), true
+	child_pid := pack_pid(remote_handle, node_id)
+
+	if register_with_parent && parent_pid != 0 {
+		add_child_msg := Add_Child {
+			existing_pid         = child_pid,
+			spawn_func_name_hash = request.spawn_func_name_hash,
+		}
+		if err := send_message(parent_pid, add_child_msg); err != .OK {
+			log.warnf(
+				"spawn_remote('%s'): spawned %v on '%s' but could not register it with parent %v (%v); the parent will not supervise it or see its termination",
+				actor_name,
+				child_pid,
+				target_node,
+				parent_pid,
+				err,
+				location = loc,
+			)
+		}
+	}
+
+	return child_pid, true
 }
 
 @(private)

@@ -39,6 +39,8 @@ run_node_role :: proc(command: string) {
 		run_mesh_leaf()
 	case "pubsub_subscriber":
 		run_pubsub_subscriber()
+	case "latecomer_publisher":
+		run_latecomer_publisher()
 	case "union_sender":
 		run_union_sender()
 	case "bytes_sender":
@@ -894,12 +896,109 @@ run_supervision_server :: proc() {
 	defer actod.shutdown_node()
 
 	_ = actod.register_spawn_func("supervision_worker", spawn_supervision_worker)
+	_ = actod.register_spawn_func("hello_probe", spawn_hello_probe)
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
 	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+
+	fmt.println("READY")
+
+	for {
+		time.sleep(100 * time.Millisecond)
+	}
+}
+
+Hello_Probe_Data :: struct {
+	die_timer: u32,
+}
+
+spawn_hello_probe :: proc(name: string, parent: actod.PID) -> (actod.PID, bool) {
+	behaviour := actod.Actor_Behaviour(Hello_Probe_Data) {
+		init = proc(d: ^Hello_Probe_Data) {
+			msg := shared.make_two_node_message(77, "hello from remote child", "hello_probe")
+			if err := actod.send_message_to_parent(msg); err != .OK {
+				fmt.printf("hello_probe: send_message_to_parent failed: %v\n", err)
+			}
+			d.die_timer, _ = actod.set_timer(150 * time.Millisecond, false)
+		},
+		handle_message = proc(d: ^Hello_Probe_Data, from: actod.PID, content: any) {
+			switch _ in content {
+			case actod.Timer_Tick:
+				actod.self_terminate()
+			}
+		},
+	}
+	return actod.spawn(
+		name,
+		Hello_Probe_Data{},
+		behaviour,
+		actod.make_actor_config(restart_policy = .TEMPORARY),
+		parent,
+	)
+}
+
+run_latecomer_publisher :: proc() {
+	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
+	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17190"
+	auth_password :=
+		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+
+	target_port := 17190
+	if port_val, ok := strconv.parse_int(target_port_str); ok {
+		target_port = port_val
+	}
+
+	actod.node_init(
+		name = "LatecomerPublisher",
+		opts = actod.make_node_config(
+			network = actod.make_network_config(
+				port = 0,
+				auth_password = auth_password,
+				heartbeat_interval = 100 * time.Millisecond,
+				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
+			),
+			actor_config = actod.make_actor_config(
+				logging = actod.make_log_config(level = log_level),
+			),
+		),
+	)
+	defer actod.shutdown_node()
+
+	publisher_type, _ := actod.register_actor_type("pubsub_broadcast_publisher")
+
+	target_addr := net.Endpoint {
+		address = net.IP4_Loopback,
+		port    = target_port,
+	}
+	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+
+	Latecomer_Pub_Data :: struct {
+		tick: u32,
+		seq:  u64,
+	}
+
+	behaviour := actod.Actor_Behaviour(Latecomer_Pub_Data) {
+		actor_type = publisher_type,
+		init = proc(d: ^Latecomer_Pub_Data) {
+			d.tick, _ = actod.set_timer(100 * time.Millisecond, true)
+		},
+		handle_message = proc(d: ^Latecomer_Pub_Data, from: actod.PID, content: any) {
+			switch _ in content {
+			case actod.Timer_Tick:
+				d.seq += 1
+				actod.broadcast(shared.Pubsub_Broadcast_Msg{value = 42, timestamp = d.seq})
+			}
+		},
+	}
+
+	_, spawn_ok := actod.spawn("latecomer_publisher", Latecomer_Pub_Data{}, behaviour)
+	if !spawn_ok {
+		fmt.println("Failed to spawn latecomer publisher")
+		os.exit(1)
+	}
 
 	fmt.println("READY")
 

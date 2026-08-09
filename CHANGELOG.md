@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+Network listeners now bind loopback by default (config-breaking for
+multi-machine meshes, which must now opt in): `make_network_config` has a
+`bind_address` field defaulting to `"127.0.0.1"`, applied to both the TCP
+listener and the UDP lane (previously both bound `0.0.0.0` unconditionally).
+Set `bind_address = "0.0.0.0"` to accept nodes from other machines;
+`node_init` refuses a non-loopback bind with an empty `auth_password`, and
+warns when it is combined with plaintext (unencrypted) authentication.
+Behaviour is otherwise unchanged: gossip discovery, heartbeats, and
+reconnect work as before once the bind is opened. The trust boundary is
+documented in `docs/10_network.md`.
+
 Wire protocol v3 to v4 (breaking): the priority flag bits are gone from the
 wire format, and user messages can carry an 8-byte ask correlation token
 after the header (ASK_TOKEN flag).

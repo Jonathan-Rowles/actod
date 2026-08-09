@@ -209,6 +209,17 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 		SYSTEM_CONFIG.loc = loc
 	}
 
+	bind_addr, bind_ok := parse_bind_address(opts.network.bind_address)
+	if !bind_ok {
+		panic_at(
+			loc,
+			"node_init('%s'): network.bind_address must be an IP address (e.g. \"127.0.0.1\", \"0.0.0.0\", \"::\"), got %q%s",
+			name,
+			opts.network.bind_address,
+			config_origin(opts.loc),
+		)
+	}
+
 	if opts.network.enable_encryption && get_auth_password() == "" {
 		panic_at(
 			loc,
@@ -218,13 +229,26 @@ node_init :: proc(name: string, opts := SYSTEM_CONFIG, loc := #caller_location) 
 		)
 	}
 
-	if opts.network.port > 0 && !opts.network.enable_encryption && get_auth_password() == "" {
-		log.warnf(
-			"node_init('%s'): listening on 0.0.0.0:%d with NO authentication and NO encryption%s. Any host that can reach this port can spawn actors, deliver messages, and terminate actors on this node. Set auth_password (and preferably enable_encryption), or keep port = 0 unless the network is trusted",
-			name,
-			opts.network.port,
-			config_origin(opts.loc),
-		)
+	if opts.network.port > 0 && !address_is_loopback(bind_addr) {
+		if get_auth_password() == "" {
+			panic_at(
+				loc,
+				"node_init('%s'): refusing to listen on %s:%d with NO authentication and NO encryption%s. Any host that can reach this port could spawn actors, deliver messages, and terminate actors on this node. Set auth_password in make_network_config() or the ACTOD_AUTH_PASSWORD env var (and preferably enable_encryption), or keep the default loopback bind_address",
+				name,
+				opts.network.bind_address,
+				opts.network.port,
+				config_origin(opts.loc),
+			)
+		}
+		if !opts.network.enable_encryption {
+			log.warnf(
+				"node_init('%s'): listening on %s:%d with plaintext authentication%s. The password exchange is offline-crackable and frames carry no post-auth integrity protection; set enable_encryption = true unless the network is trusted",
+				name,
+				opts.network.bind_address,
+				opts.network.port,
+				config_origin(opts.loc),
+			)
+		}
 	}
 
 	NODE.started = true

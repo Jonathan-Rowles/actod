@@ -16,6 +16,7 @@ SPIN_STRATEGY :: enum {
 
 Network_Config :: struct {
 	auth_password:           string,
+	bind_address:            string,
 	port:                    int,
 	udp_port:                int,
 	udp_max_datagram:        int,
@@ -29,6 +30,7 @@ Network_Config :: struct {
 
 DEFAULT_NETWORK_CONFIG := Network_Config {
 	auth_password           = "",
+	bind_address            = "127.0.0.1",
 	port                    = 0,
 	udp_port                = 0,
 	udp_max_datagram        = 1400,
@@ -42,6 +44,7 @@ DEFAULT_NETWORK_CONFIG := Network_Config {
 
 make_network_config :: proc(
 	auth_password: string = DEFAULT_NETWORK_CONFIG.auth_password,
+	bind_address: string = DEFAULT_NETWORK_CONFIG.bind_address,
 	port: int = DEFAULT_NETWORK_CONFIG.port,
 	udp_port: int = DEFAULT_NETWORK_CONFIG.udp_port,
 	udp_max_datagram: int = DEFAULT_NETWORK_CONFIG.udp_max_datagram,
@@ -55,6 +58,13 @@ make_network_config :: proc(
 ) -> Network_Config {
 	if port < 0 || port > 65535 {
 		panic_at(loc, "make_network_config: port must be 0-65535, got %d", port)
+	}
+	if _, bind_ok := parse_bind_address(bind_address); !bind_ok {
+		panic_at(
+			loc,
+			"make_network_config: bind_address must be an IP address (e.g. \"127.0.0.1\", \"0.0.0.0\", \"::\"), got %q",
+			bind_address,
+		)
 	}
 	if udp_port < 0 || udp_port > 65535 {
 		panic_at(loc, "make_network_config: udp_port must be 0-65535, got %d", udp_port)
@@ -83,6 +93,7 @@ make_network_config :: proc(
 
 	return Network_Config {
 		auth_password = auth_password,
+		bind_address = bind_address,
 		port = port,
 		udp_port = udp_port,
 		udp_max_datagram = udp_max_datagram,

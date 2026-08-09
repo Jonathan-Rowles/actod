@@ -150,6 +150,7 @@ Message_Flow_Entry :: struct {
 
 Network_Config :: struct {
 	auth_password:           string,
+	bind_address:            string,
 	port:                    int,
 	udp_port:                int,
 	udp_max_datagram:        int,
@@ -316,6 +317,7 @@ Hot_API :: struct {
 	) -> Actor_Config,
 	make_network_config:       proc(
 		auth_password: string,
+		bind_address: string,
 		port: int,
 		udp_port: int,
 		udp_max_datagram: int,
@@ -448,8 +450,8 @@ make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_ST
 	return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 }
 
-make_network_config :: proc(auth_password: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
-	return hot_api.make_network_config(auth_password, port, udp_port, udp_max_datagram, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
+make_network_config :: proc(auth_password: string = "", bind_address: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
+	return hot_api.make_network_config(auth_password, bind_address, port, udp_port, udp_max_datagram, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
 }
 
 make_log_config :: proc(level: log.Level = {}, console_opts: log.Options = {}, file_opts: log.Options = {}, ident: string = "", enable_file: bool = false, log_path: string = "", custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {

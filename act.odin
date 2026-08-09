@@ -127,6 +127,7 @@ make_actor_config :: proc(
 
 make_network_config :: proc(
 	auth_password: string = actod.DEFAULT_NETWORK_CONFIG.auth_password,
+	bind_address: string = actod.DEFAULT_NETWORK_CONFIG.bind_address,
 	port: int = actod.DEFAULT_NETWORK_CONFIG.port,
 	udp_port: int = actod.DEFAULT_NETWORK_CONFIG.udp_port,
 	udp_max_datagram: int = actod.DEFAULT_NETWORK_CONFIG.udp_max_datagram,
@@ -140,6 +141,7 @@ make_network_config :: proc(
 ) -> Network_Config {
 	return actod.make_network_config(
 		auth_password,
+		bind_address,
 		port,
 		udp_port,
 		udp_max_datagram,

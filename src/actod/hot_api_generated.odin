@@ -40,6 +40,7 @@ Hot_API :: struct {
 	) -> Actor_Config,
 	make_network_config:       proc(
 		auth_password: string,
+		bind_address: string,
 		port: int,
 		udp_port: int,
 		udp_max_datagram: int,

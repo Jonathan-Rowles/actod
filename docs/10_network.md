@@ -36,6 +36,7 @@ _, _ = act.register_node("nodeA", net.Endpoint{address = ..., port = 5000})
 ```odin
 act.make_network_config(
     port                    = 0,             // 0 = networking disabled
+    bind_address            = "127.0.0.1",   // loopback by default; see Trust boundary
     auth_password           = "",            // empty = no auth
     enable_encryption       = false,         // Noise NNpsk0 over the TCP link
     udp_port                = 0,             // 0 = no UDP lane
@@ -48,6 +49,17 @@ act.make_network_config(
 ```
 
 `connection_ring` is a `Connection_Ring_Config` field for expert tuning of the per-node send ring (slot counts, buffer sizes, Nagle). It has working defaults; leave it unset unless you have a measured reason to change it. There is no builder for it, populate the struct directly if needed.
+
+## Trust boundary
+
+The listener binds `bind_address` (TCP and, when enabled, the UDP lane). The default is `127.0.0.1`, so out of the box only processes on the same host can connect. To accept nodes from other machines, set `bind_address = "0.0.0.0"` (or a specific interface IP) explicitly.
+
+Two rules are enforced at `node_init`:
+
+- **A non-loopback bind requires a password.** `bind_address` beyond loopback with an empty `auth_password` is refused at startup. Any host that reaches the port would otherwise join the mesh with full authority.
+- **A non-loopback bind without `enable_encryption` warns.** Plaintext challenge-response proves the peer knows the password, but the exchange is offline-crackable and post-handshake frames carry no integrity protection. Treat plaintext mode as LAN-trusted-only.
+
+Know what the password grants: an authenticated peer is **fully trusted**. It can spawn any registered behaviour on this node, deliver messages to any actor by name, and terminate actors. The password is cluster admission, not per-action authorization; only share it with nodes you would let run arbitrary registered code.
 
 ## Encryption
 

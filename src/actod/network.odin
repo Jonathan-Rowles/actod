@@ -68,6 +68,29 @@ Node_Info :: struct {
 }
 
 @(private)
+parse_bind_address :: proc(bind_address: string) -> (net.Address, bool) {
+	if bind_address == "" {
+		return net.IP4_Loopback, true
+	}
+	if _, port, _ := net.split_port(bind_address); port != 0 {
+		return nil, false
+	}
+	addr := net.parse_address(bind_address)
+	return addr, addr != nil
+}
+
+@(private)
+address_is_loopback :: proc(addr: net.Address) -> bool {
+	switch a in addr {
+	case net.IP4_Address:
+		return a[0] == 127
+	case net.IP6_Address:
+		return a == net.IP6_Loopback
+	}
+	return false
+}
+
+@(private)
 get_auth_password :: proc() -> string {
 	if SYSTEM_CONFIG.network.auth_password != "" {
 		return SYSTEM_CONFIG.network.auth_password
@@ -115,9 +138,10 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	}
 
 	Listener_Context :: struct {
-		port:   int,
-		logger: runtime.Logger,
-		loc:    runtime.Source_Code_Location,
+		bind_addr: net.Address,
+		port:      int,
+		logger:    runtime.Logger,
+		loc:       runtime.Source_Code_Location,
 	}
 
 
@@ -127,7 +151,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 		defer free(listener_ctx)
 
 		endpoint := net.Endpoint {
-			address = net.IP4_Any,
+			address = listener_ctx.bind_addr,
 			port    = listener_ctx.port,
 		}
 
@@ -145,7 +169,11 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 
 		NODE.network_listener_socket = listen_sock
 
-		log.infof("Node discoverable on port %d", listener_ctx.port)
+		log.infof(
+			"Node discoverable on %s port %d",
+			net.address_to_string(listener_ctx.bind_addr, context.temp_allocator),
+			listener_ctx.port,
+		)
 		sync.atomic_store(&NODE.network_listener_running, 1)
 
 		net.set_blocking(listen_sock, false)
@@ -181,6 +209,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	}
 
 	ctx := new(Listener_Context)
+	ctx.bind_addr, _ = parse_bind_address(SYSTEM_CONFIG.network.bind_address)
 	ctx.port = SYSTEM_CONFIG.network.port
 	ctx.logger = context.logger
 	ctx.loc = SYSTEM_CONFIG.loc

@@ -40,6 +40,12 @@ x86 p99 varies 0.5-2µs between runs; p50 is stable within ±1%.
 
 ## Usage
 
+### Requirements
+
+Odin `dev-2026-07a` or newer (the version CI builds and tests against; see the
+`release:` pin in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), which
+is the source of truth if this paragraph rots).
+
 ### Installation
 
 Vendor actod into your project, pinned to a release tag. Submodule recommended:

@@ -80,7 +80,8 @@ init_udp :: proc(loc := #caller_location) -> bool {
 		return true
 	}
 
-	recv_sock, recv_err := net.make_bound_udp_socket(net.IP4_Any, port)
+	bind_addr, _ := parse_bind_address(SYSTEM_CONFIG.network.bind_address)
+	recv_sock, recv_err := net.make_bound_udp_socket(bind_addr, port)
 	if recv_err != nil {
 		log.errorf(
 			"Failed to bind UDP port %d: %v; another process may already hold it, change udp_port in make_network_config",

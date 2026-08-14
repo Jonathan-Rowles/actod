@@ -49,6 +49,22 @@ live_actor_count :: proc() -> int {
 	return len(actors)
 }
 
+slab_in_use :: proc() -> i64 {
+	return actod.slot_slab_in_use(&actod.NODE.actor_slab) +
+		actod.slot_slab_in_use(&actod.NODE.coro_slab)
+}
+
+wait_for_slab_release :: proc(target: i64) -> bool {
+	start := time.now()
+	for time.since(start) < REAP_TIMEOUT {
+		if slab_in_use() <= target {
+			return true
+		}
+		time.sleep(REAP_POLL_INTERVAL)
+	}
+	return false
+}
+
 wait_for_reap :: proc(target: int) -> (elapsed: time.Duration, ok: bool) {
 	start := time.now()
 	for time.since(start) < REAP_TIMEOUT {
@@ -116,6 +132,7 @@ main :: proc() {
 	)
 
 	baseline_live := live_actor_count()
+	baseline_slab := slab_in_use()
 	baseline := take_snapshot()
 
 	pids := make([dynamic]actod.PID, 0, count)
@@ -164,7 +181,11 @@ main :: proc() {
 		fmt.printf("reap to idle:       TIMED OUT after %v (%d still live)\n", reap_elapsed, live_actor_count())
 	}
 
+	slots_returned := wait_for_slab_release(baseline_slab)
 	after_reap := take_snapshot()
+	if !slots_returned {
+		fmt.printf("slab slots not returned within timeout, residual below is not settled\n")
+	}
 	if MEM_STATS_AVAILABLE {
 		fmt.printf(
 			"RSS residual:       %.2f KB/actor\n",

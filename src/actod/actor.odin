@@ -697,6 +697,7 @@ actor_loop :: proc(actor: ^Actor($T)) {
 	}
 
 	if libc.setjmp(&actor_ctx.panic_jmp_buf) != 0 {
+		// Landed here from longjmp, actor panicked
 		actor_panic_teardown(actor, actor_ctx)
 		return
 	}

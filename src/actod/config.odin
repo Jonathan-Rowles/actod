@@ -10,8 +10,6 @@ import "core:time"
 CACHE_LINE_SIZE :: 64 // TODO:
 SYSTEM_MAILBOX_SIZE :: 16
 
-// Address sanitizer red-zones every stack frame, which inflates stack use several fold,
-// so a stack that is comfortable in a normal build genuinely overflows under it.
 DEFAULT_CORO_STACK_SIZE :: mem.Kilobyte * 56 when !coro.ASAN_FIBERS else mem.Kilobyte * 512
 
 SPIN_STRATEGY :: enum {

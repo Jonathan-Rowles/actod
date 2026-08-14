@@ -71,6 +71,11 @@ get_type_info_ptr :: proc(
 	return nil, false
 }
 
+@(thread_local)
+g_type_hash_cache_key: u64
+@(thread_local)
+g_type_hash_cache_val: ^Message_Type_Info
+
 get_type_info_by_hash :: #force_inline proc(
 	type_hash: u64,
 	loc := #caller_location,
@@ -78,7 +83,15 @@ get_type_info_by_hash :: #force_inline proc(
 	^Message_Type_Info,
 	bool,
 ) {
-	return registry_get_by_hash(&g_message_registry, type_hash, loc)
+	if type_hash != 0 && g_type_hash_cache_key == type_hash {
+		return g_type_hash_cache_val, true
+	}
+	info, ok := registry_get_by_hash(&g_message_registry, type_hash, loc)
+	if ok {
+		g_type_hash_cache_key = type_hash
+		g_type_hash_cache_val = info
+	}
+	return info, ok
 }
 
 get_active_union_variant :: #force_inline proc(

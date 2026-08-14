@@ -469,9 +469,14 @@ deliver_broadcast_locally :: proc(
 
 	from_pid := pack_pid(from_handle, remote_node_id)
 	list := &NODE.type_subscribers[local_type]
+	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
+	block := load_subscriber_block(list)
+	if block == nil {
+		return true
+	}
 
-	for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
+	for i in 0 ..< n {
+		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
 		if pid != 0 {
 			send_from_payload(pid, from_pid, payload, type_info)
 		}

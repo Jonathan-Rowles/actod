@@ -51,9 +51,13 @@ broadcast_any :: proc(content: any, loc := #caller_location) {
 
 	list := &NODE.type_subscribers[actor_type]
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
+	block := load_subscriber_block(list)
+	if block == nil {
+		return
+	}
 
 	for i in 0 ..< n {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
+		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
 		if pid != 0 && pid != self_pid {
 			send_message_any(pid, content, loc)
 		}

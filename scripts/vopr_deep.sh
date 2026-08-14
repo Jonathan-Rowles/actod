@@ -10,8 +10,12 @@
 set -u
 
 total=${1:-100000}
-cores=$(nproc)
-mem_gb=$(($(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024))
+cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+if [[ -r /proc/meminfo ]]; then
+  mem_gb=$(($(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024))
+else
+  mem_gb=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
+fi
 cpu_cap=$((cores > 2 ? cores - 2 : 1))
 mem_cap=$((mem_gb / 2))
 ((mem_cap < 1)) && mem_cap=1

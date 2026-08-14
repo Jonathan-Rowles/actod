@@ -2,6 +2,7 @@ package actod
 
 import "core:encoding/endian"
 import "core:net"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 
@@ -364,7 +365,10 @@ test_node_directory_serialization :: proc(t: ^testing.T) {
 	network_test_setup()
 	defer network_test_remove_nodes("node_alpha", "node_beta")
 
-	NODE.name = "local_node"
+	if len(NODE.name) > 0 {
+		delete(NODE.name, get_system_allocator())
+	}
+	NODE.name = strings.clone("local_node", get_system_allocator())
 	NODE.node_id = 1
 	sync.atomic_store(&NODE.next_node_id, 2)
 

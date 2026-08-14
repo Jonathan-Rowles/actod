@@ -6,15 +6,16 @@ import "core:thread"
 
 @(private)
 clear_type_subscribers :: proc(actor_type: Actor_Type) {
-	list := &NODE.type_subscribers[actor_type]
-	for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
-		sync.atomic_store_explicit(cast(^u64)&list.subscribers[i], 0, .Release)
+	clear_type_subscriber_list(&NODE.type_subscribers[actor_type])
+}
+
+@(private)
+subscriber_at :: proc(actor_type: Actor_Type, i: u32) -> PID {
+	block := load_subscriber_block(&NODE.type_subscribers[actor_type])
+	if block == nil {
+		return 0
 	}
-	for node_id in 0 ..< MAX_NODES {
-		sync.atomic_store_explicit(&list.remote_node_sub_count[node_id], 0, .Release)
-	}
-	sync.atomic_store_explicit(&list.local_count, 0, .Release)
-	sync.atomic_store_explicit(&list.count, 0, .Release)
+	return PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
 }
 
 @(test)
@@ -30,9 +31,7 @@ test_add_subscriber :: proc(t: ^testing.T) {
 	count := get_subscriber_count(test_type)
 	testing.expect(t, count == 1, "subscriber count should be 1")
 
-	stored := PID(
-		sync.atomic_load_explicit(cast(^u64)&NODE.type_subscribers[test_type].subscribers[0], .Acquire),
-	)
+	stored := subscriber_at(test_type, 0)
 	testing.expect(t, stored == test_pid, "stored PID should match")
 }
 
@@ -63,9 +62,7 @@ test_remove_subscriber :: proc(t: ^testing.T) {
 	testing.expect(t, removed, "remove should succeed")
 	testing.expect(t, get_subscriber_count(test_type) == 0, "count should be 0")
 
-	stored := PID(
-		sync.atomic_load_explicit(cast(^u64)&NODE.type_subscribers[test_type].subscribers[0], .Acquire),
-	)
+	stored := subscriber_at(test_type, 0)
 	testing.expect(t, stored == 0, "slot should be cleared")
 }
 
@@ -189,9 +186,7 @@ test_slot_reuse_after_remove :: proc(t: ^testing.T) {
 	ok := add_subscriber(test_type, pid2)
 	testing.expect(t, ok, "should be able to add after remove")
 
-	stored := PID(
-		sync.atomic_load_explicit(cast(^u64)&NODE.type_subscribers[test_type].subscribers[0], .Acquire),
-	)
+	stored := subscriber_at(test_type, 0)
 	testing.expect(t, stored == pid2, "pid2 should be at slot 0")
 }
 
@@ -213,14 +208,14 @@ test_subscriber_compact_ordering :: proc(t: ^testing.T) {
 	local_n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 	testing.expect(t, local_n == 4, "local_count should be 4")
 
-	slot2 := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[2], .Acquire))
+	slot2 := subscriber_at(test_type, 2)
 	testing.expect(t, slot2 == pids[4], "last PID should fill the gap")
 
 	for i in 0 ..< u32(4) {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
+		pid := subscriber_at(test_type, i)
 		testing.expect(t, pid != 0, "slots 0..3 should be non-zero")
 	}
-	slot4 := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[4], .Acquire))
+	slot4 := subscriber_at(test_type, 4)
 	testing.expect(t, slot4 == 0, "slot 4 should be cleared")
 }
 
@@ -291,12 +286,7 @@ test_concurrent_subscribe :: proc(t: ^testing.T) {
 	)
 
 	for i in 0 ..< u32(PUBSUB_TEST_THREADS) {
-		pid := PID(
-			sync.atomic_load_explicit(
-				cast(^u64)&NODE.type_subscribers[test_type].subscribers[i],
-				.Acquire,
-			),
-		)
+		pid := subscriber_at(test_type, i)
 		testing.expectf(t, pid != 0, "slot %d should be occupied", i)
 	}
 }

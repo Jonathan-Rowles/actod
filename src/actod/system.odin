@@ -6,6 +6,7 @@ import "base:intrinsics"
 import "base:runtime"
 import "core:log"
 import "core:net"
+import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -215,10 +216,19 @@ NODE: ^Node_State = &default_node
 
 @(init)
 init_default_node :: proc "contextless" () {
+	context = runtime.default_context()
 	default_node.reclaim.epoch = 1
 	default_node.node_id = 1
 	default_node.next_node_id = 2
 	default_node.config = DEFAULT_SYSTEM_CONFIG
+	default_node.config.network.auth_password = strings.clone(
+		DEFAULT_SYSTEM_CONFIG.network.auth_password,
+		get_system_allocator(),
+	)
+	default_node.config.network.bind_address = strings.clone(
+		DEFAULT_SYSTEM_CONFIG.network.bind_address,
+		get_system_allocator(),
+	)
 }
 
 get_local_node_name :: proc() -> string {
@@ -235,25 +245,42 @@ get_node_log_ctx :: proc() -> log.Logger {
 }
 
 node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
-	NODE.name = name
+	sys_allocator := get_system_allocator()
+	cloned_name := strings.clone(name, sys_allocator)
+	if len(NODE.name) > 0 {
+		delete(NODE.name, sys_allocator)
+	}
+	NODE.name = cloned_name
 
 	logging_config := opts.actor_config.logging
-	logging_config.ident = name
+	logging_config.ident = NODE.name
 	NODE.logger = init_logger(logging_config)
 	context.logger = NODE.logger
 
+	old_auth := NODE.config.network.auth_password
+	old_bind := NODE.config.network.bind_address
+	cloned_auth := strings.clone(opts.network.auth_password, sys_allocator)
+	cloned_bind := strings.clone(opts.network.bind_address, sys_allocator)
 	NODE.config = opts
+	NODE.config.network.auth_password = cloned_auth
+	NODE.config.network.bind_address = cloned_bind
+	if len(old_auth) > 0 {
+		delete(old_auth, sys_allocator)
+	}
+	if len(old_bind) > 0 {
+		delete(old_bind, sys_allocator)
+	}
 	if NODE.config.loc.file_path == "" {
 		NODE.config.loc = loc
 	}
 
-	bind_addr, bind_ok := parse_bind_address(opts.network.bind_address)
+	bind_addr, bind_ok := parse_bind_address(NODE.config.network.bind_address)
 	if !bind_ok {
 		panic_at(
 			loc,
 			"node_init('%s'): network.bind_address must be an IP address (e.g. \"127.0.0.1\", \"0.0.0.0\", \"::\"), got %q%s",
 			name,
-			opts.network.bind_address,
+			NODE.config.network.bind_address,
 			config_origin(opts.loc),
 		)
 	}
@@ -273,7 +300,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 				loc,
 				"node_init('%s'): refusing to listen on %s:%d with NO authentication and NO encryption%s. Any host that can reach this port could spawn actors, deliver messages, and terminate actors on this node. Set auth_password in make_network_config() or the ACTOD_AUTH_PASSWORD env var (and preferably enable_encryption), or keep the default loopback bind_address",
 				name,
-				opts.network.bind_address,
+				NODE.config.network.bind_address,
 				opts.network.port,
 				config_origin(opts.loc),
 			)
@@ -282,7 +309,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 			log.warnf(
 				"node_init('%s'): listening on %s:%d with plaintext authentication%s. The password exchange is offline-crackable and frames carry no post-auth integrity protection; set enable_encryption = true unless the network is trusted",
 				name,
-				opts.network.bind_address,
+				NODE.config.network.bind_address,
 				opts.network.port,
 				config_origin(opts.loc),
 			)
@@ -645,6 +672,7 @@ shutdown_node :: proc(loc := #caller_location) {
 	shutdown_udp()
 	broadcast_graceful_disconnect("shutdown")
 	terminate_connection_actors_and_wait()
+	staging_drop_node_rings()
 
 	clear_all_subscriptions()
 
@@ -774,6 +802,10 @@ reset_node_state :: proc() {
 	sync.atomic_store(&NODE.next_node_id, 2)
 	NODE.node_id = 1
 	NODE.started = false
+	if len(NODE.name) > 0 {
+		delete(NODE.name, get_system_allocator())
+		NODE.name = ""
+	}
 	// NOTE: shutting_down stays true until node_init to prevent
 	// concurrent senders from accessing freed actor memory.
 	NODE.pid = 0

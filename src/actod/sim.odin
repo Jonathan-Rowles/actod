@@ -1,6 +1,7 @@
 package actod
 
 import "base:builtin"
+import "core:strings"
 
 Sim_Trace_Kind :: enum u8 {
 	Node_Step,
@@ -83,6 +84,7 @@ sim_resume_next :: proc(w: ^Worker) {
 	}
 	sim_trace_record(.Actor_Resume, u64(w.id), u64((cast(^Actor(int))handle.actor_ptr).pid))
 	worker_resume_handle(w, handle)
+	worker_flush_staging()
 }
 
 sim_create_node :: proc() -> ^Node_State {
@@ -91,6 +93,14 @@ sim_create_node :: proc() -> ^Node_State {
 	node.node_id = 1
 	node.next_node_id = 2
 	node.config = DEFAULT_SYSTEM_CONFIG
+	node.config.network.auth_password = strings.clone(
+		DEFAULT_SYSTEM_CONFIG.network.auth_password,
+		get_system_allocator(),
+	)
+	node.config.network.bind_address = strings.clone(
+		DEFAULT_SYSTEM_CONFIG.network.bind_address,
+		get_system_allocator(),
+	)
 	return node
 }
 
@@ -101,6 +111,15 @@ sim_bind_node :: proc(node: ^Node_State) -> ^Node_State {
 }
 
 sim_destroy_node :: proc(node: ^Node_State) {
+	if len(node.name) > 0 {
+		delete(node.name, get_system_allocator())
+	}
+	if len(node.config.network.auth_password) > 0 {
+		delete(node.config.network.auth_password, get_system_allocator())
+	}
+	if len(node.config.network.bind_address) > 0 {
+		delete(node.config.network.bind_address, get_system_allocator())
+	}
 	free(node, get_system_allocator())
 }
 

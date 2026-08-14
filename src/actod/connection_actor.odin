@@ -133,14 +133,34 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 			if pool := data.ring.pool; pool != nil {
 				sync.atomic_store_explicit(&pool.conn_pid, u64(0), .Release)
 			}
-			dropped := ring_reset(data.ring)
-			if dropped > 0 {
-				log.warnf(
-					"Connection actor for node %s (id=%d) terminating with %d buffered slots dropped",
+			survivor := get_connection_ring(data.node_id)
+			if survivor != nil && survivor != data.ring {
+				migrated := ring_migrate_slots(data.ring, survivor)
+				if migrated > 0 {
+					log.infof(
+						"Migrated %d buffered send slots to the surviving connection for node %s (id=%d)",
+						migrated,
+						data.node_name,
+						data.node_id,
+					)
+				}
+			}
+			if survivor == data.ring && !sync.atomic_load(&NODE.shutting_down) {
+				log.infof(
+					"Connection actor for node %s (id=%d) terminating while its ring is still registered, leaving buffered slots for the replacement to migrate",
 					data.node_name,
 					data.node_id,
-					dropped,
 				)
+			} else {
+				dropped := ring_reset(data.ring)
+				if dropped > 0 {
+					log.warnf(
+						"Connection actor for node %s (id=%d) terminating with %d buffered slots dropped",
+						data.node_name,
+						data.node_id,
+						dropped,
+					)
+				}
 			}
 		}
 		sync.atomic_store_explicit(
@@ -664,7 +684,19 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	if data.encrypted {
 		ring.transport_keys = keys
 	}
+	replaced := get_connection_ring(data.node_id)
 	register_connection_ring(data.node_id, ring)
+	if replaced != nil &&
+	   replaced != ring &&
+	   sync.atomic_load_explicit(&replaced.io_owner, .Acquire) == 0 {
+		if migrated := ring_migrate_slots(replaced, ring); migrated > 0 {
+			log.infof(
+				"Migrated %d buffered send slots from the replaced connection for node %d",
+				migrated,
+				data.node_id,
+			)
+		}
+	}
 
 	if !start_connection_io(data) {
 		return .Failed
@@ -978,6 +1010,9 @@ finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Po
 		pool_remove_active(pool, ring)
 		if ring.tcp_socket != 0 {
 			close_tcp(ring.tcp_socket)
+		}
+		if primary := get_pool_ring_at(pool, 0); primary != nil && primary != ring {
+			_ = ring_migrate_slots(ring, primary)
 		}
 		ring_reset(ring)
 		pool_park(pool, ring)

@@ -271,11 +271,13 @@ worker_loop :: proc(worker: ^Worker) {
 			handle := worker.runnext
 			worker.runnext = nil
 			worker_resume_handle(worker, handle)
+			worker_flush_staging()
 			continue
 		}
 
 		if handle := ready_pop(worker); handle != nil {
 			worker_resume_handle(worker, handle)
+			worker_flush_staging()
 			continue
 		}
 
@@ -284,6 +286,7 @@ worker_loop :: proc(worker: ^Worker) {
 			if worker.runnext != nil do break
 			if handle := ready_pop(worker); handle != nil {
 				worker_resume_handle(worker, handle)
+				worker_flush_staging()
 				break
 			}
 		}
@@ -292,12 +295,29 @@ worker_loop :: proc(worker: ^Worker) {
 
 		reclaim_scan()
 
+		when ACTOD_NET_STAGING {
+			if !staging_flush_before_park() do continue
+		}
+
 		sync.atomic_store_explicit(&worker.parked, true, .Relaxed)
 		sync.atomic_thread_fence(.Seq_Cst)
 		if worker.runnext == nil && ready_is_empty(worker) {
 			sync.atomic_sema_wait(&worker.wake_sema)
 		}
 		sync.atomic_store_explicit(&worker.parked, false, .Relaxed)
+	}
+
+	when ACTOD_NET_STAGING {
+		_ = staging_flush_before_park()
+	}
+}
+
+@(private)
+worker_flush_staging :: #force_inline proc() {
+	when ACTOD_NET_STAGING {
+		if staging_has_pending() {
+			_ = staging_flush_all()
+		}
 	}
 }
 

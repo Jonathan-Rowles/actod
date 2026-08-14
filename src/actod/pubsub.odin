@@ -3,10 +3,12 @@ package actod
 import "../../test_harness/ti"
 _ :: ti
 import "core:log"
+import "core:mem"
 import "core:sync"
 
 MAX_SUBSCRIBERS_PER_TYPE :: 16384
 MAX_TOPIC_SUBSCRIBERS :: 64
+SUBSCRIBER_BLOCK_INITIAL_CAPACITY :: 64
 
 Subscription :: struct {
 	actor_type: Actor_Type,
@@ -23,13 +25,55 @@ Topic_Subscription :: struct {
 	pid:   PID,
 }
 
+Subscriber_Block :: struct {
+	capacity: u32,
+	prev:     ^Subscriber_Block,
+	pids:     [^]u64,
+}
+
 Type_Subscriber_List :: struct {
-	subscribers:           [MAX_SUBSCRIBERS_PER_TYPE]PID,
+	block:                 ^Subscriber_Block,
 	count:                 u32,
 	local_count:           u32,
+	mutate_lock:           sync.Mutex,
 	remote_node_sub_count: [MAX_NODES]u32,
 }
 
+@(private)
+alloc_subscriber_block :: proc(capacity: u32, prev: ^Subscriber_Block) -> ^Subscriber_Block {
+	raw, err := mem.alloc(
+		size_of(Subscriber_Block) + int(capacity) * size_of(u64),
+		align_of(Subscriber_Block),
+		get_system_allocator(),
+	)
+	if err != nil {
+		return nil
+	}
+	block := cast(^Subscriber_Block)raw
+	block.capacity = capacity
+	block.prev = prev
+	block.pids = cast([^]u64)(uintptr(raw) + size_of(Subscriber_Block))
+	return block
+}
+
+@(private)
+load_subscriber_block :: #force_inline proc(list: ^Type_Subscriber_List) -> ^Subscriber_Block {
+	return(
+		cast(^Subscriber_Block)rawptr(
+			uintptr(sync.atomic_load_explicit(cast(^u64)&list.block, .Acquire)),
+		) \
+	)
+}
+
+@(private)
+free_subscriber_blocks :: proc(block: ^Subscriber_Block) {
+	block := block
+	for block != nil {
+		prev := block.prev
+		mem.free(block, get_system_allocator())
+		block = prev
+	}
+}
 
 @(private)
 add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location) -> bool {
@@ -49,32 +93,48 @@ add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location
 	}
 
 	list := &NODE.type_subscribers[actor_type]
+	sync.mutex_lock(&list.mutate_lock)
+	defer sync.mutex_unlock(&list.mutate_lock)
 
-	for {
-		idx := sync.atomic_load_explicit(&list.local_count, .Acquire)
-		if idx >= MAX_SUBSCRIBERS_PER_TYPE {
+	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
+	if n >= MAX_SUBSCRIBERS_PER_TYPE {
+		log.warnf(
+			"Subscriber list full for actor type %d, cap is %d (MAX_SUBSCRIBERS_PER_TYPE), subscription dropped",
+			actor_type,
+			MAX_SUBSCRIBERS_PER_TYPE,
+			location = loc,
+		)
+		return false
+	}
+
+	block := list.block
+	if block == nil || n == block.capacity {
+		new_capacity :=
+			block == nil \
+			? u32(SUBSCRIBER_BLOCK_INITIAL_CAPACITY) \
+			: min(block.capacity * 2, MAX_SUBSCRIBERS_PER_TYPE)
+		new_block := alloc_subscriber_block(new_capacity, block)
+		if new_block == nil {
 			log.warnf(
-				"Subscriber list full for actor type %d, cap is %d (MAX_SUBSCRIBERS_PER_TYPE), subscription dropped",
+				"Subscriber block allocation failed for actor type %d, subscription dropped",
 				actor_type,
-				MAX_SUBSCRIBERS_PER_TYPE,
 				location = loc,
 			)
 			return false
 		}
-
-		slot := cast(^u64)&list.subscribers[idx]
-		if _, swapped := sync.atomic_compare_exchange_strong_explicit(
-			slot,
-			0,
-			u64(pid),
-			.Acq_Rel,
-			.Acquire,
-		); swapped {
-			sync.atomic_add_explicit(&list.local_count, 1, .Release)
-			sync.atomic_add_explicit(&list.count, 1, .Release)
-			return true
+		if block != nil {
+			for i in 0 ..< n {
+				new_block.pids[i] = sync.atomic_load_explicit(&block.pids[i], .Relaxed)
+			}
 		}
+		sync.atomic_store_explicit(cast(^u64)&list.block, u64(uintptr(new_block)), .Release)
+		block = new_block
 	}
+
+	sync.atomic_store_explicit(&block.pids[n], u64(pid), .Release)
+	sync.atomic_add_explicit(&list.local_count, 1, .Release)
+	sync.atomic_add_explicit(&list.count, 1, .Release)
+	return true
 }
 
 @(private)
@@ -84,17 +144,23 @@ remove_subscriber :: proc(actor_type: Actor_Type, pid: PID) -> bool {
 	}
 
 	list := &NODE.type_subscribers[actor_type]
+	sync.mutex_lock(&list.mutate_lock)
+	defer sync.mutex_unlock(&list.mutate_lock)
+
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
+	block := list.block
+	if block == nil {
+		return false
+	}
 
 	for i in 0 ..< n {
-		slot := cast(^u64)&list.subscribers[i]
-		if PID(sync.atomic_load_explicit(slot, .Acquire)) == pid {
+		if PID(sync.atomic_load_explicit(&block.pids[i], .Acquire)) == pid {
 			last := n - 1
 			if i != last {
-				last_pid := sync.atomic_load_explicit(cast(^u64)&list.subscribers[last], .Acquire)
-				sync.atomic_store_explicit(slot, last_pid, .Release)
+				last_pid := sync.atomic_load_explicit(&block.pids[last], .Acquire)
+				sync.atomic_store_explicit(&block.pids[i], last_pid, .Release)
 			}
-			sync.atomic_store_explicit(cast(^u64)&list.subscribers[last], 0, .Release)
+			sync.atomic_store_explicit(&block.pids[last], 0, .Release)
 			sync.atomic_sub_explicit(&list.local_count, 1, .Release)
 			sync.atomic_sub_explicit(&list.count, 1, .Release)
 			return true
@@ -219,11 +285,14 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 
 	list := &NODE.type_subscribers[actor_type]
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
+	block := load_subscriber_block(list)
 
-	for i in 0 ..< n {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
-		if pid != 0 && pid != self_pid {
-			_ = send_message(pid, msg)
+	if block != nil {
+		for i in 0 ..< n {
+			pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
+			if pid != 0 && pid != self_pid {
+				_ = send_message(pid, msg)
+			}
 		}
 	}
 
@@ -303,12 +372,16 @@ announce_subscriptions_to_node :: proc(node_id: Node_ID) {
 		if n == 0 {
 			continue
 		}
+		block := load_subscriber_block(list)
+		if block == nil {
+			continue
+		}
 		type_hash, hash_ok := get_actor_type_hash(Actor_Type(type_idx))
 		if !hash_ok {
 			continue
 		}
 		for i in 0 ..< n {
-			pid := PID(sync.atomic_load_explicit(cast(^u64)&list.subscribers[i], .Acquire))
+			pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
 			if pid == 0 {
 				continue
 			}
@@ -371,16 +444,22 @@ clear_subscriptions_for_node :: proc(node_id: Node_ID) {
 
 clear_all_subscriptions :: proc() {
 	for type_idx in 0 ..< MAX_ACTOR_TYPES {
-		list := &NODE.type_subscribers[Actor_Type(type_idx)]
-		for i in 0 ..< MAX_SUBSCRIBERS_PER_TYPE {
-			sync.atomic_store_explicit(cast(^u64)&list.subscribers[i], 0, .Release)
-		}
-		for node_id in 0 ..< MAX_NODES {
-			sync.atomic_store_explicit(&list.remote_node_sub_count[node_id], 0, .Release)
-		}
-		sync.atomic_store_explicit(&list.local_count, 0, .Release)
-		sync.atomic_store_explicit(&list.count, 0, .Release)
+		clear_type_subscriber_list(&NODE.type_subscribers[Actor_Type(type_idx)])
 	}
+}
+
+@(private)
+clear_type_subscriber_list :: proc(list: ^Type_Subscriber_List) {
+	sync.mutex_lock(&list.mutate_lock)
+	block := list.block
+	sync.atomic_store_explicit(cast(^u64)&list.block, 0, .Release)
+	sync.atomic_store_explicit(&list.local_count, 0, .Release)
+	sync.atomic_store_explicit(&list.count, 0, .Release)
+	for node_id in 0 ..< MAX_NODES {
+		sync.atomic_store_explicit(&list.remote_node_sub_count[node_id], 0, .Release)
+	}
+	sync.mutex_unlock(&list.mutate_lock)
+	free_subscriber_blocks(block)
 }
 
 @(require_results)

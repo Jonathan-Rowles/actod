@@ -122,8 +122,7 @@ seq_writer_proc :: proc(data: rawptr) {
 	}
 }
 
-@(test)
-test_stress_per_producer_order :: proc(t: ^testing.T) {
+run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -144,7 +143,7 @@ test_stress_per_producer_order :: proc(t: ^testing.T) {
 			msg_count = MSGS_PER_THREAD,
 			thread_id = u8(i),
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], seq_writer_proc)
+		threads[i] = thread.create_and_start_with_data(&ctxs[i], writer)
 	}
 
 	for i in 0 ..< num_threads {
@@ -168,6 +167,11 @@ test_stress_per_producer_order :: proc(t: ^testing.T) {
 	for i in 0 ..< num_threads {
 		testing.expect_value(t, drainer_ctx.next_seq[i], u64(ctxs[i].sent))
 	}
+}
+
+@(test)
+test_stress_per_producer_order :: proc(t: ^testing.T) {
+	run_seq_stress(t, seq_writer_proc)
 }
 
 seq_staged_writer_proc :: proc(data: rawptr) {
@@ -234,50 +238,7 @@ seq_staged_writer_proc :: proc(data: rawptr) {
 
 @(test)
 test_stress_staged_per_producer_order :: proc(t: ^testing.T) {
-	ring := make_test_ring(16, 64 * 1024)
-	testing.expect(t, ring != nil, "Ring should be created")
-	defer destroy_connection_ring(ring)
-
-	num_threads :: 8
-	MSGS_PER_THREAD :: 50_000
-
-	drainer_ctx := Seq_Drainer_Context {
-		ring = ring,
-	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, seq_drainer_proc)
-
-	ctxs: [num_threads]Seq_Writer_Context
-	threads: [num_threads]^thread.Thread
-	for i in 0 ..< num_threads {
-		ctxs[i] = Seq_Writer_Context {
-			ring      = ring,
-			msg_count = MSGS_PER_THREAD,
-			thread_id = u8(i),
-		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], seq_staged_writer_proc)
-	}
-
-	for i in 0 ..< num_threads {
-		thread.join(threads[i])
-		thread.destroy(threads[i])
-	}
-
-	sync.atomic_store(&drainer_ctx.stop, true)
-	thread.join(drainer)
-	thread.destroy(drainer)
-
-	total_sent := 0
-	for i in 0 ..< num_threads {
-		total_sent += ctxs[i].sent
-		testing.expect_value(t, ctxs[i].failures, 0)
-	}
-
-	testing.expect_value(t, drainer_ctx.order_violations, 0)
-	testing.expect_value(t, drainer_ctx.malformed, 0)
-	testing.expect_value(t, drainer_ctx.frames_seen, total_sent)
-	for i in 0 ..< num_threads {
-		testing.expect_value(t, drainer_ctx.next_seq[i], u64(ctxs[i].sent))
-	}
+	run_seq_stress(t, seq_staged_writer_proc)
 }
 
 seq_fill_ring :: proc(ring: ^Connection_Ring, producer: u8, frames: int) -> int {

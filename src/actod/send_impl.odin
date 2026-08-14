@@ -83,7 +83,7 @@ make_message_impl :: proc(
 
 @(private)
 release_undelivered :: #force_inline proc(target: ^Actor(int), msg: ^Message, msg_ready: bool) {
-	if msg_ready && msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+	if msg_ready && message_owns_page(msg.content) {
 		free_message(&target.pool, msg.content)
 	}
 }
@@ -301,7 +301,7 @@ send_to_actor_impl :: proc(
 					location = loc,
 				)
 			}
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+			if message_owns_page(msg.content) {
 				free_message(&actor.pool, msg.content)
 			}
 			return .RECEIVER_BACKLOGGED

@@ -143,8 +143,7 @@ sim_mesh_pump :: proc(mesh: ^Sim_Mesh) -> bool {
 	if n == 0 do return false
 	start: int
 	if mesh.rng != 0 {
-		mesh.rng = mesh.rng * 6364136223846793005 + 1442695040888963407
-		start = int((mesh.rng >> 33) % u64(n))
+		start = int(lcg_next(&mesh.rng) % u64(n))
 	} else {
 		start = mesh.cursor
 		mesh.cursor = (mesh.cursor + 1) % n

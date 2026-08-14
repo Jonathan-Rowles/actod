@@ -8,7 +8,7 @@ import "core:sync"
 
 SLAB_SLOT_NONE :: u32(0xFFFF_FFFF)
 SLAB_COMMIT_CHUNK :: 8 * mem.Megabyte
-DEFAULT_ACTOR_SLAB_SLOTS :: #config(ACTOD_ACTOR_SLAB_SLOTS, 16384)
+DEFAULT_ACTOR_SLAB_SLOTS :: 16384
 
 @(private = "file")
 slab_guard_size :: proc() -> uint {
@@ -46,7 +46,7 @@ Slot_Slab :: struct #align (CACHE_LINE_SIZE) {
 	warned:        bool,
 }
 
-SLAB_KEEP_WARM :: #config(ACTOD_SLAB_KEEP_WARM, 64)
+SLAB_KEEP_WARM :: 64
 
 @(private = "file")
 slab_spare_slots :: proc(slab: ^Slot_Slab) -> i64 {
@@ -204,7 +204,7 @@ slot_slab_in_use :: proc(slab: ^Slot_Slab) -> i64 {
 warn_slab_exhausted :: proc(what: string, slab: ^Slot_Slab) {
 	if _, first := sync.atomic_compare_exchange_strong(&slab.warned, false, true); !first do return
 	log.warnf(
-		"the %s slab is full at %d slots of %d KB, so every actor from here on gets its own mapping instead. Those actors work normally, but spawn and teardown cost syscalls again and each one costs about 2 VMAs, so a large node can reach vm.max_map_count and fail to spawn. Raise it with actor_slab_slots in make_node_config() or -define:ACTOD_ACTOR_SLAB_SLOTS=N, budgeting %d KB of address space per slot",
+		"the %s slab is full at %d slots of %d KB, so every actor from here on gets its own mapping instead. Those actors work normally, but spawn and teardown cost syscalls again and each one costs about 2 VMAs, so a large node can reach vm.max_map_count and fail to spawn. Raise it with actor_slab_slots in make_node_config(), budgeting %d KB of address space per slot",
 		what,
 		slab.slot_count,
 		slab.slot_size / 1024,

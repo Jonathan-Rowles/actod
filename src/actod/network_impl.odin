@@ -5,7 +5,6 @@ import "core:encoding/endian"
 import "core:log"
 import "core:mem"
 import "core:sync"
-import "core:time"
 
 wire_format_exact_size_impl :: proc(
 	data: rawptr,
@@ -428,11 +427,7 @@ send_remote_impl :: proc(
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		result := send_to_connection_ring_impl(ring, to, data, info, base_flags, loc, token)
 		if result != .NETWORK_RING_FULL do return result
-		if retry < RING_SEND_SPIN_RETRIES {
-			intrinsics.cpu_relax()
-		} else {
-			runtime_sleep(1 * time.Microsecond)
-		}
+		ring_full_backoff(retry)
 	}
 	log.warnf(
 		"Dropping '%s' for %v: the send ring for node %d stayed full for %d retries; the peer is not draining fast enough, raise connection_ring.send_slot_count or slow the producer",
@@ -479,11 +474,7 @@ send_remote_by_name_impl :: proc(
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, {}, loc)
 		if result != .NETWORK_RING_FULL do return result
-		if retry < RING_SEND_SPIN_RETRIES {
-			intrinsics.cpu_relax()
-		} else {
-			runtime_sleep(1 * time.Microsecond)
-		}
+		ring_full_backoff(retry)
 	}
 	log.warnf(
 		"Dropping '%s' for '%s@%s': the send ring stayed full for %d retries; the peer is not draining fast enough, raise connection_ring.send_slot_count or slow the producer",

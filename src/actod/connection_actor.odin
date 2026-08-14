@@ -105,16 +105,26 @@ connection_actor_init :: proc(data: ^Connection_Actor_Data) {
 	if data.node_id != 0 do data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
 }
 
+@(private)
+conn_pool :: proc(data: ^Connection_Actor_Data) -> ^Connection_Pool {
+	return data.ring != nil ? data.ring.pool : nil
+}
+
+@(private)
+close_conn_socket :: proc(data: ^Connection_Actor_Data) {
+	if data.tcp_socket != 0 {
+		close_tcp(data.tcp_socket)
+		data.tcp_socket = 0
+	}
+}
+
 connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 	is_active := is_active_connection(data)
 
 	if data.node_id != 0 && is_active && data.ring != nil {
 		sync.atomic_store(&data.ring.io_stop, 1)
 	}
-	if data.tcp_socket != 0 {
-		close_tcp(data.tcp_socket)
-		data.tcp_socket = 0
-	}
+	close_conn_socket(data)
 
 	cancel_timer(data.heartbeat_timer_id)
 	cancel_timer(data.reconnect_timer_id)
@@ -201,10 +211,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 		result := establish_connection(data)
 		release_pending_incoming(data)
 		if result != .Established {
-			if data.tcp_socket != 0 {
-				close_tcp(data.tcp_socket)
-				data.tcp_socket = 0
-			}
+			close_conn_socket(data)
 			data.state = .Disconnected
 			_ = terminate_actor(get_self_pid(), .SHUTDOWN)
 		}
@@ -214,7 +221,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 
 	case Scale_Up_Request:
 		if data.state == .Connected {
-			pool := data.ring != nil ? data.ring.pool : nil
+			pool := conn_pool(data)
 			if pool != nil {
 				sync.atomic_store(&pool.contention_count, u32(0))
 				if pool_active_count(pool) < pool.max_rings {
@@ -228,7 +235,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 		adopt_pool_ring(data, m)
 
 	case Pool_Ring_Closed:
-		pool := data.ring != nil ? data.ring.pool : nil
+		pool := conn_pool(data)
 		if pool != nil {
 			count := pool_active_count(pool)
 			for i: u32 = 1; i < count; i += 1 {
@@ -279,10 +286,7 @@ initiate_connection :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	data.tcp_socket = sock
 	if establish_connection(data) != .Established {
-		if data.tcp_socket != 0 {
-			close_tcp(data.tcp_socket)
-			data.tcp_socket = 0
-		}
+		close_conn_socket(data)
 		return false
 	}
 	return true
@@ -734,7 +738,7 @@ handle_incoming_pool_join :: proc(
 
 @(private)
 establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
-	pool := data.ring != nil ? data.ring.pool : nil
+	pool := conn_pool(data)
 	if pool == nil || data.peer_join_token == 0 do return false
 	if pool_active_count(pool) >= pool.max_rings do return false
 
@@ -800,7 +804,7 @@ attach_pool_ring :: proc(
 	sock: net.TCP_Socket,
 	keys: Noise_Transport,
 ) -> bool {
-	pool := data.ring != nil ? data.ring.pool : nil
+	pool := conn_pool(data)
 	if pool == nil do return false
 
 	ring := pool_take_parked(pool)
@@ -852,7 +856,7 @@ adopt_pool_ring :: proc(data: ^Connection_Actor_Data, msg: Adopt_Pool_Ring) {
 	}
 	free_boxed_keys(msg.keys_ptr)
 
-	pool := data.ring != nil ? data.ring.pool : nil
+	pool := conn_pool(data)
 	if data.state != .Connected || pool == nil {
 		close_tcp(msg.socket)
 		return
@@ -875,7 +879,7 @@ adopt_pool_ring :: proc(data: ^Connection_Actor_Data, msg: Adopt_Pool_Ring) {
 
 @(private)
 pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
-	pool := data.ring != nil ? data.ring.pool : nil
+	pool := conn_pool(data)
 	if pool == nil do return
 
 	finalize_parked_rings(data, pool)
@@ -904,19 +908,25 @@ pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
 }
 
 @(private)
+park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring, migrate: bool) {
+	pool_remove_active(pool, ring)
+	if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
+	if migrate {
+		primary := get_pool_ring_at(pool, 0)
+		if primary != nil && primary != ring do _ = ring_migrate_slots(ring, primary)
+	}
+	ring_reset(ring)
+	pool_park(pool, ring)
+}
+
+@(private)
 finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Pool) {
 	count := pool_active_count(pool)
 	for i := count; i > 1; i -= 1 {
 		ring := get_pool_ring_at(pool, i - 1)
 		if ring == nil do continue
 		if sync.atomic_load(&ring.park_state) != .Park_Acked do continue
-		pool_remove_active(pool, ring)
-		if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
-		if primary := get_pool_ring_at(pool, 0); primary != nil && primary != ring {
-			_ = ring_migrate_slots(ring, primary)
-		}
-		ring_reset(ring)
-		pool_park(pool, ring)
+		park_pool_ring(pool, ring, migrate = true)
 		log.infof(
 			"Pool ring parked for node %s (id=%d): %d rings",
 			data.node_name,
@@ -929,7 +939,7 @@ finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Po
 // Called with the IO thread already stopped and joined.
 @(private)
 drain_pool_rings_into_primary :: proc(data: ^Connection_Actor_Data) {
-	pool := data.ring != nil ? data.ring.pool : nil
+	pool := conn_pool(data)
 	if pool == nil do return
 
 	count := pool_active_count(pool)
@@ -944,17 +954,14 @@ drain_pool_rings_into_primary :: proc(data: ^Connection_Actor_Data) {
 // quiesced, so reset them all and park for reuse by the next session.
 @(private)
 teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
-	pool := data.ring != nil ? data.ring.pool : nil
+	pool := conn_pool(data)
 	if pool == nil do return
 
 	count := pool_active_count(pool)
 	for i := count; i > 1; i -= 1 {
 		ring := get_pool_ring_at(pool, i - 1)
 		if ring == nil do continue
-		pool_remove_active(pool, ring)
-		if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
-		ring_reset(ring)
-		pool_park(pool, ring)
+		park_pool_ring(pool, ring, migrate = false)
 	}
 
 	sync.atomic_store(&pool.contention_count, u32(0))
@@ -1111,10 +1118,7 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 	}
 
 	if data.ring != nil do sync.atomic_store(&data.ring.io_stop, 1)
-	if data.tcp_socket != 0 {
-		close_tcp(data.tcp_socket)
-		data.tcp_socket = 0
-	}
+	close_conn_socket(data)
 	stop_connection_io(data)
 
 	if data.ring != nil && is_active {
@@ -1233,11 +1237,7 @@ ring_append_ctrl :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
 ring_append_ctrl_retry :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		if ring_append_ctrl(ring, ctrl_body) do return true
-		if retry < RING_SEND_SPIN_RETRIES {
-			intrinsics.cpu_relax()
-		} else {
-			runtime_sleep(1 * time.Microsecond)
-		}
+		ring_full_backoff(retry)
 	}
 	return false
 }
@@ -1387,80 +1387,59 @@ broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {
 	}
 }
 
+Wire_String_Field :: struct {
+	binding: ^string,
+	label:   string,
+}
+
+@(private)
+decode_wire_payload :: proc(
+	msg: ^$T,
+	payload: []byte,
+	label: string,
+	fields: []Wire_String_Field,
+) -> bool {
+	if len(payload) < size_of(T) {
+		log.warnf("%s payload too short", label)
+		return false
+	}
+	intrinsics.mem_copy_non_overlapping(msg, raw_data(payload), size_of(T))
+
+	str_offset := size_of(T)
+	for field in fields {
+		str_len := len(field.binding^)
+		if str_len < 0 || str_len > len(payload) - str_offset {
+			log.warnf("%s payload truncated at %s", label, field.label)
+			return false
+		}
+		if str_len > 0 {
+			field.binding^ = string(payload[str_offset:str_offset + str_len])
+			str_offset += str_len
+		}
+	}
+	return true
+}
+
 handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) {
 	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
 	terminated_info := get_validated_message_info_ptr(Actor_Terminated_Broadcast)
 
 	if type_hash == spawned_info.type_hash {
-		if len(payload) < size_of(Actor_Spawned_Broadcast) {
-			log.warn("Spawn broadcast payload too short")
-			return
-		}
-
 		msg: Actor_Spawned_Broadcast
-		intrinsics.mem_copy_non_overlapping(
-			&msg,
-			raw_data(payload),
-			size_of(Actor_Spawned_Broadcast),
-		)
-
-		str_offset := size_of(Actor_Spawned_Broadcast)
-
-		name_len := len(msg.name)
-		if name_len < 0 || name_len > len(payload) - str_offset {
-			log.warn("Spawn broadcast payload truncated at name")
-			return
+		fields := [?]Wire_String_Field {
+			{&msg.name, "name"},
+			{&msg.source_node_name, "source_node_name"},
 		}
-		if name_len > 0 {
-			msg.name = string(payload[str_offset:str_offset + name_len])
-			str_offset += name_len
-		}
-
-		source_name_len := len(msg.source_node_name)
-		if source_name_len < 0 || source_name_len > len(payload) - str_offset {
-			log.warn("Spawn broadcast payload truncated at source_node_name")
-			return
-		}
-		if source_name_len > 0 {
-			msg.source_node_name = string(payload[str_offset:str_offset + source_name_len])
-		}
-
+		if !decode_wire_payload(&msg, payload, "Spawn broadcast", fields[:]) do return
 		handle_spawn_broadcast(msg, from_node)
 
 	} else if type_hash == terminated_info.type_hash {
-		if len(payload) < size_of(Actor_Terminated_Broadcast) {
-			log.warn("Terminate broadcast payload too short")
-			return
-		}
-
 		msg: Actor_Terminated_Broadcast
-		intrinsics.mem_copy_non_overlapping(
-			&msg,
-			raw_data(payload),
-			size_of(Actor_Terminated_Broadcast),
-		)
-
-		str_offset := size_of(Actor_Terminated_Broadcast)
-
-		name_len := len(msg.name)
-		if name_len < 0 || name_len > len(payload) - str_offset {
-			log.warn("Terminate broadcast payload truncated at name")
-			return
+		fields := [?]Wire_String_Field {
+			{&msg.name, "name"},
+			{&msg.source_node_name, "source_node_name"},
 		}
-		if name_len > 0 {
-			msg.name = string(payload[str_offset:str_offset + name_len])
-			str_offset += name_len
-		}
-
-		source_name_len := len(msg.source_node_name)
-		if source_name_len < 0 || source_name_len > len(payload) - str_offset {
-			log.warn("Terminate broadcast payload truncated at source_node_name")
-			return
-		}
-		if source_name_len > 0 {
-			msg.source_node_name = string(payload[str_offset:str_offset + source_name_len])
-		}
-
+		if !decode_wire_payload(&msg, payload, "Terminate broadcast", fields[:]) do return
 		handle_terminate_broadcast(msg, from_node)
 
 	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Request).type_hash {
@@ -1494,21 +1473,9 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 
 @(private)
 handle_remote_spawn_request :: proc(from_node: Node_ID, payload: []byte) {
-	if len(payload) < size_of(Remote_Spawn_Request) {
-		log.warn("Remote spawn request payload too short")
-		return
-	}
-
 	msg: Remote_Spawn_Request
-	intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Remote_Spawn_Request))
-
-	name_len := len(msg.actor_name)
-	name_start := size_of(Remote_Spawn_Request)
-	if name_len < 0 || name_len > len(payload) - name_start {
-		log.warn("Remote spawn request payload truncated at actor_name")
-		return
-	}
-	if name_len > 0 do msg.actor_name = string(payload[name_start:name_start + name_len])
+	fields := [?]Wire_String_Field{{&msg.actor_name, "actor_name"}}
+	if !decode_wire_payload(&msg, payload, "Remote spawn request", fields[:]) do return
 
 	spawn_func, found := get_spawn_func_by_hash(msg.spawn_func_name_hash)
 	if !found {
@@ -1545,21 +1512,9 @@ handle_remote_spawn_request :: proc(from_node: Node_ID, payload: []byte) {
 
 @(private)
 handle_remote_spawn_response :: proc(payload: []byte) {
-	if len(payload) < size_of(Remote_Spawn_Response) {
-		log.warn("Remote spawn response payload too short")
-		return
-	}
-
 	msg: Remote_Spawn_Response
-	intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Remote_Spawn_Response))
-
-	error_len := len(msg.error_msg)
-	str_start := size_of(Remote_Spawn_Response)
-	if error_len < 0 || error_len > len(payload) - str_start {
-		log.warn("Remote spawn response payload truncated at error_msg")
-		return
-	}
-	if error_len > 0 do msg.error_msg = string(payload[str_start:str_start + error_len])
+	fields := [?]Wire_String_Field{{&msg.error_msg, "error_msg"}}
+	if !decode_wire_payload(&msg, payload, "Remote spawn response", fields[:]) do return
 
 	resolve_spawn_request(msg)
 }

@@ -148,17 +148,13 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 
 		if stats.terminated {
 			if old_stats, ok := data.active_stats[stats.pid]; ok {
-				if len(old_stats.name) > 0 do delete(old_stats.name)
-				if old_stats.received_from != nil do delete(old_stats.received_from)
-				if old_stats.sent_to != nil do delete(old_stats.sent_to)
+				free_actor_stats(&old_stats)
 				delete_key(&data.active_stats, stats.pid)
 			}
 			append(&data.terminated_stats, stats)
 		} else {
 			if old_stats, ok := data.active_stats[stats.pid]; ok {
-				if len(old_stats.name) > 0 do delete(old_stats.name)
-				if old_stats.received_from != nil do delete(old_stats.received_from)
-				if old_stats.sent_to != nil do delete(old_stats.sent_to)
+				free_actor_stats(&old_stats)
 			}
 			data.active_stats[stats.pid] = stats
 		}
@@ -232,8 +228,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 
 	case Clear_Terminated_Stats:
 		for &stats in data.terminated_stats {
-			if stats.received_from != nil do delete(stats.received_from)
-			if stats.sent_to != nil do delete(stats.sent_to)
+			free_actor_stats(&stats)
 		}
 		clear_dynamic_array(&data.terminated_stats)
 
@@ -244,6 +239,17 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 			data.last_collection = now()
 		}
 	}
+}
+
+@(private)
+fill_snapshot_entry :: proc(entry: ^Actor_Stats_Entry, stats: Actor_Stats) {
+	entry.pid = stats.pid
+	entry.messages_received = stats.messages_received
+	entry.messages_sent = stats.messages_sent
+	entry.state = stats.state
+	entry.terminated = stats.terminated
+	entry.parent_pid = stats.parent_pid
+	entry.name_len = u8(copy(entry.name[:], stats.name))
 }
 
 @(private)
@@ -262,19 +268,7 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 			break
 		}
 
-		entry := &snapshot.actors[snapshot.actor_count]
-		entry.pid = pid
-		entry.messages_received = stats.messages_received
-		entry.messages_sent = stats.messages_sent
-		entry.state = stats.state
-		entry.terminated = stats.terminated
-		entry.parent_pid = stats.parent_pid
-
-		name_len := min(len(stats.name), MAX_ACTOR_NAME_LEN)
-		for i in 0 ..< name_len {
-			entry.name[i] = stats.name[i]
-		}
-		entry.name_len = u8(name_len)
+		fill_snapshot_entry(&snapshot.actors[snapshot.actor_count], stats)
 
 		if stats.sent_to != nil {
 			for to_pid, count in stats.sent_to {
@@ -306,19 +300,7 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 			break
 		}
 
-		entry := &snapshot.actors[snapshot.actor_count]
-		entry.pid = stats.pid
-		entry.messages_received = stats.messages_received
-		entry.messages_sent = stats.messages_sent
-		entry.state = stats.state
-		entry.terminated = true
-		entry.parent_pid = stats.parent_pid
-
-		name_len := min(len(stats.name), MAX_ACTOR_NAME_LEN)
-		for i in 0 ..< name_len {
-			entry.name[i] = stats.name[i]
-		}
-		entry.name_len = u8(name_len)
+		fill_snapshot_entry(&snapshot.actors[snapshot.actor_count], stats)
 
 		snapshot.actor_count += 1
 	}
@@ -354,16 +336,19 @@ collect_all_stats :: proc(data: ^Observer_Data) {
 }
 
 @(private)
+free_actor_stats :: proc(stats: ^Actor_Stats) {
+	if len(stats.name) > 0 do delete(stats.name)
+	if stats.received_from != nil do delete(stats.received_from)
+	if stats.sent_to != nil do delete(stats.sent_to)
+}
+
+@(private)
 terminate_observer :: proc(data: ^Observer_Data) {
-	for _, stats in data.active_stats {
-		if len(stats.name) > 0 do delete(stats.name)
-		if stats.received_from != nil do delete(stats.received_from)
-		if stats.sent_to != nil do delete(stats.sent_to)
+	for _, &stats in data.active_stats {
+		free_actor_stats(&stats)
 	}
 	for &stats in data.terminated_stats {
-		if len(stats.name) > 0 do delete(stats.name)
-		if stats.received_from != nil do delete(stats.received_from)
-		if stats.sent_to != nil do delete(stats.sent_to)
+		free_actor_stats(&stats)
 	}
 }
 
@@ -481,72 +466,47 @@ log_observer_send_failed :: proc(
 	)
 }
 
-trigger_stats_collection :: proc(loc := #caller_location) -> bool {
+@(private)
+observer_request :: proc(msg: $T, proc_name: string, loc: runtime.Source_Code_Location) -> bool {
 	if NODE.observer_pid == {} {
-		log_observer_not_started("trigger_stats_collection", loc)
+		log_observer_not_started(proc_name, loc)
 		return false
 	}
-	msg := Trigger_Collection{}
 	err := send_message(NODE.observer_pid, msg)
-	if err != .OK do log_observer_send_failed("trigger_stats_collection", err, loc)
+	if err != .OK do log_observer_send_failed(proc_name, err, loc)
 	return err == .OK
+}
+
+trigger_stats_collection :: proc(loc := #caller_location) -> bool {
+	return observer_request(Trigger_Collection{}, "trigger_stats_collection", loc)
 }
 
 
 request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_location) -> bool {
-	if NODE.observer_pid == {} {
-		log_observer_not_started("request_actor_stats", loc)
-		return false
-	}
-
 	request := Get_Actor_Stats_Request {
 		actor_pid = actor_pid,
 		requester = requester,
 	}
-
-	err := send_message(NODE.observer_pid, request)
-	if err != .OK do log_observer_send_failed("request_actor_stats", err, loc)
-	return err == .OK
+	return observer_request(request, "request_actor_stats", loc)
 }
 
 
 request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
-	if NODE.observer_pid == {} {
-		log_observer_not_started("request_all_stats", loc)
-		return false
-	}
-
 	request := Get_All_Stats_Request {
 		requester = requester,
 	}
-
-	err := send_message(NODE.observer_pid, request)
-	if err != .OK do log_observer_send_failed("request_all_stats", err, loc)
-	return err == .OK
+	return observer_request(request, "request_all_stats", loc)
 }
 
 set_stats_collection_interval :: proc(interval: time.Duration, loc := #caller_location) -> bool {
-	if NODE.observer_pid == {} {
-		log_observer_not_started("set_stats_collection_interval", loc)
-		return false
-	}
 	msg := Set_Collection_Interval {
 		interval = interval,
 	}
-	err := send_message(NODE.observer_pid, msg)
-	if err != .OK do log_observer_send_failed("set_stats_collection_interval", err, loc)
-	return err == .OK
+	return observer_request(msg, "set_stats_collection_interval", loc)
 }
 
 clear_terminated_stats :: proc(loc := #caller_location) -> bool {
-	if NODE.observer_pid == {} {
-		log_observer_not_started("clear_terminated_stats", loc)
-		return false
-	}
-	msg := Clear_Terminated_Stats{}
-	err := send_message(NODE.observer_pid, msg)
-	if err != .OK do log_observer_send_failed("clear_terminated_stats", err, loc)
-	return err == .OK
+	return observer_request(Clear_Terminated_Stats{}, "clear_terminated_stats", loc)
 }
 
 @(require_results)

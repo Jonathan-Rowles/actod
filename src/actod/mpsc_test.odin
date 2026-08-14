@@ -25,7 +25,7 @@ test_mpsc_basic_operations :: proc(t: ^testing.T) {
 		count := mpsc_pop_batch(&queue, batch[:])
 		testing.expect(t, count == 0, "Should not be able to pop from empty queue")
 
-		empty := mpsc_is_empty(&queue)
+		empty := mpsc_is_empty_relaxed(&queue)
 		testing.expect(t, empty, "Queue should be empty")
 	}
 
@@ -422,10 +422,10 @@ test_mpsc_state_functions :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 8)
 	mpsc_init(&queue)
 
-	testing.expect(t, mpsc_is_empty(&queue), "New queue should be empty")
+	testing.expect(t, mpsc_is_empty_relaxed(&queue), "New queue should be empty")
 
 	mpsc_push(&queue, 1)
-	testing.expect(t, !mpsc_is_empty(&queue), "Queue with item should not be empty")
+	testing.expect(t, !mpsc_is_empty_relaxed(&queue), "Queue with item should not be empty")
 
 	for i := 0; i < 7; i += 1 {
 		mpsc_push(&queue, i)
@@ -444,7 +444,7 @@ test_mpsc_state_functions :: proc(t: ^testing.T) {
 		count += n
 	}
 
-	testing.expect(t, mpsc_is_empty(&queue), "Queue should be empty after draining")
+	testing.expect(t, mpsc_is_empty_relaxed(&queue), "Queue should be empty after draining")
 	testing.expect(
 		t,
 		count >= 8,

@@ -129,8 +129,7 @@ spawn_from_raw :: proc(
 				alloc_err,
 				location = loc,
 			)
-			actor_arena_release(&actor.arena, &actor.arena_slot)
-			free(actor, actor_system_allocator)
+			spawn_fail(actor, 0)
 			return 0, false
 		}
 		actor.data = cast(^int)ptr
@@ -144,8 +143,7 @@ spawn_from_raw :: proc(
 				alloc_err,
 				location = loc,
 			)
-			actor_arena_release(&actor.arena, &actor.arena_slot)
-			free(actor, actor_system_allocator)
+			spawn_fail(actor, 0)
 			return 0, false
 		}
 		actor.data = cast(^int)ptr
@@ -204,8 +202,7 @@ spawn_from_raw :: proc(
 			mailbox_alloc_err,
 			location = loc,
 		)
-		actor_arena_release(&actor.arena, &actor.arena_slot)
-		free(actor, actor_system_allocator)
+		spawn_fail(actor, 0)
 		return 0, false
 	}
 	mpsc_init(&actor.system_mailbox)
@@ -220,8 +217,7 @@ spawn_from_raw :: proc(
 			NODE.actor_registry.num_items,
 			location = loc,
 		)
-		actor_arena_release(&actor.arena, &actor.arena_slot)
-		free(actor, actor_system_allocator)
+		spawn_fail(actor, 0)
 		return 0, false
 	}
 
@@ -261,9 +257,7 @@ spawn_from_raw :: proc(
 				co_res,
 				location = loc,
 			)
-			remove(&NODE.actor_registry, pid)
-			actor_arena_release(&actor.arena, &actor.arena_slot)
-			free(actor, actor_system_allocator)
+			spawn_fail(actor, pid)
 			return 0, false
 		}
 		handle.co = co
@@ -308,9 +302,7 @@ spawn_from_raw :: proc(
 				pid,
 				location = loc,
 			)
-			remove(&NODE.actor_registry, pid)
-			actor_arena_release(&actor.arena, &actor.arena_slot)
-			free(actor, actor_system_allocator)
+			spawn_fail(actor, pid)
 			return 0, false
 		}
 	}
@@ -609,13 +601,15 @@ hot_reload_handle_message :: proc(data: ^Hot_Reload_Actor_Data, from: PID, msg: 
 }
 
 @(private)
+write_fixed :: proc(dst: ^[64]u8, s: string) -> int {
+	return copy(dst[:], s)
+}
+
+@(private)
 copy_fixed_string :: proc(buf: [64]u8, length: int) -> string {
 	if length <= 0 do return ""
-	result := make([]u8, length)
-	for i in 0 ..< length {
-		result[i] = buf[i]
-	}
-	return string(result)
+	bytes := buf
+	return strings.clone(string(bytes[:length]))
 }
 
 @(private)
@@ -969,7 +963,7 @@ copy_package_with_rewrites :: proc(
 }
 
 @(private)
-scan_relative_imports :: proc(dir_path: string) -> []string {
+scan_imports :: proc(dir_path: string, keep: proc(path: string) -> bool) -> []string {
 	result: [dynamic]string
 	result.allocator = context.temp_allocator
 
@@ -987,24 +981,12 @@ scan_relative_imports :: proc(dir_path: string) -> []string {
 		data, file_err := os.read_entire_file(src_path, context.temp_allocator)
 		if file_err != nil do continue
 
-		source := string(data)
-		rest := source
-		for len(rest) > 0 {
-			nl := strings.index_byte(rest, '\n')
-			line: string
-			if nl >= 0 {
-				line = rest[:nl]
-				rest = rest[nl + 1:]
-			} else {
-				line = rest
-				rest = ""
-			}
-
+		rest := string(data)
+		for line in strings.split_lines_iterator(&rest) {
 			import_path := extract_import_path(line)
 			if import_path == "" do continue
 			if is_core_or_base_import(import_path) do continue
-			if is_actod_import_path(import_path) do continue
-			if is_collection_import(import_path) do continue
+			if !keep(import_path) do continue
 
 			already := false
 			for existing in result {
@@ -1021,54 +1003,15 @@ scan_relative_imports :: proc(dir_path: string) -> []string {
 }
 
 @(private)
+scan_relative_imports :: proc(dir_path: string) -> []string {
+	return scan_imports(dir_path, proc(path: string) -> bool {
+		return !is_actod_import_path(path) && !is_collection_import(path)
+	})
+}
+
+@(private)
 scan_collection_imports :: proc(dir_path: string) -> []string {
-	result: [dynamic]string
-	result.allocator = context.temp_allocator
-
-	fd, err := os.open(dir_path)
-	if err != nil do return nil
-	entries, read_err := os.read_dir(fd, -1, context.temp_allocator)
-	os.close(fd)
-	if read_err != nil do return nil
-
-	for entry in entries {
-		if entry.type == .Directory do continue
-		if !strings.has_suffix(entry.name, ".odin") do continue
-
-		src_path := join_path({dir_path, entry.name})
-		data, file_err := os.read_entire_file(src_path, context.temp_allocator)
-		if file_err != nil do continue
-
-		source := string(data)
-		rest := source
-		for len(rest) > 0 {
-			nl := strings.index_byte(rest, '\n')
-			line: string
-			if nl >= 0 {
-				line = rest[:nl]
-				rest = rest[nl + 1:]
-			} else {
-				line = rest
-				rest = ""
-			}
-
-			import_path := extract_import_path(line)
-			if import_path == "" do continue
-			if is_core_or_base_import(import_path) do continue
-			if !is_collection_import(import_path) do continue
-
-			already := false
-			for existing in result {
-				if existing == import_path {
-					already = true
-					break
-				}
-			}
-			if !already do append(&result, import_path)
-		}
-	}
-
-	return result[:]
+	return scan_imports(dir_path, is_collection_import)
 }
 
 @(private)
@@ -1286,10 +1229,21 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 		return
 	}
 
+	actor_names, pkg_name, valid := validate_actors(data, pkg_path)
+	if !valid do return
+
+	so_path, compiled := compile_package(data, pkg_path, pkg_name)
+	if !compiled do return
+
+	load_and_swap(data, actor_names[:], so_path)
+}
+
+@(private)
+validate_actors :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) -> ([dynamic]string, string, bool) {
 	actor_names, pkg_exists := data.package_actors[pkg_path]
 	if !pkg_exists || len(actor_names) == 0 {
 		log.warnf("hot reload: file changed in unregistered package '%s'", pkg_path)
-		return
+		return nil, "", false
 	}
 
 	first_meta := data.actor_meta[actor_names[0]]
@@ -1346,15 +1300,20 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 				}
 			}
 			hot_reload.destroy_validation_result(validation)
-			return
+			return nil, "", false
 		}
 		delete(validation.errors)
 	}
 
+	return actor_names, pkg_name, true
+}
+
+@(private)
+compile_package :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string, pkg_name: string) -> (string, bool) {
 	build_pkg_path, build_ok := prepare_build_dir(pkg_path, pkg_name)
 	if !build_ok {
 		log.errorf("hot reload: failed to prepare build dir for '%s'", pkg_path)
-		return
+		return "", false
 	}
 
 	regenerate_exports(data, pkg_path, pkg_name, output_dir = build_pkg_path)
@@ -1369,9 +1328,14 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 	compile_result := hot_reload.compile_module(build_pkg_path, so_path, data.collection_flags)
 	if !compile_result.ok {
 		log.errorf("hot reload: compile failed for '%s': %s", pkg_path, compile_result.error_msg)
-		return
+		return "", false
 	}
 
+	return so_path, true
+}
+
+@(private)
+load_and_swap :: proc(data: ^Hot_Reload_Actor_Data, actor_names: []string, so_path: string) {
 	for name in actor_names {
 		meta, exists := &data.actor_meta[name]
 		if !exists do continue
@@ -1389,8 +1353,8 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 			so_path,
 			specs[:],
 			meta.state_size,
-			actor_gen,
-			state_type_prefix = meta.state_type_name,
+			meta.state_type_name,
+			generation = actor_gen,
 		)
 		if load_err.kind != .None {
 			log.errorf(
@@ -1461,11 +1425,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 	msg: Register_Hot_Actor
 	msg.pid = pid
 
-	name_len := min(len(name), 64)
-	for j in 0 ..< name_len {
-		msg.actor_name[j] = name[j]
-	}
-	msg.actor_name_len = name_len
+	msg.actor_name_len = write_fixed(&msg.actor_name, name)
 
 	behaviour_ti := type_info_of(Actor_Behaviour(T))
 	if named, ok := behaviour_ti.variant.(runtime.Type_Info_Named); ok {
@@ -1475,11 +1435,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 				if field_name == "actor_type" do continue
 				if field_idx >= MAX_BEHAVIOUR_FIELDS do break
 
-				slen := min(len(field_name), 64)
-				for j in 0 ..< slen {
-					msg.field_names[field_idx][j] = field_name[j]
-				}
-				msg.field_name_lens[field_idx] = slen
+				msg.field_name_lens[field_idx] = write_fixed(&msg.field_names[field_idx], field_name)
 				field_idx += 1
 			}
 			msg.field_count = field_idx
@@ -1489,35 +1445,19 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 	state_ti := type_info_of(T)
 	if named, ok := state_ti.variant.(runtime.Type_Info_Named); ok {
 		sname := named.name
-		slen := min(len(sname), 64)
-		for j in 0 ..< slen {
-			msg.state_type_name[j] = sname[j]
-		}
-		msg.state_type_len = slen
+		msg.state_type_len = write_fixed(&msg.state_type_name, sname)
 
 		pkg := named.pkg
-		plen := min(len(pkg), 64)
-		for j in 0 ..< plen {
-			msg.package_name[j] = pkg[j]
-		}
-		msg.package_name_len = plen
+		msg.package_name_len = write_fixed(&msg.package_name, pkg)
 
 		if st, sok := named.base.variant.(runtime.Type_Info_Struct); sok {
 			field_count := min(int(st.field_count), MAX_STATE_FIELDS)
 			for idx in 0 ..< field_count {
 				fname := st.names[idx]
-				flen := min(len(fname), 64)
-				for j in 0 ..< flen {
-					msg.state_field_names[idx][j] = fname[j]
-				}
-				msg.state_field_lens[idx] = flen
+				msg.state_field_lens[idx] = write_fixed(&msg.state_field_names[idx], fname)
 
 				type_str := type_info_to_string(st.types[idx])
-				tlen := min(len(type_str), 64)
-				for j in 0 ..< tlen {
-					msg.state_field_types[idx][j] = type_str[j]
-				}
-				msg.state_field_type_lens[idx] = tlen
+				msg.state_field_type_lens[idx] = write_fixed(&msg.state_field_types[idx], type_str)
 			}
 			msg.state_field_count = field_count
 		}

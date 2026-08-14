@@ -93,9 +93,14 @@ sim_transport_assert_quiescent :: proc() {
 	)
 }
 
+@(private = "file")
+sim_pair_matches :: proc(x, y, a, b: ^Node_State) -> bool {
+	return (x == a && y == b) || (x == b && y == a)
+}
+
 sim_link_blocked :: proc(a, b: ^Node_State) -> bool {
 	for pair in g_sim_blocked_links {
-		if (pair[0] == a && pair[1] == b) || (pair[0] == b && pair[1] == a) do return true
+		if sim_pair_matches(pair[0], pair[1], a, b) do return true
 	}
 	return false
 }
@@ -110,16 +115,14 @@ sim_unblock_link :: proc(a, b: ^Node_State) {
 	if !g_sim_initialized do return
 	for i in 0 ..< len(g_sim_blocked_links) {
 		pair := g_sim_blocked_links[i]
-		if (pair[0] == a && pair[1] == b) || (pair[0] == b && pair[1] == a) {
+		if sim_pair_matches(pair[0], pair[1], a, b) {
 			ordered_remove(&g_sim_blocked_links, i)
 			break
 		}
 	}
 	for ep in g_sim_endpoints {
 		if ep.closed || ep.peer == nil do continue
-		if (ep.node == a && ep.peer.node == b) || (ep.node == b && ep.peer.node == a) {
-			sim_wake_waiter(ep)
-		}
+		if sim_pair_matches(ep.node, ep.peer.node, a, b) do sim_wake_waiter(ep)
 	}
 }
 
@@ -129,7 +132,7 @@ sim_sever_link :: proc(a, b: ^Node_State, deliver_error: bool) {
 		target: ^Sim_Endpoint
 		for ep in g_sim_endpoints {
 			if ep.closed || ep.peer == nil || ep.peer.closed do continue
-			if (ep.node == a && ep.peer.node == b) || (ep.node == b && ep.peer.node == a) {
+			if sim_pair_matches(ep.node, ep.peer.node, a, b) {
 				target = ep
 				break
 			}
@@ -164,6 +167,20 @@ sim_deliver_reset :: proc(ep: ^Sim_Endpoint, deliver_error: bool) {
 	_ = sim_bind_node(previous)
 }
 
+@(private = "file")
+sim_purge_pending_accepts :: proc(node: ^Node_State) {
+	accept_idx := 0
+	for accept_idx < len(g_sim_pending_accepts) {
+		if g_sim_pending_accepts[accept_idx].node == node {
+			sock := g_sim_pending_accepts[accept_idx].sock
+			ordered_remove(&g_sim_pending_accepts, accept_idx)
+			sim_close_socket(sock)
+			continue
+		}
+		accept_idx += 1
+	}
+}
+
 sim_transport_drop_node :: proc(node: ^Node_State) {
 	if !g_sim_initialized do return
 	for {
@@ -177,16 +194,7 @@ sim_transport_drop_node :: proc(node: ^Node_State) {
 		if removed_port < 0 do break
 		delete_key(&g_sim_listeners, removed_port)
 	}
-	accept_idx := 0
-	for accept_idx < len(g_sim_pending_accepts) {
-		if g_sim_pending_accepts[accept_idx].node == node {
-			sock := g_sim_pending_accepts[accept_idx].sock
-			ordered_remove(&g_sim_pending_accepts, accept_idx)
-			sim_close_socket(sock)
-			continue
-		}
-		accept_idx += 1
-	}
+	sim_purge_pending_accepts(node)
 	for {
 		reopened := false
 		for ep in g_sim_endpoints {
@@ -273,16 +281,7 @@ sim_listen :: proc(port: int) {
 sim_stop_listening :: proc(port: int) {
 	if !g_sim_initialized do return
 	if g_sim_listeners[port] == NODE do delete_key(&g_sim_listeners, port)
-	accept_idx := 0
-	for accept_idx < len(g_sim_pending_accepts) {
-		if g_sim_pending_accepts[accept_idx].node == NODE {
-			sock := g_sim_pending_accepts[accept_idx].sock
-			ordered_remove(&g_sim_pending_accepts, accept_idx)
-			sim_close_socket(sock)
-			continue
-		}
-		accept_idx += 1
-	}
+	sim_purge_pending_accepts(NODE)
 }
 
 runtime_dial_tcp :: proc(endpoint: net.Endpoint) -> (net.TCP_Socket, net.Network_Error) {
@@ -383,23 +382,24 @@ sim_start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 		return false
 	}
 	if !ring_io_attach(ring, get_self_pid()) do return false
+	sim_bind_ring(ep, ring)
+	return true
+}
+
+@(private = "file")
+sim_bind_ring :: proc(ep: ^Sim_Endpoint, ring: ^Connection_Ring) {
 	sync.atomic_store(&ring.io_stop, 0)
 	ep.ring = ring
 	ring.pending_recv = nil
 	ring.send_in_flight = false
 	ring.recv_write_pos = 0
-	return true
 }
 
 sim_attach_pool_ring :: proc(ring: ^Connection_Ring, owner: PID) -> bool {
 	ep := sim_endpoint_for(ring.tcp_socket)
 	if ep == nil do return false
 	sync.atomic_store_explicit(&ring.io_owner, u64(owner), .Release)
-	sync.atomic_store(&ring.io_stop, 0)
-	ep.ring = ring
-	ring.pending_recv = nil
-	ring.send_in_flight = false
-	ring.recv_write_pos = 0
+	sim_bind_ring(ep, ring)
 	return true
 }
 

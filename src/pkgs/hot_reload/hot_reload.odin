@@ -100,8 +100,8 @@ load_module :: proc(
 	path: string,
 	expected_symbols: []Symbol_Spec,
 	expected_state_size: int,
+	state_type_prefix: string,
 	generation: u32 = 0,
-	state_type_prefix := "",
 	allocator := context.allocator,
 ) -> (
 	^Hot_Module,
@@ -127,12 +127,7 @@ load_module :: proc(
 	symbols.allocator = allocator
 
 	for spec in expected_symbols {
-		sym_name: string
-		if state_type_prefix != "" {
-			sym_name = fmt.tprintf("hot_%s_%s", state_type_prefix, spec.name)
-		} else {
-			sym_name = fmt.tprintf("hot_%s", spec.name)
-		}
+		sym_name := fmt.tprintf("hot_%s_%s", state_type_prefix, spec.name)
 		ptr, found := dynlib.symbol_address(lib, sym_name)
 
 		if spec.required && !found {
@@ -157,12 +152,7 @@ load_module :: proc(
 		)
 	}
 
-	state_size_sym: string
-	if state_type_prefix != "" {
-		state_size_sym = fmt.tprintf("hot_%s_state_size", state_type_prefix)
-	} else {
-		state_size_sym = "hot_state_size"
-	}
+	state_size_sym := fmt.tprintf("hot_%s_state_size", state_type_prefix)
 	state_size_ptr, state_size_found := dynlib.symbol_address(lib, state_size_sym)
 	if state_size_found && state_size_ptr != nil {
 		state_size_fn := cast(proc "c" () -> int)state_size_ptr

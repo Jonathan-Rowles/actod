@@ -177,33 +177,27 @@ make_connection_ring :: proc(
 
 	ring.send_slots = make([]Send_Slot, config.send_slot_count, allocator)
 	if ring.send_slots == nil {
-		free(ring, allocator)
+		destroy_connection_ring(ring, allocator)
 		return nil
 	}
 
 	send_data_size := int(config.send_slot_count) * int(config.send_slot_size)
 	ring.send_data_buffer = make([]byte, send_data_size, allocator)
 	if ring.send_data_buffer == nil {
-		delete(ring.send_slots, allocator)
-		free(ring, allocator)
+		destroy_connection_ring(ring, allocator)
 		return nil
 	}
 
 	ring.recv_buffer_size = config.recv_buffer_size
 	ring.recv_buffer = make([]byte, config.recv_buffer_size, allocator)
 	if ring.recv_buffer == nil {
-		delete(ring.send_data_buffer, allocator)
-		delete(ring.send_slots, allocator)
-		free(ring, allocator)
+		destroy_connection_ring(ring, allocator)
 		return nil
 	}
 
 	ring.send_bufs = make([][]byte, MAX_SEND_BATCH, allocator)
 	if ring.send_bufs == nil {
-		delete(ring.recv_buffer, allocator)
-		delete(ring.send_data_buffer, allocator)
-		delete(ring.send_slots, allocator)
-		free(ring, allocator)
+		destroy_connection_ring(ring, allocator)
 		return nil
 	}
 
@@ -579,6 +573,14 @@ batch_append_raw :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	return true
 }
 
+ring_full_backoff :: proc(retry: int) {
+	if retry < RING_SEND_SPIN_RETRIES {
+		intrinsics.cpu_relax()
+	} else {
+		runtime_sleep(1 * time.Microsecond)
+	}
+}
+
 batch_append_message_retry :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	when ODIN_TEST {
 		drop, dup, _ := frame_tap(.Out, frame_tap_out_hash(msg_data), msg_data, ring.node_id)
@@ -587,11 +589,7 @@ batch_append_message_retry :: proc(ring: ^Connection_Ring, msg_data: []byte) -> 
 	}
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		if batch_append_raw(ring, msg_data) do return true
-		if retry < RING_SEND_SPIN_RETRIES {
-			intrinsics.cpu_relax()
-		} else {
-			runtime_sleep(1 * time.Microsecond)
-		}
+		ring_full_backoff(retry)
 	}
 	return false
 }
@@ -1095,11 +1093,6 @@ io_release_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 }
 
 @(private)
-ring_dispatch_message :: proc(ring: ^Connection_Ring, msg_data: []byte) {
-	process_complete_message(ring, msg_data)
-}
-
-@(private)
 ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
 	plaintext, ok := envelope_open(&ring.transport_keys, envelope, ring.open_scratch)
 	if !ok {
@@ -1112,7 +1105,7 @@ ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
 		ring.open_scratch,
 		u32(len(plaintext)),
 		ring,
-		ring_dispatch_message,
+		process_complete_message,
 	)
 	if err != .None || remaining != 0 {
 		log.error("Corrupt frame inside sealed envelope")
@@ -1121,23 +1114,8 @@ ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
 }
 
 process_recv_buffer :: proc(ring: ^Connection_Ring) {
-	new_pos: u32
-	err: Recv_Frame_Error
-	if ring.encrypted {
-		new_pos, err = process_recv_frames(
-			ring.recv_buffer,
-			ring.recv_write_pos,
-			ring,
-			ring_dispatch_envelope,
-		)
-	} else {
-		new_pos, err = process_recv_frames(
-			ring.recv_buffer,
-			ring.recv_write_pos,
-			ring,
-			ring_dispatch_message,
-		)
-	}
+	dispatch := ring.encrypted ? ring_dispatch_envelope : process_complete_message
+	new_pos, err := process_recv_frames(ring.recv_buffer, ring.recv_write_pos, ring, dispatch)
 	if err != .None {
 		reason: string
 		switch err {
@@ -1212,12 +1190,6 @@ notify_ring_error :: proc(ring: ^Connection_Ring, reason: string) {
 
 send_raw_via_ring :: proc(ring: ^Connection_Ring, raw_data_with_size: []byte) -> bool {
 	if ring == nil do return false
-
-	if len(raw_data_with_size) > int(ring.usable_slot_size) {
-		log.errorf("Data too large: %d > %d", len(raw_data_with_size), ring.usable_slot_size)
-		return false
-	}
-
 	return batch_append_message(ring, raw_data_with_size)
 }
 
@@ -1354,4 +1326,147 @@ atomic_load_ring_ptr :: #force_inline proc(slot: ^^Connection_Ring) -> ^Connecti
 @(private)
 atomic_store_ring_ptr :: #force_inline proc(slot: ^^Connection_Ring, ring: ^Connection_Ring) {
 	sync.atomic_store_explicit(cast(^u64)slot, u64(uintptr(ring)), .Release)
+}
+
+get_or_create_node_ring :: proc(
+	node_id: Node_ID,
+	config: Connection_Ring_Config,
+) -> ^Connection_Ring {
+	if node_id == 0 || node_id >= MAX_NODES do return nil
+
+	ring := atomic_load_ring_ptr(&NODE.connection_rings[node_id])
+	if ring != nil do return ring
+
+	new_pool := make_connection_pool(node_id, config, get_system_allocator())
+	if new_pool == nil do return nil
+
+	new_ring := make_connection_ring(
+		config,
+		NODE.config.network.enable_encryption,
+		get_system_allocator(),
+	)
+	if new_ring == nil {
+		free(new_pool, get_system_allocator())
+		return nil
+	}
+	new_ring.node_id = node_id
+	new_ring.pool = new_pool
+	atomic_store_ring_ptr(&new_pool.rings[0], new_ring)
+	sync.atomic_store_explicit(&new_pool.ring_count, u32(1), .Release)
+
+	old, swapped := sync.atomic_compare_exchange_strong_explicit(
+		cast(^u64)&NODE.connection_rings[node_id],
+		u64(0),
+		u64(uintptr(new_ring)),
+		.Acq_Rel,
+		.Acquire,
+	)
+	if !swapped {
+		destroy_connection_ring(new_ring, get_system_allocator())
+		free(new_pool, get_system_allocator())
+		return cast(^Connection_Ring)rawptr(uintptr(old))
+	}
+	sync.atomic_store_explicit(
+		cast(^u64)&NODE.connection_pools[node_id],
+		u64(uintptr(new_pool)),
+		.Release,
+	)
+	return new_ring
+}
+
+get_connection_pool :: #force_inline proc(node_id: Node_ID) -> ^Connection_Pool {
+	if node_id == 0 || node_id >= MAX_NODES do return nil
+	return cast(^Connection_Pool)rawptr(
+		uintptr(sync.atomic_load_explicit(cast(^u64)&NODE.connection_pools[node_id], .Acquire)),
+	)
+}
+
+find_pool_owner_by_join_token :: proc(token: u64) -> PID {
+	if token == 0 do return 0
+	for i in 2 ..< MAX_NODES {
+		pool := get_connection_pool(Node_ID(i))
+		if pool == nil do continue
+		if sync.atomic_load_explicit(&pool.join_token, .Acquire) == token {
+			return PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
+		}
+	}
+	return 0
+}
+
+register_connection_ring :: proc(node_id: Node_ID, ring: ^Connection_Ring) {
+	if node_id == 0 || node_id >= MAX_NODES || ring == nil do return
+	atomic_store_ring_ptr(&NODE.connection_rings[node_id], ring)
+}
+
+get_connection_ring :: #force_inline proc(node_id: Node_ID) -> ^Connection_Ring {
+	if node_id == 0 || node_id >= MAX_NODES do return nil
+	ring := atomic_load_ring_ptr(&NODE.connection_rings[node_id])
+	if ring != nil {
+		pool := ring.pool
+		if pool != nil && sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 {
+			return get_pool_ring_ready(pool)
+		}
+	}
+	return ring
+}
+
+@(private)
+destroy_ring_if_quiesced :: proc(ring: ^Connection_Ring, node_id: int) -> bool {
+	sync.atomic_store(&ring.io_stop, 1)
+	released := false
+	for _ in 0 ..< 1000 {
+		if sync.atomic_load_explicit(&ring.io_owner, .Acquire) == 0 {
+			released = true
+			break
+		}
+		runtime_sleep(1 * time.Millisecond)
+	}
+	if !released || ring.io_thread != nil {
+		log.errorf("Leaking connection ring for node %d: IO thread never cleaned up", node_id)
+		return false
+	}
+	destroy_connection_ring(ring, get_system_allocator())
+	return true
+}
+
+destroy_all_connection_rings :: proc() {
+	for i in 1 ..< MAX_NODES {
+		ring := atomic_load_ring_ptr(&NODE.connection_rings[i])
+		pool := get_connection_pool(Node_ID(i))
+		if ring == nil && pool == nil do continue
+
+		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
+		if conn_pid != 0 {
+			log.errorf("Leaking connection ring for node %d: connection actor still alive", i)
+			continue
+		}
+
+		leaked := false
+		if pool != nil {
+			count := sync.atomic_load(&pool.ring_count)
+			for r: u32 = 1; r < count; r += 1 {
+				pr := atomic_load_ring_ptr(&pool.rings[r])
+				atomic_store_ring_ptr(&pool.rings[r], nil)
+				if pr != nil && pr != ring && !destroy_ring_if_quiesced(pr, i) do leaked = true
+			}
+			for p in 0 ..< pool.parked_count {
+				if pool.parked[p] != nil && !destroy_ring_if_quiesced(pool.parked[p], i) {
+					leaked = true
+				}
+				pool.parked[p] = nil
+			}
+			pool.parked_count = 0
+			sync.atomic_store(&pool.ring_count, u32(0))
+		}
+
+		if ring != nil {
+			atomic_store_ring_ptr(&NODE.connection_rings[i], nil)
+			if !destroy_ring_if_quiesced(ring, i) do leaked = true
+		}
+
+		if pool != nil && !leaked {
+			sync.atomic_store_explicit(cast(^u64)&NODE.connection_pools[i], u64(0), .Release)
+			free(pool, get_system_allocator())
+		}
+	}
 }

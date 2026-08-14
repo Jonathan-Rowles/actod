@@ -32,16 +32,7 @@ remove_child_from_supervisor :: proc(actor: ^Actor($T), child_pid: PID, child_in
 handle_remove_child :: proc(actor: ^Actor($T), msg: Remove_Child) {
 	for child_pid, idx in actor.children {
 		if child_pid == msg.child_pid {
-			ordered_remove(&actor.children, idx)
-
-			if idx < len(actor.opts.children) do ordered_remove(&actor.opts.children, idx)
-
-			delete_key(&actor.child_restarts, child_pid)
-
-			for j := idx; j < len(actor.children); j += 1 {
-				remaining_pid := actor.children[j]
-				if info, has := &actor.child_restarts[remaining_pid]; has do info.child_index = j
-			}
+			remove_child_from_supervisor(actor, child_pid, idx)
 
 			child_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
 			if ok {

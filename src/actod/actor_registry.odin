@@ -16,7 +16,6 @@ MAX_NODES :: 256
 NAME_BUCKET_COUNT :: 4096
 NAME_BUCKET_TOMBSTONE :: 0xFFFFFFFF
 
-
 @(private)
 PID_Map :: struct($T: typeid, $HT: typeid) {
 	items:        []PID_Entry(T, HT),
@@ -164,6 +163,45 @@ freelist_push :: proc(m: ^PID_Map($T, $HT), idx: u32) {
 }
 
 @(private)
+acquire_entry_slot :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> (u32, bool) {
+	for {
+		current_items := sync.atomic_load_explicit(&m.num_items, .Acquire)
+
+		if current_items == 0 {
+			_, ok := sync.atomic_compare_exchange_strong_explicit(
+				&m.num_items,
+				0,
+				1,
+				.Acq_Rel,
+				.Acquire,
+			)
+			if ok {
+				sync.atomic_store_explicit(&m.items[0].sequence, 0, .Release)
+				m.items[0].data = T{}
+				sync.atomic_store_explicit(&m.items[0].pid, HT{}, .Release)
+				current_items = 1
+			} else {
+				current_items = sync.atomic_load_explicit(&m.num_items, .Acquire)
+			}
+		}
+
+		if current_items >= m.capacity {
+			if !try_grow_registry(m, loc) do return 0, false
+			continue
+		}
+
+		_, ok := sync.atomic_compare_exchange_strong_explicit(
+			&m.num_items,
+			current_items,
+			current_items + 1,
+			.Acq_Rel,
+			.Acquire,
+		)
+		if ok do return current_items, true
+	}
+}
+
+@(private)
 add :: proc(
 	m: ^PID_Map($T, $HT),
 	data: T,
@@ -206,61 +244,26 @@ add :: proc(
 		return new_pid, true
 	}
 
-	for {
-		current_items := sync.atomic_load_explicit(&m.num_items, .Acquire)
+	idx, claimed := acquire_entry_slot(m, loc)
+	if !claimed do return {}, false
 
-		if current_items == 0 {
-			_, ok := sync.atomic_compare_exchange_strong_explicit(
-				&m.num_items,
-				0,
-				1,
-				.Acq_Rel,
-				.Acquire,
-			)
-			if ok {
-				sync.atomic_store_explicit(&m.items[0].sequence, 0, .Release)
-				m.items[0].data = T{}
-				sync.atomic_store_explicit(&m.items[0].pid, HT{}, .Release)
-				current_items = 1
-			} else {
-				current_items = sync.atomic_load_explicit(&m.num_items, .Acquire)
-			}
-		}
-
-		if current_items >= m.capacity {
-			if !try_grow_registry(m, loc) {
-				return {}, false
-			}
-			continue
-		}
-
-		_, ok := sync.atomic_compare_exchange_strong_explicit(
-			&m.num_items,
-			current_items,
-			current_items + 1,
-			.Acq_Rel,
-			.Acquire,
-		)
-		if ok {
-			entry := &m.items[current_items]
-			new_handle := Handle {
-				idx        = current_items,
-				gen        = 1,
-				actor_type = actor_type,
-			}
-			new_pid := pack_pid(new_handle)
-			new_seq := u32(1 << 1) | 1
-
-			entry.data = data
-			entry.name_hash = name_hash
-			sync.atomic_store_explicit(&entry.pid, new_pid, .Release)
-			sync.atomic_store_explicit(&entry.sequence, new_seq, .Release)
-
-			register_name_bucket(m, name_hash, current_items)
-
-			return new_pid, true
-		}
+	entry := &m.items[idx]
+	new_handle := Handle {
+		idx        = idx,
+		gen        = 1,
+		actor_type = actor_type,
 	}
+	new_pid := pack_pid(new_handle)
+	new_seq := u32(1 << 1) | 1
+
+	entry.data = data
+	entry.name_hash = name_hash
+	sync.atomic_store_explicit(&entry.pid, new_pid, .Release)
+	sync.atomic_store_explicit(&entry.sequence, new_seq, .Release)
+
+	register_name_bucket(m, name_hash, idx)
+
+	return new_pid, true
 }
 
 @(private)
@@ -374,45 +377,9 @@ add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool,
 	}
 
 	if !got_slot {
-		for {
-			current_items := sync.atomic_load_explicit(&m.num_items, .Acquire)
-
-			if current_items == 0 {
-				_, ok := sync.atomic_compare_exchange_strong_explicit(
-					&m.num_items,
-					0,
-					1,
-					.Acq_Rel,
-					.Acquire,
-				)
-				if ok {
-					sync.atomic_store_explicit(&m.items[0].sequence, 0, .Release)
-					m.items[0].data = T{}
-					sync.atomic_store_explicit(&m.items[0].pid, HT{}, .Release)
-					current_items = 1
-				} else {
-					current_items = sync.atomic_load_explicit(&m.num_items, .Acquire)
-				}
-			}
-
-			if current_items >= m.capacity {
-				if !try_grow_registry(m) do return false, false
-				continue
-			}
-
-			_, ok := sync.atomic_compare_exchange_strong_explicit(
-				&m.num_items,
-				current_items,
-				current_items + 1,
-				.Acq_Rel,
-				.Acquire,
-			)
-			if ok {
-				idx = current_items
-				got_slot = true
-				break
-			}
-		}
+		claimed, ok := acquire_entry_slot(m)
+		if !ok do return false, false
+		idx = claimed
 	}
 
 	entry := &m.items[idx]
@@ -452,6 +419,29 @@ add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool,
 	return true, true
 }
 
+@(private)
+remove_entry_at :: proc(m: ^PID_Map($T, $HT), idx: u32) -> bool {
+	entry := &m.items[idx]
+
+	seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
+	if (seq & 1) == 0 do return false
+
+	new_seq := seq & ~u32(1)
+	_, ok := sync.atomic_compare_exchange_strong_explicit(
+		&entry.sequence,
+		seq,
+		new_seq,
+		.Acq_Rel,
+		.Acquire,
+	)
+	if !ok do return false
+
+	deregister_name_bucket(m, entry.name_hash, idx)
+
+	freelist_push(m, idx)
+	return true
+}
+
 remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT) -> bool {
 	num_items := sync.atomic_load_explicit(&m.num_items, .Acquire)
 	for idx in 1 ..< num_items {
@@ -463,20 +453,7 @@ remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT) -> bool {
 		stored_pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
 		if stored_pid != remote_pid do continue
 
-		new_seq := seq & ~u32(1)
-		_, ok := sync.atomic_compare_exchange_strong_explicit(
-			&entry.sequence,
-			seq,
-			new_seq,
-			.Acq_Rel,
-			.Acquire,
-		)
-		if !ok do continue
-
-		deregister_name_bucket(m, entry.name_hash, idx)
-
-		freelist_push(m, idx)
-		return true
+		if remove_entry_at(m, idx) do return true
 	}
 
 	return false
@@ -495,7 +472,7 @@ handle_node_disconnect :: proc(node_id: Node_ID) {
 
 		pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
 
-		if get_node_id(pid) == node_id do _ = remove_remote(&NODE.actor_registry, pid)
+		if get_node_id(pid) == node_id do _ = remove_entry_at(&NODE.actor_registry, i)
 	}
 }
 
@@ -523,71 +500,52 @@ pid_map_rename :: proc(m: ^PID_Map($T, $HT), pid: HT, new_name: string) -> bool 
 	return true
 }
 
-get :: proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, bool) #optional_ok {
+@(private)
+validate_entry :: #force_inline proc(
+	m: ^PID_Map($T, $HT),
+	pid: HT,
+	$ORDER: sync.Atomic_Memory_Order,
+) -> (
+	^PID_Entry(T, HT),
+	bool,
+) {
 	handle, _ := unpack_pid(pid)
 
-	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Acquire) {
+	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, ORDER) {
 		return nil, false
 	}
 
 	entry := &m.items[handle.idx]
 
-	seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-
+	seq := sync.atomic_load_explicit(&entry.sequence, ORDER)
 	if (seq & 1) == 0 do return nil, false
 
 	gen := u16(seq >> 1)
 	if gen != handle.gen do return nil, false
 
-	stored_pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
+	stored_pid := sync.atomic_load_explicit(&entry.pid, ORDER)
 	if stored_pid != pid do return nil, false
 
+	return entry, true
+}
+
+get :: proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, bool) #optional_ok {
+	entry, ok := validate_entry(m, pid, .Acquire)
+	if !ok do return nil, false
 	return entry.data, true
 }
 
 @(private)
 get_relaxed :: #force_inline proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, bool) #optional_ok {
-	handle, _ := unpack_pid(pid)
-
-	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Relaxed) {
-		return nil, false
-	}
-
-	entry := &m.items[handle.idx]
-
-	seq := sync.atomic_load_explicit(&entry.sequence, .Relaxed)
-
-	if (seq & 1) == 0 do return nil, false
-
-	gen := u16(seq >> 1)
-	if gen != handle.gen do return nil, false
-
-	stored_pid := sync.atomic_load_explicit(&entry.pid, .Relaxed)
-	if stored_pid != pid do return nil, false
-
+	entry, ok := validate_entry(m, pid, .Relaxed)
+	if !ok do return nil, false
 	return entry.data, true
 }
 
 @(private)
 get_relaxed_loc :: #force_inline proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, i32, bool) {
-	handle, _ := unpack_pid(pid)
-
-	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Relaxed) {
-		return nil, 0, false
-	}
-
-	entry := &m.items[handle.idx]
-
-	seq := sync.atomic_load_explicit(&entry.sequence, .Relaxed)
-
-	if (seq & 1) == 0 do return nil, 0, false
-
-	gen := u16(seq >> 1)
-	if gen != handle.gen do return nil, 0, false
-
-	stored_pid := sync.atomic_load_explicit(&entry.pid, .Relaxed)
-	if stored_pid != pid do return nil, 0, false
-
+	entry, ok := validate_entry(m, pid, .Relaxed)
+	if !ok do return nil, 0, false
 	home_worker := sync.atomic_load_explicit(&entry.home_worker, .Relaxed)
 	return entry.data, home_worker, true
 }
@@ -658,23 +616,8 @@ num_used :: proc(m: ^PID_Map($T, $HT)) -> int {
 }
 
 valid :: proc(m: ^PID_Map($T, $HT), pid: HT) -> bool {
-	handle, _ := unpack_pid(pid)
-
-	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Acquire) {
-		return false
-	}
-
-	entry := &m.items[handle.idx]
-
-	seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-
-	if (seq & 1) == 0 do return false
-
-	gen := u16(seq >> 1)
-	if gen != handle.gen do return false
-
-	stored_pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
-	return stored_pid == pid
+	_, ok := validate_entry(m, pid, .Acquire)
+	return ok
 }
 
 cap :: proc(m: ^PID_Map($T, $HT)) -> int {
@@ -864,26 +807,17 @@ register_node_entry :: proc(
 		return existing_id, false
 	}
 
-	for {
-		node_id := sync.atomic_load(&NODE.next_node_id)
-		if node_id >= MAX_NODES {
-			log.errorf(
-				"register_node('%s') failed: this node already knows the maximum of %d peers",
-				name,
-				MAX_NODES,
-				location = loc,
-			)
-			return 0, false
-		}
-		if _, ok := sync.atomic_compare_exchange_strong(
-			&NODE.next_node_id,
-			node_id,
-			node_id + 1,
-		); ok {
-			break
-		}
+	node_id := sync.atomic_load(&NODE.next_node_id)
+	if node_id >= MAX_NODES {
+		log.errorf(
+			"register_node('%s') failed: this node already knows the maximum of %d peers",
+			name,
+			MAX_NODES,
+			location = loc,
+		)
+		return 0, false
 	}
-	node_id := sync.atomic_load(&NODE.next_node_id) - 1
+	sync.atomic_store(&NODE.next_node_id, node_id + 1)
 
 	cloned_name := strings.clone(name, get_system_allocator())
 
@@ -969,149 +903,6 @@ gossip_seq_reset :: proc(node_id: Node_ID, frontier: u64) {
 	window := &NODE.node_registry[node_id].gossip
 	window.next_seq = frontier + 1
 	builtin.clear(&window.ahead)
-}
-
-get_or_create_node_ring :: proc(
-	node_id: Node_ID,
-	config: Connection_Ring_Config,
-) -> ^Connection_Ring {
-	if node_id == 0 || node_id >= MAX_NODES do return nil
-
-	ring := atomic_load_ring_ptr(&NODE.connection_rings[node_id])
-	if ring != nil do return ring
-
-	new_pool := make_connection_pool(node_id, config, get_system_allocator())
-	if new_pool == nil do return nil
-
-	new_ring := make_connection_ring(
-		config,
-		NODE.config.network.enable_encryption,
-		get_system_allocator(),
-	)
-	if new_ring == nil {
-		free(new_pool, get_system_allocator())
-		return nil
-	}
-	new_ring.node_id = node_id
-	new_ring.pool = new_pool
-	atomic_store_ring_ptr(&new_pool.rings[0], new_ring)
-	sync.atomic_store_explicit(&new_pool.ring_count, u32(1), .Release)
-
-	old, swapped := sync.atomic_compare_exchange_strong_explicit(
-		cast(^u64)&NODE.connection_rings[node_id],
-		u64(0),
-		u64(uintptr(new_ring)),
-		.Acq_Rel,
-		.Acquire,
-	)
-	if !swapped {
-		destroy_connection_ring(new_ring, get_system_allocator())
-		free(new_pool, get_system_allocator())
-		return cast(^Connection_Ring)rawptr(uintptr(old))
-	}
-	sync.atomic_store_explicit(
-		cast(^u64)&NODE.connection_pools[node_id],
-		u64(uintptr(new_pool)),
-		.Release,
-	)
-	return new_ring
-}
-
-get_connection_pool :: #force_inline proc(node_id: Node_ID) -> ^Connection_Pool {
-	if node_id == 0 || node_id >= MAX_NODES do return nil
-	return cast(^Connection_Pool)rawptr(
-		uintptr(sync.atomic_load_explicit(cast(^u64)&NODE.connection_pools[node_id], .Acquire)),
-	)
-}
-
-find_pool_owner_by_join_token :: proc(token: u64) -> PID {
-	if token == 0 do return 0
-	for i in 2 ..< MAX_NODES {
-		pool := get_connection_pool(Node_ID(i))
-		if pool == nil do continue
-		if sync.atomic_load_explicit(&pool.join_token, .Acquire) == token {
-			return PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
-		}
-	}
-	return 0
-}
-
-register_connection_ring :: proc(node_id: Node_ID, ring: ^Connection_Ring) {
-	if node_id == 0 || node_id >= MAX_NODES || ring == nil do return
-	atomic_store_ring_ptr(&NODE.connection_rings[node_id], ring)
-}
-
-get_connection_ring :: #force_inline proc(node_id: Node_ID) -> ^Connection_Ring {
-	if node_id == 0 || node_id >= MAX_NODES do return nil
-	ring := atomic_load_ring_ptr(&NODE.connection_rings[node_id])
-	if ring != nil {
-		pool := ring.pool
-		if pool != nil && sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 {
-			return get_pool_ring_ready(pool)
-		}
-	}
-	return ring
-}
-
-@(private)
-destroy_ring_if_quiesced :: proc(ring: ^Connection_Ring, node_id: int) -> bool {
-	sync.atomic_store(&ring.io_stop, 1)
-	released := false
-	for _ in 0 ..< 1000 {
-		if sync.atomic_load_explicit(&ring.io_owner, .Acquire) == 0 {
-			released = true
-			break
-		}
-		runtime_sleep(1 * time.Millisecond)
-	}
-	if !released || ring.io_thread != nil {
-		log.errorf("Leaking connection ring for node %d: IO thread never cleaned up", node_id)
-		return false
-	}
-	destroy_connection_ring(ring, get_system_allocator())
-	return true
-}
-
-destroy_all_connection_rings :: proc() {
-	for i in 1 ..< MAX_NODES {
-		ring := atomic_load_ring_ptr(&NODE.connection_rings[i])
-		pool := get_connection_pool(Node_ID(i))
-		if ring == nil && pool == nil do continue
-
-		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
-		if conn_pid != 0 {
-			log.errorf("Leaking connection ring for node %d: connection actor still alive", i)
-			continue
-		}
-
-		leaked := false
-		if pool != nil {
-			count := sync.atomic_load(&pool.ring_count)
-			for r: u32 = 1; r < count; r += 1 {
-				pr := atomic_load_ring_ptr(&pool.rings[r])
-				atomic_store_ring_ptr(&pool.rings[r], nil)
-				if pr != nil && pr != ring && !destroy_ring_if_quiesced(pr, i) do leaked = true
-			}
-			for p in 0 ..< pool.parked_count {
-				if pool.parked[p] != nil && !destroy_ring_if_quiesced(pool.parked[p], i) {
-					leaked = true
-				}
-				pool.parked[p] = nil
-			}
-			pool.parked_count = 0
-			sync.atomic_store(&pool.ring_count, u32(0))
-		}
-
-		if ring != nil {
-			atomic_store_ring_ptr(&NODE.connection_rings[i], nil)
-			if !destroy_ring_if_quiesced(ring, i) do leaked = true
-		}
-
-		if pool != nil && !leaked {
-			sync.atomic_store_explicit(cast(^u64)&NODE.connection_pools[i], u64(0), .Release)
-			free(pool, get_system_allocator())
-		}
-	}
 }
 
 @(require_results)

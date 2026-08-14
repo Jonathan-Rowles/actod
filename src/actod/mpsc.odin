@@ -139,7 +139,7 @@ mpsc_size :: proc(q: ^MPSC_Queue($T, $N)) -> int {
 	return int(size)
 }
 
-mpsc_is_empty :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
+mpsc_is_empty_relaxed :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
 	pos := q.read_index
 	mask := q.r_mask
 	entry := &q.r_entries[pos & mask]
@@ -147,7 +147,7 @@ mpsc_is_empty :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
 	return seq != pos + 1
 }
 
-mpsc_has_ready_item :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
+mpsc_has_ready_acquire :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
 	pos := q.read_index
 	mask := q.r_mask
 	entry := &q.r_entries[pos & mask]

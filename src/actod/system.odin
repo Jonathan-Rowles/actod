@@ -220,15 +220,21 @@ init_default_node :: proc "contextless" () {
 	default_node.reclaim.epoch = 1
 	default_node.node_id = 1
 	default_node.next_node_id = 2
-	default_node.config = DEFAULT_SYSTEM_CONFIG
-	default_node.config.network.auth_password = strings.clone(
-		DEFAULT_SYSTEM_CONFIG.network.auth_password,
-		get_system_allocator(),
-	)
-	default_node.config.network.bind_address = strings.clone(
-		DEFAULT_SYSTEM_CONFIG.network.bind_address,
-		get_system_allocator(),
-	)
+	node_own_config_strings(&default_node, DEFAULT_SYSTEM_CONFIG)
+}
+
+@(private)
+node_own_config_strings :: proc(node: ^Node_State, opts: System_Config) {
+	sys_allocator := get_system_allocator()
+	old_auth := node.config.network.auth_password
+	old_bind := node.config.network.bind_address
+	cloned_auth := strings.clone(opts.network.auth_password, sys_allocator)
+	cloned_bind := strings.clone(opts.network.bind_address, sys_allocator)
+	node.config = opts
+	node.config.network.auth_password = cloned_auth
+	node.config.network.bind_address = cloned_bind
+	delete(old_auth, sys_allocator)
+	delete(old_bind, sys_allocator)
 }
 
 get_local_node_name :: proc() -> string {
@@ -255,15 +261,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.logger = make_logger(logging_config)
 	context.logger = NODE.logger
 
-	old_auth := NODE.config.network.auth_password
-	old_bind := NODE.config.network.bind_address
-	cloned_auth := strings.clone(opts.network.auth_password, sys_allocator)
-	cloned_bind := strings.clone(opts.network.bind_address, sys_allocator)
-	NODE.config = opts
-	NODE.config.network.auth_password = cloned_auth
-	NODE.config.network.bind_address = cloned_bind
-	if len(old_auth) > 0 do delete(old_auth, sys_allocator)
-	if len(old_bind) > 0 do delete(old_bind, sys_allocator)
+	node_own_config_strings(NODE, opts)
 	if NODE.config.loc.file_path == "" do NODE.config.loc = loc
 
 	bind_addr, bind_ok := parse_bind_address(NODE.config.network.bind_address)
@@ -441,7 +439,7 @@ send_to_node_mailbox :: #force_inline proc(
 			result,
 			location = loc,
 		)
-		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+		if message_owns_page(msg.content) {
 			free_message(&actor.pool, msg.content)
 		}
 		return false

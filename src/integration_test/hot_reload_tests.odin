@@ -112,6 +112,7 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
+		"Counter_State",
 		generation = 1,
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
@@ -170,6 +171,7 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
+		"Counter_State",
 		generation = 2,
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
@@ -224,6 +226,7 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
+		"Counter_State",
 		generation = 3,
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
@@ -284,6 +287,7 @@ test_rollback :: proc(t: ^testing.T) {
 		v1_path,
 		specs,
 		size_of(HR_Counter_State),
+		"Counter_State",
 		generation = 4,
 	)
 	expect_value(t, v1_err.kind, hot_reload.Load_Error_Kind.None)
@@ -294,6 +298,7 @@ test_rollback :: proc(t: ^testing.T) {
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
+		"Counter_State",
 		generation = 5,
 	)
 	expect_value(t, v2_err.kind, hot_reload.Load_Error_Kind.None)
@@ -494,6 +499,7 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 		v2_path,
 		specs,
 		size_of(HR_Counter_State),
+		"Counter_State",
 		generation = 100,
 	)
 	if load_err.kind != .None {

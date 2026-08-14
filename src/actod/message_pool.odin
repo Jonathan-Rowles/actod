@@ -5,10 +5,15 @@ import "core:mem"
 import "core:sync"
 
 INLINE_MESSAGE_SIZE :: 32
-INLINE_NEEDS_FIXUP :: rawptr(uintptr(1)) // sentinel: inline message with string/slice pointers
+INLINE_NEEDS_FIXUP :: rawptr(uintptr(1))
 MAX_ALLOC_RETRIES :: 1000
 DEFAULT_PAGE_SIZE :: mem.Kilobyte * 64
 MAX_STATIC_MESSAGE_SIZE :: #config(ACTOD_MAX_MESSAGE_SIZE, DEFAULT_PAGE_SIZE)
+@(private)
+message_owns_page :: #force_inline proc "contextless" (content: rawptr) -> bool {
+	return content != nil && content != INLINE_NEEDS_FIXUP
+}
+
 @(private)
 pool_max_pages :: proc(mailbox_capacity: int) -> int {
 	return mailbox_capacity + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE
@@ -29,7 +34,7 @@ ASK_REPLY_BIT :: u64(1) << 63
 
 @(private)
 message_ask_token :: #force_inline proc "contextless" (msg: ^Message) -> (token: u64, is_reply: bool) {
-	if msg.content == nil || msg.content == INLINE_NEEDS_FIXUP do return 0, false
+	if !message_owns_page(msg.content) do return 0, false
 	raw := msg.ask_token
 	return raw &~ ASK_REPLY_BIT, raw & ASK_REPLY_BIT != 0
 }
@@ -205,21 +210,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 }
 
 @(private)
-free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
-	if ptr == nil do return
-
-	idx := int((cast(^Type_Header)ptr).page_index)
-
-	if idx < 0 || idx >= page_pool.max_pages || page_pool.pages[idx] != ptr {
-		panic_at(
-			loc,
-			"free_message: invalid page pointer %p, its header says page index %d (valid range is 0 to %d), the page was double freed or its header was overwritten",
-			ptr,
-			idx,
-			page_pool.max_pages - 1,
-		)
-	}
-
+return_page_to_ring :: #force_inline proc(page_pool: ^Pool, idx: int) {
 	for {
 		pos := sync.atomic_load_explicit(&page_pool.write_index, .Relaxed)
 		entry := &page_pool.ring[pos & page_pool.ring_mask]
@@ -242,6 +233,25 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
 
 		intrinsics.cpu_relax()
 	}
+}
+
+@(private)
+free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
+	if ptr == nil do return
+
+	idx := int((cast(^Type_Header)ptr).page_index)
+
+	if idx < 0 || idx >= page_pool.max_pages || page_pool.pages[idx] != ptr {
+		panic_at(
+			loc,
+			"free_message: invalid page pointer %p, its header says page index %d (valid range is 0 to %d), the page was double freed or its header was overwritten",
+			ptr,
+			idx,
+			page_pool.max_pages - 1,
+		)
+	}
+
+	return_page_to_ring(page_pool, idx)
 }
 
 @(private)
@@ -277,28 +287,7 @@ flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer, loc := #calle
 			)
 		}
 
-		for {
-			pos := sync.atomic_load_explicit(&pool.write_index, .Relaxed)
-			entry := &pool.ring[pos & pool.ring_mask]
-			seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-			diff := i64(seq) - i64(pos)
-
-			if diff == 0 {
-				if _, ok := sync.atomic_compare_exchange_weak_explicit(
-					&pool.write_index,
-					pos,
-					pos + 1,
-					.Release,
-					.Relaxed,
-				); ok {
-					entry.page_index = idx
-					sync.atomic_store_explicit(&entry.sequence, pos + 1, .Release)
-					break
-				}
-			} else {
-				intrinsics.cpu_relax()
-			}
-		}
+		return_page_to_ring(pool, idx)
 	}
 
 	buffer.count = 0

@@ -1,5 +1,5 @@
 package missing_required
 
-// Deliberately missing hot_handle_message, only exports state_size.
+// Deliberately missing hot_Counter_State_handle_message, only exports state_size.
 @(export)
-hot_state_size :: proc "c" () -> int {return 4}
+hot_Counter_State_state_size :: proc "c" () -> int {return 4}

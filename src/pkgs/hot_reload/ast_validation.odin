@@ -527,6 +527,24 @@ discover_package_procs :: proc(package_path: string, allocator := context.alloca
 	return result[:]
 }
 
+@(private)
+take_candidate :: proc(
+	result: ^[dynamic]Proc_Name_Mapping,
+	used: ^map[string]bool,
+	field_name: string,
+	proc_name: string,
+	allocator: mem.Allocator,
+) {
+	append(
+		result,
+		Proc_Name_Mapping {
+			field_name = strings.clone(field_name, allocator),
+			proc_name = strings.clone(proc_name, allocator),
+		},
+	)
+	used[proc_name] = true
+}
+
 discover_proc_names :: proc(
 	package_path: string,
 	state_type_name: string,
@@ -627,14 +645,7 @@ discover_proc_names :: proc(
 		for c in candidates {
 			if c.name in used do continue
 			if c.param_count == 3 && c.param_types[2] == "any" {
-				append(
-					&result,
-					Proc_Name_Mapping {
-						field_name = strings.clone(field_name, allocator),
-						proc_name = strings.clone(c.name, allocator),
-					},
-				)
-				used[c.name] = true
+				take_candidate(&result, &used, field_name, c.name, allocator)
 				break
 			}
 		}
@@ -645,14 +656,7 @@ discover_proc_names :: proc(
 		for c in candidates {
 			if c.name in used do continue
 			if c.name == field_name {
-				append(
-					&result,
-					Proc_Name_Mapping {
-						field_name = strings.clone(field_name, allocator),
-						proc_name = strings.clone(c.name, allocator),
-					},
-				)
-				used[c.name] = true
+				take_candidate(&result, &used, field_name, c.name, allocator)
 				break
 			}
 		}
@@ -676,14 +680,7 @@ discover_proc_names :: proc(
 				   field_name,
 				   strings.concatenate({"_", c.name}, context.temp_allocator),
 			   ) {
-				append(
-					&result,
-					Proc_Name_Mapping {
-						field_name = strings.clone(field_name, allocator),
-						proc_name = strings.clone(c.name, allocator),
-					},
-				)
-				used[c.name] = true
+				take_candidate(&result, &used, field_name, c.name, allocator)
 				break
 			}
 		}

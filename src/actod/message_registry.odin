@@ -399,13 +399,7 @@ check_type_safety :: proc(
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 
 	build_error :: proc(path: string, type_desc: string) -> string {
-		sb: strings.Builder
-		strings.builder_init(&sb, 0, 64, context.temp_allocator)
-		strings.write_string(&sb, path)
-		strings.write_string(&sb, " (")
-		strings.write_string(&sb, type_desc)
-		strings.write_string(&sb, ")")
-		return strings.to_string(sb)
+		return fmt.tprintf("%s (%s)", path, type_desc)
 	}
 
 	#partial switch v in base.variant {
@@ -451,13 +445,7 @@ check_type_safety :: proc(
 		any_has_variable_data := false
 
 		for variant, i in v.variants {
-			sb: strings.Builder
-			strings.builder_init(&sb, 0, 64, context.temp_allocator)
-			strings.write_string(&sb, path)
-			strings.write_string(&sb, ".variant[")
-			strings.write_int(&sb, i)
-			strings.write_string(&sb, "]")
-			variant_path := strings.to_string(sb)
+			variant_path := fmt.tprintf("%s.variant[%d]", path, i)
 
 			variant_safe, msg := check_type_safety(
 				variant,
@@ -508,11 +496,7 @@ check_type_safety :: proc(
 		}
 		return true, ""
 	case runtime.Type_Info_Array:
-		sb: strings.Builder
-		strings.builder_init(&sb, 0, 64, context.temp_allocator)
-		strings.write_string(&sb, path)
-		strings.write_string(&sb, "[]")
-		array_path := strings.to_string(sb)
+		array_path := fmt.tprintf("%s[]", path)
 
 		return check_type_safety(
 			v.elem,
@@ -529,12 +513,7 @@ check_type_safety :: proc(
 			if path == "" {
 				field_path = string(v.names[i])
 			} else {
-				sb: strings.Builder
-				strings.builder_init(&sb, 0, 64, context.temp_allocator)
-				strings.write_string(&sb, path)
-				strings.write_string(&sb, ".")
-				strings.write_string(&sb, string(v.names[i]))
-				field_path = strings.to_string(sb)
+				field_path = fmt.tprintf("%s.%s", path, v.names[i])
 			}
 			field_offset := base_offset + uintptr(v.offsets[i])
 			field_safe, msg := check_type_safety(

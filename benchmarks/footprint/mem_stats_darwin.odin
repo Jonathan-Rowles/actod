@@ -2,7 +2,6 @@
 package footprint
 
 import "core:fmt"
-import "core:slice"
 import "core:sys/darwin"
 import "core:sys/posix"
 
@@ -138,39 +137,18 @@ read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 	return int(resident_pages * page_size / 1024)
 }
 
-Vma_Bucket :: struct {
-	size_kb: int,
-	perms:   i32,
-	count:   int,
+Vma_Visit_Ctx :: struct {
+	visit: proc(size_kb: int, perms: string, user: rawptr),
+	user:  rawptr,
 }
 
-print_vma_breakdown :: proc(top: int) {
-	buckets := make([dynamic]Vma_Bucket)
-	defer delete(buckets)
-
+vma_regions :: proc(visit: proc(size_kb: int, perms: string, user: rawptr), user: rawptr) {
+	ctx := Vma_Visit_Ctx{visit, user}
 	walk_regions(proc(region: Region, user: rawptr) {
-		buckets := cast(^[dynamic]Vma_Bucket)user
+		ctx := cast(^Vma_Visit_Ctx)user
 		size_kb := int(region.size / 1024)
-		for &b in buckets {
-			if b.size_kb == size_kb && b.perms == region.protection {
-				b.count += 1
-				return
-			}
-		}
-		append(buckets, Vma_Bucket{size_kb = size_kb, perms = region.protection, count = 1})
-	}, &buckets)
-
-	slice.sort_by(buckets[:], proc(a: Vma_Bucket, b: Vma_Bucket) -> bool {
-		return a.count > b.count
-	})
-
-	fmt.println()
-	fmt.println("--- VMA breakdown (top buckets by count) ---")
-	shown := min(top, len(buckets))
-	for i in 0 ..< shown {
-		b := buckets[i]
-		fmt.printf("%8d x %8d KB  %s\n", b.count, b.size_kb, protection_string(b.perms))
-	}
+		ctx.visit(size_kb, protection_string(region.protection), ctx.user)
+	}, &ctx)
 }
 
 protection_string :: proc(protection: i32) -> string {

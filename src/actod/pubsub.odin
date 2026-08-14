@@ -201,7 +201,7 @@ subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subs
 
 	type_hash, hash_ok := get_actor_type_hash(actor_type)
 	if hash_ok {
-		broadcast_to_all_nodes(Subscribe_Remote{type_name_hash = type_hash, count = 1})
+		broadcast_to_others(Subscribe_Remote{type_name_hash = type_hash, count = 1})
 	} else {
 		log.warnf(
 			"subscribe_type: no registered type name hash for actor type %d, the local subscription succeeded but remote nodes were not told, broadcasts from other nodes will not arrive",
@@ -246,7 +246,7 @@ pubsub_unsubscribe :: proc(sub: Subscription, loc := #caller_location) -> bool {
 
 	type_hash, hash_ok := get_actor_type_hash(sub.actor_type)
 	if hash_ok {
-		broadcast_to_all_nodes(
+		broadcast_to_others(
 			Unsubscribe_Remote{type_name_hash = type_hash, count = 1},
 		)
 	} else {

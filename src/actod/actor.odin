@@ -207,7 +207,7 @@ actor_arena_reserve :: proc(data_size: int, mailbox_size: int, opts: Actor_Confi
 	return uint(static_worst + opts.arena_headroom)
 }
 
-DEFAULT_ACTOR_SLOT_BYTES :: #config(ACTOD_ACTOR_SLOT_BYTES, 128 * mem.Kilobyte)
+DEFAULT_ACTOR_SLOT_BYTES :: 128 * mem.Kilobyte
 
 @(private)
 actor_arena_slot_size :: proc(opts: Actor_Config) -> uint {
@@ -245,11 +245,8 @@ send_self :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Er
 	when ODIN_TEST {if r, ok := ti.intercept_send_self(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_self_impl(&v, size_of(T), typeid_of(T), info, .System, loc)
-	} else {
-		return send_self_impl(&v, size_of(T), typeid_of(T), info, .User, loc)
-	}
+	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
+	return send_self_impl(&v, size_of(T), typeid_of(T), info, CLASS, loc)
 }
 
 @(require_results)
@@ -257,11 +254,8 @@ send_message :: #force_inline proc(to: PID, content: $T, loc := #caller_location
 	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .System, loc)
-	} else {
-		return send_message_impl(to, &v, size_of(T), typeid_of(T), info, .User, loc)
-	}
+	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
+	return send_message_impl(to, &v, size_of(T), typeid_of(T), info, CLASS, loc)
 }
 
 // Send message by actor name. Supports both local and remote actors.
@@ -410,11 +404,8 @@ send_message_to_children :: #force_inline proc(content: $T, loc := #caller_locat
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .System, loc)
-	} else {
-		return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, .User, loc)
-	}
+	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
+	return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, CLASS, loc)
 }
 
 @(require_results)
@@ -422,11 +413,8 @@ send_message_to_parent :: #force_inline proc(content: $T, loc := #caller_locatio
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .System, loc)
-	} else {
-		return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, .User, loc)
-	}
+	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
+	return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, CLASS, loc)
 }
 
 @(private)
@@ -623,11 +611,8 @@ send :: #force_inline proc(
 ) -> Send_Error {
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	when intrinsics.type_is_variant_of(SYSTEM_MSG, T) {
-		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .System, loc)
-	} else {
-		return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, .User, loc)
-	}
+	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
+	return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, CLASS, loc)
 }
 
 @(require_results)
@@ -1007,7 +992,7 @@ send_system_from_payload :: #force_inline proc(
 			actor_origin(to_pid),
 			info.name,
 		)
-		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP {
+		if message_owns_page(msg.content) {
 			free_message(&actor.pool, msg.content)
 		}
 		return .RECEIVER_BACKLOGGED
@@ -1036,6 +1021,13 @@ track_max_mailbox_size :: proc(mailbox: ^ACTOR_MAILBOX) {
 }
 
 @(private)
+build_pid_histogram :: proc(list: []PID) -> map[PID]u64 {
+	histogram := make(map[PID]u64)
+	for pid in list do histogram[pid] += 1
+	return histogram
+}
+
+@(private)
 collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 	stats := Actor_Stats {
 		pid        = actor.pid,
@@ -1060,23 +1052,8 @@ collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 		context.allocator = actor_system_allocator
 		defer context.allocator = saved_allocator
 
-		stats.received_from = make(map[PID]u64)
-		for pid in current_actor_context.stats.received_list {
-			if count, exists := stats.received_from[pid]; exists {
-				stats.received_from[pid] = count + 1
-			} else {
-				stats.received_from[pid] = 1
-			}
-		}
-
-		stats.sent_to = make(map[PID]u64)
-		for pid in current_actor_context.stats.sent_list {
-			if count, exists := stats.sent_to[pid]; exists {
-				stats.sent_to[pid] = count + 1
-			} else {
-				stats.sent_to[pid] = 1
-			}
-		}
+		stats.received_from = build_pid_histogram(current_actor_context.stats.received_list[:])
+		stats.sent_to = build_pid_histogram(current_actor_context.stats.sent_list[:])
 
 		clear_dynamic_array(&current_actor_context.stats.received_list)
 		clear_dynamic_array(&current_actor_context.stats.sent_list)

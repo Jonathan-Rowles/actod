@@ -26,7 +26,7 @@ mock_module_path :: proc(name: string) -> string {
 test_load_module_bad_path :: proc(t: ^testing.T) {
 	specs := []Symbol_Spec{{name = "handle_message", required = true}}
 
-	mod, err := load_module(mock_module_path("actod_missing_module"), specs, 4)
+	mod, err := load_module(mock_module_path("actod_missing_module"), specs, 4, "Counter_State")
 	testing.expect_value(t, err.kind, Load_Error_Kind.File_Not_Found)
 	testing.expect(t, mod == nil, "module should be nil on error")
 }
@@ -171,7 +171,7 @@ compile_load_and_invoke :: proc(
 	}
 
 	specs := []Symbol_Spec{{name = "handle_message", required = true}}
-	mod, err := load_module(out, specs, size_of(Mock_Counter_State), generation = generation)
+	mod, err := load_module(out, specs, size_of(Mock_Counter_State), "Counter_State", generation = generation)
 	testing.expect_value(t, err.kind, Load_Error_Kind.None, loc = loc)
 	if mod == nil {
 		return nil
@@ -255,11 +255,11 @@ test_error_message_missing_required_symbol :: proc(t: ^testing.T) {
 		Load_Error {
 			kind = .Missing_Required_Symbol,
 			module_path = path,
-			symbol_name = "hot_handle_message",
+			symbol_name = "hot_Counter_State_handle_message",
 		},
 	)
 	testing.expect(t, strings.contains(msg, path), "should contain module path")
-	testing.expect(t, strings.contains(msg, "hot_handle_message"), "should contain symbol name")
+	testing.expect(t, strings.contains(msg, "hot_Counter_State_handle_message"), "should contain symbol name")
 }
 
 @(test)

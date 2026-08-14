@@ -777,81 +777,76 @@ SPAWN_CHILD_RAW_FIELD :: `	spawn_child_raw:          proc(
 	) -> (PID, bool),
 `
 
+detect_raw_spawn_needs :: proc(procs: []Proc_Info) -> (need_spawn_raw: bool, need_spawn_child_raw: bool) {
+	for p in procs {
+		if needs_hot_api_entry(p) do continue
+		if p.kind != .Compose do continue
+		if strings.contains(p.compose_body, "hot_api.spawn_raw(") do need_spawn_raw = true
+		if strings.contains(p.compose_body, "hot_api.spawn_child_raw(") do need_spawn_child_raw = true
+	}
+	return
+}
+
+emit_padding :: proc(sb: ^strings.Builder, name: string, column: int) {
+	pad := column - len(name)
+	if pad < 1 do pad = 1
+	for _ in 0 ..< pad do fmt.sbprint(sb, " ")
+}
+
+emit_param_list :: proc(sb: ^strings.Builder, p: Proc_Info, multiline: bool) {
+	separator := ",\n" if multiline else ", "
+	prefix := "\t\t" if multiline else ""
+
+	leading_params, trailing_loc := split_trailing_loc(p.params[:])
+
+	param_count := 0
+	for param in leading_params {
+		if param_count > 0 do fmt.sbprint(sb, separator)
+		type_str := resolve_type(param.type_str)
+		if multiline || param.name != "" {
+			fmt.sbprintf(sb, "%s%s: %s", prefix, param.name, type_str)
+		} else {
+			fmt.sbprint(sb, type_str)
+		}
+		param_count += 1
+	}
+	for extra in p.extra_params {
+		if param_count > 0 do fmt.sbprint(sb, separator)
+		eq_idx := strings.index_byte(extra, '=')
+		text := extra if eq_idx < 0 else strings.trim_space(extra[:eq_idx])
+		fmt.sbprintf(sb, "%s%s", prefix, text)
+		param_count += 1
+	}
+	if loc_param, has_loc := trailing_loc.?; has_loc {
+		if param_count > 0 do fmt.sbprint(sb, separator)
+		fmt.sbprintf(sb, "%s%s: %s", prefix, loc_param.name, resolve_type(loc_param.type_str))
+		param_count += 1
+	}
+}
+
 build_hot_api_struct_text :: proc(procs: []Proc_Info) -> string {
 	sb := strings.builder_make()
 	fmt.sbprint(&sb, "Hot_API :: struct {\n")
 
-	need_spawn_raw := false
-	need_spawn_child_raw := false
+	need_spawn_raw, need_spawn_child_raw := detect_raw_spawn_needs(procs)
 
 	for p in procs {
-		if !needs_hot_api_entry(p) {
-			if p.kind == .Compose {
-				if strings.contains(p.compose_body, "hot_api.spawn_raw(") do need_spawn_raw = true
-				if strings.contains(p.compose_body, "hot_api.spawn_child_raw(") do need_spawn_child_raw = true
-			}
-			continue
-		}
+		if !needs_hot_api_entry(p) do continue
 
-		field_name := p.name
-		fmt.sbprintf(&sb, "\t%s:", field_name)
-
-		pad := 26 - len(field_name)
-		if pad < 1 do pad = 1
-		for _ in 0 ..< pad do fmt.sbprint(&sb, " ")
+		fmt.sbprintf(&sb, "\t%s:", p.name)
+		emit_padding(&sb, p.name, 26)
 
 		fmt.sbprint(&sb, "proc(")
-
-		leading_params, trailing_loc := split_trailing_loc(p.params[:])
 
 		total_params := len(p.params) + len(p.extra_params)
 		needs_multiline := total_params > 4
 
-		param_count := 0
 		if needs_multiline {
 			fmt.sbprint(&sb, "\n")
-			for param in leading_params {
-				if param_count > 0 do fmt.sbprint(&sb, ",\n")
-				type_str := resolve_type(param.type_str)
-				fmt.sbprintf(&sb, "\t\t%s: %s", param.name, type_str)
-				param_count += 1
-			}
-			for extra in p.extra_params {
-				if param_count > 0 do fmt.sbprint(&sb, ",\n")
-				eq_idx := strings.index_byte(extra, '=')
-				text := extra if eq_idx < 0 else strings.trim_space(extra[:eq_idx])
-				fmt.sbprintf(&sb, "\t\t%s", text)
-				param_count += 1
-			}
-			if loc_param, has_loc := trailing_loc.?; has_loc {
-				if param_count > 0 do fmt.sbprint(&sb, ",\n")
-				fmt.sbprintf(&sb, "\t\t%s: %s", loc_param.name, resolve_type(loc_param.type_str))
-				param_count += 1
-			}
+			emit_param_list(&sb, p, true)
 			fmt.sbprint(&sb, ",\n\t)")
 		} else {
-			for param in leading_params {
-				if param_count > 0 do fmt.sbprint(&sb, ", ")
-				type_str := resolve_type(param.type_str)
-				if param.name != "" {
-					fmt.sbprintf(&sb, "%s: %s", param.name, type_str)
-				} else {
-					fmt.sbprint(&sb, type_str)
-				}
-				param_count += 1
-			}
-			for extra in p.extra_params {
-				if param_count > 0 do fmt.sbprint(&sb, ", ")
-				eq_idx := strings.index_byte(extra, '=')
-				text := extra if eq_idx < 0 else strings.trim_space(extra[:eq_idx])
-				fmt.sbprint(&sb, text)
-				param_count += 1
-			}
-			if loc_param, has_loc := trailing_loc.?; has_loc {
-				if param_count > 0 do fmt.sbprint(&sb, ", ")
-				fmt.sbprintf(&sb, "%s: %s", loc_param.name, resolve_type(loc_param.type_str))
-				param_count += 1
-			}
+			emit_param_list(&sb, p, false)
 			fmt.sbprint(&sb, ")")
 		}
 
@@ -870,26 +865,16 @@ build_hot_api_init :: proc(procs: []Proc_Info) -> string {
 	sb := strings.builder_make()
 	fmt.sbprint(&sb, "g_hot_api := Hot_API{\n")
 
-	need_spawn_raw := false
-	need_spawn_child_raw := false
+	need_spawn_raw, need_spawn_child_raw := detect_raw_spawn_needs(procs)
 
 	for p in procs {
-		if !needs_hot_api_entry(p) {
-			if p.kind == .Compose {
-				if strings.contains(p.compose_body, "hot_api.spawn_raw(") do need_spawn_raw = true
-				if strings.contains(p.compose_body, "hot_api.spawn_child_raw(") do need_spawn_child_raw = true
-			}
-			continue
-		}
+		if !needs_hot_api_entry(p) do continue
 
 		field := p.name
 		host := host_func_name(p)
 
-		pad := 23 - len(field)
-		if pad < 1 do pad = 1
-
 		fmt.sbprintf(&sb, "\t%s", field)
-		for _ in 0 ..< pad do fmt.sbprint(&sb, " ")
+		emit_padding(&sb, field, 23)
 		fmt.sbprintf(&sb, "= %s,\n", host)
 	}
 

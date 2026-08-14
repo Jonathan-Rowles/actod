@@ -301,7 +301,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 mailbox_has_messages :: #force_inline proc(actor: ^Actor($T)) -> bool {
 	if actor.local_read != actor.local_write do return true
 	if sync.atomic_load_explicit(&actor.stopped_head, .Relaxed) != nil do return true
-	return !mpsc_is_empty(&actor.mailbox)
+	return !mpsc_is_empty_relaxed(&actor.mailbox)
 }
 
 @(private)
@@ -309,7 +309,7 @@ process_system_mailbox :: #force_no_inline proc(
 	actor: ^Actor($T),
 	ctx: ^Message_Processing_Context,
 ) -> bool {
-	if mpsc_is_empty(&actor.system_mailbox) do return true
+	if mpsc_is_empty_relaxed(&actor.system_mailbox) do return true
 	ensure_message_batch(actor, ctx)
 	batch_count := mpsc_pop_batch(&actor.system_mailbox, ctx.message_batch[0:ctx.batch_size])
 
@@ -319,7 +319,7 @@ process_system_mailbox :: #force_no_inline proc(
 
 		if actor.pid == NODE.pid {
 			actor.handle_message(actor.data, msg.from, ctx.data)
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do free_message(&actor.pool, msg.content)
+			if message_owns_page(msg.content) do free_message(&actor.pool, msg.content)
 			continue
 		}
 
@@ -333,7 +333,7 @@ process_system_mailbox :: #force_no_inline proc(
 				if try_transition_state(&actor.state, current, .STOPPING) do break
 			}
 
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do free_message(&actor.pool, msg.content)
+			if message_owns_page(msg.content) do free_message(&actor.pool, msg.content)
 			return false
 
 		case Actor_Stopped:
@@ -354,7 +354,7 @@ process_system_mailbox :: #force_no_inline proc(
 			swap_behaviour(actor, v.generation)
 		}
 
-		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do free_message(&actor.pool, msg.content)
+		if message_owns_page(msg.content) do free_message(&actor.pool, msg.content)
 
 		track_message_received(msg.from)
 	}
@@ -386,14 +386,14 @@ process_user_mailboxes :: #force_inline proc(
 				deliver_user_message(actor, msg, ctx.data)
 				track_message_received(msg.from)
 			}
-			if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
+			if message_owns_page(msg.content) do message_free_deferred(&ctx.free_buffer, msg.content)
 		}
 		flush_batch_free(&ctx.free_buffer)
 		if sync.atomic_load(&actor.state) != .RUNNING do return false
 	}
 
 	// thread safe
-	if !mpsc_has_ready_item(&actor.mailbox) do return true
+	if !mpsc_has_ready_acquire(&actor.mailbox) do return true
 	ensure_message_batch(actor, ctx)
 	batch_count := mpsc_pop_batch(&actor.mailbox, ctx.message_batch[0:ctx.batch_size])
 	if batch_count == 0 do return true
@@ -409,7 +409,7 @@ process_user_mailboxes :: #force_inline proc(
 			deliver_user_message(actor, msg, ctx.data)
 			track_message_received(msg.from)
 		}
-		if msg.content != nil && msg.content != INLINE_NEEDS_FIXUP do message_free_deferred(&ctx.free_buffer, msg.content)
+		if message_owns_page(msg.content) do message_free_deferred(&ctx.free_buffer, msg.content)
 	}
 
 	flush_batch_free(&ctx.free_buffer)
@@ -526,23 +526,8 @@ notify_termination :: proc(actor: ^Actor($T)) {
 	context.allocator = actor_system_allocator
 	defer context.allocator = saved_allocator
 
-	final_stats.received_from = make(map[PID]u64)
-	for pid in current_actor_context.stats.received_list {
-		if count, exists := final_stats.received_from[pid]; exists {
-			final_stats.received_from[pid] = count + 1
-		} else {
-			final_stats.received_from[pid] = 1
-		}
-	}
-
-	final_stats.sent_to = make(map[PID]u64)
-	for pid in current_actor_context.stats.sent_list {
-		if count, exists := final_stats.sent_to[pid]; exists {
-			final_stats.sent_to[pid] = count + 1
-		} else {
-			final_stats.sent_to[pid] = 1
-		}
-	}
+	final_stats.received_from = build_pid_histogram(current_actor_context.stats.received_list[:])
+	final_stats.sent_to = build_pid_histogram(current_actor_context.stats.sent_list[:])
 
 	response := Stats_Response {
 		stats = final_stats,

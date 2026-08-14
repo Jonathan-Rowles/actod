@@ -1,9 +1,7 @@
 #+build linux
 package footprint
 
-import "core:fmt"
 import "core:os"
-import "core:slice"
 import "core:strconv"
 import "core:strings"
 
@@ -45,19 +43,10 @@ read_vma_count :: proc() -> int {
 	return count
 }
 
-Vma_Bucket :: struct {
-	size_kb: int,
-	perms:   string,
-	count:   int,
-}
-
-print_vma_breakdown :: proc(top: int) {
+vma_regions :: proc(visit: proc(size_kb: int, perms: string, user: rawptr), user: rawptr) {
 	data, err := os.read_entire_file_from_path("/proc/self/maps", context.allocator)
 	if err != nil do return
 	defer delete(data)
-
-	buckets := make([dynamic]Vma_Bucket)
-	defer delete(buckets)
 
 	rest := string(data)
 	for line in strings.split_lines_iterator(&rest) {
@@ -72,29 +61,7 @@ print_vma_breakdown :: proc(top: int) {
 		if end <= start do continue
 
 		size_kb := int((end - start) / 1024)
-		found := false
-		for &b in buckets {
-			if b.size_kb == size_kb && b.perms == fields[1] {
-				b.count += 1
-				found = true
-				break
-			}
-		}
-		if !found {
-			append(&buckets, Vma_Bucket{size_kb = size_kb, perms = fields[1], count = 1})
-		}
-	}
-
-	slice.sort_by(buckets[:], proc(a: Vma_Bucket, b: Vma_Bucket) -> bool {
-		return a.count > b.count
-	})
-
-	fmt.println()
-	fmt.println("--- VMA breakdown (top buckets by count) ---")
-	shown := min(top, len(buckets))
-	for i in 0 ..< shown {
-		b := buckets[i]
-		fmt.printf("%8d x %8d KB  %s\n", b.count, b.size_kb, b.perms)
+		visit(size_kb, fields[1], user)
 	}
 }
 

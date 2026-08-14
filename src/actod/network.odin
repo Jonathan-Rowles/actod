@@ -239,6 +239,20 @@ MAX_PENDING_INCOMING_HANDSHAKES :: 32
 
 g_pending_incoming_handshakes: i32
 
+make_connection_actor_data :: proc(node_id: Node_ID, address: net.Endpoint) -> Connection_Actor_Data {
+	return Connection_Actor_Data {
+		node_id                 = node_id,
+		state                   = .Disconnected,
+		address                 = address,
+		heartbeat_interval      = NODE.config.network.heartbeat_interval,
+		heartbeat_timeout       = NODE.config.network.heartbeat_timeout,
+		reconnect_initial_delay = NODE.config.network.reconnect_initial_delay,
+		reconnect_retry_delay   = NODE.config.network.reconnect_retry_delay,
+		auth_password           = get_auth_password(),
+		ring_config             = NODE.config.network.connection_ring,
+	}
+}
+
 accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> bool {
 	pending := sync.atomic_add(&g_pending_incoming_handshakes, 1)
 	if pending >= MAX_PENDING_INCOMING_HANDSHAKES {
@@ -247,19 +261,9 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 		return false
 	}
 
-	conn_data := Connection_Actor_Data {
-		node_id                 = 0,
-		state                   = .Disconnected,
-		address                 = addr,
-		tcp_socket              = sock,
-		heartbeat_interval      = NODE.config.network.heartbeat_interval,
-		heartbeat_timeout       = NODE.config.network.heartbeat_timeout,
-		reconnect_initial_delay = NODE.config.network.reconnect_initial_delay,
-		reconnect_retry_delay   = NODE.config.network.reconnect_retry_delay,
-		auth_password           = get_auth_password(),
-		is_incoming             = true,
-		ring_config             = NODE.config.network.connection_ring,
-	}
+	conn_data := make_connection_actor_data(0, addr)
+	conn_data.tcp_socket = sock
+	conn_data.is_incoming = true
 
 	actor_name := fmt.tprintf("incoming_%v_%d", addr, time.to_unix_nanoseconds(now()))
 
@@ -475,18 +479,8 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 
 	if get_or_create_node_ring(node_id, NODE.config.network.connection_ring) == nil do return 0
 
-	conn_data := Connection_Actor_Data {
-		node_id                 = node_id,
-		node_name               = node_info.node_name,
-		state                   = .Disconnected,
-		address                 = node_info.address,
-		heartbeat_interval      = NODE.config.network.heartbeat_interval,
-		heartbeat_timeout       = NODE.config.network.heartbeat_timeout,
-		reconnect_initial_delay = NODE.config.network.reconnect_initial_delay,
-		reconnect_retry_delay   = NODE.config.network.reconnect_retry_delay,
-		auth_password           = get_auth_password(),
-		ring_config             = NODE.config.network.connection_ring,
-	}
+	conn_data := make_connection_actor_data(node_id, node_info.address)
+	conn_data.node_name = node_info.node_name
 
 	conn_config := make_actor_config(
 		restart_policy = .PERMANENT,
@@ -574,7 +568,7 @@ broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, 
 		source_ip          = ipv4_to_u32(local_info.address.address),
 	}
 
-	broadcast_to_all_nodes(msg)
+	broadcast_to_others(msg)
 }
 
 broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_Reason) {
@@ -592,19 +586,10 @@ broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_R
 		source_node_name   = NODE.name,
 	}
 
-	broadcast_to_all_nodes(msg)
+	broadcast_to_others(msg)
 }
 
-broadcast_to_all_nodes :: proc(msg: $T) {
-	for node_id in 2 ..< MAX_NODES {
-		ring := get_connection_ring(Node_ID(node_id))
-		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
-			send_lifecycle_message(ring, msg)
-		}
-	}
-}
-
-broadcast_to_others :: proc(msg: $T, except: Node_ID) {
+broadcast_to_others :: proc(msg: $T, except: Node_ID = 0) {
 	for node_id in 2 ..< MAX_NODES {
 		if Node_ID(node_id) == except do continue
 		ring := get_connection_ring(Node_ID(node_id))
@@ -765,6 +750,7 @@ spawn_remote_impl :: proc(
 		)
 		return 0, false
 	}
+	defer sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 
 	pending := &g_pending_spawns[slot_idx]
 	for sync.atomic_sema_wait_with_timeout(&pending.sema, time.Microsecond) {
@@ -782,7 +768,6 @@ spawn_remote_impl :: proc(
 
 	ring := ensure_ring_for_node(node_id)
 	if ring == nil {
-		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		log.errorf(
 			"Cannot spawn '%s' on node '%s': no connection to that node could be established; check it is running and reachable",
 			actor_name,
@@ -802,14 +787,12 @@ spawn_remote_impl :: proc(
 			timeout,
 			location = loc,
 		)
-		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		return 0, false
 	}
 
 	response := pending.response
 
 	if response.request_id != request_id {
-		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		log.errorf(
 			"Remote spawn of '%s' on node '%s' received a stale response (request %d, got %d), treating as failed",
 			actor_name,
@@ -830,11 +813,8 @@ spawn_remote_impl :: proc(
 			string(pending.error_buf[:pending.error_len]),
 			location = loc,
 		)
-		sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 		return 0, false
 	}
-
-	sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
 
 	remote_handle, _ := unpack_pid(response.pid)
 	child_pid := pack_pid(remote_handle, node_id)

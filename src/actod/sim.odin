@@ -1,7 +1,6 @@
 package actod
 
 import "base:builtin"
-import "core:strings"
 
 Sim_Trace_Kind :: enum u8 {
 	Node_Step,
@@ -52,10 +51,14 @@ sim_seed :: proc(seed: u64) {
 	sim_rng = seed
 }
 
+lcg_next :: proc(state: ^u64) -> u64 {
+	state^ = state^ * 6364136223846793005 + 1442695040888963407
+	return state^ >> 33
+}
+
 @(private = "file")
 sim_rand :: proc() -> u64 {
-	sim_rng = sim_rng * 6364136223846793005 + 1442695040888963407
-	return sim_rng >> 33
+	return lcg_next(&sim_rng)
 }
 
 @(private = "file")
@@ -84,15 +87,7 @@ sim_create_node :: proc() -> ^Node_State {
 	node.reclaim.epoch = 1
 	node.node_id = 1
 	node.next_node_id = 2
-	node.config = DEFAULT_SYSTEM_CONFIG
-	node.config.network.auth_password = strings.clone(
-		DEFAULT_SYSTEM_CONFIG.network.auth_password,
-		get_system_allocator(),
-	)
-	node.config.network.bind_address = strings.clone(
-		DEFAULT_SYSTEM_CONFIG.network.bind_address,
-		get_system_allocator(),
-	)
+	node_own_config_strings(node, DEFAULT_SYSTEM_CONFIG)
 	return node
 }
 
@@ -103,13 +98,9 @@ sim_bind_node :: proc(node: ^Node_State) -> ^Node_State {
 }
 
 sim_destroy_node :: proc(node: ^Node_State) {
-	if len(node.name) > 0 do delete(node.name, get_system_allocator())
-	if len(node.config.network.auth_password) > 0 {
-		delete(node.config.network.auth_password, get_system_allocator())
-	}
-	if len(node.config.network.bind_address) > 0 {
-		delete(node.config.network.bind_address, get_system_allocator())
-	}
+	delete(node.name, get_system_allocator())
+	delete(node.config.network.auth_password, get_system_allocator())
+	delete(node.config.network.bind_address, get_system_allocator())
 	free(node, get_system_allocator())
 }
 

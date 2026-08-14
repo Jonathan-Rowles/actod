@@ -61,6 +61,7 @@ Stats_Response :: actod.Stats_Response
 
 make_node_config :: proc(
 	actor_registry_size: int = actod.NODE.config.actor_registry_size,
+	actor_slab_slots: int = actod.NODE.config.actor_slab_slots,
 	allow_registry_growth: bool = actod.NODE.config.allow_registry_growth,
 	enable_observer: bool = actod.NODE.config.enable_observer,
 	observer_interval: time.Duration = actod.NODE.config.observer_interval,
@@ -75,6 +76,7 @@ make_node_config :: proc(
 ) -> System_Config {
 	return actod.make_node_config(
 		actor_registry_size,
+		actor_slab_slots,
 		allow_registry_growth,
 		enable_observer,
 		observer_interval,

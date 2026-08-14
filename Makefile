@@ -1,4 +1,4 @@
-.PHONY: test test-ci test-unit test-integration test-facade vopr vopr-deep bench-single bench-network gen-hot-api clean
+.PHONY: test test-ci test-unit test-integration test-facade vopr vopr-deep bench-single bench-network bench-footprint gen-hot-api clean
 
 VOPR_COUNT ?= 200
 VOPR_DEEP_COUNT ?= 100000
@@ -52,6 +52,11 @@ bench-network:
 	@mkdir -p bin
 	@odin build ./benchmarks/network -out:bin/network_benchmark $(RELEASE_FLAGS)
 	bin/network_benchmark
+
+bench-footprint:
+	@mkdir -p bin
+	@odin build ./benchmarks/footprint -out:bin/footprint_benchmark $(RELEASE_FLAGS)
+	bin/footprint_benchmark
 
 gen-hot-api:
 	@mkdir -p bin

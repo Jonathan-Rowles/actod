@@ -19,9 +19,10 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 	mailbox:          ^ACTOR_MAILBOX,
 	system_mailbox:   ^MPSC_Queue(Message, SYSTEM_MAILBOX_SIZE),
 	home_worker:      ^Worker,
+	coro_slot:        u32,
 	wants_reschedule: bool,
 	transport_parked: bool,
-	_pad0:            [6]byte,
+	_pad0:            [2]byte,
 	in_ready_queue:   bool,
 	_pad1:            [CACHE_LINE_SIZE - 1]byte,
 	main_fn:          proc(_: rawptr),
@@ -29,6 +30,8 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 	logger:           log.Logger,
 	msg_ctx:          rawptr,
 }
+
+#assert(offset_of(Pooled_Actor_Handle, in_ready_queue) % CACHE_LINE_SIZE == 0)
 
 Worker :: struct #align (CACHE_LINE_SIZE) {
 	id:          int,

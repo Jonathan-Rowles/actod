@@ -108,6 +108,7 @@ make_network_config :: proc(
 
 System_Config :: struct {
 	actor_registry_size:   int,
+	actor_slab_slots:      int,
 	allow_registry_growth: bool,
 	enable_observer:       bool,
 	observer_interval:     time.Duration, // Collection interval, 0 for manual only
@@ -123,6 +124,7 @@ System_Config :: struct {
 
 DEFAULT_SYSTEM_CONFIG := System_Config {
 	actor_registry_size = 256, // Default: 16K actors (power-of-2)
+	actor_slab_slots = DEFAULT_ACTOR_SLAB_SLOTS,
 	allow_registry_growth = true, // Enable auto-growth
 	enable_observer = false,
 	observer_interval = 0,
@@ -157,6 +159,7 @@ DEFAULT_SYSTEM_CONFIG := System_Config {
 
 make_node_config :: proc(
 	actor_registry_size: int = NODE.config.actor_registry_size,
+	actor_slab_slots: int = NODE.config.actor_slab_slots,
 	allow_registry_growth: bool = NODE.config.allow_registry_growth,
 	enable_observer: bool = NODE.config.enable_observer,
 	observer_interval: time.Duration = NODE.config.observer_interval,
@@ -176,6 +179,15 @@ make_node_config :: proc(
 			actor_registry_size,
 		)
 	}
+	if next_power_of_two(actor_registry_size) > REGISTRY_MAX_CAPACITY {
+		panic_at(
+			loc,
+			"make_node_config: actor_registry_size %d rounds up to %d, above REGISTRY_MAX_CAPACITY %d",
+			actor_registry_size,
+			next_power_of_two(actor_registry_size),
+			REGISTRY_MAX_CAPACITY,
+		)
+	}
 	if worker_count < 0 {
 		panic_at(
 			loc,
@@ -183,10 +195,18 @@ make_node_config :: proc(
 			worker_count,
 		)
 	}
+	if actor_slab_slots < 0 {
+		panic_at(
+			loc,
+			"make_node_config: actor_slab_slots must be >= 0 (0 disables the slab), got %d",
+			actor_slab_slots,
+		)
+	}
 
 	return System_Config {
 		loc = loc,
 		actor_registry_size = actor_registry_size,
+		actor_slab_slots = actor_slab_slots,
 		allow_registry_growth = allow_registry_growth,
 		enable_observer = enable_observer,
 		observer_interval = observer_interval,

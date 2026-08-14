@@ -207,6 +207,8 @@ Node_State :: struct {
 	network_listener_running: i32, // Atomic flag: 0 = stopped, 1 = running
 	network_listener_socket:  net.TCP_Socket,
 	shutdown_signal_port:     int, // Port for shutdown signaling
+	actor_slab:               Slot_Slab,
+	coro_slab:                Slot_Slab,
 }
 
 default_node: Node_State
@@ -303,6 +305,25 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 		registry_size = 256
 	}
 	init_pid_map(&NODE.actor_registry, registry_size)
+
+	if opts.actor_slab_slots > 0 {
+		slot_size := actor_arena_reserve(0, DEFAULT_MAIL_BOX_SIZE, opts.actor_config)
+		if !slot_slab_init(&NODE.actor_slab, slot_size, u64(opts.actor_slab_slots)) {
+			log.warnf(
+				"node_init('%s'): could not reserve an actor slab of %d slots x %d B, falling back to a dedicated mapping per actor",
+				name,
+				opts.actor_slab_slots,
+				slot_size,
+			)
+		}
+		if !slot_slab_init(&NODE.coro_slab, coro_slot_size(opts.actor_config), u64(opts.actor_slab_slots)) {
+			log.warnf(
+				"node_init('%s'): could not reserve a coro slab of %d slots, falling back to a dedicated mapping per coroutine",
+				name,
+				opts.actor_slab_slots,
+			)
+		}
+	}
 
 	worker_count := opts.worker_count
 	if worker_count == 0 {
@@ -773,6 +794,9 @@ reset_node_state :: proc() {
 	NODE.network_listener_socket = {}
 
 	NODE.node_registry = {}
+
+	slot_slab_destroy(&NODE.actor_slab)
+	slot_slab_destroy(&NODE.coro_slab)
 }
 
 wait_for_actors_to_clear :: proc(
@@ -860,7 +884,7 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 	pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
 		offset_of(Actor(int), pool_handle))
 	if pool_handle_ptr^ != nil && pool_handle_ptr^.co != nil {
-		if res := coro.destroy(pool_handle_ptr^.co); res != .Success {
+		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot); res != .Success {
 			log.errorf(
 				"leaking the coroutine stack of a terminated actor: %s",
 				coro.result_description(res),
@@ -869,9 +893,9 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 		pool_handle_ptr^.co = nil
 	}
 
-	arena_offset := offset_of(Actor(int), arena)
-	arena_ptr := cast(^vmem.Arena)(uintptr(actor_ptr) + arena_offset)
-	vmem.arena_destroy(arena_ptr)
+	arena_ptr := cast(^vmem.Arena)(uintptr(actor_ptr) + offset_of(Actor(int), arena))
+	slot_ptr := cast(^u32)(uintptr(actor_ptr) + offset_of(Actor(int), arena_slot))
+	actor_arena_release(arena_ptr, slot_ptr)
 }
 
 await_signal :: proc() {

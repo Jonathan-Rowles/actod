@@ -115,13 +115,8 @@ spawn_from_raw :: proc(
 		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
 	}
 
-	arena_err := vmem.arena_init_static(
-		&actor.arena,
-		actor_arena_reserve(data_size, DEFAULT_MAIL_BOX_SIZE, opts),
-		ARENA_COMMIT_SIZE,
-	)
-	if arena_err != nil {
-		panic_at(loc, "spawn('%s'): failed to reserve actor arena: %v", name, arena_err)
+	if !actor_arena_acquire(&actor.arena, &actor.arena_slot, data_size, DEFAULT_MAIL_BOX_SIZE, opts) {
+		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
 	}
 	actor.allocator = vmem.arena_allocator(&actor.arena)
 	context.allocator = actor.allocator
@@ -139,7 +134,7 @@ spawn_from_raw :: proc(
 				alloc_err,
 				location = loc,
 			)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}
@@ -154,7 +149,7 @@ spawn_from_raw :: proc(
 				alloc_err,
 				location = loc,
 			)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}
@@ -214,7 +209,7 @@ spawn_from_raw :: proc(
 			mailbox_alloc_err,
 			location = loc,
 		)
-		vmem.arena_destroy(&actor.arena)
+		actor_arena_release(&actor.arena, &actor.arena_slot)
 		free(actor, actor_system_allocator)
 		return 0, false
 	}
@@ -230,7 +225,7 @@ spawn_from_raw :: proc(
 			NODE.actor_registry.num_items,
 			location = loc,
 		)
-		vmem.arena_destroy(&actor.arena)
+		actor_arena_release(&actor.arena, &actor.arena_slot)
 		free(actor, actor_system_allocator)
 		return 0, false
 	}
@@ -260,7 +255,7 @@ spawn_from_raw :: proc(
 		}
 		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
-		co, co_res := coro.create(&desc)
+		co, co_res := coro_acquire(&desc, &handle.coro_slot, actor.opts)
 		if co_res != .Success {
 			log.errorf(
 				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
@@ -270,7 +265,7 @@ spawn_from_raw :: proc(
 				location = loc,
 			)
 			remove(&NODE.actor_registry, pid)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}
@@ -317,7 +312,7 @@ spawn_from_raw :: proc(
 				location = loc,
 			)
 			remove(&NODE.actor_registry, pid)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}

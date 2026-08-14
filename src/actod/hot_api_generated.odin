@@ -9,6 +9,7 @@ import "core:net"
 Hot_API :: struct {
 	make_node_config:          proc(
 		actor_registry_size: int,
+		actor_slab_slots: int,
 		allow_registry_growth: bool,
 		enable_observer: bool,
 		observer_interval: time.Duration,

@@ -15,7 +15,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 64)
+DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 32)
 #assert(
 	DEFAULT_MAIL_BOX_SIZE > 0 && (DEFAULT_MAIL_BOX_SIZE & (DEFAULT_MAIL_BOX_SIZE - 1)) == 0,
 	"-define:ACTOD_MAILBOX_SIZE must be a power of two",
@@ -135,6 +135,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	opts:               Actor_Config,
 	allocator:          mem.Allocator,
 	arena:              vmem.Arena,
+	arena_slot:         u32,
 	parent:             PID,
 	name:               string,
 	thread:             ^thread.Thread,
@@ -282,13 +283,8 @@ spawn_impl :: proc(
 		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor(%v)", name, typeid_of(T))
 	}
 
-	arena_err := vmem.arena_init_static(
-		&actor.arena,
-		actor_arena_reserve(size_of(T), mailbox_size, opts),
-		ARENA_COMMIT_SIZE,
-	)
-	if arena_err != nil {
-		panic_at(loc, "spawn('%s'): failed to reserve actor arena: %v", name, arena_err)
+	if !actor_arena_acquire(&actor.arena, &actor.arena_slot, size_of(T), mailbox_size, opts) {
+		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
 	}
 	actor.allocator = vmem.arena_allocator(&actor.arena)
 	context.allocator = actor.allocator
@@ -306,7 +302,7 @@ spawn_impl :: proc(
 				typeid_of(T),
 				location = loc,
 			)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}
@@ -321,7 +317,7 @@ spawn_impl :: proc(
 				err,
 				location = loc,
 			)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}
@@ -380,7 +376,7 @@ spawn_impl :: proc(
 			mailbox_alloc_err,
 			location = loc,
 		)
-		vmem.arena_destroy(&actor.arena)
+		actor_arena_release(&actor.arena, &actor.arena_slot)
 		free(actor, actor_system_allocator)
 		return 0, false
 	}
@@ -396,7 +392,7 @@ spawn_impl :: proc(
 			NODE.actor_registry.num_items,
 			location = loc,
 		)
-		vmem.arena_destroy(&actor.arena)
+		actor_arena_release(&actor.arena, &actor.arena_slot)
 		free(actor, actor_system_allocator)
 		return 0, false
 	}
@@ -464,7 +460,7 @@ spawn_impl :: proc(
 		}
 		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
-		co, co_res := coro.create(&desc)
+		co, co_res := coro_acquire(&desc, &handle.coro_slot, actor.opts)
 		if co_res != .Success {
 			log.errorf(
 				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
@@ -474,7 +470,7 @@ spawn_impl :: proc(
 				location = loc,
 			)
 			remove(&NODE.actor_registry, pid)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}
@@ -536,7 +532,7 @@ spawn_impl :: proc(
 				location = loc,
 			)
 			remove(&NODE.actor_registry, pid)
-			vmem.arena_destroy(&actor.arena)
+			actor_arena_release(&actor.arena, &actor.arena_slot)
 			free(actor, actor_system_allocator)
 			return 0, false
 		}

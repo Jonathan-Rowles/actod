@@ -8,6 +8,8 @@ MIN_STACK_SIZE :: 16 * mem.Kilobyte
 DEFAULT_STORAGE_SIZE :: 1024
 DEFAULT_STACK_SIZE :: 56 * 1024
 STACK_GUARD_SIZE :: 16 * mem.Kilobyte
+STACK_CANARY_SIZE :: 64
+STACK_CANARY_WORD :: 0xC5C5C5C5C5C5C5C5
 MAGIC_NUMBER :: 0x7E3CB1A9
 
 State :: enum {
@@ -45,6 +47,7 @@ Coro :: struct #align (64) {
 	func:         Func,
 	mapping_base: rawptr,
 	mapping_size: uint,
+	canary_base:  rawptr,
 	coro_ctx:     Ctx_Buf,
 	back_ctx:     Ctx_Buf,
 	storage:      [^]u8,
@@ -156,43 +159,53 @@ uninit :: proc(co: ^Coro) -> Result {
 	return .Success
 }
 
-create :: proc(desc: ^Desc) -> (^Coro, Result) {
-	res := validate_desc(desc)
-	if res != .Success {
-		return nil, res
+header_size :: proc "contextless" (storage_size: uint) -> uint {
+	return page_align(
+		align_forward(size_of(Coro), 64) + align_forward(storage_size, 16) + STACK_CANARY_SIZE,
+	)
+}
+
+region_size :: proc "contextless" (stack_size: uint, storage_size: uint) -> uint {
+	return header_size(storage_size) + page_align(stack_size)
+}
+
+stack_canary_intact :: proc "contextless" (co: ^Coro) -> bool {
+	if co == nil || co.canary_base == nil {
+		return true
 	}
-
-	stack_size := page_align(desc.stack_size)
-	header_size := page_align(align_forward(size_of(Coro), 64) + align_forward(desc.storage_size, 16))
-	mapping_size := STACK_GUARD_SIZE + stack_size + header_size
-
-	mapping, reserve_err := vmem.reserve(mapping_size)
-	if reserve_err != nil {
-		return nil, .Out_Of_Memory
+	words := cast([^]u64)co.canary_base
+	for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
+		if words[i] != STACK_CANARY_WORD {
+			return false
+		}
 	}
+	return true
+}
 
-	base := uintptr(raw_data(mapping))
-	stack_base := rawptr(base + STACK_GUARD_SIZE)
-	if commit_err := vmem.commit(stack_base, stack_size + header_size); commit_err != nil {
-		vmem.release(rawptr(base), mapping_size)
-		return nil, .Out_Of_Memory
-	}
+@(private)
+init_at :: proc(desc: ^Desc, base: uintptr, stack_size: uint, storage_size: uint) -> (^Coro, Result) {
+	header := header_size(storage_size)
 
-	co := cast(^Coro)(base + STACK_GUARD_SIZE + uintptr(stack_size))
+	co := cast(^Coro)base
 	co^ = {}
 
-	res = makectx(co, stack_base, stack_size)
-	if res != .Success {
-		vmem.release(rawptr(base), mapping_size)
+	canary_at := base + uintptr(header) - STACK_CANARY_SIZE
+	canary := cast([^]u64)canary_at
+	for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
+		canary[i] = STACK_CANARY_WORD
+	}
+
+	usable_base := rawptr(base + uintptr(header))
+
+	if res := makectx(co, usable_base, stack_size); res != .Success {
 		return nil, res
 	}
 
-	co.mapping_base = rawptr(base)
-	co.mapping_size = mapping_size
-	co.stack_base = stack_base
+	co.canary_base = rawptr(canary_at)
+	co.stack_base = usable_base
 	co.stack_size = stack_size
 	co.storage = cast([^]u8)(uintptr(co) + uintptr(align_forward(size_of(Coro), 64)))
-	co.storage_size = desc.storage_size
+	co.storage_size = storage_size
 	co.state = .Suspended
 	co.func = desc.func
 	co.user_data = desc.user_data
@@ -200,15 +213,74 @@ create :: proc(desc: ^Desc) -> (^Coro, Result) {
 	return co, .Success
 }
 
+create :: proc(desc: ^Desc) -> (^Coro, Result) {
+	res := validate_desc(desc)
+	if res != .Success {
+		return nil, res
+	}
+
+	stack_size := page_align(desc.stack_size)
+	region := region_size(stack_size, desc.storage_size)
+	mapping_size := STACK_GUARD_SIZE + region
+
+	mapping, reserve_err := vmem.reserve(mapping_size)
+	if reserve_err != nil {
+		return nil, .Out_Of_Memory
+	}
+
+	base := uintptr(raw_data(mapping))
+	region_base := rawptr(base + STACK_GUARD_SIZE)
+	if commit_err := vmem.commit(region_base, region); commit_err != nil {
+		vmem.release(rawptr(base), mapping_size)
+		return nil, .Out_Of_Memory
+	}
+
+	co, init_res := init_at(desc, base + STACK_GUARD_SIZE, stack_size, desc.storage_size)
+	if init_res != .Success {
+		vmem.release(rawptr(base), mapping_size)
+		return nil, init_res
+	}
+
+	co.mapping_base = rawptr(base)
+	co.mapping_size = mapping_size
+	return co, .Success
+}
+
+create_in :: proc(desc: ^Desc, region: []byte) -> (^Coro, Result) {
+	res := validate_desc(desc)
+	if res != .Success {
+		return nil, res
+	}
+
+	stack_size := page_align(desc.stack_size)
+	if uint(len(region)) < region_size(stack_size, desc.storage_size) {
+		return nil, .Not_Enough_Space
+	}
+
+	co, init_res := init_at(desc, uintptr(raw_data(region)), stack_size, desc.storage_size)
+	if init_res != .Success {
+		return nil, init_res
+	}
+
+	co.mapping_base = nil
+	co.mapping_size = 0
+	return co, .Success
+}
+
 destroy :: proc(co: ^Coro) -> Result {
 	if co == nil {
 		return .Invalid_Coroutine
+	}
+	if !stack_canary_intact(co) {
+		panic("coro stack overflow: the canary below the stack was overwritten")
 	}
 	res := uninit(co)
 	if res != .Success {
 		return res
 	}
-	vmem.release(co.mapping_base, co.mapping_size)
+	if co.mapping_base != nil {
+		vmem.release(co.mapping_base, co.mapping_size)
+	}
 	return .Success
 }
 
@@ -262,6 +334,9 @@ yield :: proc(co: ^Coro) -> Result {
 // Fast yield for worker-pool coros resumed via resume_top_level.
 // Skips nil check, state validation, prev_co tracking, and Result return.
 yield_top_level :: proc(co: ^Coro) {
+	if !stack_canary_intact(co) {
+		panic("coro stack overflow: the canary below the stack was overwritten")
+	}
 	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
 	when ODIN_DEBUG {
 		assert(co != nil)

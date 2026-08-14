@@ -88,6 +88,21 @@ ALL_TESTS :: []Test_Entry {
 		expects_error_logs = true,
 	},
 	{
+		name = "test_slab_slots_return_after_termination",
+		test_proc = test_slab_slots_return_after_termination,
+		worker_count = 4,
+	},
+	{
+		name = "test_slab_falls_back_for_oversized_actor",
+		test_proc = test_slab_falls_back_for_oversized_actor,
+		worker_count = 2,
+	},
+	{
+		name = "test_slab_neighbours_survive_arena_exhaustion",
+		test_proc = test_slab_neighbours_survive_arena_exhaustion,
+		worker_count = 2,
+	},
+	{
 		name = "test_mailbox_overflow_preserves_send_order",
 		test_proc = test_mailbox_overflow_preserves_send_order,
 		worker_count = 2,
@@ -736,6 +751,7 @@ run_integration_tests :: proc(t: ^testing.T) {
 @(init)
 register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Integration_Test_Message)
+	actod.register_message_type(u64)
 	actod.register_message_type(string)
 	actod.register_message_type(int)
 	actod.register_message_type(Reclaim_Tick)

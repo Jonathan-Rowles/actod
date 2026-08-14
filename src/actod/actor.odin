@@ -9,7 +9,6 @@ import "base:runtime"
 import "core:c/libc"
 import "core:log"
 import "core:mem"
-import vmem "core:mem/virtual"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -124,6 +123,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	local_read:         u64,
 	local_buf:          ^[LOCAL_MAILBOX_SIZE]Message,
 	pool_handle:        ^Pooled_Actor_Handle,
+	msg_ctx:            ^Message_Processing_Context,
 	data:               ^T,
 	handle_message:     proc(data: ^T, from: PID, content: any),
 	pid:                PID,
@@ -134,7 +134,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	behaviour:          Actor_Behaviour(T),
 	opts:               Actor_Config,
 	allocator:          mem.Allocator,
-	arena:              vmem.Arena,
+	arena:              Actor_Arena,
 	arena_slot:         u32,
 	parent:             PID,
 	name:               string,
@@ -206,6 +206,22 @@ actor_arena_reserve :: proc(data_size: int, mailbox_size: int, opts: Actor_Confi
 		size_of(Actor_Context) +
 		ARENA_FIXED_OVERHEAD
 	return uint(static_worst + opts.arena_headroom)
+}
+
+DEFAULT_ACTOR_SLOT_BYTES :: #config(ACTOD_ACTOR_SLOT_BYTES, 128 * mem.Kilobyte)
+
+@(private)
+actor_arena_slot_size :: proc(opts: Actor_Config) -> uint {
+	eager :=
+		DEFAULT_MAIL_BOX_SIZE * size_of(Entry(Message)) +
+		SYSTEM_MAILBOX_SIZE * size_of(Entry(Message)) +
+		size_of(Actor_Context) +
+		ARENA_FIXED_OVERHEAD
+	slot := uint(DEFAULT_ACTOR_SLOT_BYTES)
+	if slot < uint(eager) {
+		slot = uint(eager)
+	}
+	return slot
 }
 
 spawn :: proc {
@@ -286,7 +302,7 @@ spawn_impl :: proc(
 	if !actor_arena_acquire(&actor.arena, &actor.arena_slot, size_of(T), mailbox_size, opts) {
 		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
 	}
-	actor.allocator = vmem.arena_allocator(&actor.arena)
+	actor.allocator = actor_arena_allocator(&actor.arena)
 	context.allocator = actor.allocator
 
 	actor.name = strings.clone(name, context.allocator)
@@ -453,14 +469,18 @@ spawn_impl :: proc(
 		handle.main_fn = proc(ptr: rawptr) {
 			actor_loop(cast(^Actor(T))ptr)
 		}
+		handle.resume_fn = proc(ptr: rawptr) {
+			actor_resume(cast(^Actor(T))ptr)
+		}
 
 		coro_stack := uint(actor.opts.coro_stack_size)
 		if coro_stack < coro.MIN_STACK_SIZE {
 			coro_stack = coro.MIN_STACK_SIZE
 		}
+		handle.coro_stack = coro_stack
 		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
-		co, co_res := coro_acquire(&desc, &handle.coro_slot, actor.opts)
+		co, co_res := coro_acquire(&desc, &handle.coro_slot, coro_stack)
 		if co_res != .Success {
 			log.errorf(
 				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
@@ -517,7 +537,7 @@ spawn_impl :: proc(
 		handle.home_worker = &NODE.worker_pool.workers[idx]
 		set_entry_home_worker(&NODE.actor_registry, pid, idx)
 		sync.atomic_store(&handle.in_ready_queue, true)
-		mpsc_push(&handle.home_worker.ready_queue, rawptr(handle))
+		ready_push(handle.home_worker, handle)
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)
 	} else {
 		actor.thread = threads_act.create_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
@@ -651,6 +671,7 @@ actor_panic_handler :: proc(prefix, message: string, loc: runtime.Source_Code_Lo
 		ctx.panic_message_len += n
 	}
 
+	coro.asan_before_longjmp()
 	libc.longjmp(&ctx.panic_jmp_buf, 1)
 }
 
@@ -672,56 +693,19 @@ actor_loop :: proc(actor: ^Actor($T)) {
 	if actor.pool_handle != nil {
 		actor.pool_handle.actor_ctx = actor_ctx
 		actor.pool_handle.file_logger = current_actor_file_logger
+		actor.pool_handle.logger = logger
 	}
 
 	if libc.setjmp(&actor_ctx.panic_jmp_buf) != 0 {
-		// Landed here from longjmp, actor panicked
-		panic_msg := string(actor_ctx.panic_message[:actor_ctx.panic_message_len])
-		loc := actor_ctx.panic_location
-		log.errorf(
-			"ACTOR PANIC [%s (PID: %v)]: %s at %s:%d",
-			actor.name,
-			actor.pid,
-			panic_msg,
-			loc.file_path,
-			loc.line,
-		)
-
-		if actor_ctx.panic_recovery_done {
-			log.fatalf(
-				"actor %v panicked inside its own panic recovery, aborting instead of corrupting termination state",
-				actor.pid,
-			)
-			runtime.trap()
-		}
-		actor_ctx.panic_recovery_done = true
-
-		actor.termination_reason = .ABNORMAL
-		sync.atomic_store(&actor.state, .STOPPING)
-
-		if !actor_ctx.panic_teardown_started {
-			actor_ctx.panic_teardown_started = true
-			terminate_children(actor)
-			call_terminate_handler(actor)
-		}
-
-		sync.atomic_store(&actor.state, .THREAD_STOPPED)
-
-		if actor.started != nil {
-			sync.atomic_store_explicit(actor.started, true, .Release)
-		}
-
-		notify_termination(actor)
-
-		wi := sync.atomic_load_explicit(&actor.pool.write_index, .Relaxed)
-		sync.atomic_store_explicit(&actor.pool.read_index, wi, .Release)
-
-		cleanup_actor_context(actor_ctx)
+		actor_panic_teardown(actor, actor_ctx)
 		return
 	}
 
 	spawn_initial_children(actor)
-	ctx := init_message_processing_context(actor, actor.allocator)
+
+	ctx := new(Message_Processing_Context, actor.allocator)
+	ctx^ = init_message_processing_context(actor, actor.allocator)
+	actor.msg_ctx = ctx
 
 	call_init_handler(actor)
 	sync.atomic_store(&actor.state, .RUNNING)
@@ -729,7 +713,39 @@ actor_loop :: proc(actor: ^Actor($T)) {
 		sync.atomic_store_explicit(actor.started, true, .Release)
 	}
 
-	run_message_loop(actor, &ctx)
+	actor_run_phase(actor, actor_ctx, ctx)
+}
+
+@(private)
+actor_resume :: proc(actor: ^Actor($T)) {
+	actor_ctx := current_actor_context
+	if actor_ctx == nil {
+		return
+	}
+
+	context.allocator = actor.allocator
+	context.logger = actor.pool_handle.logger
+	context.assertion_failure_proc = actor_panic_handler
+
+	if libc.setjmp(&actor_ctx.panic_jmp_buf) != 0 {
+		actor_panic_teardown(actor, actor_ctx)
+		return
+	}
+
+	actor_run_phase(actor, actor_ctx, actor.msg_ctx)
+}
+
+@(private)
+actor_run_phase :: proc(
+	actor: ^Actor($T),
+	actor_ctx: ^Actor_Context,
+	ctx: ^Message_Processing_Context,
+) {
+	run_message_loop(actor, ctx)
+
+	if actor.pool_handle != nil && actor.pool_handle.parked_cold {
+		return
+	}
 
 	actor_ctx.panic_teardown_started = true
 	terminate_children(actor)
@@ -754,6 +770,51 @@ actor_loop :: proc(actor: ^Actor($T)) {
 	sync.atomic_store_explicit(&actor.pool.read_index, wi, .Release)
 
 	log.infof("Terminating - Reason: %s", actor.termination_reason)
+	cleanup_actor_context(actor_ctx)
+}
+
+@(private)
+actor_panic_teardown :: proc(actor: ^Actor($T), actor_ctx: ^Actor_Context) {
+	panic_msg := string(actor_ctx.panic_message[:actor_ctx.panic_message_len])
+	loc := actor_ctx.panic_location
+	log.errorf(
+		"ACTOR PANIC [%s (PID: %v)]: %s at %s:%d",
+		actor.name,
+		actor.pid,
+		panic_msg,
+		loc.file_path,
+		loc.line,
+	)
+
+	if actor_ctx.panic_recovery_done {
+		log.fatalf(
+			"actor %v panicked inside its own panic recovery, aborting instead of corrupting termination state",
+			actor.pid,
+		)
+		runtime.trap()
+	}
+	actor_ctx.panic_recovery_done = true
+
+	actor.termination_reason = .ABNORMAL
+	sync.atomic_store(&actor.state, .STOPPING)
+
+	if !actor_ctx.panic_teardown_started {
+		actor_ctx.panic_teardown_started = true
+		terminate_children(actor)
+		call_terminate_handler(actor)
+	}
+
+	sync.atomic_store(&actor.state, .THREAD_STOPPED)
+
+	if actor.started != nil {
+		sync.atomic_store_explicit(actor.started, true, .Release)
+	}
+
+	notify_termination(actor)
+
+	wi := sync.atomic_load_explicit(&actor.pool.write_index, .Relaxed)
+	sync.atomic_store_explicit(&actor.pool.read_index, wi, .Release)
+
 	cleanup_actor_context(actor_ctx)
 }
 
@@ -813,17 +874,23 @@ init_message_processing_context :: proc(
 	actor: ^Actor($T),
 	allocator: mem.Allocator,
 ) -> Message_Processing_Context {
-	batch_size := actor.opts.message_batch
 	return Message_Processing_Context {
-		free_buffer = Batch_Free_Buffer {
-			entries = make([]rawptr, FREE_BATCH_SIZE, allocator),
-			count = 0,
-			pool = &actor.pool,
-		},
-		message_batch = make([]Message, batch_size, allocator),
-		batch_size = batch_size,
+		free_buffer = Batch_Free_Buffer{count = 0, pool = &actor.pool},
+		batch_size = actor.opts.message_batch,
 		is_node = actor.pid == NODE.pid,
 	}
+}
+
+@(private)
+ensure_message_batch :: #force_inline proc(
+	actor: ^Actor($T),
+	ctx: ^Message_Processing_Context,
+) {
+	if ctx.message_batch != nil {
+		return
+	}
+	ctx.message_batch = make([]Message, ctx.batch_size, actor.allocator)
+	ctx.free_buffer.entries = make([]rawptr, FREE_BATCH_SIZE, actor.allocator)
 }
 
 @(private)
@@ -863,7 +930,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 		}
 		if mailbox_has_messages(actor) do continue
 		if current_worker != nil &&
-		   (current_worker.runnext != nil || mpsc_size(&current_worker.ready_queue) > 0) {
+		   (current_worker.runnext != nil || !ready_is_empty(current_worker)) {
 			coro.yield(co)
 			continue
 		}
@@ -872,6 +939,10 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 			if mailbox_has_messages(actor) do break
 		}
 		if !mailbox_has_messages(actor) {
+			if actor.pool_handle != nil {
+				actor.pool_handle.parked_cold = true
+				return
+			}
 			coro.yield(co)
 		}
 	}
@@ -890,6 +961,7 @@ process_system_mailbox :: #force_no_inline proc(
 	ctx: ^Message_Processing_Context,
 ) -> bool {
 	if mpsc_is_empty(&actor.system_mailbox) do return true
+	ensure_message_batch(actor, ctx)
 	batch_count := mpsc_pop_batch(&actor.system_mailbox, ctx.message_batch[0:ctx.batch_size])
 
 	for i in 0 ..< batch_count {
@@ -952,6 +1024,7 @@ process_user_mailboxes :: #force_inline proc(
 ) -> bool {
 	// local worker first
 	if actor.local_read != actor.local_write {
+		ensure_message_batch(actor, ctx)
 		batch_count := 0
 		for batch_count < ctx.batch_size && actor.local_read != actor.local_write {
 			ctx.message_batch[batch_count] =
@@ -975,6 +1048,8 @@ process_user_mailboxes :: #force_inline proc(
 	}
 
 	// thread safe
+	if !mpsc_has_ready_item(&actor.mailbox) do return true
+	ensure_message_batch(actor, ctx)
 	batch_count := mpsc_pop_batch(&actor.mailbox, ctx.message_batch[0:ctx.batch_size])
 	if batch_count == 0 do return true
 
@@ -1222,7 +1297,7 @@ process_stop_signals :: proc(actor: ^Actor($T)) {
 @(private)
 stop_signal_ready :: proc(child: ^Actor(int)) -> bool {
 	if child.pool_handle == nil do return true
-	return coro.status(child.pool_handle.co) == .Dead
+	return sync.atomic_load_explicit(&child.pool_handle.terminated, .Acquire)
 }
 
 @(private)

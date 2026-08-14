@@ -86,7 +86,7 @@ test_slab_slots_return_after_termination :: proc(t: ^testing.T) {
 	}
 }
 
-test_slab_falls_back_for_oversized_actor :: proc(t: ^testing.T) {
+test_slab_spills_for_oversized_actor :: proc(t: ^testing.T) {
 	reset_test_state()
 
 	if !actod.NODE.actor_slab.enabled {
@@ -101,23 +101,23 @@ test_slab_falls_back_for_oversized_actor :: proc(t: ^testing.T) {
 		slab_probe_behaviour,
 		SLAB_BIG_MAILBOX,
 	)
-	expect(t, spawned, "an actor too large for a slab slot must still spawn")
+	expect(t, spawned, "an actor whose mailbox outgrows a slab slot must still spawn")
 	if !spawned {
 		return
 	}
 
 	expectf(
 		t,
-		slab_in_use() == before,
-		"an actor needing more than one slot must not take a slab slot, in_use went %d -> %d",
+		slab_in_use() == before + 1,
+		"an actor that outgrows its slot should keep the slot and spill the rest, in_use went %d -> %d",
 		before,
 		slab_in_use(),
 	)
 
-	expect(t, actod.send_message(pid, u64(0xABCD)) == .OK, "the fallback actor must receive messages")
+	expect(t, actod.send_message(pid, u64(0xABCD)) == .OK, "the spilled actor must receive messages")
 
 	_ = actod.terminate_actor(pid)
-	expect(t, wait_for_slab_in_use(before), "terminating a fallback actor must not disturb the slab")
+	expect(t, wait_for_slab_in_use(before), "terminating a spilled actor must return its slot")
 }
 
 SLAB_NEIGHBOUR_COUNT :: 3

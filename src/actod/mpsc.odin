@@ -192,6 +192,13 @@ mpsc_is_empty :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
 	return seq != pos + 1
 }
 
+mpsc_has_ready_item :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
+	pos := q.read_index
+	mask := q.r_mask
+	entry := &q.r_entries[pos & mask]
+	return sync.atomic_load_explicit(&entry.sequence, .Acquire) == pos + 1
+}
+
 mpsc_peek :: proc(q: ^MPSC_Queue($T, $N), data: ^T) -> bool {
 	mask := q.r_mask
 	pos := q.read_index

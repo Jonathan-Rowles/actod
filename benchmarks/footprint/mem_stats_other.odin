@@ -1,4 +1,4 @@
-#+build !linux
+#+build windows, freebsd, openbsd, netbsd
 package footprint
 
 MEM_STATS_AVAILABLE :: false
@@ -22,6 +22,6 @@ read_max_map_count :: proc() -> int {
 print_vma_breakdown :: proc(top: int) {
 }
 
-read_mapping_rss_kb :: proc(address: uintptr) -> int {
+read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 	return -1
 }

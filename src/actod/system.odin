@@ -5,7 +5,6 @@ import "../pkgs/threads_act"
 import "base:intrinsics"
 import "base:runtime"
 import "core:log"
-import vmem "core:mem/virtual"
 import "core:net"
 import "core:sync"
 import "core:thread"
@@ -307,7 +306,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	init_pid_map(&NODE.actor_registry, registry_size)
 
 	if opts.actor_slab_slots > 0 {
-		slot_size := actor_arena_reserve(0, DEFAULT_MAIL_BOX_SIZE, opts.actor_config)
+		slot_size := actor_arena_slot_size(opts.actor_config)
 		if !slot_slab_init(&NODE.actor_slab, slot_size, u64(opts.actor_slab_slots)) {
 			log.warnf(
 				"node_init('%s'): could not reserve an actor slab of %d slots x %d B, falling back to a dedicated mapping per actor",
@@ -316,7 +315,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 				slot_size,
 			)
 		}
-		if !slot_slab_init(&NODE.coro_slab, coro_slot_size(opts.actor_config), u64(opts.actor_slab_slots)) {
+		if !slot_slab_init(&NODE.coro_slab, coro_slot_size(uint(opts.actor_config.coro_stack_size)), u64(opts.actor_slab_slots)) {
 			log.warnf(
 				"node_init('%s'): could not reserve a coro slab of %d slots, falling back to a dedicated mapping per coroutine",
 				name,
@@ -548,7 +547,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			offset_of(Actor(int), pool_handle))
 		if pool_handle_ptr^ != nil {
 			for i := 0; i < 10000; i += 1 {
-				if coro.status(pool_handle_ptr^.co) == .Dead do break
+				if sync.atomic_load_explicit(&pool_handle_ptr^.terminated, .Acquire) do break
 				runtime_sleep(100 * time.Microsecond)
 			}
 		} else {
@@ -570,7 +569,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		if pool_handle_ptr^ != nil {
 			wake_pooled_actor(pool_handle_ptr^)
 			for i := 0; i < 10000; i += 1 {
-				if coro.status(pool_handle_ptr^.co) == .Dead do break
+				if sync.atomic_load_explicit(&pool_handle_ptr^.terminated, .Acquire) do break
 				runtime_sleep(100 * time.Microsecond)
 			}
 		} else {
@@ -884,7 +883,7 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 	pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
 		offset_of(Actor(int), pool_handle))
 	if pool_handle_ptr^ != nil && pool_handle_ptr^.co != nil {
-		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot); res != .Success {
+		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot, true); res != .Success {
 			log.errorf(
 				"leaking the coroutine stack of a terminated actor: %s",
 				coro.result_description(res),
@@ -893,7 +892,7 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 		pool_handle_ptr^.co = nil
 	}
 
-	arena_ptr := cast(^vmem.Arena)(uintptr(actor_ptr) + offset_of(Actor(int), arena))
+	arena_ptr := cast(^Actor_Arena)(uintptr(actor_ptr) + offset_of(Actor(int), arena))
 	slot_ptr := cast(^u32)(uintptr(actor_ptr) + offset_of(Actor(int), arena_slot))
 	actor_arena_release(arena_ptr, slot_ptr)
 }

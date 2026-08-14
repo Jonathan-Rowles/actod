@@ -216,7 +216,10 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 		}
 	}
 
+	prev_allocator := context.allocator
+	context.allocator = get_system_allocator()
 	t := thread.create(timer_thread_proc)
+	context.allocator = prev_allocator
 	if t != nil {
 		t.user_args[0] = ctx
 		thread.start(t)

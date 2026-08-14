@@ -9,7 +9,6 @@ import "core:dynlib"
 import "core:fmt"
 import "core:log"
 import "core:mem"
-import vmem "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -118,7 +117,7 @@ spawn_from_raw :: proc(
 	if !actor_arena_acquire(&actor.arena, &actor.arena_slot, data_size, DEFAULT_MAIL_BOX_SIZE, opts) {
 		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
 	}
-	actor.allocator = vmem.arena_allocator(&actor.arena)
+	actor.allocator = actor_arena_allocator(&actor.arena)
 	context.allocator = actor.allocator
 
 	actor.name = strings.clone(name, context.allocator)
@@ -248,14 +247,18 @@ spawn_from_raw :: proc(
 		handle.main_fn = proc(ptr: rawptr) {
 			actor_loop(cast(^Actor(int))ptr)
 		}
+		handle.resume_fn = proc(ptr: rawptr) {
+			actor_resume(cast(^Actor(int))ptr)
+		}
 
 		coro_stack := uint(actor.opts.coro_stack_size)
 		if coro_stack < coro.MIN_STACK_SIZE {
 			coro_stack = coro.MIN_STACK_SIZE
 		}
+		handle.coro_stack = coro_stack
 		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
-		co, co_res := coro_acquire(&desc, &handle.coro_slot, actor.opts)
+		co, co_res := coro_acquire(&desc, &handle.coro_slot, coro_stack)
 		if co_res != .Success {
 			log.errorf(
 				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
@@ -297,7 +300,7 @@ spawn_from_raw :: proc(
 		handle.home_worker = &NODE.worker_pool.workers[idx]
 		set_entry_home_worker(&NODE.actor_registry, actor.pid, idx)
 		sync.atomic_store(&handle.in_ready_queue, true)
-		mpsc_push(&handle.home_worker.ready_queue, rawptr(handle))
+		ready_push(handle.home_worker, handle)
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)
 	} else {
 		actor.thread = threads_act.create_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {

@@ -4,6 +4,7 @@ import "../../src/actod"
 import "../../src/pkgs/threads_act/"
 import "core:fmt"
 import "core:os"
+import "core:mem"
 import vmem "core:mem/virtual"
 import "core:strconv"
 import "core:time"
@@ -135,10 +136,19 @@ main :: proc() {
 		)
 		fmt.printf("VMAs total:         %d\n", loaded.vma_count)
 		print_slab_rss(n)
-		print_arena_usage(n)
-		print_vma_breakdown(6)
 	} else {
 		fmt.println("RSS/VMA stats:      unavailable on this platform")
+	}
+	print_arena_usage(n)
+	print_coro_usage(n)
+	when MEM_STATS_AVAILABLE && ODIN_OS == .Darwin {
+		coro_slab := &actod.NODE.coro_slab
+		print_slot_page_map("coro slot", raw_data(coro_slab.memory), coro_slab.slot_size, min(n, 200))
+		arena_slab := &actod.NODE.actor_slab
+		print_slot_page_map("arena slot", raw_data(arena_slab.memory), arena_slab.slot_size, min(n, 200))
+	}
+	if MEM_STATS_AVAILABLE {
+		print_vma_breakdown(6)
 	}
 
 	fmt.println()
@@ -214,14 +224,29 @@ print_slab_rss :: proc(actors: int) {
 	if !MEM_STATS_AVAILABLE || actors <= 0 {
 		return
 	}
-	if len(actod.NODE.actor_slab.memory) > 0 {
-		rss := read_mapping_rss_kb(uintptr(raw_data(actod.NODE.actor_slab.memory)))
+	arena_slab := actod.NODE.actor_slab.memory
+	if len(arena_slab) > 0 {
+		rss := read_mapping_rss_kb(uintptr(raw_data(arena_slab)), uint(len(arena_slab)))
 		fmt.printf("  arena slab RSS:   %.2f KB/actor\n", f64(rss) / f64(actors))
 	}
-	if len(actod.NODE.coro_slab.memory) > 0 {
-		rss := read_mapping_rss_kb(uintptr(raw_data(actod.NODE.coro_slab.memory)))
+	coro_slab := actod.NODE.coro_slab.memory
+	if len(coro_slab) > 0 {
+		rss := read_mapping_rss_kb(uintptr(raw_data(coro_slab)), uint(len(coro_slab)))
 		fmt.printf("  coro slab RSS:    %.2f KB/actor\n", f64(rss) / f64(actors))
 	}
+}
+
+print_coro_usage :: proc(actors: int) {
+	slab := &actod.NODE.coro_slab
+	if !slab.enabled || actors <= 0 {
+		return
+	}
+	fmt.printf(
+		"  coro slot size:   %d B (%d B header + stack), %d slots in use\n",
+		slab.slot_size,
+		actod.coro_header_bytes(),
+		actod.slot_slab_in_use(slab),
+	)
 }
 
 print_arena_usage :: proc(actors: int) {
@@ -229,6 +254,11 @@ print_arena_usage :: proc(actors: int) {
 	if !slab.enabled || actors <= 0 {
 		return
 	}
+	fmt.printf(
+		"  arena slot size:  %d B reserved per actor (%d slots in use)\n",
+		slab.slot_size,
+		actod.slot_slab_in_use(slab),
+	)
 
 	total: uint
 	sampled := 0
@@ -241,10 +271,13 @@ print_arena_usage :: proc(actors: int) {
 		sampled += 1
 	}
 	if sampled > 0 {
+		avg := total / uint(sampled)
 		fmt.printf(
-			"  arena bytes used: %d B/actor over %d slots (page boundary at 4096)\n",
-			total / uint(sampled),
+			"  arena bytes used: %d B/actor over %d slots = %d pages of %d B\n",
+			avg,
 			sampled,
+			(avg + uint(mem.PAGE_SIZE) - 1) / uint(mem.PAGE_SIZE),
+			mem.PAGE_SIZE,
 		)
 	}
 }

@@ -1122,7 +1122,10 @@ start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	sync.atomic_store(&ring.io_stop, 0)
 
+	prev_allocator := context.allocator
+	context.allocator = get_system_allocator()
 	t := thread.create(nbio_io_loop)
+	context.allocator = prev_allocator
 	if t == nil {
 		free(ctx)
 		log.error("Failed to create connection IO thread")

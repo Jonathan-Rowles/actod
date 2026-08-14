@@ -18,8 +18,8 @@ test_stack_guard_region_is_inaccessible :: proc(t: ^testing.T) {
 
 	testing.expect(
 		t,
-		uintptr(co) - uintptr(co.mapping_base) == STACK_GUARD_SIZE,
-		"the guard region should sit directly below the coro header",
+		uintptr(co.canary_base) - uintptr(co.mapping_base) == STACK_GUARD_SIZE,
+		"the guard region should sit directly below the canary at the base of the region",
 	)
 	testing.expect(
 		t,
@@ -28,8 +28,13 @@ test_stack_guard_region_is_inaccessible :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		uintptr(co.canary_base) - uintptr(co) < uintptr(mem.PAGE_SIZE),
-		"the canary should share the header's first page so it costs no extra resident page",
+		uintptr(co.stack_base) + uintptr(co.stack_size) == uintptr(co),
+		"the initial stack pointer should sit immediately below the header",
+	)
+	testing.expect(
+		t,
+		uintptr(co) / uintptr(mem.PAGE_SIZE) == (uintptr(co) - 1) / uintptr(mem.PAGE_SIZE),
+		"the header should share a page with the top of the stack so a shallow stack costs one resident page",
 	)
 
 	reader, writer, pipe_err := os.pipe()
@@ -37,7 +42,7 @@ test_stack_guard_region_is_inaccessible :: proc(t: ^testing.T) {
 	defer os.close(reader)
 	defer os.close(writer)
 
-	guard_top := mem.slice_ptr(cast(^u8)(uintptr(co) - 1), 1)
+	guard_top := mem.slice_ptr(cast(^u8)(uintptr(co.canary_base) - 1), 1)
 	_, guard_err := os.write(writer, guard_top)
 	testing.expect(t, guard_err != nil, "the guard region should not be readable")
 
@@ -63,20 +68,27 @@ test_unmapped_coro_uses_a_canary_instead_of_a_guard :: proc(t: ^testing.T) {
 	}
 
 	testing.expect(t, co.mapping_base == nil, "a caller-provided coro must not own a mapping")
-	testing.expect(t, uintptr(co) == uintptr(raw_data(region)), "the coro header should sit at the base of the region")
 	testing.expect(
 		t,
-		uintptr(co.canary_base) - uintptr(co) < uintptr(mem.PAGE_SIZE),
-		"the canary should share the header's first page",
+		uintptr(co.canary_base) == uintptr(raw_data(region)),
+		"the canary should sit at the base of the region, where an overflow arrives",
+	)
+	testing.expect(
+		t,
+		uintptr(co) + uintptr(header_size(co.storage_size)) <=
+		uintptr(raw_data(region)) + uintptr(len(region)),
+		"the header should sit at the top of the region",
 	)
 	testing.expect(t, stack_canary_intact(co), "a fresh canary should be intact")
 
-	scribble := cast([^]u64)co.canary_base
-	scribble[STACK_CANARY_SIZE / size_of(u64) - 1] = 0
-	testing.expect(t, !stack_canary_intact(co), "a write into the canary must be detected")
+	when CANARY_ENABLED {
+		scribble := cast([^]u64)co.canary_base
+		scribble[STACK_CANARY_SIZE / size_of(u64) - 1] = 0xDEADBEEF
+		testing.expect(t, !stack_canary_intact(co), "a write into the canary must be detected")
 
-	scribble[STACK_CANARY_SIZE / size_of(u64) - 1] = STACK_CANARY_WORD
-	testing.expect(t, stack_canary_intact(co), "restoring the canary should clear the detection")
+		scribble[STACK_CANARY_SIZE / size_of(u64) - 1] = STACK_CANARY_WORD
+		testing.expect(t, stack_canary_intact(co), "restoring the canary should clear the detection")
+	}
 
 	testing.expect(t, destroy(co) == .Success, "destroying a caller-provided coro should succeed")
 }

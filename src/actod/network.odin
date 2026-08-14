@@ -170,7 +170,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	listener_proc :: proc(t: ^thread.Thread) {
 		listener_ctx := cast(^Listener_Context)t.user_args[0]
 		context.logger = listener_ctx.logger
-		defer free(listener_ctx)
+		defer free(listener_ctx, get_system_allocator())
 
 		endpoint := net.Endpoint {
 			address = listener_ctx.bind_addr,
@@ -230,18 +230,21 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 		sync.atomic_store(&NODE.network_listener_running, 0)
 	}
 
-	ctx := new(Listener_Context)
+	ctx := new(Listener_Context, get_system_allocator())
 	ctx.bind_addr, _ = parse_bind_address(NODE.config.network.bind_address)
 	ctx.port = NODE.config.network.port
 	ctx.logger = context.logger
 	ctx.loc = NODE.config.loc
 
+	prev_allocator := context.allocator
+	context.allocator = get_system_allocator()
 	NODE.network_listener_thread = thread.create(listener_proc)
+	context.allocator = prev_allocator
 	if NODE.network_listener_thread != nil {
 		NODE.network_listener_thread.user_args[0] = ctx
 		thread.start(NODE.network_listener_thread)
 	} else {
-		free(ctx)
+		free(ctx, get_system_allocator())
 		log.errorf(
 			"Failed to create the network listener thread for port %d; this node will not accept incoming connections",
 			NODE.config.network.port,

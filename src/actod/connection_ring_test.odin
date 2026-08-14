@@ -1497,3 +1497,57 @@ test_pool_contention_sets_scale_request :: proc(t: ^testing.T) {
 	pool_note_contention(pool)
 	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 1, "threshold crossed")
 }
+
+@(test)
+test_ring_reset_keeps_outstanding_writer_count :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil {
+		return
+	}
+	defer destroy_connection_ring(ring)
+
+	dst, sid, ok := batch_reserve(ring, 128)
+	testing.expect(t, ok, "reserve failed")
+	if !ok {
+		return
+	}
+	for i in 0 ..< len(dst) {
+		dst[i] = 0
+	}
+
+	testing.expect(
+		t,
+		sync.atomic_load(&ring.send_slots[sid].active_writers) == 1,
+		"the reserve should be counted",
+	)
+
+	ring_reset(ring)
+
+	testing.expectf(
+		t,
+		sync.atomic_load(&ring.send_slots[sid].active_writers) == 1,
+		"ring_reset dropped an outstanding writer's count, so its commit will underflow: active_writers is %d",
+		sync.atomic_load(&ring.send_slots[sid].active_writers),
+	)
+
+	testing.expect(
+		t,
+		sync.atomic_load(&ring.send_slots[sid].state) == .DISCARDED,
+		"a slot with an outstanding writer must be discarded, not freed for reuse",
+	)
+
+	batch_commit(ring, sid)
+
+	testing.expectf(
+		t,
+		sync.atomic_load(&ring.send_slots[sid].active_writers) == 0,
+		"after the outstanding writer commits the count should be back to zero, got %d",
+		sync.atomic_load(&ring.send_slots[sid].active_writers),
+	)
+	testing.expect(
+		t,
+		sync.atomic_load(&ring.send_slots[sid].state) == .FREE,
+		"the last writer on a discarded slot should release it for reuse",
+	)
+}

@@ -65,7 +65,7 @@ sim_rand :: proc() -> u64 {
 
 @(private = "file")
 sim_worker_has_work :: proc(w: ^Worker) -> bool {
-	return w.runnext != nil || mpsc_size(&w.ready_queue) > 0
+	return w.runnext != nil || !ready_is_empty(w)
 }
 
 @(private = "file")
@@ -76,11 +76,10 @@ sim_resume_next :: proc(w: ^Worker) {
 		handle = w.runnext
 		w.runnext = nil
 	} else {
-		raw: rawptr
-		if !mpsc_pop(&w.ready_queue, &raw) {
+		handle = ready_pop(w)
+		if handle == nil {
 			return
 		}
-		handle = cast(^Pooled_Actor_Handle)raw
 	}
 	sim_trace_record(.Actor_Resume, u64(w.id), u64((cast(^Actor(int))handle.actor_ptr).pid))
 	worker_resume_handle(w, handle)

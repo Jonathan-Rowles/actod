@@ -116,14 +116,17 @@ print_vma_breakdown :: proc(top: int) {
 	}
 }
 
-read_mapping_rss_kb :: proc(address: uintptr) -> int {
+read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 	data, err := os.read_entire_file_from_path("/proc/self/smaps", context.allocator)
 	if err != nil {
 		return -1
 	}
 	defer delete(data)
 
+	low := u64(address)
+	high := u64(address) + u64(size)
 	in_range := false
+	total := -1
 	rest := string(data)
 	for line in strings.split_lines_iterator(&rest) {
 		fields := strings.fields(line)
@@ -135,15 +138,16 @@ read_mapping_rss_kb :: proc(address: uintptr) -> int {
 		if dash := strings.index_byte(fields[0], '-'); dash > 0 && len(fields) >= 2 {
 			start := strconv.parse_u64_of_base(fields[0][:dash], 16) or_else 0
 			end := strconv.parse_u64_of_base(fields[0][dash + 1:], 16) or_else 0
-			in_range = u64(address) >= start && u64(address) < end
+			in_range = start < high && end > low
 			continue
 		}
 
 		if in_range && fields[0] == "Rss:" && len(fields) >= 2 {
-			return strconv.parse_int(fields[1]) or_else -1
+			rss := strconv.parse_int(fields[1]) or_else 0
+			total = max(total, 0) + rss
 		}
 	}
-	return -1
+	return total
 }
 
 read_max_map_count :: proc() -> int {

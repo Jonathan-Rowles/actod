@@ -8,7 +8,6 @@ import "core:mem"
 import "core:sync"
 import "core:thread"
 
-WORKER_READY_QUEUE_SIZE :: 512
 WORKER_SPIN_TRIES :: 128
 
 Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
@@ -26,9 +25,15 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 	in_ready_queue:   bool,
 	_pad1:            [CACHE_LINE_SIZE - 1]byte,
 	main_fn:          proc(_: rawptr),
+	resume_fn:        proc(_: rawptr),
 	allocator:        mem.Allocator,
 	logger:           log.Logger,
 	msg_ctx:          rawptr,
+	next_ready:       ^Pooled_Actor_Handle,
+	coro_stack:       uint,
+	started_once:     bool,
+	parked_cold:      bool,
+	terminated:       bool,
 }
 
 #assert(offset_of(Pooled_Actor_Handle, in_ready_queue) % CACHE_LINE_SIZE == 0)
@@ -42,7 +47,53 @@ Worker :: struct #align (CACHE_LINE_SIZE) {
 	wake_sema:   sync.Atomic_Sema,
 	parked:      bool,
 	_pad1:       [CACHE_LINE_SIZE - size_of(sync.Atomic_Sema) - size_of(bool)]byte,
-	ready_queue: MPSC_Queue(rawptr, WORKER_READY_QUEUE_SIZE),
+	ready_head:  ^Pooled_Actor_Handle,
+	ready_local: ^Pooled_Actor_Handle,
+}
+
+@(private)
+ready_push :: proc(w: ^Worker, handle: ^Pooled_Actor_Handle) {
+	for {
+		head := sync.atomic_load_explicit(&w.ready_head, .Relaxed)
+		handle.next_ready = head
+		if _, swapped := sync.atomic_compare_exchange_weak_explicit(
+			&w.ready_head,
+			head,
+			handle,
+			.Release,
+			.Relaxed,
+		); swapped {
+			return
+		}
+	}
+}
+
+@(private)
+ready_pop :: proc(w: ^Worker) -> ^Pooled_Actor_Handle {
+	if w.ready_local == nil {
+		batch := sync.atomic_exchange_explicit(&w.ready_head, nil, .Acquire)
+		if batch == nil {
+			return nil
+		}
+		reversed: ^Pooled_Actor_Handle
+		for node := batch; node != nil; {
+			next := node.next_ready
+			node.next_ready = reversed
+			reversed = node
+			node = next
+		}
+		w.ready_local = reversed
+	}
+
+	handle := w.ready_local
+	w.ready_local = handle.next_ready
+	handle.next_ready = nil
+	return handle
+}
+
+@(private)
+ready_is_empty :: #force_inline proc(w: ^Worker) -> bool {
+	return w.ready_local == nil && sync.atomic_load_explicit(&w.ready_head, .Acquire) == nil
 }
 
 Worker_Pool :: struct {
@@ -66,7 +117,8 @@ init_worker_pool :: proc(count: int) {
 	for i in 0 ..< count {
 		w := &NODE.worker_pool.workers[i]
 		w.id = i
-		init_mpsc(&w.ready_queue)
+		w.ready_head = nil
+		w.ready_local = nil
 		sync.atomic_store(&w.running, true)
 
 		if !NODE.config.sim_mode {
@@ -111,11 +163,11 @@ wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
 		w := handle.home_worker
 		if w == current_worker {
 			if w.runnext != nil {
-				mpsc_push(&w.ready_queue, rawptr(w.runnext))
+				ready_push(w, w.runnext)
 			}
 			w.runnext = handle
 		} else {
-			mpsc_push(&w.ready_queue, rawptr(handle))
+			ready_push(w, handle)
 
 			sync.atomic_thread_fence(.Seq_Cst)
 			if sync.atomic_load_explicit(&w.parked, .Relaxed) {
@@ -128,13 +180,38 @@ wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
 @(private)
 coro_entry :: proc(co: ^coro.Coro) {
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
+	if handle.started_once {
+		handle.resume_fn(handle.actor_ptr)
+		return
+	}
+	handle.started_once = true
 	handle.main_fn(handle.actor_ptr)
+}
+
+@(private)
+handle_acquire_coro :: proc(handle: ^Pooled_Actor_Handle) -> bool {
+	desc := coro.desc_init(coro_entry, handle.coro_stack)
+	desc.user_data = handle
+	co, res := coro_acquire(&desc, &handle.coro_slot, handle.coro_stack)
+	if res != .Success {
+		return false
+	}
+	handle.co = co
+	return true
 }
 
 @(private)
 worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 	current_actor_context = handle.actor_ctx
 	current_actor_file_logger = handle.file_logger
+
+	if handle.co == nil && !handle_acquire_coro(handle) {
+		log.errorf("could not reacquire a coroutine stack to wake a parked actor")
+		sync.atomic_store_explicit(&handle.in_ready_queue, false, .Release)
+		current_actor_context = nil
+		current_actor_file_logger = nil
+		return
+	}
 
 	reclaim_pin()
 
@@ -143,18 +220,29 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 	current_actor_context = nil
 	current_actor_file_logger = nil
 
-	if coro.status(handle.co) == .Dead {
-	} else if handle.transport_parked {
+	if handle.parked_cold {
+		handle.parked_cold = false
+		coro_release(handle.co, &handle.coro_slot, false)
+		handle.co = nil
+	} else if coro.status(handle.co) == .Dead {
+		if tls_reclaim_depth > 0 {
+			reclaim_unpin()
+		}
+		sync.atomic_store_explicit(&handle.terminated, true, .Release)
+		return
+	}
+
+	if handle.transport_parked {
 		sync.atomic_store_explicit(&handle.in_ready_queue, false, .Release)
 	} else if handle.wants_reschedule || has_pending_messages(handle) {
 		handle.wants_reschedule = false
-		mpsc_push(&worker.ready_queue, rawptr(handle))
+		ready_push(worker, handle)
 	} else {
 		sync.atomic_store_explicit(&handle.in_ready_queue, false, .Release)
 		sync.atomic_thread_fence(.Seq_Cst)
 		reschedule := has_pending_messages(handle)
 		if !reschedule {
-			if worker.runnext == nil && mpsc_size(&worker.ready_queue) == 0 {
+			if worker.runnext == nil && ready_is_empty(worker) {
 				for _ in 0 ..< 8 {
 					intrinsics.cpu_relax()
 				}
@@ -164,7 +252,7 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 		if reschedule {
 			_, ok := sync.atomic_compare_exchange_strong(&handle.in_ready_queue, false, true)
 			if ok {
-				mpsc_push(&worker.ready_queue, rawptr(handle))
+				ready_push(worker, handle)
 			}
 		}
 	}
@@ -177,7 +265,6 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 @(private)
 worker_loop :: proc(worker: ^Worker) {
 	current_worker = worker
-	raw: rawptr
 
 	for sync.atomic_load(&worker.running) {
 		if worker.runnext != nil {
@@ -187,16 +274,16 @@ worker_loop :: proc(worker: ^Worker) {
 			continue
 		}
 
-		if mpsc_pop(&worker.ready_queue, &raw) {
-			worker_resume_handle(worker, cast(^Pooled_Actor_Handle)raw)
+		if handle := ready_pop(worker); handle != nil {
+			worker_resume_handle(worker, handle)
 			continue
 		}
 
 		for _ in 0 ..< WORKER_SPIN_TRIES {
 			intrinsics.cpu_relax()
 			if worker.runnext != nil do break
-			if mpsc_pop(&worker.ready_queue, &raw) {
-				worker_resume_handle(worker, cast(^Pooled_Actor_Handle)raw)
+			if handle := ready_pop(worker); handle != nil {
+				worker_resume_handle(worker, handle)
 				break
 			}
 		}
@@ -207,7 +294,7 @@ worker_loop :: proc(worker: ^Worker) {
 
 		sync.atomic_store_explicit(&worker.parked, true, .Relaxed)
 		sync.atomic_thread_fence(.Seq_Cst)
-		if worker.runnext == nil && mpsc_size(&worker.ready_queue) == 0 {
+		if worker.runnext == nil && ready_is_empty(worker) {
 			sync.atomic_sema_wait(&worker.wake_sema)
 		}
 		sync.atomic_store_explicit(&worker.parked, false, .Relaxed)

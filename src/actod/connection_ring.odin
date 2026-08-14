@@ -20,10 +20,11 @@ IO_ATTACH_RETRY_DELAY :: 100 * time.Microsecond
 RING_RESET_WRITER_SPIN :: 1_000_000
 
 Send_Slot_State :: enum u32 {
-	FREE    = 0,
-	WRITING = 1,
-	SEALED  = 2,
-	READY   = 3,
+	FREE      = 0,
+	WRITING   = 1,
+	SEALED    = 2,
+	READY     = 3,
+	DISCARDED = 4,
 }
 
 Send_Slot :: struct #align (CACHE_LINE_SIZE) {
@@ -267,8 +268,12 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 		if sync.atomic_load(&slot.state) != .FREE {
 			dropped += 1
 		}
-		slot.state = .FREE
 		slot.length = 0
+		if sync.atomic_load(&slot.active_writers) > 0 {
+			sync.atomic_store(&slot.state, .DISCARDED)
+			continue
+		}
+		slot.state = .FREE
 		slot.active_writers = 0
 	}
 
@@ -622,6 +627,11 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 
 	if old == 1 {
 		state := sync.atomic_load(&slot.state)
+		if state == .DISCARDED {
+			slot.length = 0
+			sync.atomic_store(&slot.state, .FREE)
+			return
+		}
 		if state == .SEALED {
 			when ODIN_DEBUG {
 				data := slot_data(ring, slot_idx)

@@ -88,13 +88,18 @@ ALL_TESTS :: []Test_Entry {
 		expects_error_logs = true,
 	},
 	{
+		name = "test_all_actors_run_when_woken_at_once",
+		test_proc = test_all_actors_run_when_woken_at_once,
+		worker_count = READY_QUEUE_TEST_WORKERS,
+	},
+	{
 		name = "test_slab_slots_return_after_termination",
 		test_proc = test_slab_slots_return_after_termination,
 		worker_count = 4,
 	},
 	{
-		name = "test_slab_falls_back_for_oversized_actor",
-		test_proc = test_slab_falls_back_for_oversized_actor,
+		name = "test_slab_spills_for_oversized_actor",
+		test_proc = test_slab_spills_for_oversized_actor,
 		worker_count = 2,
 	},
 	{

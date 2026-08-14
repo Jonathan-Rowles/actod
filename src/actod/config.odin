@@ -1,5 +1,6 @@
 package actod
 
+import "../pkgs/coro"
 import "base:intrinsics"
 import "base:runtime"
 import "core:log"
@@ -8,6 +9,10 @@ import "core:time"
 
 CACHE_LINE_SIZE :: 64 // TODO:
 SYSTEM_MAILBOX_SIZE :: 16
+
+// Address sanitizer red-zones every stack frame, which inflates stack use several fold,
+// so a stack that is comfortable in a normal build genuinely overflows under it.
+DEFAULT_CORO_STACK_SIZE :: mem.Kilobyte * 56 when !coro.ASAN_FIBERS else mem.Kilobyte * 512
 
 SPIN_STRATEGY :: enum {
 	CPU_RELAX,
@@ -152,7 +157,7 @@ DEFAULT_SYSTEM_CONFIG := System_Config {
 		home_worker = -1,
 		affinity = nil,
 		stack_size_dedicated_os_thread = mem.Kilobyte * 128,
-		coro_stack_size = mem.Kilobyte * 56,
+		coro_stack_size = DEFAULT_CORO_STACK_SIZE,
 		use_dedicated_os_thread = false,
 	},
 }

@@ -8,7 +8,8 @@ MIN_STACK_SIZE :: 16 * mem.Kilobyte
 DEFAULT_STORAGE_SIZE :: 1024
 DEFAULT_STACK_SIZE :: 56 * 1024
 STACK_GUARD_SIZE :: 16 * mem.Kilobyte
-STACK_CANARY_SIZE :: 64
+CANARY_ENABLED :: #config(ACTOD_CORO_CANARY, true)
+STACK_CANARY_SIZE :: 64 when CANARY_ENABLED else 0
 STACK_CANARY_WORD :: 0xC5C5C5C5C5C5C5C5
 MAGIC_NUMBER :: 0x7E3CB1A9
 
@@ -37,6 +38,41 @@ Result :: enum {
 
 Func :: proc(co: ^Coro)
 
+ASAN_FIBERS :: .Address in ODIN_SANITIZER_FLAGS
+
+when ASAN_FIBERS {
+	@(default_calling_convention = "c")
+	foreign {
+		__sanitizer_start_switch_fiber :: proc(save: ^rawptr, bottom: rawptr, size: uint) ---
+		__sanitizer_finish_switch_fiber :: proc(save: rawptr, bottom_old: ^rawptr, size_old: ^uint) ---
+		__asan_handle_no_return :: proc() ---
+	}
+}
+
+asan_before_longjmp :: #force_inline proc "contextless" () {
+	when ASAN_FIBERS {
+		__asan_handle_no_return()
+	}
+}
+
+@(private)
+asan_leaving :: #force_inline proc "contextless" (save: ^rawptr, bottom: rawptr, size: uint) {
+	when ASAN_FIBERS {
+		__sanitizer_start_switch_fiber(save, bottom, size)
+	}
+}
+
+@(private)
+asan_arrived :: #force_inline proc "contextless" (
+	save: rawptr,
+	bottom_old: ^rawptr,
+	size_old: ^uint,
+) {
+	when ASAN_FIBERS {
+		__sanitizer_finish_switch_fiber(save, bottom_old, size_old)
+	}
+}
+
 Coro :: struct #align (64) {
 	state:        State,
 	prev_co:      ^Coro,
@@ -53,6 +89,10 @@ Coro :: struct #align (64) {
 	storage:      [^]u8,
 	bytes_stored: uint,
 	storage_size: uint,
+	caller_stack:      rawptr,
+	caller_stack_size: uint,
+	asan_save_caller:  rawptr,
+	asan_save_self:    rawptr,
 }
 
 Desc :: struct {
@@ -66,11 +106,14 @@ Desc :: struct {
 current_co: ^Coro
 
 mco_main :: proc "c" (co: ^Coro) {
+	asan_arrived(nil, &co.caller_stack, &co.caller_stack_size)
 	ctx := runtime.default_context()
 	context = ctx
 	co.func(co)
 	co.state = .Dead
-	jumpout(co)
+	prepare_jumpout(co)
+	asan_leaving(nil, co.caller_stack, co.caller_stack_size)
+	mco_switch(&co.coro_ctx, &co.back_ctx)
 }
 
 @(optimization_mode = "none")
@@ -100,12 +143,16 @@ prepare_jumpout :: proc(co: ^Coro) {
 
 jumpin :: proc(co: ^Coro) {
 	prepare_jumpin(co)
+	asan_leaving(&co.asan_save_caller, co.stack_base, co.stack_size)
 	mco_switch(&co.back_ctx, &co.coro_ctx)
+	asan_arrived(co.asan_save_caller, nil, nil)
 }
 
 jumpout :: proc(co: ^Coro) {
 	prepare_jumpout(co)
+	asan_leaving(&co.asan_save_self, co.caller_stack, co.caller_stack_size)
 	mco_switch(&co.coro_ctx, &co.back_ctx)
+	asan_arrived(co.asan_save_self, &co.caller_stack, &co.caller_stack_size)
 }
 
 align_forward :: proc "contextless" (addr: uint, align: uint) -> uint {
@@ -160,48 +207,50 @@ uninit :: proc(co: ^Coro) -> Result {
 }
 
 header_size :: proc "contextless" (storage_size: uint) -> uint {
-	return page_align(
-		align_forward(size_of(Coro), 64) + align_forward(storage_size, 16) + STACK_CANARY_SIZE,
-	)
+	return align_forward(align_forward(size_of(Coro), 64) + storage_size, 16)
 }
 
 region_size :: proc "contextless" (stack_size: uint, storage_size: uint) -> uint {
-	return header_size(storage_size) + page_align(stack_size)
+	return page_align(STACK_CANARY_SIZE + stack_size + header_size(storage_size))
 }
 
 stack_canary_intact :: proc "contextless" (co: ^Coro) -> bool {
-	if co == nil || co.canary_base == nil {
-		return true
-	}
-	words := cast([^]u64)co.canary_base
-	for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
-		if words[i] != STACK_CANARY_WORD {
-			return false
+	when CANARY_ENABLED {
+		if co == nil || co.canary_base == nil {
+			return true
+		}
+		words := cast([^]u64)co.canary_base
+		for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
+			if words[i] != STACK_CANARY_WORD {
+				return false
+			}
 		}
 	}
 	return true
 }
 
 @(private)
-init_at :: proc(desc: ^Desc, base: uintptr, stack_size: uint, storage_size: uint) -> (^Coro, Result) {
-	header := header_size(storage_size)
+init_at :: proc(desc: ^Desc, base: uintptr, region: uint, storage_size: uint) -> (^Coro, Result) {
+	header_at := base + uintptr(region) - uintptr(header_size(storage_size))
 
-	co := cast(^Coro)base
+	co := cast(^Coro)header_at
 	co^ = {}
 
-	canary_at := base + uintptr(header) - STACK_CANARY_SIZE
-	canary := cast([^]u64)canary_at
-	for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
-		canary[i] = STACK_CANARY_WORD
+	when CANARY_ENABLED {
+		canary := cast([^]u64)base
+		for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
+			canary[i] = STACK_CANARY_WORD
+		}
 	}
 
-	usable_base := rawptr(base + uintptr(header))
+	usable_base := rawptr(base + STACK_CANARY_SIZE)
+	stack_size := uint(header_at - uintptr(usable_base))
 
 	if res := makectx(co, usable_base, stack_size); res != .Success {
 		return nil, res
 	}
 
-	co.canary_base = rawptr(canary_at)
+	co.canary_base = rawptr(base)
 	co.stack_base = usable_base
 	co.stack_size = stack_size
 	co.storage = cast([^]u8)(uintptr(co) + uintptr(align_forward(size_of(Coro), 64)))
@@ -235,7 +284,7 @@ create :: proc(desc: ^Desc) -> (^Coro, Result) {
 		return nil, .Out_Of_Memory
 	}
 
-	co, init_res := init_at(desc, base + STACK_GUARD_SIZE, stack_size, desc.storage_size)
+	co, init_res := init_at(desc, base + STACK_GUARD_SIZE, region, desc.storage_size)
 	if init_res != .Success {
 		vmem.release(rawptr(base), mapping_size)
 		return nil, init_res
@@ -253,11 +302,12 @@ create_in :: proc(desc: ^Desc, region: []byte) -> (^Coro, Result) {
 	}
 
 	stack_size := page_align(desc.stack_size)
-	if uint(len(region)) < region_size(stack_size, desc.storage_size) {
+	needed := region_size(stack_size, desc.storage_size)
+	if uint(len(region)) < needed {
 		return nil, .Not_Enough_Space
 	}
 
-	co, init_res := init_at(desc, uintptr(raw_data(region)), stack_size, desc.storage_size)
+	co, init_res := init_at(desc, uintptr(raw_data(region)), needed, desc.storage_size)
 	if init_res != .Success {
 		return nil, init_res
 	}
@@ -306,7 +356,9 @@ resume_top_level :: proc(co: ^Coro) {
 	}
 	co.state = .Running
 	current_co = co
+	asan_leaving(&co.asan_save_caller, co.stack_base, co.stack_size)
 	mco_switch(&co.back_ctx, &co.coro_ctx)
+	asan_arrived(co.asan_save_caller, nil, nil)
 }
 
 
@@ -334,24 +386,22 @@ yield :: proc(co: ^Coro) -> Result {
 // Fast yield for worker-pool coros resumed via resume_top_level.
 // Skips nil check, state validation, prev_co tracking, and Result return.
 yield_top_level :: proc(co: ^Coro) {
-	if !stack_canary_intact(co) {
-		panic("coro stack overflow: the canary below the stack was overwritten")
+	dummy: uint
+	stack_addr := uintptr(&dummy)
+	if stack_addr < uintptr(co.stack_base) ||
+	   stack_addr > uintptr(co.stack_base) + uintptr(co.stack_size) {
+		panic("coro stack overflow: the stack pointer left its region")
 	}
 	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
 	when ODIN_DEBUG {
 		assert(co != nil)
 		assert(co.state == .Running)
-		dummy: uint
-		stack_addr := uint(uintptr(&dummy))
-		stack_min := uint(uintptr(co.stack_base))
-		stack_max := stack_min + co.stack_size
-		assert(
-			co.magic_number == MAGIC_NUMBER && stack_addr >= stack_min && stack_addr <= stack_max,
-		)
 	}
 	co.state = .Suspended
 	current_co = nil
+	asan_leaving(&co.asan_save_self, co.caller_stack, co.caller_stack_size)
 	mco_switch(&co.coro_ctx, &co.back_ctx)
+	asan_arrived(co.asan_save_self, &co.caller_stack, &co.caller_stack_size)
 }
 
 status :: proc(co: ^Coro) -> State {

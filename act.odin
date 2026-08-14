@@ -793,11 +793,3 @@ get_current_log_config :: proc() -> Log_Config {
 get_node_log_ctx :: proc() -> log.Logger {
 	return actod.NODE.logger
 }
-
-// Deprecated names, kept for compatibility.
-
-shutdown_node :: node_shutdown
-send_message_to_parent :: send_parent
-send_message_to_children :: send_children
-get_pid_actor_type :: get_actor_type
-add_child_existing :: adopt_child

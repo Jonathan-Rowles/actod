@@ -23,22 +23,13 @@ act.stop_observer()
 ```odin
 // Manual trigger
 act.trigger_stats_collection()
-
-// Request stats for one actor
-act.request_actor_stats(target_pid, requester_pid)
-
-// Request stats for all actors
-act.request_all_stats(requester_pid)
-
-// Change collection interval at runtime
-act.set_stats_collection_interval(10 * time.Second)
 ```
 
 ## Subscribing to Snapshots
 
 ```odin
 sub, ok := act.subscribe_to_stats()
-defer act.unsubscribe_from_stats(sub)
+defer act.unsubscribe(sub)
 
 // Actor receives Stats_Snapshot messages
 handle_message = proc(d: ^Data, from: act.PID, msg: any) {
@@ -71,12 +62,8 @@ Per actor:
 start_observer :: proc(collection_interval: time.Duration = 0) -> (PID, bool)
 stop_observer :: proc()
 trigger_stats_collection :: proc() -> bool
-request_actor_stats :: proc(actor_pid: PID, requester: PID) -> bool
-request_all_stats :: proc(requester: PID) -> bool
-set_stats_collection_interval :: proc(interval: time.Duration) -> bool
-clear_terminated_stats :: proc() -> bool
 subscribe_to_stats :: proc() -> (Subscription, bool)
-unsubscribe_from_stats :: proc(sub: Subscription) -> bool
+unsubscribe :: proc(sub: Subscription) -> bool
 ```
 
 ---

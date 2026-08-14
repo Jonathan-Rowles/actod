@@ -45,7 +45,7 @@ actor_loop :: proc(actor: ^Actor($T)) {
 		panic_at(actor.spawn_loc, "Actor '%v' already started or terminated\n", actor.name)
 	}
 
-	if actor.opts.blocking do log.warn("blocking caller thread")
+	if actor.blocking do log.warn("blocking caller thread")
 
 	logger, actor_ctx := setup_actor_runtime(actor)
 	context.allocator = actor.allocator
@@ -429,14 +429,7 @@ wait_for_messages_if_idle :: #force_inline proc(
 	if mpsc_size(&actor.mailbox) == 0 &&
 	   mpsc_size(&actor.system_mailbox) == 0 &&
 	   sync.atomic_load(&actor.stopped_head) == nil {
-		#partial switch actor.opts.spin_strategy {
-		case .WAKE_SEMA:
-			sync.atomic_sema_wait(&actor.wake_sema)
-		case .CPU_RELAX:
-			for _ in 0 ..< 10 {
-				intrinsics.cpu_relax()
-			}
-		}
+		sync.atomic_sema_wait(&actor.wake_sema)
 	}
 }
 
@@ -444,7 +437,7 @@ wait_for_messages_if_idle :: #force_inline proc(
 wake_actor :: #force_inline proc(actor: ^Actor(int)) {
 	if actor.pool_handle != nil {
 		wake_pooled_actor(actor.pool_handle)
-	} else if actor.opts.spin_strategy == .WAKE_SEMA {
+	} else {
 		sync.atomic_sema_post(&actor.wake_sema)
 	}
 }

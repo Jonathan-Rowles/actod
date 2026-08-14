@@ -48,7 +48,6 @@ run_local_throughput :: proc(
 			actor_config = actod.make_actor_config(
 				page_size = mem.Kilobyte * 64,
 				logging = actod.make_log_config(enable_file = false, level = .Warning),
-				spin_strategy = actod.SPIN_STRATEGY.CPU_RELAX,
 			),
 		),
 	)

@@ -1030,10 +1030,6 @@ add_remote_split_brain_full_scenario_test :: proc(t: ^testing.T) {
 
 @(test)
 registry_growth_keeps_entries_stable :: proc(t: ^testing.T) {
-	saved_growth := NODE.config.allow_registry_growth
-	NODE.config.allow_registry_growth = true
-	defer NODE.config.allow_registry_growth = saved_growth
-
 	reg := new(PID_Map(rawptr, PID))
 	pid_map_init(reg, 64)
 	defer {

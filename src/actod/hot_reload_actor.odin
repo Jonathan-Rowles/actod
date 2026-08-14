@@ -212,7 +212,7 @@ spawn_from_raw :: proc(
 	pid, ok := add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
 		log.errorf(
-			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size or enable allow_registry_growth in make_node_config()",
+			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size in make_node_config()",
 			name,
 			NODE.actor_registry.num_items,
 			location = loc,
@@ -231,7 +231,7 @@ spawn_from_raw :: proc(
 	started: bool
 	actor.started = &started
 
-	if !opts.use_dedicated_os_thread && !opts.blocking && NODE.worker_pool.initialized {
+	if !opts.use_dedicated_os_thread && NODE.worker_pool.initialized {
 		handle := new(Pooled_Actor_Handle, actor.allocator)
 		handle.actor_ptr = actor
 		handle.mailbox = &actor.mailbox

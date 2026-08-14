@@ -3,6 +3,8 @@ package hot_reload
 import "core:path/filepath"
 import "core:strings"
 
+DEFAULT_DEBOUNCE_MS :: 100
+
 Watch_Event :: struct {
 	actor_name: string,
 }

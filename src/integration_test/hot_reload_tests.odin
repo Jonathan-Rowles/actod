@@ -66,15 +66,20 @@ hr_read_count :: proc(pid: actod.PID) -> (i32, bool) {
 	return state.count, true
 }
 
+HR_Count_Probe :: struct {
+	pid:      actod.PID,
+	expected: i32,
+}
+
+hr_count_reached :: proc(state: rawptr) -> bool {
+	probe := cast(^HR_Count_Probe)state
+	count, ok := hr_read_count(probe.pid)
+	return ok && count >= probe.expected
+}
+
 hr_wait_for_count :: proc(pid: actod.PID, expected: i32, max_ms: int = 500) -> bool {
-	for _ in 0 ..< scaled_timeout_ms(max_ms) / 5 {
-		count, ok := hr_read_count(pid)
-		if ok && count >= expected {
-			return true
-		}
-		time.sleep(5 * time.Millisecond)
-	}
-	return false
+	probe := HR_Count_Probe{pid = pid, expected = expected}
+	return poll_until(hr_count_reached, &probe, time.Duration(max_ms) * time.Millisecond)
 }
 
 test_hot_reload_basic :: proc(t: ^testing.T) {
@@ -363,10 +368,11 @@ test_file_watcher_detection :: proc(t: ^testing.T) {
 		name_len = &callback_name_len,
 	}
 
-	w, ok := hot_reload.make_watcher(cb, &cb_data, debounce_ms = 10)
+	w, ok := hot_reload.make_watcher(cb, &cb_data)
 	expect(t, ok, "should create watcher")
 	if !ok do return
 	defer hot_reload.destroy_watcher(w)
+	w.debounce_ms = 10
 
 	expect(t, hot_reload.add_watch(w, dir, "test_actor"), "should add watch")
 	hot_reload.start_watcher(w)
@@ -413,10 +419,11 @@ test_file_watcher_excludes_tmp :: proc(t: ^testing.T) {
 		sync.atomic_store_explicit(fired, true, .Release)
 	}
 
-	w, ok := hot_reload.make_watcher(cb, &callback_fired, debounce_ms = 10)
+	w, ok := hot_reload.make_watcher(cb, &callback_fired)
 	expect(t, ok, "should create watcher")
 	if !ok do return
 	defer hot_reload.destroy_watcher(w)
+	w.debounce_ms = 10
 
 	expect(t, hot_reload.add_watch(w, dir, "test_actor"), "should add watch")
 	hot_reload.start_watcher(w)

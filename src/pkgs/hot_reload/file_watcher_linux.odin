@@ -67,7 +67,6 @@ File_Watcher :: struct {
 make_watcher :: proc(
 	callback: Watch_Callback,
 	user_data: rawptr,
-	debounce_ms: int = 100,
 ) -> (
 	^File_Watcher,
 	bool,
@@ -79,7 +78,7 @@ make_watcher :: proc(
 	w.fd = fd
 	w.callback = callback
 	w.user_data = user_data
-	w.debounce_ms = debounce_ms
+	w.debounce_ms = DEFAULT_DEBOUNCE_MS
 	return w, true
 }
 

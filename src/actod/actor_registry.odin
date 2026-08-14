@@ -74,15 +74,6 @@ pid_map_init :: proc(m: ^PID_Map($T, $HT), initial_capacity: int) {
 
 @(private)
 try_grow_registry :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> bool {
-	if !NODE.config.allow_registry_growth {
-		log.errorf(
-			"actor registry is full (capacity=%d) and allow_registry_growth is disabled. Raise actor_registry_size in make_node_config() or enable growth",
-			m.capacity,
-			location = loc,
-		)
-		return false
-	}
-
 	sync.lock(&m.mutex)
 	defer sync.unlock(&m.mutex)
 

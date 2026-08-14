@@ -5,3 +5,4 @@ tmp/
 docs/hot_reload_example/hot_reload_example
 docs/hot_reload_example/hot_reload_example.exe
 demo_mesh/
+*.o

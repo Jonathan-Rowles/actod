@@ -129,7 +129,6 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 			actor_config = actod.make_actor_config(
 				page_size = mem.Kilobyte * 64,
 				logging = actod.make_log_config(enable_file = false, level = .Error),
-				spin_strategy = actod.SPIN_STRATEGY.CPU_RELAX,
 			),
 		),
 	)

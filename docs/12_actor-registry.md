@@ -36,12 +36,11 @@ actor_type := act.get_pid_actor_type(pid)
 
 ## Capacity
 
-The registry starts at a configurable size (default 256) and grows dynamically when full (if `allow_registry_growth` is enabled).
+The registry starts at a configurable size (default 256) and doubles whenever it fills, up to a hard ceiling of 1M entries. Growth commits more of an address range that was reserved up front, so raising the initial size only avoids the first few doublings; it does not change the ceiling.
 
 ```odin
 act.make_node_config(
-    actor_registry_size   = 256,   // initial capacity (power-of-2)
-    allow_registry_growth = true,  // double on overflow
+    actor_registry_size = 256,   // initial capacity (power-of-2)
 )
 ```
 

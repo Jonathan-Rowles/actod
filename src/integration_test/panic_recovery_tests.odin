@@ -185,7 +185,7 @@ test_crash_runs_terminate_and_reaps_children :: proc(t: ^testing.T) {
 	expect(t, ok, "Failed to spawn parent")
 	if !ok do return
 
-	_, added := actod.add_child(parent_pid, create_crash_child(0))
+	added := actod.add_child(parent_pid, create_crash_child(0))
 	expect(t, added, "Failed to add child")
 	expect(t, wait_for_child_count(parent_pid, 1, 2000), "Child should be registered")
 

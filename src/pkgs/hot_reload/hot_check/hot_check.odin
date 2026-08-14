@@ -86,8 +86,6 @@ exercise_node_api :: proc() {
 
 	pid, found := act.get_actor_pid("probe-1")
 	if found do log.info(act.get_actor_name(pid), act.is_local_pid(pid), act.get_node_id(pid))
-	handle, node_id := act.unpack_pid(pid)
-	_ = act.pack_pid(handle, node_id)
 	_ = act.get_actor_type(pid)
 
 	_ = act.terminate_actor(p2)
@@ -96,9 +94,9 @@ exercise_node_api :: proc() {
 	_ = act.rename(p1, "probe-one-again")
 
 	children := act.get_children(p1)
-	_, _ = act.add_child(p1, spawn_probe)
+	_ = act.add_child(p1, spawn_probe)
 	if len(children) > 0 {
-		_, _ = act.adopt_child(p1, children[0], spawn_probe)
+		_ = act.adopt_child(p1, children[0], spawn_probe)
 		_ = act.remove_child(p1, children[0])
 	}
 
@@ -125,12 +123,8 @@ exercise_node_api :: proc() {
 
 	_, _ = act.start_observer()
 	_ = act.trigger_stats_collection()
-	_ = act.request_actor_stats(p1, p1)
-	_ = act.request_all_stats(p1)
-	_ = act.set_stats_collection_interval(1 * time.Second)
-	_ = act.clear_terminated_stats()
 	stats_sub, _ := act.subscribe_to_stats()
-	_ = act.unsubscribe_from_stats(stats_sub)
+	_ = act.unsubscribe(stats_sub)
 	act.stop_observer()
 
 	act.set_log_level(.Info)

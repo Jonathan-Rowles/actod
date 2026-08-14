@@ -58,8 +58,7 @@ get_local_node_pid :: proc() -> PID
 ```odin
 act.make_node_config(
     worker_count          = 0,      // 0 = auto (CPU count)
-    actor_registry_size   = 256,    // Initial capacity (power-of-2)
-    allow_registry_growth = true,   // Dynamic expansion
+    actor_registry_size   = 256,    // Initial capacity (power-of-2), doubles on overflow
     actor_config          = ...,    // Default config for all actors
     network               = ...,    // Network_Config for distributed mode
     enable_observer       = false,  // Stats collection

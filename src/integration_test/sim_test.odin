@@ -248,7 +248,7 @@ test_sim_two_nodes :: proc(t: ^testing.T) {
 	opts := actod.make_node_config(
 		worker_count = 2,
 		sim_mode = true,
-		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Error)),
+		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = test_log_level())),
 	)
 	actod.node_init("sim_node_b", opts)
 	expect_value(t, actod.get_local_node_name(), "sim_node_b")
@@ -360,7 +360,7 @@ test_sim_virtual_transport :: proc(t: ^testing.T) {
 			auth_password = "test_dist_password",
 			port = 18500,
 		),
-		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Warning)),
+		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = test_log_level())),
 	)
 	actod.node_init("sim_vt_b", opts)
 

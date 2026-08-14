@@ -5,7 +5,7 @@ import "core:testing"
 import "core:time"
 
 test_sim_regression_stale_gossip_after_restart :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(3, base_port = 29000)
+	mesh := actod.sim_mesh_create(3, base_port = 29000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 2)
@@ -43,7 +43,7 @@ test_sim_regression_stale_gossip_after_restart :: proc(t: ^testing.T) {
 }
 
 test_sim_regression_relay_heals_lost_broadcast :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(3, base_port = 30000)
+	mesh := actod.sim_mesh_create(3, base_port = 30000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 	defer actod.frame_tap_clear()
 
@@ -79,7 +79,7 @@ test_sim_regression_relay_heals_lost_broadcast :: proc(t: ^testing.T) {
 }
 
 test_sim_regression_relay_cannot_resurrect :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(3, base_port = 34000)
+	mesh := actod.sim_mesh_create(3, base_port = 34000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 	defer actod.frame_tap_clear()
 
@@ -140,7 +140,7 @@ scale_up_pool :: proc(t: ^testing.T, mesh: ^actod.Sim_Mesh, i: int, peer_name: s
 }
 
 test_sim_regression_pool_peer_crash :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(2, base_port = 31000)
+	mesh := actod.sim_mesh_create(2, base_port = 31000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
@@ -159,7 +159,7 @@ test_sim_regression_pool_peer_crash :: proc(t: ^testing.T) {
 }
 
 test_sim_regression_idle_pool_ring_parks :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(2, base_port = 32000)
+	mesh := actod.sim_mesh_create(2, base_port = 32000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
@@ -214,7 +214,7 @@ test_sim_regression_publish_during_scale_down :: proc(t: ^testing.T) {
 		delete(g_reg_pub_seen[slot])
 	}
 
-	mesh := actod.sim_mesh_create(2, base_port = 33000)
+	mesh := actod.sim_mesh_create(2, base_port = 33000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	pub_pids: [2]actod.PID

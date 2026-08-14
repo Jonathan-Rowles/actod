@@ -29,7 +29,6 @@ Test_Entry :: struct {
 	udp_port:              int,
 	expects_error_logs:    bool,
 	sim_mode:              bool,
-	quiet_logs:            bool,
 }
 
 ALL_TESTS :: []Test_Entry {
@@ -72,10 +71,10 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_sim_regression_stale_gossip_after_restart", test_proc = test_sim_regression_stale_gossip_after_restart, sim_mode = true, worker_count = 2},
 	{name = "test_sim_regression_relay_heals_lost_broadcast", test_proc = test_sim_regression_relay_heals_lost_broadcast, sim_mode = true, worker_count = 2},
 	{name = "test_sim_regression_relay_cannot_resurrect", test_proc = test_sim_regression_relay_cannot_resurrect, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_pool_peer_crash", test_proc = test_sim_regression_pool_peer_crash, sim_mode = true, worker_count = 2, quiet_logs = true},
+	{name = "test_sim_regression_pool_peer_crash", test_proc = test_sim_regression_pool_peer_crash, sim_mode = true, worker_count = 2},
 	{name = "test_sim_regression_idle_pool_ring_parks", test_proc = test_sim_regression_idle_pool_ring_parks, sim_mode = true, worker_count = 2},
 	{name = "test_sim_regression_publish_during_scale_down", test_proc = test_sim_regression_publish_during_scale_down, sim_mode = true, worker_count = 2},
-	{name = "test_sim_vopr", test_proc = test_sim_vopr, sim_mode = true, worker_count = 2, quiet_logs = true},
+	{name = "test_sim_vopr", test_proc = test_sim_vopr, sim_mode = true, worker_count = 2},
 	{
 		name = "test_reclaim_churn_under_termination",
 		test_proc = test_reclaim_churn_under_termination,
@@ -488,7 +487,7 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	node_opts := actod.make_node_config(
 		network = network_config,
 		actor_config = actod.make_actor_config(
-			logging = actod.make_log_config(level = .Error if entry.quiet_logs else .Warning),
+			logging = actod.make_log_config(level = test_log_level()),
 		),
 		hot_reload_dev = entry.hot_reload_dev,
 		hot_reload_watch_path = entry.hot_reload_watch_path,
@@ -754,7 +753,7 @@ run_integration_tests :: proc(t: ^testing.T) {
 }
 
 @(init)
-register_shared_messages :: proc "contextless" () {
+register_integration_messages :: proc "contextless" () {
 	actod.register_message_type(Integration_Test_Message)
 	actod.register_message_type(u64)
 	actod.register_message_type(string)
@@ -773,8 +772,6 @@ register_shared_messages :: proc "contextless" () {
 	actod.register_message_type(Mixed_Byte_Slice_Message)
 	actod.register_message_type(Union_Test_Message)
 	actod.register_message_type(Union_Ack)
-	actod.register_message_type(shared.Network_Test_Request)
-	actod.register_message_type(shared.Network_Test_Response)
 	actod.register_message_type(Pubsub_Price_Update)
 	actod.register_message_type(Topic_Price_Update)
 	actod.register_message_type(struct {

@@ -6,6 +6,22 @@ import "core:fmt"
 import "core:os"
 import "core:reflect"
 import "core:testing"
+import "core:time"
+
+poll_until :: proc(
+	condition: proc(state: rawptr) -> bool,
+	state: rawptr,
+	budget: time.Duration,
+	interval := 5 * time.Millisecond,
+) -> bool {
+	start := time.tick_now()
+	scaled_budget := scaled_timeout(budget)
+	for {
+		if condition(state) do return true
+		if time.tick_since(start) >= scaled_budget do return false
+		time.sleep(interval)
+	}
+}
 
 @(private = "file")
 report :: proc(t: ^testing.T, loc: runtime.Source_Code_Location, msg: string) {

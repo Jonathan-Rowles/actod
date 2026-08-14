@@ -174,7 +174,6 @@ spawn_benchmark_actor :: proc($T: typeid, id: int) -> actod.PID {
 		behaviour,
 		4096,
 		actod.make_actor_config(
-			spin_strategy = .CPU_RELAX,
 			logging = actod.make_log_config(level = .Error),
 		),
 	)
@@ -263,7 +262,6 @@ run_receiver_node :: proc() {
 				},
 			),
 			actor_config = actod.make_actor_config(
-				spin_strategy = .CPU_RELAX,
 				page_size = mem.Kilobyte * 64,
 				logging = actod.make_log_config(level = .Warning),
 			),

@@ -78,7 +78,7 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 
 	for round in 0 ..< LEAK_TEST_ROUNDS {
 		for _ in 0 ..< LEAK_TEST_BATCH {
-			if _, added := actod.add_child(supervisor_pid, create_crash_child(0)); !added {
+			if added := actod.add_child(supervisor_pid, create_crash_child(0)); !added {
 				fail_hard("failed to add child in round %d", round)
 			}
 		}
@@ -133,7 +133,7 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 	for _ in 0 ..< MASS_DEATH_CHILDREN {
 		added := false
 		for _ in 0 ..< 200 {
-			if _, add_ok := actod.add_child(supervisor_pid, create_crash_child(0)); add_ok {
+			if add_ok := actod.add_child(supervisor_pid, create_crash_child(0)); add_ok {
 				added = true
 				break
 			}
@@ -206,7 +206,7 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 	for _ in 0 ..< BLOCKED_SUPERVISOR_CHILDREN {
 		added := false
 		for _ in 0 ..< 200 {
-			if _, add_ok := actod.add_child(supervisor_pid, create_crash_child(0)); add_ok {
+			if add_ok := actod.add_child(supervisor_pid, create_crash_child(0)); add_ok {
 				added = true
 				break
 			}

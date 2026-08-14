@@ -107,10 +107,6 @@ err := act.send_message(target_pid, MyMessage{value = 42})
 err = act.send_message_name("worker", MyMessage{value = 42})
 err = act.send_message_name("worker@nodeA", MyMessage{value = 42})
 
-// By name with PID cache, skips lookup on repeated sends to the same name.
-// Auto-refreshes if the actor restarts with a new PID.
-err = act.send_by_name_cached("worker", MyMessage{value = 42})
-
 // Explicit remote: actor name + node name
 err = act.send_to("worker", "nodeA", MyMessage{value = 42})
 

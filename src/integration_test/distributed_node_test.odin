@@ -938,7 +938,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 	expect(t, child_pid != 0, "Child PID should not be zero")
 
 	spawn_hash := actod.get_spawn_func_hash("supervision_worker")
-	_, adopt_ok := actod.add_child_existing(
+	adopt_ok := actod.add_child_existing(
 		observer_pid,
 		child_pid,
 		local_supervision_worker_stub,
@@ -1002,7 +1002,7 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 
 	time.sleep(100 * time.Millisecond)
 
-	_, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
+	add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
 	expect(t, add_ok, "Should add remote child")
 
 	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
@@ -1076,7 +1076,7 @@ test_remote_one_for_all_restart :: proc(t: ^testing.T) {
 	time.sleep(100 * time.Millisecond)
 
 	for _ in 0 ..< 3 {
-		_, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
+		add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
 		expect(t, add_ok, "Should add remote child")
 	}
 
@@ -1159,7 +1159,7 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 	time.sleep(100 * time.Millisecond)
 
 	for _ in 0 ..< 4 {
-		_, add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
+		add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
 		expect(t, add_ok, "Should add remote child")
 	}
 
@@ -1253,7 +1253,7 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 
 	spawn_hash := actod.get_spawn_func_hash("supervision_worker")
 
-	_, adopt_ok := actod.add_child_existing(
+	adopt_ok := actod.add_child_existing(
 		supervisor_pid,
 		remote_pid,
 		local_supervision_worker_stub,

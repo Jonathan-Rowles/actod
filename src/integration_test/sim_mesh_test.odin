@@ -42,7 +42,7 @@ Mesh_Relay_Behaviour :: actod.Actor_Behaviour(Mesh_Relay_Data) {
 test_sim_mesh_basic :: proc(t: ^testing.T) {
 	g_mesh_counts = {}
 
-	mesh := actod.sim_mesh_create(3, base_port = 21000)
+	mesh := actod.sim_mesh_create(3, base_port = 21000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	for i in 0 ..< 3 {
@@ -86,7 +86,7 @@ run_mesh_trace_scenario :: proc(t: ^testing.T, seed: u64) -> []actod.Sim_Trace_E
 	actod.sim_trace_enable(true)
 	actod.sim_trace_reset()
 
-	mesh := actod.sim_mesh_create(3, seed, base_port = 22000)
+	mesh := actod.sim_mesh_create(3, seed, base_port = 22000, log_level = test_log_level())
 
 	relay_pids: [3]actod.PID
 	for i in 0 ..< 3 {
@@ -143,7 +143,7 @@ test_sim_mesh_determinism :: proc(t: ^testing.T) {
 test_sim_mesh_partition_heal :: proc(t: ^testing.T) {
 	g_mesh_counts = {}
 
-	mesh := actod.sim_mesh_create(2, base_port = 23000)
+	mesh := actod.sim_mesh_create(2, base_port = 23000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 1)
@@ -206,7 +206,7 @@ test_sim_mesh_remote_spawn_supervision :: proc(t: ^testing.T) {
 	g_sup_child_terms = 0
 	_ = actod.register_spawn_func("sim_sup_child", spawn_sim_sup_child)
 
-	mesh := actod.sim_mesh_create(2, base_port = 26000)
+	mesh := actod.sim_mesh_create(2, base_port = 26000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 0)
@@ -233,7 +233,7 @@ test_sim_mesh_remote_spawn_supervision :: proc(t: ^testing.T) {
 test_sim_mesh_discovery :: proc(t: ^testing.T) {
 	g_mesh_counts = {}
 
-	mesh := actod.sim_mesh_create(3, base_port = 27000, register_peers = false)
+	mesh := actod.sim_mesh_create(3, base_port = 27000, register_peers = false, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	actod.sim_mesh_register(mesh, 0, 1)
@@ -269,7 +269,7 @@ test_sim_mesh_discovery :: proc(t: ^testing.T) {
 test_sim_mesh_pool_scale_up :: proc(t: ^testing.T) {
 	g_mesh_counts = {}
 
-	mesh := actod.sim_mesh_create(2, base_port = 28000)
+	mesh := actod.sim_mesh_create(2, base_port = 28000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 1)
@@ -310,7 +310,7 @@ test_sim_mesh_pool_scale_up :: proc(t: ^testing.T) {
 test_sim_mesh_crash_restart :: proc(t: ^testing.T) {
 	g_mesh_counts = {}
 
-	mesh := actod.sim_mesh_create(2, base_port = 24000)
+	mesh := actod.sim_mesh_create(2, base_port = 24000, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 1)

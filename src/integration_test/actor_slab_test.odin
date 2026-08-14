@@ -30,15 +30,14 @@ slab_in_use :: proc() -> i64 {
 	return actod.slot_slab_in_use(&actod.NODE.actor_slab)
 }
 
+slab_use_reached :: proc(state: rawptr) -> bool {
+	target := cast(^i64)state
+	return slab_in_use() <= target^
+}
+
 wait_for_slab_in_use :: proc(target: i64) -> bool {
-	deadline := time.tick_now()
-	for time.tick_since(deadline) < SLAB_REAP_TIMEOUT {
-		if slab_in_use() <= target {
-			return true
-		}
-		time.sleep(SLAB_REAP_POLL)
-	}
-	return false
+	ceiling := target
+	return poll_until(slab_use_reached, &ceiling, SLAB_REAP_TIMEOUT, SLAB_REAP_POLL)
 }
 
 test_slab_slots_return_after_termination :: proc(t: ^testing.T) {

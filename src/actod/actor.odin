@@ -20,7 +20,7 @@ DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 32)
 )
 SEND_RETRY_DELAY :: 1 * time.Microsecond
 SEND_STALL_TIMEOUT :: #config(ACTOD_SEND_STALL_TIMEOUT_MS, 100) * time.Millisecond
-SEND_MAX_BLOCK_TIMEOUT :: #config(ACTOD_SEND_MAX_BLOCK_MS, 100) * time.Millisecond
+SEND_MAX_BLOCK_TIMEOUT :: 100 * time.Millisecond
 THREAD_SEND_SPIN_TRIES :: 4096
 BATCH_SIZE :: LOCAL_MAILBOX_SIZE
 FREE_BATCH_SIZE :: BATCH_SIZE
@@ -144,6 +144,7 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	stop_signal:        Stop_Signal,
 	stopped_head:       rawptr,
 	stopped_closed:     bool,
+	blocking:           bool,
 	system_drops:       u64,
 
 	// keep unknown sizes at the bottom
@@ -299,80 +300,6 @@ send_message_name :: proc(to: string, content: $T, loc := #caller_location) -> S
 		return .ACTOR_NOT_FOUND
 	}
 	return send_message(local_pid, content, loc)
-}
-
-// Send by name with a local PID cache. Resolves name→PID on first call, then
-// reuses the cached PID. If the target actor dies and restarts (new PID, same name),
-// the cache auto-refreshes on the next ACTOR_NOT_FOUND error.
-// Local actors only, does not support "actor@node" remote format.
-// The cache is a simple linear scan, intended for a small number of target names
-// per message type. If you're sending to many distinct names, use get_actor_pid + send_message.
-@(require_results)
-send_by_name_cached :: proc(to: string, content: $T, loc := #caller_location) -> Send_Error {
-	context.logger = diagnostic_logger(context.logger)
-	NAME_CACHE_MAX :: 16
-
-	Name_PID_Entry :: struct {
-		name: string,
-		pid:  PID,
-	}
-
-	@(static) cache: [NAME_CACHE_MAX]Name_PID_Entry
-	@(static) cache_count: int
-
-	pid: PID = 0
-	cache_idx := -1
-
-	for i in 0 ..< cache_count {
-		if cache[i].name == to {
-			pid = cache[i].pid
-			cache_idx = i
-			break
-		}
-	}
-
-	if pid == 0 {
-		resolved, found := get_actor_pid(to)
-		if !found {
-			log.errorf(
-				"send_by_name_cached('%s') failed: no local actor is registered under that name",
-				to,
-				location = loc,
-			)
-			return .ACTOR_NOT_FOUND
-		}
-		pid = resolved
-
-		if cache_count < NAME_CACHE_MAX {
-			cache[cache_count] = {
-				name = to,
-				pid  = pid,
-			}
-			cache_idx = cache_count
-			cache_count += 1
-		}
-	}
-
-	err := send_message(pid, content, loc)
-
-	if err == .ACTOR_NOT_FOUND {
-		resolved, found := get_actor_pid(to)
-		if !found {
-			log.errorf(
-				"send_by_name_cached('%s') failed: the cached actor died and no actor is registered under that name any more",
-				to,
-				location = loc,
-			)
-			return .ACTOR_NOT_FOUND
-		}
-		pid = resolved
-
-		if cache_idx >= 0 do cache[cache_idx].pid = pid
-
-		err = send_message(pid, content, loc)
-	}
-
-	return err
 }
 
 // Send message to a remote actor with dynamic node and actor names.
@@ -664,7 +591,7 @@ terminate_actor :: proc(
 
 // Dynamically add a child to a supervisor
 @(require_results)
-add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (PID, bool) {
+add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	if child_spawn == nil {
 		panic_at(loc, "add_child(parent=%v): child_spawn must not be nil", parent)
@@ -677,7 +604,7 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (
 			parent,
 			location = loc,
 		)
-		return 0, false
+		return false
 	}
 
 	// Send system message to supervisor to handle child addition
@@ -693,10 +620,10 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> (
 			err,
 			location = loc,
 		)
-		return 0, false
+		return false
 	}
 
-	return 0, true
+	return true
 }
 
 adopt_child :: add_child_existing
@@ -709,10 +636,7 @@ add_child_existing :: proc(
 	child_spawn: SPAWN,
 	spawn_func_name_hash: u64 = 0,
 	loc := #caller_location,
-) -> (
-	PID,
-	bool,
-) {
+) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	if child_spawn == nil && spawn_func_name_hash == 0 {
 		panic_at(
@@ -730,7 +654,7 @@ add_child_existing :: proc(
 			parent,
 			location = loc,
 		)
-		return 0, false
+		return false
 	}
 
 	msg := Add_Child {
@@ -747,10 +671,10 @@ add_child_existing :: proc(
 			err,
 			location = loc,
 		)
-		return 0, false
+		return false
 	}
 
-	return existing_child, true
+	return true
 }
 
 // Remove a child from a supervisor
@@ -1004,7 +928,7 @@ send_system_from_payload :: #force_inline proc(
 
 @(private)
 track_message_received :: proc(from: PID) {
-	if NODE.config.enable_observer {
+	if NODE.observer_pid != {} {
 		current_actor_context.stats.messages_received += 1
 		if from != 0 do append(&current_actor_context.stats.received_list, from)
 	}
@@ -1012,7 +936,7 @@ track_message_received :: proc(from: PID) {
 
 @(private)
 track_max_mailbox_size :: proc(mailbox: ^ACTOR_MAILBOX) {
-	if NODE.config.enable_observer {
+	if NODE.observer_pid != {} {
 		current_size := mpsc_size(mailbox)
 		if current_size > current_actor_context.stats.max_mailbox_size {
 			current_actor_context.stats.max_mailbox_size = current_size
@@ -1064,7 +988,7 @@ collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 
 @(private)
 handle_set_message_stats :: #force_inline proc(from: PID, to: PID) {
-	if NODE.config.enable_observer {
+	if NODE.observer_pid != {} {
 		if current_actor_context != nil && current_actor_context.pid == from {
 			current_actor_context.stats.messages_sent += 1
 			append(&current_actor_context.stats.sent_list, to)

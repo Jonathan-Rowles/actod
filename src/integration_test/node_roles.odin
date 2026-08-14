@@ -2,7 +2,6 @@ package integration
 
 import "../actod"
 import "core:fmt"
-import "core:log"
 import "core:net"
 import "core:os"
 import "core:strconv"
@@ -10,8 +9,6 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 import "network/shared"
-
-log_level :: log.Level.Fatal
 
 run_node_role :: proc(command: string) {
 	switch command {
@@ -76,7 +73,7 @@ run_send_once :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -315,10 +312,6 @@ run_send_burst :: proc() {
 		}
 	}
 
-	if sent := sync.atomic_load(&queued_total); sent != message_count {
-		fmt.eprintf("[burst] queued only %d of %d messages\n", sent, message_count)
-	}
-
 	wait_time := max(1, message_count / 1000)
 	time.sleep(time.Duration(wait_time) * time.Second)
 
@@ -356,7 +349,7 @@ run_relay_node :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -434,7 +427,7 @@ run_echo_back :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -522,7 +515,7 @@ run_concurrent_echo :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -629,7 +622,7 @@ run_lifecycle_server :: proc() {
 				reconnect_retry_delay = time.Duration(reconnect_retry) * time.Millisecond,
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -717,7 +710,7 @@ run_lifecycle_broadcast :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -786,7 +779,7 @@ run_registry_exchange :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -889,7 +882,7 @@ run_supervision_server :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -961,7 +954,7 @@ run_latecomer_publisher :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -1037,7 +1030,7 @@ run_mesh_middle :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -1086,7 +1079,7 @@ run_mesh_leaf :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -1159,7 +1152,7 @@ run_pubsub_subscriber :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -1251,7 +1244,7 @@ run_union_sender :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)
@@ -1320,7 +1313,7 @@ run_bytes_sender :: proc() {
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
 			),
 			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = log_level),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		),
 	)

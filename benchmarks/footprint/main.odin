@@ -121,7 +121,7 @@ main :: proc() {
 		opts = actod.make_node_config(
 			actor_registry_size = registry_size,
 			enable_observer = false,
-			actor_config = actod.make_actor_config(logging = actod.make_log_config(.Error)),
+			actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Error)),
 		),
 	)
 

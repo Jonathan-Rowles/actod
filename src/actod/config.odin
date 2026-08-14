@@ -12,11 +12,6 @@ SYSTEM_MAILBOX_SIZE :: 16
 
 DEFAULT_CORO_STACK_SIZE :: mem.Kilobyte * 56 when !coro.ASAN_FIBERS else mem.Kilobyte * 512
 
-SPIN_STRATEGY :: enum {
-	CPU_RELAX,
-	WAKE_SEMA,
-}
-
 Network_Config :: struct {
 	auth_password:           string,
 	bind_address:            string,
@@ -46,17 +41,17 @@ DEFAULT_NETWORK_CONFIG := Network_Config {
 }
 
 make_network_config :: proc(
-	auth_password: string = DEFAULT_NETWORK_CONFIG.auth_password,
-	bind_address: string = DEFAULT_NETWORK_CONFIG.bind_address,
-	port: int = DEFAULT_NETWORK_CONFIG.port,
-	udp_port: int = DEFAULT_NETWORK_CONFIG.udp_port,
-	udp_max_datagram: int = DEFAULT_NETWORK_CONFIG.udp_max_datagram,
-	enable_encryption: bool = DEFAULT_NETWORK_CONFIG.enable_encryption,
-	heartbeat_interval: time.Duration = DEFAULT_NETWORK_CONFIG.heartbeat_interval,
-	heartbeat_timeout: time.Duration = DEFAULT_NETWORK_CONFIG.heartbeat_timeout,
-	reconnect_initial_delay: time.Duration = DEFAULT_NETWORK_CONFIG.reconnect_initial_delay,
-	reconnect_retry_delay: time.Duration = DEFAULT_NETWORK_CONFIG.reconnect_retry_delay,
-	connection_ring: Connection_Ring_Config = DEFAULT_NETWORK_CONFIG.connection_ring,
+	port: int = NODE.config.network.port,
+	bind_address: string = NODE.config.network.bind_address,
+	auth_password: string = NODE.config.network.auth_password,
+	enable_encryption: bool = NODE.config.network.enable_encryption,
+	udp_port: int = NODE.config.network.udp_port,
+	udp_max_datagram: int = NODE.config.network.udp_max_datagram,
+	heartbeat_interval: time.Duration = NODE.config.network.heartbeat_interval,
+	heartbeat_timeout: time.Duration = NODE.config.network.heartbeat_timeout,
+	reconnect_initial_delay: time.Duration = NODE.config.network.reconnect_initial_delay,
+	reconnect_retry_delay: time.Duration = NODE.config.network.reconnect_retry_delay,
+	connection_ring: Connection_Ring_Config = NODE.config.network.connection_ring,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Network_Config {
 	if port < 0 || port > 65535 {
@@ -112,7 +107,6 @@ make_network_config :: proc(
 System_Config :: struct {
 	actor_registry_size:   int,
 	actor_slab_slots:      int,
-	allow_registry_growth: bool,
 	enable_observer:       bool,
 	observer_interval:     time.Duration,
 	network:               Network_Config,
@@ -128,7 +122,6 @@ System_Config :: struct {
 DEFAULT_SYSTEM_CONFIG := System_Config {
 	actor_registry_size = 256,
 	actor_slab_slots = DEFAULT_ACTOR_SLAB_SLOTS,
-	allow_registry_growth = true,
 	enable_observer = false,
 	observer_interval = 0,
 	network = DEFAULT_NETWORK_CONFIG,
@@ -137,7 +130,6 @@ DEFAULT_SYSTEM_CONFIG := System_Config {
 		children = nil,
 		page_size = DEFAULT_PAGE_SIZE,
 		arena_headroom = DEFAULT_ARENA_HEADROOM,
-		spin_strategy = .WAKE_SEMA,
 		logging = Log_Config {
 			level = .Info,
 			console_opts = log.Options{.Level, .Terminal_Color, .Short_File_Path, .Line} |
@@ -160,17 +152,16 @@ DEFAULT_SYSTEM_CONFIG := System_Config {
 }
 
 make_node_config :: proc(
-	actor_registry_size: int = NODE.config.actor_registry_size,
-	actor_slab_slots: int = NODE.config.actor_slab_slots,
-	allow_registry_growth: bool = NODE.config.allow_registry_growth,
+	worker_count: int = NODE.config.worker_count,
+	actor_config: Actor_Config = NODE.config.actor_config,
+	network: Network_Config = NODE.config.network,
 	enable_observer: bool = NODE.config.enable_observer,
 	observer_interval: time.Duration = NODE.config.observer_interval,
-	network: Network_Config = NODE.config.network,
-	actor_config: Actor_Config = NODE.config.actor_config,
-	blocking_child: SPAWN = NODE.config.blocking_child,
-	worker_count: int = NODE.config.worker_count,
+	actor_registry_size: int = NODE.config.actor_registry_size,
+	actor_slab_slots: int = NODE.config.actor_slab_slots,
 	hot_reload_dev: bool = NODE.config.hot_reload_dev,
 	hot_reload_watch_path: string = NODE.config.hot_reload_watch_path,
+	blocking_child: SPAWN = NODE.config.blocking_child,
 	sim_mode: bool = NODE.config.sim_mode,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> System_Config {
@@ -209,7 +200,6 @@ make_node_config :: proc(
 		loc = loc,
 		actor_registry_size = actor_registry_size,
 		actor_slab_slots = actor_slab_slots,
-		allow_registry_growth = allow_registry_growth,
 		enable_observer = enable_observer,
 		observer_interval = observer_interval,
 		network = network,
@@ -226,7 +216,6 @@ DEFAULT_ARENA_HEADROOM :: #config(ACTOD_ARENA_HEADROOM, mem.Megabyte * 16)
 
 Actor_Config :: struct {
 	children:                       [dynamic]SPAWN,
-	spin_strategy:                  SPIN_STRATEGY,
 	logging:                        Log_Config,
 	page_size:                      int,
 	arena_headroom:                 int,
@@ -238,25 +227,23 @@ Actor_Config :: struct {
 	affinity:                       Actor_Ref,
 	coro_stack_size:                int,
 	use_dedicated_os_thread:        bool,
-	blocking:                       bool,
 	stack_size_dedicated_os_thread: int,
 	loc:                            runtime.Source_Code_Location,
 }
 
 // user overrides config sent to node in actor.node_init
 make_actor_config :: proc(
-	children: [dynamic]SPAWN = nil,
-	spin_strategy: SPIN_STRATEGY = NODE.config.actor_config.spin_strategy,
 	logging: Log_Config = NODE.config.actor_config.logging,
-	page_size: int = NODE.config.actor_config.page_size,
-	arena_headroom: int = NODE.config.actor_config.arena_headroom,
-	supervision_strategy: Supervision_Strategy = NODE.config.actor_config.supervision_strategy,
 	restart_policy: Restart_Policy = NODE.config.actor_config.restart_policy,
 	max_restarts: int = NODE.config.actor_config.max_restarts,
 	restart_window: time.Duration = NODE.config.actor_config.restart_window,
+	supervision_strategy: Supervision_Strategy = NODE.config.actor_config.supervision_strategy,
+	children: [dynamic]SPAWN = nil,
+	page_size: int = NODE.config.actor_config.page_size,
+	arena_headroom: int = NODE.config.actor_config.arena_headroom,
+	coro_stack_size: int = NODE.config.actor_config.coro_stack_size,
 	home_worker: int = NODE.config.actor_config.home_worker,
 	affinity: Actor_Ref = NODE.config.actor_config.affinity,
-	coro_stack_size: int = NODE.config.actor_config.coro_stack_size,
 	use_dedicated_os_thread: bool = NODE.config.actor_config.use_dedicated_os_thread,
 	stack_size_dedicated_os_thread: int = NODE.config.actor_config.stack_size_dedicated_os_thread,
 	loc: runtime.Source_Code_Location = #caller_location,
@@ -293,7 +280,6 @@ make_actor_config :: proc(
 	return Actor_Config {
 		loc = loc,
 		logging = logging,
-		spin_strategy = spin_strategy,
 		children = children,
 		page_size = page_size,
 		arena_headroom = arena_headroom,
@@ -325,11 +311,11 @@ Log_Config :: struct {
 
 make_log_config :: proc(
 	level: log.Level = NODE.config.actor_config.logging.level,
-	console_opts: log.Options = NODE.config.actor_config.logging.console_opts,
-	file_opts: log.Options = NODE.config.actor_config.logging.file_opts,
 	ident: string = NODE.config.actor_config.logging.ident,
 	enable_file: bool = NODE.config.actor_config.logging.enable_file,
 	log_path: string = NODE.config.actor_config.logging.log_path,
+	console_opts: log.Options = NODE.config.actor_config.logging.console_opts,
+	file_opts: log.Options = NODE.config.actor_config.logging.file_opts,
 	custom_logger: Log_Callback = NODE.config.actor_config.logging.custom_logger,
 	custom_flush: Log_Flush = NODE.config.actor_config.logging.custom_flush,
 ) -> Log_Config {

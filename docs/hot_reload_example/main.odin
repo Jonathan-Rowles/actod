@@ -9,6 +9,7 @@ main :: proc() {
 	act.node_init(
 		"hot-reload_test",
 		act.make_node_config(
+			worker_count = 2,
 			hot_reload_dev = true,
 			hot_reload_watch_path = "hot_reload_actors",
 			actor_config = act.make_actor_config(

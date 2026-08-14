@@ -15,16 +15,14 @@ INTEGRATION_MAX_CONCURRENT_ACTORS :: 50
 INTEGRATION_TEST_TIMEOUT_MS :: 5000
 INTEGRATION_TEST_TIMEOUT :: time.Duration(INTEGRATION_TEST_TIMEOUT_MS) * time.Millisecond
 
+node_registered :: proc(state: rawptr) -> bool {
+	if !actod.NODE.started || actod.NODE.pid == 0 do return false
+	_, ok := actod.get(&actod.NODE.actor_registry, actod.NODE.pid)
+	return ok
+}
+
 wait_for_node :: proc() {
-	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		if actod.NODE.started && actod.NODE.pid != 0 {
-			_, ok := actod.get(&actod.NODE.actor_registry, actod.NODE.pid)
-			if ok {
-				break
-			}
-		}
-		time.sleep(time.Millisecond)
-	}
+	_ = poll_until(node_registered, nil, INTEGRATION_TEST_TIMEOUT, time.Millisecond)
 }
 
 Test_State :: struct {

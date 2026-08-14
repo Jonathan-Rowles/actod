@@ -172,7 +172,7 @@ spawn_alloc_actor :: proc(
 	pid, ok = add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
 		log.errorf(
-			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size or enable allow_registry_growth in make_node_config()",
+			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size in make_node_config()",
 			name,
 			NODE.actor_registry.num_items,
 			location = loc,
@@ -255,7 +255,7 @@ spawn_impl :: proc(
 				current_actor_context.name,
 			)
 		}
-		actor.opts.blocking = true
+		actor.blocking = true
 		actor.opts.use_dedicated_os_thread = true
 		spawning_blocking_child = false
 		actor_loop(actor)
@@ -265,7 +265,7 @@ spawn_impl :: proc(
 	started: bool = false
 	actor.started = &started
 
-	pool_this_actor := !opts.use_dedicated_os_thread && !opts.blocking
+	pool_this_actor := !opts.use_dedicated_os_thread
 	if NODE.config.sim_mode do pool_this_actor = true
 	if pool_this_actor && NODE.worker_pool.initialized {
 		if !spawn_schedule_pooled(actor, name, pid, loc) {

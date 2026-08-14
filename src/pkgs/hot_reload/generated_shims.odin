@@ -30,7 +30,6 @@ Actor_Behaviour :: struct($T: typeid) {
 
 Actor_Config :: struct {
 	children:                       [dynamic]SPAWN,
-	spin_strategy:                  SPIN_STRATEGY,
 	logging:                        Log_Config,
 	page_size:                      int,
 	arena_headroom:                 int,
@@ -42,7 +41,6 @@ Actor_Config :: struct {
 	affinity:                       Actor_Ref,
 	coro_stack_size:                int,
 	use_dedicated_os_thread:        bool,
-	blocking:                       bool,
 	stack_size_dedicated_os_thread: int,
 	loc:                            runtime.Source_Code_Location,
 }
@@ -197,11 +195,6 @@ Restart_Policy :: enum {
 
 SPAWN :: proc(name: string, parent_pid: PID) -> (PID, bool)
 
-SPIN_STRATEGY :: enum {
-	CPU_RELAX,
-	WAKE_SEMA,
-}
-
 Send_Error :: enum {
 	OK = 0,
 	ACTOR_NOT_FOUND,
@@ -240,7 +233,6 @@ Supervision_Strategy :: enum {
 System_Config :: struct {
 	actor_registry_size:   int,
 	actor_slab_slots:      int,
-	allow_registry_growth: bool,
 	enable_observer:       bool,
 	observer_interval:     time.Duration,
 	network:               Network_Config,
@@ -293,44 +285,42 @@ import "core:net"
 
 Hot_API :: struct {
 	make_node_config:          proc(
-		actor_registry_size: int,
-		actor_slab_slots: int,
-		allow_registry_growth: bool,
+		worker_count: int,
+		actor_config: Actor_Config,
+		network: Network_Config,
 		enable_observer: bool,
 		observer_interval: time.Duration,
-		network: Network_Config,
-		actor_config: Actor_Config,
-		blocking_child: SPAWN,
-		worker_count: int,
+		actor_registry_size: int,
+		actor_slab_slots: int,
 		hot_reload_dev: bool,
 		hot_reload_watch_path: string,
+		blocking_child: SPAWN,
 		sim_mode: bool,
 		loc: runtime.Source_Code_Location,
 	) -> System_Config,
 	make_actor_config:         proc(
-		children: [dynamic]SPAWN,
-		spin_strategy: SPIN_STRATEGY,
 		logging: Log_Config,
-		page_size: int,
-		arena_headroom: int,
-		supervision_strategy: Supervision_Strategy,
 		restart_policy: Restart_Policy,
 		max_restarts: int,
 		restart_window: time.Duration,
+		supervision_strategy: Supervision_Strategy,
+		children: [dynamic]SPAWN,
+		page_size: int,
+		arena_headroom: int,
+		coro_stack_size: int,
 		home_worker: int,
 		affinity: Actor_Ref,
-		coro_stack_size: int,
 		use_dedicated_os_thread: bool,
 		stack_size_dedicated_os_thread: int,
 		loc: runtime.Source_Code_Location,
 	) -> Actor_Config,
 	make_network_config:       proc(
-		auth_password: string,
-		bind_address: string,
 		port: int,
+		bind_address: string,
+		auth_password: string,
+		enable_encryption: bool,
 		udp_port: int,
 		udp_max_datagram: int,
-		enable_encryption: bool,
 		heartbeat_interval: time.Duration,
 		heartbeat_timeout: time.Duration,
 		reconnect_initial_delay: time.Duration,
@@ -340,11 +330,11 @@ Hot_API :: struct {
 	) -> Network_Config,
 	make_log_config:           proc(
 		level: log.Level,
-		console_opts: log.Options,
-		file_opts: log.Options,
 		ident: string,
 		enable_file: bool,
 		log_path: string,
+		console_opts: log.Options,
+		file_opts: log.Options,
 		custom_logger: Log_Callback,
 		custom_flush: Log_Flush,
 	) -> Log_Config,
@@ -383,19 +373,17 @@ Hot_API :: struct {
 	is_local_pid:              proc(pid: PID) -> bool,
 	get_node_id:               proc(pid: PID) -> Node_ID,
 	get_actor_type:            proc(pid: PID) -> Actor_Type,
-	pack_pid:                  proc(h: Handle, node_id: Node_ID) -> PID,
-	unpack_pid:                proc(pid: PID) -> (Handle, Node_ID),
 	terminate_actor:           proc(to: PID, reason: Termination_Reason, loc: runtime.Source_Code_Location) -> bool,
 	rename_actor:              proc(pid: PID, new_name: string, loc: runtime.Source_Code_Location) -> bool,
 	get_children:              proc(parent: PID) -> []PID,
-	add_child:                 proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Location) -> (PID, bool),
+	add_child:                 proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Location) -> bool,
 	adopt_child:               proc(
 		parent: PID,
 		existing_child: PID,
 		child_spawn: SPAWN,
 		spawn_func_name_hash: u64,
 		loc: runtime.Source_Code_Location,
-	) -> (PID, bool),
+	) -> bool,
 	remove_child:              proc(parent: PID, child: PID, loc: runtime.Source_Code_Location) -> bool,
 	register_actor_type:       proc(name: string) -> (Actor_Type, bool),
 	get_actor_type_name:       proc(actor_type: Actor_Type) -> (string, bool),
@@ -419,12 +407,7 @@ Hot_API :: struct {
 	start_observer:            proc(collection_interval: time.Duration, loc: runtime.Source_Code_Location) -> (PID, bool),
 	stop_observer:             proc(),
 	trigger_stats_collection:  proc(loc: runtime.Source_Code_Location) -> bool,
-	request_actor_stats:       proc(actor_pid: PID, requester: PID, loc: runtime.Source_Code_Location) -> bool,
-	request_all_stats:         proc(requester: PID, loc: runtime.Source_Code_Location) -> bool,
-	set_stats_collection_interval: proc(interval: time.Duration, loc: runtime.Source_Code_Location) -> bool,
-	clear_terminated_stats:    proc(loc: runtime.Source_Code_Location) -> bool,
 	subscribe_to_stats:        proc(loc: runtime.Source_Code_Location) -> (Subscription, bool),
-	unsubscribe_from_stats:    proc(sub: Subscription, loc: runtime.Source_Code_Location) -> bool,
 	set_log_level:             proc(level: log.Level),
 	is_log_level_enabled:      proc(level: log.Level) -> bool,
 	get_current_log_config:    proc() -> Log_Config,
@@ -454,20 +437,20 @@ Hot_API :: struct {
 @(export)
 hot_api: ^Hot_API
 
-make_node_config :: proc(actor_registry_size: int = 0, actor_slab_slots: int = 0, allow_registry_growth: bool = false, enable_observer: bool = false, observer_interval: time.Duration = {}, network: Network_Config = {}, actor_config: Actor_Config = {}, blocking_child: SPAWN = {}, worker_count: int = 0, hot_reload_dev: bool = false, hot_reload_watch_path: string = "", sim_mode: bool = false, loc: runtime.Source_Code_Location = #caller_location) -> System_Config {
-	return hot_api.make_node_config(actor_registry_size, actor_slab_slots, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, sim_mode, loc)
+make_node_config :: proc(worker_count: int = 0, actor_config: Actor_Config = {}, network: Network_Config = {}, enable_observer: bool = false, observer_interval: time.Duration = {}, actor_registry_size: int = 0, actor_slab_slots: int = 0, hot_reload_dev: bool = false, hot_reload_watch_path: string = "", blocking_child: SPAWN = {}, sim_mode: bool = false, loc: runtime.Source_Code_Location = #caller_location) -> System_Config {
+	return hot_api.make_node_config(worker_count, actor_config, network, enable_observer, observer_interval, actor_registry_size, actor_slab_slots, hot_reload_dev, hot_reload_watch_path, blocking_child, sim_mode, loc)
 }
 
-make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, page_size: int = 65536, arena_headroom: int = 16777216, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
-	return hot_api.make_actor_config(children, spin_strategy, logging, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
+make_actor_config :: proc(logging: Log_Config = {}, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, children: [dynamic]SPAWN = nil, page_size: int = 65536, arena_headroom: int = 16777216, coro_stack_size: int = 57344, home_worker: int = -1, affinity: Actor_Ref = nil, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
+	return hot_api.make_actor_config(logging, restart_policy, max_restarts, restart_window, supervision_strategy, children, page_size, arena_headroom, coro_stack_size, home_worker, affinity, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 }
 
-make_network_config :: proc(auth_password: string = "", bind_address: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
-	return hot_api.make_network_config(auth_password, bind_address, port, udp_port, udp_max_datagram, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
+make_network_config :: proc(port: int = 0, bind_address: string = "", auth_password: string = "", enable_encryption: bool = false, udp_port: int = 0, udp_max_datagram: int = 0, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
+	return hot_api.make_network_config(port, bind_address, auth_password, enable_encryption, udp_port, udp_max_datagram, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
 }
 
-make_log_config :: proc(level: log.Level = {}, console_opts: log.Options = {}, file_opts: log.Options = {}, ident: string = "", enable_file: bool = false, log_path: string = "", custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {
-	return hot_api.make_log_config(level, console_opts, file_opts, ident, enable_file, log_path, custom_logger, custom_flush)
+make_log_config :: proc(level: log.Level = {}, ident: string = "", enable_file: bool = false, log_path: string = "", console_opts: log.Options = {}, file_opts: log.Options = {}, custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {
+	return hot_api.make_log_config(level, ident, enable_file, log_path, console_opts, file_opts, custom_logger, custom_flush)
 }
 
 node_init :: proc(name: string, opts: System_Config = {}, loc: runtime.Source_Code_Location = #caller_location) {
@@ -640,14 +623,6 @@ get_actor_type :: proc(pid: PID) -> Actor_Type {
 	return hot_api.get_actor_type(pid)
 }
 
-pack_pid :: proc(h: Handle, node_id: Node_ID = {}) -> PID {
-	return hot_api.pack_pid(h, node_id)
-}
-
-unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
-	return hot_api.unpack_pid(pid)
-}
-
 terminate_actor :: proc(to: PID, reason: Termination_Reason = .SHUTDOWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {
 	return hot_api.terminate_actor(to, reason, loc)
 }
@@ -660,11 +635,11 @@ get_children :: proc(parent: PID) -> []PID {
 	return hot_api.get_children(parent)
 }
 
-add_child :: proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
+add_child :: proc(parent: PID, child_spawn: SPAWN, loc: runtime.Source_Code_Location = #caller_location) -> bool {
 	return hot_api.add_child(parent, child_spawn, loc)
 }
 
-adopt_child :: proc(parent: PID, existing_child: PID, child_spawn: SPAWN, spawn_func_name_hash: u64 = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {
+adopt_child :: proc(parent: PID, existing_child: PID, child_spawn: SPAWN, spawn_func_name_hash: u64 = 0, loc: runtime.Source_Code_Location = #caller_location) -> bool {
 	return hot_api.adopt_child(parent, existing_child, child_spawn, spawn_func_name_hash, loc)
 }
 
@@ -736,28 +711,8 @@ trigger_stats_collection :: proc(loc: runtime.Source_Code_Location = #caller_loc
 	return hot_api.trigger_stats_collection(loc)
 }
 
-request_actor_stats :: proc(actor_pid: PID, requester: PID, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.request_actor_stats(actor_pid, requester, loc)
-}
-
-request_all_stats :: proc(requester: PID, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.request_all_stats(requester, loc)
-}
-
-set_stats_collection_interval :: proc(interval: time.Duration, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.set_stats_collection_interval(interval, loc)
-}
-
-clear_terminated_stats :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.clear_terminated_stats(loc)
-}
-
 subscribe_to_stats :: proc(loc: runtime.Source_Code_Location = #caller_location) -> (Subscription, bool) {
 	return hot_api.subscribe_to_stats(loc)
-}
-
-unsubscribe_from_stats :: proc(sub: Subscription, loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return hot_api.unsubscribe_from_stats(sub, loc)
 }
 
 set_log_level :: proc(level: log.Level) {

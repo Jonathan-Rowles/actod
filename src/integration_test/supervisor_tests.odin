@@ -107,112 +107,79 @@ supervisor_test_terminate :: proc(data: ^Supervisor_Test_Data) {
 	sync.atomic_add(&global_test_state.actors_terminated, 1)
 }
 
-wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
-	start := time.now()
-	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
+Registry_Probe :: struct {
+	pid: actod.PID,
+}
 
-	if condition() {
+Child_Count_Probe :: struct {
+	parent:   actod.PID,
+	expected: int,
+}
+
+Child_Change_Probe :: struct {
+	parent:  actod.PID,
+	old_pid: actod.PID,
+	index:   int,
+	new_pid: actod.PID,
+}
+
+plain_condition_holds :: proc(state: rawptr) -> bool {
+	condition := (cast(^proc() -> bool)state)^
+	return condition()
+}
+
+actor_state_present :: proc(state: rawptr) -> bool {
+	probe := cast(^Registry_Probe)state
+	_, ok := actod.get(&actod.NODE.actor_registry, probe.pid)
+	return ok
+}
+
+actor_gone :: proc(state: rawptr) -> bool {
+	probe := cast(^Registry_Probe)state
+	return !actod.valid(&actod.NODE.actor_registry, probe.pid)
+}
+
+child_count_matches :: proc(state: rawptr) -> bool {
+	probe := cast(^Child_Count_Probe)state
+	children := actod.get_children(probe.parent)
+	defer delete(children)
+	return len(children) == probe.expected
+}
+
+child_pid_changed :: proc(state: rawptr) -> bool {
+	probe := cast(^Child_Change_Probe)state
+	children := actod.get_children(probe.parent)
+	defer delete(children)
+	if len(children) > probe.index && children[probe.index] != probe.old_pid {
+		probe.new_pid = children[probe.index]
 		return true
 	}
-
-	for i := 0; i < 20; i += 1 {
-		if condition() {
-			return true
-		}
-		time.sleep(1 * time.Millisecond)
-	}
-
-	for time.diff(time.now(), deadline) > 0 {
-		if condition() {
-			return true
-		}
-		time.sleep(1 * time.Millisecond)
-	}
-
 	return false
+}
+
+wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
+	held := condition
+	return poll_until(
+		plain_condition_holds,
+		&held,
+		time.Duration(timeout_ms) * time.Millisecond,
+		time.Millisecond,
+	)
 }
 
 wait_for_actor_state :: proc(pid: actod.PID, timeout_ms: int) -> bool {
-	start := time.now()
-	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
-
-	if _, ok := actod.get(&actod.NODE.actor_registry, pid); ok {
-		return true
-	}
-
-	for i := 0; i < 20; i += 1 {
-		if _, ok := actod.get(&actod.NODE.actor_registry, pid); ok {
-			return true
-		}
-		time.sleep(2 * time.Millisecond)
-	}
-
-	for time.diff(time.now(), deadline) > 0 {
-		if _, ok := actod.get(&actod.NODE.actor_registry, pid); ok {
-			return true
-		}
-		time.sleep(5 * time.Millisecond)
-	}
-
-	return false
+	probe := Registry_Probe{pid = pid}
+	return poll_until(actor_state_present, &probe, time.Duration(timeout_ms) * time.Millisecond)
 }
 
 wait_for_child_count :: proc(parent: actod.PID, expected: int, timeout_ms: int) -> bool {
-	start := time.now()
-	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
-
-	{
-		children := actod.get_children(parent)
-		defer delete(children)
-		if len(children) == expected {
-			return true
-		}
-	}
-
-	for i := 0; i < 20; i += 1 {
-		children := actod.get_children(parent)
-		defer delete(children)
-		if len(children) == expected {
-			return true
-		}
-		time.sleep(2 * time.Millisecond)
-	}
-
-	for time.diff(time.now(), deadline) > 0 {
-		children := actod.get_children(parent)
-		defer delete(children)
-		if len(children) == expected {
-			return true
-		}
-		time.sleep(5 * time.Millisecond)
-	}
-
-	return false
+	probe := Child_Count_Probe{parent = parent, expected = expected}
+	return poll_until(child_count_matches, &probe, time.Duration(timeout_ms) * time.Millisecond)
 }
 
 wait_for_actor_invalid :: proc(pid: actod.PID, timeout_ms: int) -> bool {
-	start := time.now()
-	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
-
-	if !actod.valid(&actod.NODE.actor_registry, pid) {
-		return true
-	}
-
-	for i := 0; i < 20; i += 1 {
-		if !actod.valid(&actod.NODE.actor_registry, pid) {
-			return true
-		}
-		time.sleep(2 * time.Millisecond)
-	}
-
-	for time.diff(time.now(), deadline) > 0 {
-		if !actod.valid(&actod.NODE.actor_registry, pid) {
-			return true
-		}
-		time.sleep(5 * time.Millisecond)
-	}
-
-	return false
+	probe := Registry_Probe{pid = pid}
+	return poll_until(actor_gone, &probe, time.Duration(timeout_ms) * time.Millisecond)
 }
 
 wait_for_child_pid_change :: proc(
@@ -224,35 +191,9 @@ wait_for_child_pid_change :: proc(
 	new_pid: actod.PID,
 	success: bool,
 ) {
-	start := time.now()
-	deadline := time.time_add(start, time.Duration(scaled_timeout_ms(timeout_ms)) * time.Millisecond)
-
-	{
-		children := actod.get_children(parent)
-		defer delete(children)
-		if len(children) > index && children[index] != old_pid {
-			return children[index], true
-		}
-	}
-
-	for i := 0; i < 20; i += 1 {
-		children := actod.get_children(parent)
-		defer delete(children)
-		if len(children) > index && children[index] != old_pid {
-			return children[index], true
-		}
-		time.sleep(2 * time.Millisecond)
-	}
-
-	for time.diff(time.now(), deadline) > 0 {
-		children := actod.get_children(parent)
-		defer delete(children)
-		if len(children) > index && children[index] != old_pid {
-			return children[index], true
-		}
-		time.sleep(5 * time.Millisecond)
-	}
-
+	probe := Child_Change_Probe{parent = parent, old_pid = old_pid, index = index}
+	changed := poll_until(child_pid_changed, &probe, time.Duration(timeout_ms) * time.Millisecond)
+	if changed do return probe.new_pid, true
 	return 0, false
 }
 
@@ -807,7 +748,7 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 		expect(t, no_child, "TRANSIENT child should NOT restart on NORMAL termination")
 	}
 
-	_, _ = actod.add_child(supervisor_pid, create_transient_child(0))
+	_ = actod.add_child(supervisor_pid, create_transient_child(0))
 	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "New child should be added")
 
 	children2 := actod.get_children(supervisor_pid)
@@ -868,7 +809,7 @@ test_add_child_dynamically :: proc(t: ^testing.T) {
 	time.sleep(100 * time.Millisecond)
 	verify_child_count(t, supervisor_pid, 2)
 
-	_, add_ok := actod.add_child(supervisor_pid, create_crash_child(0))
+	add_ok := actod.add_child(supervisor_pid, create_crash_child(0))
 	expect(t, add_ok, "Failed to add child dynamically")
 
 	count_ok := wait_for_child_count(supervisor_pid, 3, 500)
@@ -1004,7 +945,7 @@ test_adopt_existing_actor :: proc(t: ^testing.T) {
 		)
 	}
 
-	_, adopt_ok := actod.add_child_existing(supervisor_pid, orphan_pid, orphan_spawn)
+	adopt_ok := actod.add_child_existing(supervisor_pid, orphan_pid, orphan_spawn)
 	expect(t, adopt_ok, "Failed to adopt orphan actor")
 
 	count_ok := wait_for_child_count(supervisor_pid, 1, 500)
@@ -1055,7 +996,7 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 		expect(t, ok, "Failed to spawn supervisor")
 		if !ok do continue
 
-		_, add_ok := actod.add_child(supervisor_pid, create_terminating_child)
+		add_ok := actod.add_child(supervisor_pid, create_terminating_child)
 		expect(t, add_ok, "Failed to add child")
 		expect(t, wait_for_child_count(supervisor_pid, 1, 1000), "Child should be registered")
 

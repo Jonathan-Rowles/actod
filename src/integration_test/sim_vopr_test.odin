@@ -196,7 +196,7 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		node_count,
 		seed,
 		base_port = 25000,
-		log_level = .Info if g_vopr_verbose else .Error,
+		log_level = .Info if g_vopr_verbose else test_log_level(),
 	)
 	defer actod.sim_mesh_destroy(mesh)
 	defer actod.frame_tap_clear()

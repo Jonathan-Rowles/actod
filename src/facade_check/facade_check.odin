@@ -25,7 +25,6 @@ probe_behaviour := act.Actor_Behaviour(Probe) {
 			d.n += 1
 			_ = act.send(from, d.n)
 			_ = act.send("probe-child", m)
-			_ = act.send_cached("probe-child", d.n)
 			_ = act.send_self(d.n)
 			_ = act.send_parent(d.n)
 			_ = act.send_children(d.n)

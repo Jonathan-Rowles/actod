@@ -13,7 +13,7 @@ What a send result promises, and what it never promises. Every send proc returns
 | Error | Meaning | Retry? |
 |-------|---------|--------|
 | `OK` | Accepted: receiver's mailbox (local) or this node's send buffer (remote) | n/a |
-| `ACTOR_NOT_FOUND` | No live actor behind that PID or name; a stale PID from before a restart counts | Only after re-resolving the target (`get_actor_pid`, or use `send_by_name_cached`) |
+| `ACTOR_NOT_FOUND` | No live actor behind that PID or name; a stale PID from before a restart counts | Only after re-resolving the target (`get_actor_pid`) |
 | `RECEIVER_BACKLOGGED` | Receiver made no progress for the whole stall window: it is stuck, not busy | Retryable, but treat it as an overload signal (see below) |
 | `MESSAGE_TOO_LARGE` | Message exceeds the actor's configured `page_size` | No. Config error: raise `page_size` or shrink the message |
 | `SYSTEM_SHUTTING_DOWN` | Node is shutting down | No |

@@ -92,11 +92,19 @@ Ask_Requester_Behaviour :: actod.Actor_Behaviour(Ask_Requester_Data) {
 	handle_message = ask_requester_handle,
 }
 
+Int_Probe :: struct {
+	target:   ^int,
+	sentinel: int,
+}
+
+int_left_sentinel :: proc(state: rawptr) -> bool {
+	probe := cast(^Int_Probe)state
+	return sync.atomic_load(probe.target) != probe.sentinel
+}
+
 wait_for_int :: proc(target: ^int, sentinel: int, budget: time.Duration) {
-	start := time.now()
-	for sync.atomic_load(target) == sentinel && time.diff(start, time.now()) < scaled_timeout(budget) {
-		time.sleep(5 * time.Millisecond)
-	}
+	probe := Int_Probe{target = target, sentinel = sentinel}
+	_ = poll_until(int_left_sentinel, &probe, budget)
 }
 
 test_ask_reply_roundtrip :: proc(t: ^testing.T) {

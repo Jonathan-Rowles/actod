@@ -2,12 +2,26 @@ package actod
 
 import "base:intrinsics"
 import "core:encoding/endian"
+import "core:log"
 import "core:sync"
 import "core:testing"
 import "core:thread"
 
 SEQ_FRAME_SIZE :: 20
 SEQ_MAX_THREADS :: 16
+
+SEQ_MAX_RECORDED_VIOLATIONS :: 8
+
+Seq_Violation :: struct {
+	producer:     int,
+	expected:     u64,
+	got:          u64,
+	submit_idx:   u32,
+	slot_idx:     u32,
+	slot_length:  u32,
+	frame_offset: u32,
+	frames_seen:  int,
+}
 
 Seq_Drainer_Context :: struct {
 	ring:             ^Connection_Ring,
@@ -16,6 +30,10 @@ Seq_Drainer_Context :: struct {
 	order_violations: int,
 	malformed:        int,
 	next_seq:         [SEQ_MAX_THREADS]u64,
+	submit_idx:       u32,
+	slot_idx:         u32,
+	violations:       [SEQ_MAX_RECORDED_VIOLATIONS]Seq_Violation,
+	recorded:         int,
 }
 
 seq_validate_slot :: proc(ctx: ^Seq_Drainer_Context, data: []byte, length: u32) {
@@ -33,6 +51,19 @@ seq_validate_slot :: proc(ctx: ^Seq_Drainer_Context, data: []byte, length: u32) 
 			if producer < SEQ_MAX_THREADS {
 				if seq != ctx.next_seq[producer] {
 					ctx.order_violations += 1
+					if ctx.recorded < SEQ_MAX_RECORDED_VIOLATIONS {
+						ctx.violations[ctx.recorded] = Seq_Violation {
+							producer     = producer,
+							expected     = ctx.next_seq[producer],
+							got          = seq,
+							submit_idx   = ctx.submit_idx,
+							slot_idx     = ctx.slot_idx,
+							slot_length  = length,
+							frame_offset = offset,
+							frames_seen  = ctx.frames_seen,
+						}
+						ctx.recorded += 1
+					}
 				}
 				ctx.next_seq[producer] = seq + 1
 			}
@@ -57,6 +88,8 @@ seq_drain_ready :: proc(ctx: ^Seq_Drainer_Context) -> int {
 		if sync.atomic_load(&slot.state) != .READY {
 			break
 		}
+		ctx.submit_idx = ring.send_submit_idx
+		ctx.slot_idx = slot_idx
 		seq_validate_slot(ctx, slot_data(ring, slot_idx), slot.length)
 		slot.length = 0
 		sync.atomic_store(&slot.state, .FREE)
@@ -161,6 +194,22 @@ run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
 		testing.expect_value(t, ctxs[i].failures, 0)
 	}
 
+	for i in 0 ..< drainer_ctx.recorded {
+		v := drainer_ctx.violations[i]
+		log.errorf(
+			"seq violation %d: producer=%d expected=%d got=%d delta=%d submit_idx=%d slot_idx=%d slot_length=%d frame_offset=%d frames_seen=%d",
+			i,
+			v.producer,
+			v.expected,
+			v.got,
+			i64(v.got) - i64(v.expected),
+			v.submit_idx,
+			v.slot_idx,
+			v.slot_length,
+			v.frame_offset,
+			v.frames_seen,
+		)
+	}
 	testing.expect_value(t, drainer_ctx.order_violations, 0)
 	testing.expect_value(t, drainer_ctx.malformed, 0)
 	testing.expect_value(t, drainer_ctx.frames_seen, total_sent)

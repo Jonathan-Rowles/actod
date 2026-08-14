@@ -20,12 +20,6 @@ init_observer_messages :: proc "contextless" () {
 
 Trigger_Collection :: struct {}
 
-Get_All_Stats :: struct {}
-
-Get_Actor_Stats :: struct {
-	actor_pid: PID,
-}
-
 Get_Actor_Stats_Request :: struct {
 	actor_pid: PID,
 	requester: PID,
@@ -180,35 +174,14 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 		collect_all_stats(data)
 		broadcast_stats_snapshot(data)
 
-	case Get_All_Stats:
-		response := All_Stats_Response {
-			active_stats     = data.active_stats,
-			terminated_stats = data.terminated_stats[:],
-		}
-		_ = send_message(from, response)
-
 	case Get_All_Stats_Request:
 		response := All_Stats_Response {
 			active_stats     = data.active_stats,
 			terminated_stats = data.terminated_stats[:],
 		}
-		_ = send_message(m.requester, response)
-
-	case Get_Actor_Stats:
-		response: Actor_Stats_Response
-		if stats, ok := data.active_stats[m.actor_pid]; ok {
-			response.stats = stats
-			response.found = true
-		} else {
-			for &s in data.terminated_stats {
-				if s.pid == m.actor_pid {
-					response.stats = s
-					response.found = true
-					break
-				}
-			}
-		}
-		_ = send_message(from, response)
+		requester := m.requester
+		if requester == {} do requester = from
+		_ = send_message(requester, response)
 
 	case Get_Actor_Stats_Request:
 		response: Actor_Stats_Response
@@ -224,7 +197,9 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 				}
 			}
 		}
-		_ = send_message(m.requester, response)
+		requester := m.requester
+		if requester == {} do requester = from
+		_ = send_message(requester, response)
 
 	case Clear_Terminated_Stats:
 		for &stats in data.terminated_stats {
@@ -406,8 +381,6 @@ start_observer :: proc(
 		_ = send_message(NODE.observer_pid, Set_Collection_Interval{interval = collection_interval})
 	}
 
-	NODE.config.enable_observer = true
-
 	return pid, ok
 }
 
@@ -436,15 +409,13 @@ stop_observer :: proc() {
 		}
 		NODE.observer_pid = {}
 	}
-
-	NODE.config.enable_observer = false
 }
 
 @(private)
 log_observer_not_started :: proc(proc_name: string, loc: runtime.Source_Code_Location) {
 	context.logger = diagnostic_logger(context.logger)
 	log.errorf(
-		"%s failed: the observer is not running, enable it with enable_observer = true in make_node_config or call start_observer",
+		"%s failed: the observer is not running, start it with start_observer",
 		proc_name,
 		location = loc,
 	)
@@ -481,34 +452,6 @@ trigger_stats_collection :: proc(loc := #caller_location) -> bool {
 	return observer_request(Trigger_Collection{}, "trigger_stats_collection", loc)
 }
 
-
-request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_location) -> bool {
-	request := Get_Actor_Stats_Request {
-		actor_pid = actor_pid,
-		requester = requester,
-	}
-	return observer_request(request, "request_actor_stats", loc)
-}
-
-
-request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
-	request := Get_All_Stats_Request {
-		requester = requester,
-	}
-	return observer_request(request, "request_all_stats", loc)
-}
-
-set_stats_collection_interval :: proc(interval: time.Duration, loc := #caller_location) -> bool {
-	msg := Set_Collection_Interval {
-		interval = interval,
-	}
-	return observer_request(msg, "set_stats_collection_interval", loc)
-}
-
-clear_terminated_stats :: proc(loc := #caller_location) -> bool {
-	return observer_request(Clear_Terminated_Stats{}, "clear_terminated_stats", loc)
-}
-
 @(require_results)
 subscribe_to_stats :: proc(loc := #caller_location) -> (Subscription, bool) {
 	if OBSERVER_TYPE == ACTOR_TYPE_UNTYPED {
@@ -516,9 +459,4 @@ subscribe_to_stats :: proc(loc := #caller_location) -> (Subscription, bool) {
 		return {}, false
 	}
 	return subscribe_type(OBSERVER_TYPE, loc)
-}
-
-@(require_results)
-unsubscribe_from_stats :: proc(sub: Subscription, loc := #caller_location) -> bool {
-	return pubsub_unsubscribe(sub, loc)
 }

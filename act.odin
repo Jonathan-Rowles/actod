@@ -44,7 +44,6 @@ Log_Callback :: actod.Log_Callback
 Log_Flush :: actod.Log_Flush
 Log_Level :: log.Level
 Log_Options :: log.Options
-Spin_Strategy :: actod.SPIN_STRATEGY
 
 // Networking
 Node_ID :: actod.Node_ID
@@ -60,122 +59,118 @@ Stats_Response :: actod.Stats_Response
 // Configuration builders. All parameters default sensibly; override what you need.
 
 make_node_config :: proc(
-	actor_registry_size: int = actod.NODE.config.actor_registry_size,
-	actor_slab_slots: int = actod.NODE.config.actor_slab_slots,
-	allow_registry_growth: bool = actod.NODE.config.allow_registry_growth,
+	worker_count: int = actod.NODE.config.worker_count,
+	actor_config: Actor_Config = actod.NODE.config.actor_config,
+	network: Network_Config = actod.NODE.config.network,
 	enable_observer: bool = actod.NODE.config.enable_observer,
 	observer_interval: time.Duration = actod.NODE.config.observer_interval,
-	network: Network_Config = actod.NODE.config.network,
-	actor_config: Actor_Config = actod.NODE.config.actor_config,
-	blocking_child: SPAWN = actod.NODE.config.blocking_child,
-	worker_count: int = actod.NODE.config.worker_count,
+	actor_registry_size: int = actod.NODE.config.actor_registry_size,
+	actor_slab_slots: int = actod.NODE.config.actor_slab_slots,
 	hot_reload_dev: bool = actod.NODE.config.hot_reload_dev,
 	hot_reload_watch_path: string = actod.NODE.config.hot_reload_watch_path,
+	blocking_child: SPAWN = actod.NODE.config.blocking_child,
 	sim_mode: bool = actod.NODE.config.sim_mode,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> System_Config {
 	return actod.make_node_config(
-		actor_registry_size,
-		actor_slab_slots,
-		allow_registry_growth,
-		enable_observer,
-		observer_interval,
-		network,
-		actor_config,
-		blocking_child,
-		worker_count,
-		hot_reload_dev,
-		hot_reload_watch_path,
-		sim_mode,
-		loc,
+		worker_count = worker_count,
+		actor_config = actor_config,
+		network = network,
+		enable_observer = enable_observer,
+		observer_interval = observer_interval,
+		actor_registry_size = actor_registry_size,
+		actor_slab_slots = actor_slab_slots,
+		hot_reload_dev = hot_reload_dev,
+		hot_reload_watch_path = hot_reload_watch_path,
+		blocking_child = blocking_child,
+		sim_mode = sim_mode,
+		loc = loc,
 	)
 }
 
 make_actor_config :: proc(
-	children: [dynamic]SPAWN = nil,
-	spin_strategy: Spin_Strategy = actod.NODE.config.actor_config.spin_strategy,
 	logging: Log_Config = actod.NODE.config.actor_config.logging,
-	page_size: int = actod.NODE.config.actor_config.page_size,
-	arena_headroom: int = actod.NODE.config.actor_config.arena_headroom,
-	supervision_strategy: Supervision_Strategy = actod.NODE.config.actor_config.supervision_strategy,
 	restart_policy: Restart_Policy = actod.NODE.config.actor_config.restart_policy,
 	max_restarts: int = actod.NODE.config.actor_config.max_restarts,
 	restart_window: time.Duration = actod.NODE.config.actor_config.restart_window,
+	supervision_strategy: Supervision_Strategy = actod.NODE.config.actor_config.supervision_strategy,
+	children: [dynamic]SPAWN = nil,
+	page_size: int = actod.NODE.config.actor_config.page_size,
+	arena_headroom: int = actod.NODE.config.actor_config.arena_headroom,
+	coro_stack_size: int = actod.NODE.config.actor_config.coro_stack_size,
 	home_worker: int = actod.NODE.config.actor_config.home_worker,
 	affinity: Actor_Ref = actod.NODE.config.actor_config.affinity,
-	coro_stack_size: int = actod.NODE.config.actor_config.coro_stack_size,
 	use_dedicated_os_thread: bool = actod.NODE.config.actor_config.use_dedicated_os_thread,
 	stack_size_dedicated_os_thread: int = actod.NODE.config.actor_config.stack_size_dedicated_os_thread,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Actor_Config {
 	return actod.make_actor_config(
-		children,
-		spin_strategy,
-		logging,
-		page_size,
-		arena_headroom,
-		supervision_strategy,
-		restart_policy,
-		max_restarts,
-		restart_window,
-		home_worker,
-		affinity,
-		coro_stack_size,
-		use_dedicated_os_thread,
-		stack_size_dedicated_os_thread,
-		loc,
+		logging = logging,
+		restart_policy = restart_policy,
+		max_restarts = max_restarts,
+		restart_window = restart_window,
+		supervision_strategy = supervision_strategy,
+		children = children,
+		page_size = page_size,
+		arena_headroom = arena_headroom,
+		coro_stack_size = coro_stack_size,
+		home_worker = home_worker,
+		affinity = affinity,
+		use_dedicated_os_thread = use_dedicated_os_thread,
+		stack_size_dedicated_os_thread = stack_size_dedicated_os_thread,
+		loc = loc,
 	)
 }
 
 make_network_config :: proc(
-	auth_password: string = actod.DEFAULT_NETWORK_CONFIG.auth_password,
-	bind_address: string = actod.DEFAULT_NETWORK_CONFIG.bind_address,
-	port: int = actod.DEFAULT_NETWORK_CONFIG.port,
-	udp_port: int = actod.DEFAULT_NETWORK_CONFIG.udp_port,
-	udp_max_datagram: int = actod.DEFAULT_NETWORK_CONFIG.udp_max_datagram,
-	enable_encryption: bool = actod.DEFAULT_NETWORK_CONFIG.enable_encryption,
-	heartbeat_interval: time.Duration = actod.DEFAULT_NETWORK_CONFIG.heartbeat_interval,
-	heartbeat_timeout: time.Duration = actod.DEFAULT_NETWORK_CONFIG.heartbeat_timeout,
-	reconnect_initial_delay: time.Duration = actod.DEFAULT_NETWORK_CONFIG.reconnect_initial_delay,
-	reconnect_retry_delay: time.Duration = actod.DEFAULT_NETWORK_CONFIG.reconnect_retry_delay,
-	connection_ring: Connection_Ring_Config = actod.DEFAULT_NETWORK_CONFIG.connection_ring,
+	port: int = actod.NODE.config.network.port,
+	bind_address: string = actod.NODE.config.network.bind_address,
+	auth_password: string = actod.NODE.config.network.auth_password,
+	enable_encryption: bool = actod.NODE.config.network.enable_encryption,
+	udp_port: int = actod.NODE.config.network.udp_port,
+	udp_max_datagram: int = actod.NODE.config.network.udp_max_datagram,
+	heartbeat_interval: time.Duration = actod.NODE.config.network.heartbeat_interval,
+	heartbeat_timeout: time.Duration = actod.NODE.config.network.heartbeat_timeout,
+	reconnect_initial_delay: time.Duration = actod.NODE.config.network.reconnect_initial_delay,
+	reconnect_retry_delay: time.Duration = actod.NODE.config.network.reconnect_retry_delay,
+	connection_ring: Connection_Ring_Config = actod.NODE.config.network.connection_ring,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Network_Config {
 	return actod.make_network_config(
-		auth_password,
-		bind_address,
-		port,
-		udp_port,
-		udp_max_datagram,
-		enable_encryption,
-		heartbeat_interval,
-		heartbeat_timeout,
-		reconnect_initial_delay,
-		reconnect_retry_delay,
-		connection_ring,
-		loc,
+		port = port,
+		bind_address = bind_address,
+		auth_password = auth_password,
+		enable_encryption = enable_encryption,
+		udp_port = udp_port,
+		udp_max_datagram = udp_max_datagram,
+		heartbeat_interval = heartbeat_interval,
+		heartbeat_timeout = heartbeat_timeout,
+		reconnect_initial_delay = reconnect_initial_delay,
+		reconnect_retry_delay = reconnect_retry_delay,
+		connection_ring = connection_ring,
+		loc = loc,
 	)
 }
 
 make_log_config :: proc(
 	level: Log_Level = actod.NODE.config.actor_config.logging.level,
-	console_opts: Log_Options = actod.NODE.config.actor_config.logging.console_opts,
-	file_opts: Log_Options = actod.NODE.config.actor_config.logging.file_opts,
 	ident: string = actod.NODE.config.actor_config.logging.ident,
 	enable_file: bool = actod.NODE.config.actor_config.logging.enable_file,
 	log_path: string = actod.NODE.config.actor_config.logging.log_path,
+	console_opts: Log_Options = actod.NODE.config.actor_config.logging.console_opts,
+	file_opts: Log_Options = actod.NODE.config.actor_config.logging.file_opts,
 	custom_logger: Log_Callback = actod.NODE.config.actor_config.logging.custom_logger,
 	custom_flush: Log_Flush = actod.NODE.config.actor_config.logging.custom_flush,
 ) -> Log_Config {
 	return actod.make_log_config(
-		level,
-		console_opts,
-		file_opts,
-		ident,
-		enable_file,
-		log_path,
-		custom_logger,
-		custom_flush,
+		level = level,
+		ident = ident,
+		enable_file = enable_file,
+		log_path = log_path,
+		console_opts = console_opts,
+		file_opts = file_opts,
+		custom_logger = custom_logger,
+		custom_flush = custom_flush,
 	)
 }
 
@@ -389,18 +384,6 @@ send_unreliable :: proc(
 	return actod.send_unreliable(to, content, loc)
 }
 
-// Send by name with a local PID cache. Caches the name->PID resolution so repeated
-// sends to the same name skip the lookup. If the actor restarts (new PID), the cache
-// auto-refreshes. Local actors only. Linear scan, best for a small number of target names.
-@(require_results)
-send_cached :: proc(
-	to: string,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_by_name_cached(to, content, loc)
-}
-
 // Send a message to a remote actor with explicit node and actor names.
 @(require_results)
 send_to :: proc(
@@ -567,14 +550,6 @@ get_actor_type :: proc(pid: PID) -> Actor_Type {
 	return actod.get_pid_actor_type(pid)
 }
 
-pack_pid :: proc(h: Handle, node_id: Node_ID = actod.NODE.node_id) -> PID {
-	return actod.pack_pid(h, node_id)
-}
-
-unpack_pid :: proc(pid: PID) -> (handle: Handle, node_id: Node_ID) {
-	return actod.unpack_pid(pid)
-}
-
 // Terminate an actor by PID. Defaults to reason .SHUTDOWN.
 @(require_results)
 terminate_actor :: proc(
@@ -622,10 +597,7 @@ add_child :: proc(
 	parent: PID,
 	child_spawn: SPAWN,
 	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
+) -> bool {
 	return actod.add_child(parent, child_spawn, loc)
 }
 
@@ -636,10 +608,7 @@ adopt_child :: proc(
 	existing_child: PID,
 	child_spawn: SPAWN,
 	loc: runtime.Source_Code_Location = #caller_location,
-) -> (
-	PID,
-	bool,
-) {
+) -> bool {
 	return actod.add_child_existing(parent, existing_child, child_spawn, 0, loc)
 }
 
@@ -795,32 +764,6 @@ trigger_stats_collection :: proc(loc: runtime.Source_Code_Location = #caller_loc
 	return actod.trigger_stats_collection(loc)
 }
 
-request_actor_stats :: proc(
-	actor_pid: PID,
-	requester: PID,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.request_actor_stats(actor_pid, requester, loc)
-}
-
-request_all_stats :: proc(
-	requester: PID,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.request_all_stats(requester, loc)
-}
-
-set_stats_collection_interval :: proc(
-	interval: time.Duration,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.set_stats_collection_interval(interval, loc)
-}
-
-clear_terminated_stats :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
-	return actod.clear_terminated_stats(loc)
-}
-
 // Subscribe to observer stats snapshots. Must be called from within an actor.
 @(require_results)
 subscribe_to_stats :: proc(
@@ -830,14 +773,6 @@ subscribe_to_stats :: proc(
 	bool,
 ) {
 	return actod.subscribe_to_stats(loc)
-}
-
-@(require_results)
-unsubscribe_from_stats :: proc(
-	sub: Subscription,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> bool {
-	return actod.unsubscribe_from_stats(sub, loc)
 }
 
 // Logging
@@ -862,7 +797,6 @@ get_node_log_ctx :: proc() -> log.Logger {
 // Deprecated names, kept for compatibility.
 
 shutdown_node :: node_shutdown
-send_by_name_cached :: send_cached
 send_message_to_parent :: send_parent
 send_message_to_children :: send_children
 get_pid_actor_type :: get_actor_type

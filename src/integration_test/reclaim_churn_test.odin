@@ -62,7 +62,7 @@ reclaim_sender_behaviour := actod.Actor_Behaviour(Reclaim_Sender) {
 reclaim_target_config :: proc() -> actod.Actor_Config {
 	return actod.make_actor_config(
 		home_worker = RECLAIM_TARGET_WORKER,
-		logging = actod.make_log_config(level = .Fatal),
+		logging = actod.make_log_config(level = test_log_level()),
 	)
 }
 
@@ -132,7 +132,7 @@ test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
 			reclaim_sender_behaviour,
 			actod.make_actor_config(
 				home_worker = RECLAIM_TARGET_WORKER,
-				logging = actod.make_log_config(level = .Fatal),
+				logging = actod.make_log_config(level = test_log_level()),
 			),
 		)
 		if ok {

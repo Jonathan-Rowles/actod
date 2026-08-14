@@ -17,8 +17,7 @@ main :: proc() {
 		opts = actod.make_node_config(
 			actor_config = actod.make_actor_config(
 				page_size = mem.Kilobyte * 64,
-				logging = actod.make_log_config(.Error),
-				spin_strategy = actod.SPIN_STRATEGY.CPU_RELAX,
+				logging = actod.make_log_config(level = .Error),
 			),
 		),
 	)
@@ -36,7 +35,6 @@ print_provenance_header :: proc() {
 	fmt.printf("odin version:     %v\n", ODIN_VERSION)
 	fmt.printf("build:            -o:aggressive -no-bounds-check -disable-assert -microarch:native\n")
 	fmt.printf("page_size:        %d KB\n", 64)
-	fmt.printf("spin_strategy:    CPU_RELAX\n")
 	fmt.printf("mailboxes:        %d slots (default), backlogged sends retried\n", actod.DEFAULT_MAIL_BOX_SIZE)
 	fmt.printf("repeats:          %d\n", BENCH_REPEATS)
 	fmt.println()

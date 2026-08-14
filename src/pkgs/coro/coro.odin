@@ -383,27 +383,6 @@ yield :: proc(co: ^Coro) -> Result {
 	return .Success
 }
 
-// Fast yield for worker-pool coros resumed via resume_top_level.
-// Skips nil check, state validation, prev_co tracking, and Result return.
-yield_top_level :: proc(co: ^Coro) {
-	dummy: uint
-	stack_addr := uintptr(&dummy)
-	if stack_addr < uintptr(co.stack_base) ||
-	   stack_addr > uintptr(co.stack_base) + uintptr(co.stack_size) {
-		panic("coro stack overflow: the stack pointer left its region")
-	}
-	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
-	when ODIN_DEBUG {
-		assert(co != nil)
-		assert(co.state == .Running)
-	}
-	co.state = .Suspended
-	current_co = nil
-	asan_leaving(&co.asan_save_self, co.caller_stack, co.caller_stack_size)
-	mco_switch(&co.coro_ctx, &co.back_ctx)
-	asan_arrived(co.asan_save_self, &co.caller_stack, &co.caller_stack_size)
-}
-
 status :: proc(co: ^Coro) -> State {
 	if co != nil {
 		return co.state

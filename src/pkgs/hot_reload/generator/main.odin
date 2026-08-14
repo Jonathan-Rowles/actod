@@ -308,10 +308,6 @@ needs_hot_api_entry :: proc(p: Proc_Info) -> bool {
 	return false
 }
 
-api_field_name :: proc(p: Proc_Info) -> string {
-	return p.name
-}
-
 split_trailing_loc :: proc(params: []Param_Info) -> (leading: []Param_Info, loc: Maybe(Param_Info)) {
 	if len(params) > 0 && params[len(params) - 1].name == "loc" {
 		return params[:len(params) - 1], params[len(params) - 1]
@@ -381,14 +377,6 @@ build_types_shim :: proc(
 			if len(v_decl.names) == 0 || len(v_decl.values) == 0 do continue
 			name := ident_name(v_decl.names[0])
 			if name == "" do continue
-			for attr in v_decl.attributes {
-				if attr == nil do continue
-				for elem in attr.elems {
-					if ident, ok := elem.derived.(^ast.Ident); ok && ident.name == "private" {
-						continue
-					}
-				}
-			}
 			all_decls[name] = v_decl
 			decl_files[name] = file
 		}
@@ -831,7 +819,7 @@ build_hot_api_struct_text :: proc(procs: []Proc_Info) -> string {
 			continue
 		}
 
-		field_name := api_field_name(p)
+		field_name := p.name
 		fmt.sbprintf(&sb, "\t%s:", field_name)
 
 		pad := 26 - len(field_name)
@@ -920,7 +908,7 @@ build_hot_api_init :: proc(procs: []Proc_Info) -> string {
 			continue
 		}
 
-		field := api_field_name(p)
+		field := p.name
 		host := host_func_name(p)
 
 		pad := 23 - len(field)

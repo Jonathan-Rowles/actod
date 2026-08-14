@@ -110,14 +110,18 @@ us_per :: proc(d: time.Duration, n: int) -> f64 {
 	return f64(time.duration_nanoseconds(d)) / f64(n) / 1000.0
 }
 
-main :: proc() {
-	count := DEFAULT_ACTOR_COUNT
-	if v, ok := os.lookup_env("FOOTPRINT_ACTORS", context.allocator); ok {
+env_int :: proc(name: string, fallback: int) -> int {
+	if v, ok := os.lookup_env(name, context.allocator); ok {
 		defer delete(v)
 		if n, parse_ok := strconv.parse_int(v); parse_ok && n > 0 {
-			count = n
+			return n
 		}
 	}
+	return fallback
+}
+
+main :: proc() {
+	count := env_int("FOOTPRINT_ACTORS", DEFAULT_ACTOR_COUNT)
 
 	print_provenance_header(count)
 
@@ -158,12 +162,6 @@ main :: proc() {
 	}
 	print_arena_usage(n)
 	print_coro_usage(n)
-	when MEM_STATS_AVAILABLE && ODIN_OS == .Darwin {
-		coro_slab := &actod.NODE.coro_slab
-		print_slot_page_map("coro slot", raw_data(coro_slab.memory), coro_slab.slot_size, min(n, 200))
-		arena_slab := &actod.NODE.actor_slab
-		print_slot_page_map("arena slot", raw_data(arena_slab.memory), arena_slab.slot_size, min(n, 200))
-	}
 	if MEM_STATS_AVAILABLE {
 		print_vma_breakdown(6)
 	}
@@ -218,13 +216,7 @@ main :: proc() {
 }
 
 spawner_count :: proc() -> int {
-	if v, ok := os.lookup_env("FOOTPRINT_SPAWNERS", context.allocator); ok {
-		defer delete(v)
-		if n, parse_ok := strconv.parse_int(v); parse_ok && n > 0 {
-			return n
-		}
-	}
-	return threads_act.get_cpu_count()
+	return env_int("FOOTPRINT_SPAWNERS", threads_act.get_cpu_count())
 }
 
 print_provenance_header :: proc(count: int) {
@@ -245,15 +237,19 @@ print_slab_rss :: proc(actors: int) {
 	if !MEM_STATS_AVAILABLE || actors <= 0 {
 		return
 	}
-	arena_slab := actod.NODE.actor_slab.memory
-	if len(arena_slab) > 0 {
-		rss := read_mapping_rss_kb(uintptr(raw_data(arena_slab)), uint(len(arena_slab)))
-		fmt.printf("  arena slab RSS:   %.2f KB/actor\n", f64(rss) / f64(actors))
+	Slab_Line :: struct {
+		prefix: string,
+		memory: []byte,
 	}
-	coro_slab := actod.NODE.coro_slab.memory
-	if len(coro_slab) > 0 {
-		rss := read_mapping_rss_kb(uintptr(raw_data(coro_slab)), uint(len(coro_slab)))
-		fmt.printf("  coro slab RSS:    %.2f KB/actor\n", f64(rss) / f64(actors))
+	slabs := [?]Slab_Line {
+		{"  arena slab RSS:   ", actod.NODE.actor_slab.memory},
+		{"  coro slab RSS:    ", actod.NODE.coro_slab.memory},
+	}
+	for slab in slabs {
+		if len(slab.memory) > 0 {
+			rss := read_mapping_rss_kb(uintptr(raw_data(slab.memory)), uint(len(slab.memory)))
+			fmt.printf("%s%.2f KB/actor\n", slab.prefix, f64(rss) / f64(actors))
+		}
 	}
 }
 

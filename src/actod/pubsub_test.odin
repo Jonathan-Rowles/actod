@@ -6,7 +6,10 @@ import "core:thread"
 
 @(private)
 clear_type_subscribers :: proc(actor_type: Actor_Type) {
+	was_shutting_down := sync.atomic_load(&NODE.shutting_down)
+	sync.atomic_store(&NODE.shutting_down, true)
 	clear_type_subscriber_list(&NODE.type_subscribers[actor_type])
+	sync.atomic_store(&NODE.shutting_down, was_shutting_down)
 }
 
 @(private)

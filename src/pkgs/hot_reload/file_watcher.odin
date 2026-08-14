@@ -3,16 +3,8 @@ package hot_reload
 import "core:path/filepath"
 import "core:strings"
 
-Watch_Event_Kind :: enum {
-	Modified,
-	Created,
-	Deleted,
-}
-
 Watch_Event :: struct {
-	path:       string,
 	actor_name: string,
-	kind:       Watch_Event_Kind,
 }
 
 Watch_Callback :: proc(event: Watch_Event, user_data: rawptr)

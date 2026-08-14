@@ -279,3 +279,82 @@ test_stress_staged_per_producer_order :: proc(t: ^testing.T) {
 		testing.expect_value(t, drainer_ctx.next_seq[i], u64(ctxs[i].sent))
 	}
 }
+
+seq_fill_ring :: proc(ring: ^Connection_Ring, producer: u8, frames: int) -> int {
+	msg: [SEQ_FRAME_SIZE]byte
+	endian.put_u32(msg[0:4], .Little, SEQ_FRAME_SIZE - 4)
+	msg[4] = producer
+
+	appended := 0
+	for seq in 0 ..< frames {
+		endian.put_u64(msg[8:16], .Little, u64(seq))
+		if !batch_append_message(ring, msg[:]) do break
+		appended += 1
+	}
+	return appended
+}
+
+@(test)
+test_migrate_preserves_buffered_frames :: proc(t: ^testing.T) {
+	loser := make_test_ring(16, 4096)
+	survivor := make_test_ring(16, 4096)
+	testing.expect(t, loser != nil, "Loser ring should be created")
+	testing.expect(t, survivor != nil, "Survivor ring should be created")
+	defer destroy_connection_ring(loser)
+	defer destroy_connection_ring(survivor)
+
+	FRAMES :: 1000
+	testing.expect_value(t, seq_fill_ring(loser, 0, FRAMES), FRAMES)
+
+	migrated := ring_migrate_slots(loser, survivor)
+	testing.expect(t, migrated > 0, "Migration should move at least one slot")
+
+	batch_flush(survivor)
+
+	survivor_ctx := Seq_Drainer_Context {
+		ring = survivor,
+	}
+	seq_drain_ready(&survivor_ctx)
+
+	testing.expect_value(t, survivor_ctx.malformed, 0)
+	testing.expect_value(t, survivor_ctx.order_violations, 0)
+	testing.expect_value(t, survivor_ctx.frames_seen, FRAMES)
+	testing.expect_value(t, survivor_ctx.next_seq[0], u64(FRAMES))
+
+	loser_ctx := Seq_Drainer_Context {
+		ring = loser,
+	}
+	seq_drain_ready(&loser_ctx)
+	testing.expect_value(t, loser_ctx.frames_seen, 0)
+}
+
+@(test)
+test_migrate_then_reset_drops_nothing :: proc(t: ^testing.T) {
+	secondary := make_test_ring(16, 4096)
+	primary := make_test_ring(16, 4096)
+	testing.expect(t, secondary != nil, "Secondary ring should be created")
+	testing.expect(t, primary != nil, "Primary ring should be created")
+	defer destroy_connection_ring(secondary)
+	defer destroy_connection_ring(primary)
+
+	PRIMARY_FRAMES :: 400
+	SECONDARY_FRAMES :: 600
+	testing.expect_value(t, seq_fill_ring(primary, 0, PRIMARY_FRAMES), PRIMARY_FRAMES)
+	testing.expect_value(t, seq_fill_ring(secondary, 1, SECONDARY_FRAMES), SECONDARY_FRAMES)
+
+	_ = ring_migrate_slots(secondary, primary)
+	testing.expect_value(t, ring_reset(secondary), 0)
+
+	batch_flush(primary)
+
+	primary_ctx := Seq_Drainer_Context {
+		ring = primary,
+	}
+	seq_drain_ready(&primary_ctx)
+
+	testing.expect_value(t, primary_ctx.malformed, 0)
+	testing.expect_value(t, primary_ctx.order_violations, 0)
+	testing.expect_value(t, primary_ctx.frames_seen, PRIMARY_FRAMES + SECONDARY_FRAMES)
+	testing.expect_value(t, primary_ctx.next_seq[0], u64(PRIMARY_FRAMES))
+	testing.expect_value(t, primary_ctx.next_seq[1], u64(SECONDARY_FRAMES))
+}

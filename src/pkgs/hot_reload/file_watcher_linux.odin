@@ -127,8 +127,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 			if n <= 0 do continue
 
 			changed_actors: [MAX_WATCHES]string
-			changed_paths: [MAX_WATCHES]string
-			changed_kinds: [MAX_WATCHES]Watch_Event_Kind
 			changed_count: int = 0
 
 			collect_events :: proc(
@@ -136,8 +134,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 				n: int,
 				w: ^File_Watcher,
 				actors: ^[MAX_WATCHES]string,
-				paths: ^[MAX_WATCHES]string,
-				kinds: ^[MAX_WATCHES]Watch_Event_Kind,
 				count: ^int,
 			) {
 				offset: int = 0
@@ -160,15 +156,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 
 							if should_ignore_file(file_name, file_name) do break
 
-							kind: Watch_Event_Kind
-							if event.mask & IN_MODIFY != 0 {
-								kind = .Modified
-							} else if event.mask & (IN_CREATE | IN_MOVED_TO) != 0 {
-								kind = .Created
-							} else if event.mask & IN_DELETE != 0 {
-								kind = .Deleted
-							}
-
 							already := false
 							for j in 0 ..< count^ {
 								if actors[j] == w.watches[i].actor_name {
@@ -178,8 +165,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 							}
 							if !already && count^ < MAX_WATCHES {
 								actors[count^] = w.watches[i].actor_name
-								paths[count^] = w.watches[i].path
-								kinds[count^] = kind
 								count^ += 1
 							}
 							break
@@ -193,8 +178,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 				int(n),
 				w,
 				&changed_actors,
-				&changed_paths,
-				&changed_kinds,
 				&changed_count,
 			)
 
@@ -210,8 +193,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 						int(drain_n),
 						w,
 						&changed_actors,
-						&changed_paths,
-						&changed_kinds,
 						&changed_count,
 					)
 				}
@@ -220,14 +201,7 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 			if sync.atomic_load_explicit(&w.should_stop, .Acquire) do break
 
 			for i in 0 ..< changed_count {
-				w.callback(
-					Watch_Event {
-						path = changed_paths[i],
-						actor_name = changed_actors[i],
-						kind = changed_kinds[i],
-					},
-					w.user_data,
-				)
+				w.callback(Watch_Event{actor_name = changed_actors[i]}, w.user_data)
 			}
 		}
 	}

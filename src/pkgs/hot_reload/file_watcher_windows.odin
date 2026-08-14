@@ -116,8 +116,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 
 			if result >= win32.WAIT_OBJECT_0 && result < win32.WAIT_OBJECT_0 + win32.DWORD(count) {
 				changed_actors: [MAX_WATCHES]string
-				changed_paths: [MAX_WATCHES]string
-				changed_kinds: [MAX_WATCHES]Watch_Event_Kind
 				changed_count: int = 0
 
 				for wi in 0 ..< count {
@@ -131,8 +129,6 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 								w.watches[wi].buf[:bytes_returned],
 								&w.watches[wi],
 								&changed_actors,
-								&changed_paths,
-								&changed_kinds,
 								&changed_count,
 							)
 						}
@@ -150,14 +146,7 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 					if sync.atomic_load_explicit(&w.should_stop, .Acquire) do return
 
 					for i in 0 ..< changed_count {
-						w.callback(
-							Watch_Event {
-								path       = changed_paths[i],
-								actor_name = changed_actors[i],
-								kind       = changed_kinds[i],
-							},
-							w.user_data,
-						)
+						w.callback(Watch_Event{actor_name = changed_actors[i]}, w.user_data)
 					}
 				}
 			}
@@ -193,8 +182,6 @@ process_notifications :: proc(
 	buf: []u8,
 	watch: ^Watch_Entry,
 	actors: ^[MAX_WATCHES]string,
-	paths: ^[MAX_WATCHES]string,
-	kinds: ^[MAX_WATCHES]Watch_Event_Kind,
 	count: ^int,
 ) {
 	offset: u32 = 0
@@ -228,16 +215,6 @@ process_notifications :: proc(
 			}
 
 			if !should_ignore_file(file_name, basename) {
-				kind: Watch_Event_Kind
-				switch info.action {
-				case win32.FILE_ACTION_MODIFIED:
-					kind = .Modified
-				case win32.FILE_ACTION_ADDED, win32.FILE_ACTION_RENAMED_NEW_NAME:
-					kind = .Created
-				case win32.FILE_ACTION_REMOVED, win32.FILE_ACTION_RENAMED_OLD_NAME:
-					kind = .Deleted
-				}
-
 				already := false
 				for j in 0 ..< count^ {
 					if actors[j] == watch.actor_name {
@@ -247,8 +224,6 @@ process_notifications :: proc(
 				}
 				if !already && count^ < MAX_WATCHES {
 					actors[count^] = watch.actor_name
-					paths[count^] = watch.path
-					kinds[count^] = kind
 					count^ += 1
 				}
 			}

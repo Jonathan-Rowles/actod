@@ -245,9 +245,6 @@ destroy_connection_ring :: proc(ring: ^Connection_Ring, allocator := context.all
 	free(ring, allocator)
 }
 
-// Caller must have stopped and joined the IO thread first. Drops all buffered
-// slots (unflushed data does not survive a dead connection) and wipes the
-// session keys. Returns the number of dropped slots.
 ring_migrate_slots :: proc(loser: ^Connection_Ring, survivor: ^Connection_Ring) -> int {
 	if loser == nil || survivor == nil || loser == survivor {
 		return 0
@@ -306,6 +303,9 @@ ring_migrate_slots :: proc(loser: ^Connection_Ring, survivor: ^Connection_Ring) 
 	return migrated
 }
 
+// Caller must have stopped and joined the IO thread first. Drops all buffered
+// slots (unflushed data does not survive a dead connection) and wipes the
+// session keys. Returns the number of dropped slots.
 ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	if ring == nil do return 0
 

@@ -233,8 +233,6 @@ fsevents_callback :: proc "c" (
 	if sync.atomic_load_explicit(&w.should_stop, .Acquire) do return
 
 	changed_actors: [MAX_WATCHES]string
-	changed_paths: [MAX_WATCHES]string
-	changed_kinds: [MAX_WATCHES]Watch_Event_Kind
 	changed_count: int
 
 	for i in 0 ..< int(num_events) {
@@ -250,15 +248,6 @@ fsevents_callback :: proc "c" (
 		}
 
 		if should_ignore_file(file_path, basename) do continue
-
-		kind: Watch_Event_Kind
-		if flags & kFSEventStreamEventFlagItemModified != 0 {
-			kind = .Modified
-		} else if flags & (kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRenamed) != 0 {
-			kind = .Created
-		} else if flags & kFSEventStreamEventFlagItemRemoved != 0 {
-			kind = .Deleted
-		}
 
 		dir_path := file_path
 		if last_slash := strings.last_index_byte(file_path, '/'); last_slash >= 0 {
@@ -276,8 +265,6 @@ fsevents_callback :: proc "c" (
 				}
 				if !already && changed_count < MAX_WATCHES {
 					changed_actors[changed_count] = w.watches[j].actor_name
-					changed_paths[changed_count] = w.watches[j].path
-					changed_kinds[changed_count] = kind
 					changed_count += 1
 				}
 				break
@@ -286,14 +273,7 @@ fsevents_callback :: proc "c" (
 	}
 
 	for i in 0 ..< changed_count {
-		w.callback(
-			Watch_Event {
-				path       = changed_paths[i],
-				actor_name = changed_actors[i],
-				kind       = changed_kinds[i],
-			},
-			w.user_data,
-		)
+		w.callback(Watch_Event{actor_name = changed_actors[i]}, w.user_data)
 	}
 }
 

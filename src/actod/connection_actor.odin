@@ -129,6 +129,7 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 
 		udp_clear_peer(data.node_id)
 		if data.ring != nil {
+			drain_pool_rings_into_primary(data)
 			teardown_pool_rings(data)
 			if pool := data.ring.pool; pool != nil {
 				sync.atomic_store_explicit(&pool.conn_pid, u64(0), .Release)
@@ -1027,6 +1028,19 @@ finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Po
 
 // Called with the IO thread already stopped and joined: every pool ring is
 // quiesced, so reset them all and park for reuse by the next session.
+@(private)
+drain_pool_rings_into_primary :: proc(data: ^Connection_Actor_Data) {
+	pool := data.ring != nil ? data.ring.pool : nil
+	if pool == nil do return
+
+	count := pool_active_count(pool)
+	for i := count; i > 1; i -= 1 {
+		ring := get_pool_ring_at(pool, i - 1)
+		if ring == nil || ring == data.ring do continue
+		_ = ring_migrate_slots(ring, data.ring)
+	}
+}
+
 @(private)
 teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 	pool := data.ring != nil ? data.ring.pool : nil

@@ -154,47 +154,6 @@ read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 	return int(resident_pages * page_size / 1024)
 }
 
-foreign import libc "system:System"
-
-@(default_calling_convention = "c")
-foreign libc {
-	mincore :: proc(addr: rawptr, length: uint, vec: [^]u8) -> i32 ---
-}
-
-print_slot_page_map :: proc(label: string, base: rawptr, slot_size: uint, slots: int) {
-	page := uint(posix.sysconf(._PAGESIZE))
-	if page == 0 || slot_size == 0 {
-		return
-	}
-	MAX_PAGES :: 16
-	pages := min(slot_size / page, MAX_PAGES)
-	if pages == 0 {
-		return
-	}
-	vec := make([]u8, pages)
-	defer delete(vec)
-
-	histogram := make(map[string]int)
-	defer delete(histogram)
-
-	for i in 0 ..< slots {
-		slot := rawptr(uintptr(base) + uintptr(uint(i) * slot_size))
-		if mincore(slot, pages * page, raw_data(vec)) != 0 {
-			return
-		}
-		pattern: [MAX_PAGES]byte
-		for p in 0 ..< pages {
-			pattern[p] = vec[p] & 1 != 0 ? '#' : '.'
-		}
-		histogram[string(pattern[:pages])] += 1
-	}
-
-	fmt.printf("  %s page map (# resident, . absent), first %d pages of %d B:\n", label, pages, page)
-	for pattern, count in histogram {
-		fmt.printf("    %s  x%d\n", pattern, count)
-	}
-}
-
 Vma_Bucket :: struct {
 	size_kb: int,
 	perms:   i32,

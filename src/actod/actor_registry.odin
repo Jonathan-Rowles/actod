@@ -523,7 +523,6 @@ handle_node_disconnect :: proc(node_id: Node_ID) {
 	}
 
 	num_items := sync.atomic_load_explicit(&NODE.actor_registry.num_items, .Acquire)
-	removed: int
 
 	for i in 1 ..< num_items {
 		entry := &NODE.actor_registry.items[i]
@@ -535,11 +534,7 @@ handle_node_disconnect :: proc(node_id: Node_ID) {
 
 		pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
 
-		if get_node_id(pid) == node_id {
-			if remove_remote(&NODE.actor_registry, pid) {
-				removed += 1
-			}
-		}
+		if get_node_id(pid) == node_id do _ = remove_remote(&NODE.actor_registry, pid)
 	}
 }
 

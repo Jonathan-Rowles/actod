@@ -284,10 +284,10 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 	}
 
 	list := &NODE.type_subscribers[actor_type]
-	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 	block := load_subscriber_block(list)
 
 	if block != nil {
+		n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
 		for i in 0 ..< n {
 			pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
 			if pid != 0 && pid != self_pid {
@@ -368,12 +368,12 @@ announce_subscriptions_to_node :: proc(node_id: Node_ID) {
 	}
 	for type_idx in 1 ..< MAX_ACTOR_TYPES {
 		list := &NODE.type_subscribers[Actor_Type(type_idx)]
-		n := sync.atomic_load_explicit(&list.local_count, .Acquire)
-		if n == 0 {
-			continue
-		}
 		block := load_subscriber_block(list)
 		if block == nil {
+			continue
+		}
+		n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
+		if n == 0 {
 			continue
 		}
 		type_hash, hash_ok := get_actor_type_hash(Actor_Type(type_idx))
@@ -450,6 +450,10 @@ clear_all_subscriptions :: proc() {
 
 @(private)
 clear_type_subscriber_list :: proc(list: ^Type_Subscriber_List) {
+	assert(
+		sync.atomic_load(&NODE.shutting_down),
+		"clear_type_subscriber_list frees blocks a live broadcaster may still hold, it is only safe once the node is shutting down and its actors have been joined",
+	)
 	sync.mutex_lock(&list.mutate_lock)
 	block := list.block
 	sync.atomic_store_explicit(cast(^u64)&list.block, 0, .Release)

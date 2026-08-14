@@ -196,9 +196,7 @@ run_odin_check :: proc(
 	stderr_buf.allocator = context.temp_allocator
 
 	state, err := run_process(args[:], nil, &stderr_buf)
-	if err != nil {
-		return true
-	}
+	if err != nil do return true
 
 	if state.exit_code != 0 {
 		msg := strings.clone(
@@ -398,9 +396,7 @@ types_match :: proc(ast_type: string, runtime_type: string) -> bool {
 @(private)
 ident_name :: proc(expr: ^ast.Expr) -> string {
 	if expr == nil do return ""
-	if ident, ok := expr.derived.(^ast.Ident); ok {
-		return ident.name
-	}
+	if ident, ok := expr.derived.(^ast.Ident); ok do return ident.name
 	return ""
 }
 
@@ -474,9 +470,7 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 
 @(private)
 pos_to_line_col :: proc(pos: tokenizer.Pos) -> (line: int, col: int) {
-	if pos.line > 0 {
-		return pos.line, pos.column
-	}
+	if pos.line > 0 do return pos.line, pos.column
 	return 0, 0
 }
 
@@ -490,9 +484,7 @@ destroy_validation_result :: proc(result: Validation_Result, allocator := contex
 
 format_validation_error :: proc(err: Validation_Error, actor_name: string) -> string {
 	loc: string
-	if err.file != "" {
-		loc = fmt.tprintf(" (%s:%d:%d)", err.file, err.line, err.col)
-	}
+	if err.file != "" do loc = fmt.tprintf(" (%s:%d:%d)", err.file, err.line, err.col)
 
 	return fmt.tprintf("HOT RELOAD BLOCKED [%s]: %s%s", actor_name, err.message, loc)
 }
@@ -527,9 +519,7 @@ discover_package_procs :: proc(package_path: string, allocator := context.alloca
 
 			if _, is_proc := v_decl.values[0].derived.(^ast.Proc_Lit); is_proc {
 				name := ident_name(v_decl.names[0])
-				if name != "" {
-					append(&result, strings.clone(name, allocator))
-				}
+				if name != "" do append(&result, strings.clone(name, allocator))
 			}
 		}
 	}
@@ -590,9 +580,7 @@ discover_proc_names :: proc(
 		}
 	}
 
-	if len(result) > 0 || behaviour_field_names == nil {
-		return result[:]
-	}
+	if len(result) > 0 || behaviour_field_names == nil do return result[:]
 
 	Candidate :: struct {
 		name:        string,
@@ -623,16 +611,12 @@ discover_proc_names :: proc(
 				ts := expr_to_string(field.type)
 				nc := len(field.names) if len(field.names) > 0 else 1
 				for _ in 0 ..< nc {
-					if c.param_count < 8 {
-						c.param_types[c.param_count] = ts
-					}
+					if c.param_count < 8 do c.param_types[c.param_count] = ts
 					c.param_count += 1
 				}
 			}
 
-			if c.param_count > 0 && c.param_types[0] == ptr_state {
-				append(&candidates, c)
-			}
+			if c.param_count > 0 && c.param_types[0] == ptr_state do append(&candidates, c)
 		}
 	}
 

@@ -26,9 +26,7 @@ KNOWN_IMPORTS :: []Import_Entry {
 
 emit_needed_imports :: proc(sb: ^strings.Builder, text: string) {
 	for entry in KNOWN_IMPORTS {
-		if strings.contains(text, entry.prefix) {
-			fmt.sbprintf(sb, "%s\n", entry.import_line)
-		}
+		if strings.contains(text, entry.prefix) do fmt.sbprintf(sb, "%s\n", entry.import_line)
 	}
 }
 
@@ -335,9 +333,7 @@ host_func_name :: proc(p: Proc_Info) -> string {
 
 format_results :: proc(results: []Result_Info, for_struct: bool) -> string {
 	if len(results) == 0 do return ""
-	if len(results) == 1 {
-		return fmt.aprintf(" -> %s", results[0].type_str)
-	}
+	if len(results) == 1 do return fmt.aprintf(" -> %s", results[0].type_str)
 	sb := strings.builder_make()
 	fmt.sbprint(&sb, " -> (")
 	for r, i in results {
@@ -416,9 +412,7 @@ build_types_shim :: proc(
 		for val in decl.values {
 			collect_idents_from_expr(val, &refs)
 		}
-		if decl.type != nil {
-			collect_idents_from_expr(decl.type, &refs)
-		}
+		if decl.type != nil do collect_idents_from_expr(decl.type, &refs)
 
 		for ref_name in refs {
 			seed_name(ref_name, &all_decls, &needed, &queue)
@@ -438,9 +432,7 @@ build_types_shim :: proc(
 			src := string(file.src[start:end])
 			if strings.has_prefix(src, "@(private)") {
 				nl := strings.index_byte(src, '\n')
-				if nl >= 0 {
-					src = strings.trim_left_space(src[nl + 1:])
-				}
+				if nl >= 0 do src = strings.trim_left_space(src[nl + 1:])
 			}
 			src = strip_inline_comments(src)
 			type_sources[name] = src
@@ -452,9 +444,7 @@ build_types_shim :: proc(
 
 	all_type_text := strings.builder_make()
 	for name in ordered {
-		if src, ok := type_sources[name]; ok {
-			fmt.sbprint(&all_type_text, src)
-		}
+		if src, ok := type_sources[name]; ok do fmt.sbprint(&all_type_text, src)
 	}
 
 	sb := strings.builder_make()
@@ -463,9 +453,7 @@ build_types_shim :: proc(
 	fmt.sbprint(&sb, "\n")
 
 	for name in ordered {
-		if src, ok := type_sources[name]; ok {
-			fmt.sbprintf(&sb, "%s\n\n", src)
-		}
+		if src, ok := type_sources[name]; ok do fmt.sbprintf(&sb, "%s\n\n", src)
 	}
 
 	return strings.to_string(sb), needed
@@ -578,9 +566,7 @@ strip_inline_comments :: proc(src: string) -> string {
 		cleaned := line
 		if !strings.has_prefix(strings.trim_space(line), "//") {
 			comment_idx := find_comment_start(line)
-			if comment_idx >= 0 {
-				cleaned = strings.trim_right_space(line[:comment_idx])
-			}
+			if comment_idx >= 0 do cleaned = strings.trim_right_space(line[:comment_idx])
 		} else {
 			continue
 		}
@@ -594,9 +580,7 @@ find_comment_start :: proc(line: string) -> int {
 	in_string := false
 	for i := 0; i < len(line) - 1; i += 1 {
 		if line[i] == '"' do in_string = !in_string
-		if !in_string && line[i] == '/' && line[i + 1] == '/' {
-			return i
-		}
+		if !in_string && line[i] == '/' && line[i + 1] == '/' do return i
 	}
 	return -1
 }
@@ -640,9 +624,7 @@ filter_group_to_shim_members :: proc(shim_text: string, group: string) -> (strin
 		name := strings.trim_space(member)
 		if name == "" do continue
 		needle := fmt.tprintf("\n%s :: proc", name)
-		if strings.contains(shim_text, needle) {
-			append(&kept, name)
-		}
+		if strings.contains(shim_text, needle) do append(&kept, name)
 	}
 	if len(kept) == 0 do return "", false
 
@@ -658,24 +640,18 @@ filter_group_to_shim_members :: proc(shim_text: string, group: string) -> (strin
 emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {
 	fmt.sbprintf(sb, "%s :: proc", p.name)
 
-	if p.calling_conv != "" {
-		fmt.sbprintf(sb, " %s", p.calling_conv)
-	}
+	if p.calling_conv != "" do fmt.sbprintf(sb, " %s", p.calling_conv)
 
 	fmt.sbprint(sb, "(")
 
 	leading_params, trailing_loc := split_trailing_loc(p.params[:])
 
 	emit_shim_param :: proc(sb: ^strings.Builder, p: Proc_Info, param: Param_Info) {
-		if param.name != "" {
-			fmt.sbprintf(sb, "%s: ", param.name)
-		}
+		if param.name != "" do fmt.sbprintf(sb, "%s: ", param.name)
 		fmt.sbprint(sb, map_act_alias(param.type_str))
 
 		default_val := get_shim_default(p, param)
-		if default_val != "" {
-			fmt.sbprintf(sb, " = %s", default_val)
-		}
+		if default_val != "" do fmt.sbprintf(sb, " = %s", default_val)
 	}
 
 	param_count := 0
@@ -737,9 +713,7 @@ emit_auto_bridge_body :: proc(sb: ^strings.Builder, p: Proc_Info) {
 	for extra in p.extra_params {
 		if param_count > 0 do fmt.sbprint(sb, ", ")
 		colon_idx := strings.index_byte(extra, ':')
-		if colon_idx > 0 {
-			fmt.sbprint(sb, strings.trim_space(extra[:colon_idx]))
-		}
+		if colon_idx > 0 do fmt.sbprint(sb, strings.trim_space(extra[:colon_idx]))
 		param_count += 1
 	}
 
@@ -919,9 +893,7 @@ build_hot_api_init :: proc(procs: []Proc_Info) -> string {
 		fmt.sbprintf(&sb, "= %s,\n", host)
 	}
 
-	if need_spawn_raw {
-		fmt.sbprint(&sb, "\tspawn_raw              = spawn_from_raw,\n")
-	}
+	if need_spawn_raw do fmt.sbprint(&sb, "\tspawn_raw              = spawn_from_raw,\n")
 	if need_spawn_child_raw {
 		fmt.sbprint(&sb, "\tspawn_child_raw        = spawn_child_from_raw,\n")
 	}

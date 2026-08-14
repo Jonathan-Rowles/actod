@@ -148,7 +148,7 @@ IO_Context :: struct {
 	logger:    runtime.Logger,
 }
 
-create_connection_ring :: proc(
+make_connection_ring :: proc(
 	config: Connection_Ring_Config,
 	encrypted: bool = false,
 	allocator := context.allocator,
@@ -226,9 +226,7 @@ create_connection_ring :: proc(
 }
 
 destroy_connection_ring :: proc(ring: ^Connection_Ring, allocator := context.allocator) {
-	if ring == nil {
-		return
-	}
+	if ring == nil do return
 
 	if ring.open_scratch != nil do delete(ring.open_scratch, allocator)
 	if ring.seal_scratch != nil do delete(ring.seal_scratch, allocator)
@@ -240,9 +238,7 @@ destroy_connection_ring :: proc(ring: ^Connection_Ring, allocator := context.all
 }
 
 ring_migrate_slots :: proc(loser: ^Connection_Ring, survivor: ^Connection_Ring) -> int {
-	if loser == nil || survivor == nil || loser == survivor {
-		return 0
-	}
+	if loser == nil || survivor == nil || loser == survivor do return 0
 
 	sync.mutex_lock(&loser.batch_mutex)
 
@@ -265,13 +261,9 @@ ring_migrate_slots :: proc(loser: ^Connection_Ring, survivor: ^Connection_Ring) 
 	write_idx := sync.atomic_load(&loser.send_write_idx)
 	for idx := loser.send_submit_idx; idx < write_idx; idx += 1 {
 		slot := &loser.send_slots[idx & loser.send_mask]
-		if sync.atomic_load(&slot.state) != .READY {
-			continue
-		}
+		if sync.atomic_load(&slot.state) != .READY do continue
 		length := slot.length
-		if length == 0 {
-			continue
-		}
+		if length == 0 do continue
 		if u32(length) > survivor.usable_slot_size {
 			log.errorf(
 				"Cannot migrate %d buffered bytes to the surviving ring for node %d, its slots hold %d",
@@ -321,9 +313,7 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	dropped := 0
 	for i in 0 ..< ring.send_slot_count {
 		slot := &ring.send_slots[i]
-		if sync.atomic_load(&slot.state) != .FREE {
-			dropped += 1
-		}
+		if sync.atomic_load(&slot.state) != .FREE do dropped += 1
 		slot.length = 0
 		if sync.atomic_load(&slot.active_writers) > 0 {
 			sync.atomic_store(&slot.state, .DISCARDED)
@@ -374,29 +364,21 @@ ring_io_release :: proc(ring: ^Connection_Ring) {
 
 @(private)
 ring_signal_batch :: proc(ring: ^Connection_Ring) {
-	if sync.atomic_exchange_explicit(&ring.batch_pending, 1, .Seq_Cst) == 0 {
-		ring_wake_io(ring)
-	}
+	if sync.atomic_exchange_explicit(&ring.batch_pending, 1, .Seq_Cst) == 0 do ring_wake_io(ring)
 }
 
 @(private)
 ring_wake_io :: proc(ring: ^Connection_Ring) {
 	target := ring
 	if ring.pool != nil {
-		if primary := atomic_load_ring_ptr(&ring.pool.rings[0]); primary != nil {
-			target = primary
-		}
+		if primary := atomic_load_ring_ptr(&ring.pool.rings[0]); primary != nil do target = primary
 	}
-	if sync.atomic_load_explicit(&target.io_sleeping, .Seq_Cst) == 0 {
-		return
-	}
+	if sync.atomic_load_explicit(&target.io_sleeping, .Seq_Cst) == 0 do return
 	sync.atomic_add_explicit(&target.io_wakers, 1, .Seq_Cst)
 	loop := cast(^nbio.Event_Loop)rawptr(
 		uintptr(sync.atomic_load_explicit(cast(^u64)&target.io_event_loop, .Seq_Cst)),
 	)
-	if loop != nil {
-		nbio.wake_up(loop)
-	}
+	if loop != nil do nbio.wake_up(loop)
 	sync.atomic_sub_explicit(&target.io_wakers, 1, .Release)
 }
 
@@ -409,13 +391,9 @@ acquire_slot :: proc(ring: ^Connection_Ring) -> (slot: ^Send_Slot, idx: u32, ok:
 		for spin := 0; spin < 4096; spin += 1 {
 			intrinsics.cpu_relax()
 			complete_idx = sync.atomic_load(&ring.send_complete_idx)
-			if write_idx - complete_idx < ring.send_slot_count {
-				break
-			}
+			if write_idx - complete_idx < ring.send_slot_count do break
 		}
-		if write_idx - complete_idx >= ring.send_slot_count {
-			return nil, 0, false
-		}
+		if write_idx - complete_idx >= ring.send_slot_count do return nil, 0, false
 	}
 
 	sync.atomic_store(&ring.send_write_idx, write_idx + 1)
@@ -438,16 +416,10 @@ acquire_slot :: proc(ring: ^Connection_Ring) -> (slot: ^Send_Slot, idx: u32, ok:
 
 @(private)
 pool_note_contention :: proc(pool: ^Connection_Pool) {
-	if pool == nil || pool.max_rings <= 1 {
-		return
-	}
-	if sync.atomic_load_explicit(&pool.scale_up_requested, .Relaxed) != 0 {
-		return
-	}
+	if pool == nil || pool.max_rings <= 1 do return
+	if sync.atomic_load_explicit(&pool.scale_up_requested, .Relaxed) != 0 do return
 	count := sync.atomic_add(&pool.contention_count, 1)
-	if count < pool.contention_threshold {
-		return
-	}
+	if count < pool.contention_threshold do return
 	if _, swapped := sync.atomic_compare_exchange_strong(&pool.scale_up_requested, 0, 1);
 	   swapped {
 		conn_pid := PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
@@ -460,9 +432,7 @@ pool_note_contention :: proc(pool: ^Connection_Pool) {
 @(private)
 batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 	slot_idx := ring.batch_slot_idx
-	if slot_idx < 0 {
-		return
-	}
+	if slot_idx < 0 do return
 
 	if u32(slot_idx) >= ring.send_slot_count {
 		log.errorf("Invalid batch_slot_idx: %d >= %d", slot_idx, ring.send_slot_count)
@@ -497,9 +467,7 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 		return
 	}
 
-	if !force && active > 0 {
-		return
-	}
+	if !force && active > 0 do return
 
 	slot.length = write_pos
 	ring.batch_slot_idx = -1
@@ -588,9 +556,7 @@ batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 
 batch_append_raw :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	msg_len := u32(len(msg_data))
-	if msg_len == 0 {
-		return true
-	}
+	if msg_len == 0 do return true
 
 	if msg_len > ring.usable_slot_size {
 		log.errorf("Message too large for slot: %d > %d", msg_len, ring.usable_slot_size)
@@ -606,9 +572,7 @@ batch_append_raw :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	}
 
 	dst, sid, ok := batch_reserve(ring, msg_len)
-	if !ok {
-		return false
-	}
+	if !ok do return false
 
 	intrinsics.mem_copy_non_overlapping(raw_data(dst), raw_data(msg_data), int(msg_len))
 	batch_commit(ring, sid)
@@ -622,9 +586,7 @@ batch_append_message_retry :: proc(ring: ^Connection_Ring, msg_data: []byte) -> 
 		if dup do _ = batch_append_raw(ring, msg_data)
 	}
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		if batch_append_raw(ring, msg_data) {
-			return true
-		}
+		if batch_append_raw(ring, msg_data) do return true
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
@@ -643,9 +605,7 @@ batch_reserve :: proc(
 	slot_idx: u32,
 	ok: bool,
 ) {
-	if exact_size == 0 || exact_size > ring.usable_slot_size {
-		return nil, 0, false
-	}
+	if exact_size == 0 || exact_size > ring.usable_slot_size do return nil, 0, false
 
 	if !sync.mutex_try_lock(&ring.batch_mutex) {
 		pool_note_contention(ring.pool)
@@ -657,9 +617,7 @@ batch_reserve :: proc(
 				break
 			}
 		}
-		if !acquired {
-			sync.mutex_lock(&ring.batch_mutex)
-		}
+		if !acquired do sync.mutex_lock(&ring.batch_mutex)
 	}
 
 	batch_idx := ring.batch_slot_idx
@@ -778,9 +736,7 @@ submit_nbio_sends :: proc(ring: ^Connection_Ring) {
 		slot_idx := check_idx & ring.send_mask
 		slot := &ring.send_slots[slot_idx]
 
-		if sync.atomic_load_explicit(&slot.state, .Acquire) != .READY {
-			break
-		}
+		if sync.atomic_load_explicit(&slot.state, .Acquire) != .READY do break
 
 		if ring.encrypted {
 			stride := int(ring.usable_slot_size) + ENVELOPE_OVERHEAD
@@ -851,15 +807,11 @@ nbio_send_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring, batch_co
 		return
 	}
 
-	if sync.atomic_load(&ring.state) == .Ready {
-		submit_nbio_sends(ring)
-	}
+	if sync.atomic_load(&ring.state) == .Ready do submit_nbio_sends(ring)
 }
 
 submit_nbio_recv :: proc(ring: ^Connection_Ring) {
-	if ring.pending_recv != nil {
-		return
-	}
+	if ring.pending_recv != nil do return
 
 	write_pos := ring.recv_write_pos
 	available := ring.recv_buffer_size - write_pos
@@ -917,9 +869,7 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	ring.recv_write_pos = new_write_pos
 	process_recv_buffer(ring)
 
-	if sync.atomic_load(&ring.state) == .Ready {
-		submit_nbio_recv(ring)
-	}
+	if sync.atomic_load(&ring.state) == .Ready do submit_nbio_recv(ring)
 }
 
 @(private)
@@ -930,9 +880,7 @@ g_nbio_probed: bool
 g_nbio_available: bool
 
 nbio_available :: proc() -> bool {
-	if NODE.config.sim_mode {
-		return true
-	}
+	if NODE.config.sim_mode do return true
 
 	sync.mutex_lock(&g_nbio_probe_mutex)
 	defer sync.mutex_unlock(&g_nbio_probe_mutex)
@@ -956,9 +904,7 @@ nbio_available :: proc() -> bool {
 
 nbio_io_loop :: proc(t: ^thread.Thread) {
 	ctx := cast(^IO_Context)t.user_args[0]
-	if ctx == nil {
-		return
-	}
+	if ctx == nil do return
 
 	ring := ctx.ring
 	context.allocator = ctx.allocator
@@ -1013,19 +959,13 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 	idle_ticks: u32 = 0
 
 	for sync.atomic_load(&ring.io_stop) == 0 {
-		if sync.atomic_exchange(&ring.batch_pending, 0) != 0 {
-			batch_flush(ring)
-		}
+		if sync.atomic_exchange(&ring.batch_pending, 0) != 0 do batch_flush(ring)
 		submit_nbio_sends(ring)
 
-		if pool != nil {
-			io_service_pool_rings(pool, ring, ctx.conn_pid)
-		}
+		if pool != nil do io_service_pool_rings(pool, ring, ctx.conn_pid)
 
 		any_active := ring.send_in_flight
-		if !any_active && pool != nil {
-			any_active = io_pool_any_in_flight(pool, ring)
-		}
+		if !any_active && pool != nil do any_active = io_pool_any_in_flight(pool, ring)
 
 		timeout: time.Duration
 		if any_active {
@@ -1059,9 +999,7 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 		nbio.remove(ring.pending_recv)
 		ring.pending_recv = nil
 	}
-	if pool != nil {
-		io_release_pool_rings(pool, ring, ctx.conn_pid)
-	}
+	if pool != nil do io_release_pool_rings(pool, ring, ctx.conn_pid)
 }
 
 @(private)
@@ -1069,9 +1007,7 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
 	for i: u32 = 1; i < count; i += 1 {
 		pr := atomic_load_ring_ptr(&pool.rings[i])
-		if pr == nil || pr == primary {
-			continue
-		}
+		if pr == nil || pr == primary do continue
 
 		owned := sync.atomic_load_explicit(&pr.io_owner, .Acquire) == u64(owner)
 
@@ -1088,14 +1024,10 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 			}
 			continue
 		}
-		if park != .Active {
-			continue
-		}
+		if park != .Active do continue
 
 		if !owned {
-			if pr.tcp_socket == 0 {
-				continue
-			}
+			if pr.tcp_socket == 0 do continue
 			_, swapped := sync.atomic_compare_exchange_strong_explicit(
 				&pr.io_owner,
 				0,
@@ -1103,9 +1035,7 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 				.Acq_Rel,
 				.Acquire,
 			)
-			if !swapped {
-				continue
-			}
+			if !swapped do continue
 			if err := nbio.associate_socket(pr.tcp_socket); err != nil {
 				log.errorf("Failed to associate pool ring socket: %v", err)
 				ring_io_release(pr)
@@ -1119,21 +1049,15 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 			submit_nbio_recv(pr)
 		}
 
-		if sync.atomic_exchange(&pr.batch_pending, 0) != 0 {
-			batch_flush(pr)
-		}
+		if sync.atomic_exchange(&pr.batch_pending, 0) != 0 do batch_flush(pr)
 		submit_nbio_sends(pr)
 	}
 }
 
 @(private)
 io_any_batch_pending :: proc(ring: ^Connection_Ring, pool: ^Connection_Pool) -> bool {
-	if sync.atomic_load_explicit(&ring.batch_pending, .Seq_Cst) != 0 {
-		return true
-	}
-	if pool == nil {
-		return false
-	}
+	if sync.atomic_load_explicit(&ring.batch_pending, .Seq_Cst) != 0 do return true
+	if pool == nil do return false
 	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
 	for i: u32 = 1; i < count; i += 1 {
 		pr := atomic_load_ring_ptr(&pool.rings[i])
@@ -1149,9 +1073,7 @@ io_pool_any_in_flight :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring)
 	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
 	for i: u32 = 1; i < count; i += 1 {
 		pr := atomic_load_ring_ptr(&pool.rings[i])
-		if pr != nil && pr != primary && pr.send_in_flight {
-			return true
-		}
+		if pr != nil && pr != primary && pr.send_in_flight do return true
 	}
 	return false
 }
@@ -1161,12 +1083,8 @@ io_release_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
 	for i: u32 = 1; i < count; i += 1 {
 		pr := atomic_load_ring_ptr(&pool.rings[i])
-		if pr == nil || pr == primary {
-			continue
-		}
-		if sync.atomic_load_explicit(&pr.io_owner, .Acquire) != u64(owner) {
-			continue
-		}
+		if pr == nil || pr == primary do continue
+		if sync.atomic_load_explicit(&pr.io_owner, .Acquire) != u64(owner) do continue
 		if pr.pending_recv != nil {
 			nbio.remove(pr.pending_recv)
 			pr.pending_recv = nil
@@ -1263,9 +1181,7 @@ process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) 
 			data = msg_copy,
 		}
 		err := send_message(ring.conn_pid, remote_msg)
-		if err != .OK {
-			log.warnf("Failed to send control/lifecycle message: %v", err)
-		}
+		if err != .OK do log.warnf("Failed to send control/lifecycle message: %v", err)
 		delete(msg_copy)
 		return
 	}
@@ -1295,9 +1211,7 @@ notify_ring_error :: proc(ring: ^Connection_Ring, reason: string) {
 }
 
 send_raw_via_ring :: proc(ring: ^Connection_Ring, raw_data_with_size: []byte) -> bool {
-	if ring == nil {
-		return false
-	}
+	if ring == nil do return false
 
 	if len(raw_data_with_size) > int(ring.usable_slot_size) {
 		log.errorf("Data too large: %d > %d", len(raw_data_with_size), ring.usable_slot_size)
@@ -1339,34 +1253,26 @@ send_to_connection_ring_by_name :: #force_inline proc(
 	)
 }
 
-create_connection_pool :: proc(
+make_connection_pool :: proc(
 	node_id: Node_ID,
 	config: Connection_Ring_Config,
 	allocator := context.allocator,
 ) -> ^Connection_Pool {
 	pool := new(Connection_Pool, allocator)
-	if pool == nil {
-		return nil
-	}
+	if pool == nil do return nil
 	pool.node_id = node_id
 	pool.max_rings = clamp(config.max_pool_rings, 1, MAX_POOL_RINGS)
 	pool.contention_threshold = config.scale_up_contention_threshold
-	if pool.contention_threshold == 0 {
-		pool.contention_threshold = 100
-	}
+	if pool.contention_threshold == 0 do pool.contention_threshold = 100
 	return pool
 }
 
 // Active-ring mutation is conn-actor-thread only; readers (producers, IO) go
 // through the atomic ring pointers and ring_count.
 pool_add_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> bool {
-	if pool == nil || ring == nil {
-		return false
-	}
+	if pool == nil || ring == nil do return false
 	count := sync.atomic_load(&pool.ring_count)
-	if count >= pool.max_rings {
-		return false
-	}
+	if count >= pool.max_rings do return false
 	ring.pool = pool
 	atomic_store_ring_ptr(&pool.rings[count], ring)
 	sync.atomic_store_explicit(&pool.ring_count, count + 1, .Release)
@@ -1376,9 +1282,7 @@ pool_add_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> bool {
 pool_remove_active :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> bool {
 	count := sync.atomic_load(&pool.ring_count)
 	for i: u32 = 1; i < count; i += 1 {
-		if atomic_load_ring_ptr(&pool.rings[i]) != ring {
-			continue
-		}
+		if atomic_load_ring_ptr(&pool.rings[i]) != ring do continue
 		last := count - 1
 		if i != last {
 			atomic_store_ring_ptr(&pool.rings[i], atomic_load_ring_ptr(&pool.rings[last]))
@@ -1391,9 +1295,7 @@ pool_remove_active :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> bo
 }
 
 pool_take_parked :: proc(pool: ^Connection_Pool) -> ^Connection_Ring {
-	if pool.parked_count == 0 {
-		return nil
-	}
+	if pool.parked_count == 0 do return nil
 	pool.parked_count -= 1
 	ring := pool.parked[pool.parked_count]
 	pool.parked[pool.parked_count] = nil
@@ -1414,17 +1316,13 @@ pool_active_count :: #force_inline proc(pool: ^Connection_Pool) -> u32 {
 }
 
 get_pool_ring_at :: #force_inline proc(pool: ^Connection_Pool, idx: u32) -> ^Connection_Ring {
-	if idx >= sync.atomic_load_explicit(&pool.ring_count, .Acquire) {
-		return nil
-	}
+	if idx >= sync.atomic_load_explicit(&pool.ring_count, .Acquire) do return nil
 	return atomic_load_ring_ptr(&pool.rings[idx])
 }
 
 get_pool_ring_ready :: proc(pool: ^Connection_Pool) -> ^Connection_Ring {
 	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
-	if count == 0 {
-		return nil
-	}
+	if count == 0 do return nil
 
 	start: u32
 	if w := current_worker; w != nil {

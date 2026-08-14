@@ -29,9 +29,7 @@ ASK_REPLY_BIT :: u64(1) << 63
 
 @(private)
 message_ask_token :: #force_inline proc "contextless" (msg: ^Message) -> (token: u64, is_reply: bool) {
-	if msg.content == nil || msg.content == INLINE_NEEDS_FIXUP {
-		return 0, false
-	}
+	if msg.content == nil || msg.content == INLINE_NEEDS_FIXUP do return 0, false
 	raw := msg.ask_token
 	return raw &~ ASK_REPLY_BIT, raw & ASK_REPLY_BIT != 0
 }
@@ -86,7 +84,7 @@ Pool :: struct {
 }
 
 @(private)
-init_pool :: proc(
+pool_init :: proc(
 	pool: ^Pool,
 	allocator: mem.Allocator,
 	page_size: int = NODE.config.actor_config.page_size,
@@ -104,9 +102,7 @@ init_pool :: proc(
 
 @(private)
 pool_ensure_ready :: proc(pool: ^Pool) -> bool {
-	if sync.atomic_load_explicit(&pool.init_state, .Acquire) == .READY {
-		return true
-	}
+	if sync.atomic_load_explicit(&pool.init_state, .Acquire) == .READY do return true
 
 	if _, won := sync.atomic_compare_exchange_strong_explicit(
 		&pool.init_state,
@@ -130,9 +126,7 @@ pool_ensure_ready :: proc(pool: ^Pool) -> bool {
 	}
 
 	for attempt := 0; attempt < MAX_ALLOC_RETRIES; attempt += 1 {
-		if sync.atomic_load_explicit(&pool.init_state, .Acquire) == .READY {
-			return true
-		}
+		if sync.atomic_load_explicit(&pool.init_state, .Acquire) == .READY do return true
 		intrinsics.cpu_relax()
 	}
 	return false
@@ -150,13 +144,9 @@ Alloc_Error :: enum {
 
 @(private)
 message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
-	if size > page_pool.page_size {
-		return nil, .SIZE_EXCEEDS_PAGE
-	}
+	if size > page_pool.page_size do return nil, .SIZE_EXCEEDS_PAGE
 
-	if !pool_ensure_ready(page_pool) {
-		return nil, .ALLOC_CONTENDED
-	}
+	if !pool_ensure_ready(page_pool) do return nil, .ALLOC_CONTENDED
 
 	for attempt := 0; attempt < MAX_ALLOC_RETRIES; attempt += 1 {
 		pos := sync.atomic_load_explicit(&page_pool.read_index, .Relaxed)
@@ -181,9 +171,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 			}
 		} else if diff < 0 {
 			slot := sync.atomic_load_explicit(&page_pool.allocated_count, .Relaxed)
-			if slot >= page_pool.max_pages {
-				return nil, .POOL_EXHAUSTED
-			}
+			if slot >= page_pool.max_pages do return nil, .POOL_EXHAUSTED
 
 			if _, ok := sync.atomic_compare_exchange_strong_explicit(
 				&page_pool.allocated_count,
@@ -218,9 +206,7 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 
 @(private)
 free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
-	if ptr == nil {
-		return
-	}
+	if ptr == nil do return
 
 	idx := int((cast(^Type_Header)ptr).page_index)
 
@@ -265,9 +251,7 @@ message_free_deferred :: #force_inline proc(buffer: ^Batch_Free_Buffer, ptr: raw
 	buffer.entries[buffer.count] = ptr
 	buffer.count += 1
 
-	if buffer.count >= FREE_BATCH_SIZE {
-		flush_batch_free(buffer)
-	}
+	if buffer.count >= FREE_BATCH_SIZE do flush_batch_free(buffer)
 }
 
 @(private)

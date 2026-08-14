@@ -27,23 +27,17 @@ panic_at :: proc(loc: runtime.Source_Code_Location, format: string, args: ..any)
 
 @(private)
 config_origin :: proc(loc: runtime.Source_Code_Location) -> string {
-	if loc.file_path == "" {
-		return ""
-	}
+	if loc.file_path == "" do return ""
 	return fmt.tprintf(" (config built at %s:%d)", loc.file_path, loc.line)
 }
 
 @(private)
 actor_origin :: proc(pid: PID) -> string {
 	actor_ptr, active := get(&NODE.actor_registry, pid)
-	if !active || actor_ptr == nil {
-		return fmt.tprintf("PID %v (no longer registered)", pid)
-	}
+	if !active || actor_ptr == nil do return fmt.tprintf("PID %v (no longer registered)", pid)
 
 	actor := cast(^Actor(int))actor_ptr
-	if actor.spawn_loc.file_path == "" {
-		return fmt.tprintf("'%s' (PID %v)", actor.name, pid)
-	}
+	if actor.spawn_loc.file_path == "" do return fmt.tprintf("'%s' (PID %v)", actor.name, pid)
 	return fmt.tprintf(
 		"'%s' (PID %v, spawned at %s:%d)",
 		actor.name,
@@ -79,9 +73,7 @@ actor_system_allocator: runtime.Allocator
 
 @(private)
 get_system_allocator :: #force_inline proc() -> runtime.Allocator {
-	if actor_system_allocator.procedure == nil {
-		actor_system_allocator = runtime.heap_allocator()
-	}
+	if actor_system_allocator.procedure == nil do actor_system_allocator = runtime.heap_allocator()
 	return actor_system_allocator
 }
 
@@ -89,7 +81,7 @@ get_system_allocator :: #force_inline proc() -> runtime.Allocator {
 spawning_blocking_child: bool
 
 @(private)
-init_logger :: proc(config: Log_Config) -> log.Logger {
+make_logger :: proc(config: Log_Config) -> log.Logger {
 	actor_system_allocator = runtime.heap_allocator()
 	NODE.logger_data = new(Actor_Logger_Data, actor_system_allocator)
 
@@ -103,9 +95,7 @@ init_logger :: proc(config: Log_Config) -> log.Logger {
 		allocator = actor_system_allocator,
 	)
 
-	if config.enable_file {
-		os.make_directory(config.log_path)
-	}
+	if config.enable_file do os.make_directory(config.log_path)
 
 	return log.Logger {
 		procedure = actor_logger_proc,
@@ -279,15 +269,11 @@ setup_actor_context :: proc(
 
 @(private)
 cleanup_actor_context :: proc(actor_ctx: ^Actor_Context) {
-	if current_actor_context != actor_ctx {
-		return
-	}
+	if current_actor_context != actor_ctx do return
 
 	if context.logger.data != nil {
 		logger_data := cast(^Actor_Logger_Data)context.logger.data
-		if logger_data.log_config.custom_flush != nil {
-			logger_data.log_config.custom_flush()
-		}
+		if logger_data.log_config.custom_flush != nil do logger_data.log_config.custom_flush()
 	}
 
 	if current_actor_file_logger != nil {
@@ -316,8 +302,6 @@ set_log_level :: proc(level: log.Level) {
 }
 
 get_current_log_config :: proc() -> Log_Config {
-	if NODE.logger_data != nil {
-		return NODE.logger_data.log_config
-	}
+	if NODE.logger_data != nil do return NODE.logger_data.log_config
 	return NODE.config.actor_config.logging
 }

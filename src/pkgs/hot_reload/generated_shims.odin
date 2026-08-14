@@ -31,7 +31,6 @@ Actor_Behaviour :: struct($T: typeid) {
 Actor_Config :: struct {
 	children:                       [dynamic]SPAWN,
 	spin_strategy:                  SPIN_STRATEGY,
-	message_batch:                  int,
 	logging:                        Log_Config,
 	page_size:                      int,
 	arena_headroom:                 int,
@@ -312,7 +311,6 @@ Hot_API :: struct {
 		children: [dynamic]SPAWN,
 		spin_strategy: SPIN_STRATEGY,
 		logging: Log_Config,
-		message_batch: int,
 		page_size: int,
 		arena_headroom: int,
 		supervision_strategy: Supervision_Strategy,
@@ -460,8 +458,8 @@ make_node_config :: proc(actor_registry_size: int = 0, actor_slab_slots: int = 0
 	return hot_api.make_node_config(actor_registry_size, actor_slab_slots, allow_registry_growth, enable_observer, observer_interval, network, actor_config, blocking_child, worker_count, hot_reload_dev, hot_reload_watch_path, sim_mode, loc)
 }
 
-make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, message_batch: int = 64, page_size: int = 65536, arena_headroom: int = 16777216, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
-	return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
+make_actor_config :: proc(children: [dynamic]SPAWN = nil, spin_strategy: SPIN_STRATEGY = .WAKE_SEMA, logging: Log_Config = {}, page_size: int = 65536, arena_headroom: int = 16777216, supervision_strategy: Supervision_Strategy = .ONE_FOR_ONE, restart_policy: Restart_Policy = .PERMANENT, max_restarts: int = 3, restart_window: time.Duration = 5 * time.Second, home_worker: int = -1, affinity: Actor_Ref = nil, coro_stack_size: int = 57344, use_dedicated_os_thread: bool = false, stack_size_dedicated_os_thread: int = 131072, loc: runtime.Source_Code_Location = #caller_location) -> Actor_Config {
+	return hot_api.make_actor_config(children, spin_strategy, logging, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 }
 
 make_network_config :: proc(auth_password: string = "", bind_address: string = "", port: int = 0, udp_port: int = 0, udp_max_datagram: int = 0, enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {

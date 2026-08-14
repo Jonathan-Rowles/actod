@@ -48,25 +48,17 @@ udp_local_enabled :: #force_inline proc() -> bool {
 }
 
 udp_max_frame_bytes :: proc() -> int {
-	if !NODE.udp.enabled {
-		return 0
-	}
+	if !NODE.udp.enabled do return 0
 	limit := NODE.config.network.udp_max_datagram
-	if limit <= 0 || limit > UDP_MAX_DATAGRAM_HARD {
-		limit = UDP_MAX_DATAGRAM_HARD
-	}
+	if limit <= 0 || limit > UDP_MAX_DATAGRAM_HARD do limit = UDP_MAX_DATAGRAM_HARD
 	overhead := UDP_HEADER_PLAIN
-	if NODE.config.network.enable_encryption {
-		overhead = UDP_HEADER_SEALED + UDP_TAG_SIZE
-	}
+	if NODE.config.network.enable_encryption do overhead = UDP_HEADER_SEALED + UDP_TAG_SIZE
 	return min(limit - overhead, UDP_FRAME_BUFFER)
 }
 
 init_udp :: proc(loc := #caller_location) -> bool {
 	port := NODE.config.network.udp_port
-	if port <= 0 || NODE.config.sim_mode {
-		return true
-	}
+	if port <= 0 || NODE.config.sim_mode do return true
 
 	if !NODE.config.network.enable_encryption {
 		log.warnf(
@@ -142,9 +134,7 @@ init_udp :: proc(loc := #caller_location) -> bool {
 }
 
 shutdown_udp :: proc() {
-	if !NODE.udp.enabled {
-		return
-	}
+	if !NODE.udp.enabled do return
 	NODE.udp.enabled = false
 	sync.atomic_store(&NODE.udp.running, 0)
 
@@ -178,9 +168,7 @@ udp_register_peer :: proc(
 	keys: Udp_Keys,
 	encrypted: bool,
 ) {
-	if node_id == 0 || node_id >= MAX_NODES {
-		return
-	}
+	if node_id == 0 || node_id >= MAX_NODES do return
 	peer := &NODE.udp.peers[node_id]
 	gen := sync.atomic_load(&peer.generation)
 	sync.atomic_store_explicit(&peer.generation, gen + 1, .Release)
@@ -197,13 +185,9 @@ udp_register_peer :: proc(
 }
 
 udp_clear_peer :: proc(node_id: Node_ID) {
-	if node_id == 0 || node_id >= MAX_NODES {
-		return
-	}
+	if node_id == 0 || node_id >= MAX_NODES do return
 	peer := &NODE.udp.peers[node_id]
-	if !peer.active {
-		return
-	}
+	if !peer.active do return
 	gen := sync.atomic_load(&peer.generation)
 	sync.atomic_store_explicit(&peer.generation, gen + 1, .Release)
 
@@ -219,12 +203,8 @@ udp_clear_peer :: proc(node_id: Node_ID) {
 // Safe from any producer thread. A sequence number consumed under a torn
 // generation is discarded, never sent, so (key, nonce) pairs are never reused.
 udp_try_send :: proc(node_id: Node_ID, frame_with_size: []byte) -> bool {
-	if !NODE.udp.enabled || node_id == 0 || node_id >= MAX_NODES {
-		return false
-	}
-	if len(frame_with_size) > UDP_FRAME_BUFFER {
-		return false
-	}
+	if !NODE.udp.enabled || node_id == 0 || node_id >= MAX_NODES do return false
+	if len(frame_with_size) > UDP_FRAME_BUFFER do return false
 
 	peer := &NODE.udp.peers[node_id]
 
@@ -234,9 +214,7 @@ udp_try_send :: proc(node_id: Node_ID, frame_with_size: []byte) -> bool {
 			intrinsics.cpu_relax()
 			continue
 		}
-		if !peer.active {
-			return false
-		}
+		if !peer.active do return false
 
 		endpoint := peer.endpoint
 		token := peer.token_out
@@ -301,15 +279,11 @@ udp_snapshot_for_recv :: proc(
 	for i in 1 ..< MAX_NODES {
 		peer := &NODE.udp.peers[i]
 		g1 := sync.atomic_load_explicit(&peer.generation, .Acquire)
-		if g1 & 1 != 0 || !peer.active || peer.token_in != token {
-			continue
-		}
+		if g1 & 1 != 0 || !peer.active || peer.token_in != token do continue
 		enc := peer.encrypted
 		key := peer.keys.recv_key
 		g2 := sync.atomic_load_explicit(&peer.generation, .Acquire)
-		if g1 != g2 {
-			continue
-		}
+		if g1 != g2 do continue
 		return Node_ID(i), g1, enc, key, true
 	}
 	return 0, 0, false, {}, false
@@ -349,9 +323,7 @@ udp_dispatch_frames :: proc(node_id: Node_ID, frames: []byte) {
 
 udp_recv_loop :: proc(t: ^thread.Thread) {
 	ctx := cast(^Udp_Recv_Context)t.user_args[0]
-	if ctx == nil {
-		return
-	}
+	if ctx == nil do return
 
 	context.allocator = ctx.allocator
 	context.logger = ctx.logger
@@ -364,31 +336,23 @@ udp_recv_loop :: proc(t: ^thread.Thread) {
 	for sync.atomic_load(&NODE.udp.running) != 0 {
 		n, _, err := net.recv_udp(NODE.udp.recv_socket, recv_buf[:])
 		if err != nil {
-			if sync.atomic_load(&NODE.udp.running) == 0 {
-				break
-			}
+			if sync.atomic_load(&NODE.udp.running) == 0 do break
 			continue
 		}
-		if n < UDP_HEADER_PLAIN + 1 {
-			continue
-		}
+		if n < UDP_HEADER_PLAIN + 1 do continue
 
 		datagram := recv_buf[:n]
 		token := endian.unchecked_get_u32le(datagram)
 
 		node_id, generation, encrypted, recv_key, found := udp_snapshot_for_recv(token)
-		if !found {
-			continue
-		}
+		if !found do continue
 
 		if !encrypted {
 			udp_dispatch_frames(node_id, datagram[UDP_HEADER_PLAIN:])
 			continue
 		}
 
-		if n < UDP_HEADER_SEALED + UDP_TAG_SIZE + 1 {
-			continue
-		}
+		if n < UDP_HEADER_SEALED + UDP_TAG_SIZE + 1 do continue
 
 		window := &replay_windows[node_id]
 		if replay_gens[node_id] != generation {
@@ -397,9 +361,7 @@ udp_recv_loop :: proc(t: ^thread.Thread) {
 		}
 
 		seq := endian.unchecked_get_u64le(datagram[4:])
-		if !replay_check(window, seq) {
-			continue
-		}
+		if !replay_check(window, seq) do continue
 
 		plaintext, opened := udp_open(
 			recv_key[:],
@@ -408,9 +370,7 @@ udp_recv_loop :: proc(t: ^thread.Thread) {
 			datagram[UDP_HEADER_SEALED:],
 			open_buf[:],
 		)
-		if !opened {
-			continue
-		}
+		if !opened do continue
 
 		replay_commit(window, seq)
 		udp_dispatch_frames(node_id, plaintext)

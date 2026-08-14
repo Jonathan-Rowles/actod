@@ -50,21 +50,15 @@ registry_verify_no_collision :: #force_inline proc(
 }
 
 registry_ensure_init :: proc(r: ^Name_Registry($T, $N), loc := #caller_location) {
-	if sync.atomic_load(&r.initialized) {
-		return
-	}
+	if sync.atomic_load(&r.initialized) do return
 
 	sync.lock(&r.mtx)
 	defer sync.unlock(&r.mtx)
 
-	if sync.atomic_load(&r.initialized) {
-		return
-	}
+	if sync.atomic_load(&r.initialized) do return
 
 	arena_err := vmem.arena_init_static(&r.arena)
-	if arena_err != nil {
-		panic_at(loc, "failed to initialize registry arena: %v", arena_err)
-	}
+	if arena_err != nil do panic_at(loc, "failed to initialize registry arena: %v", arena_err)
 
 	r.allocator = vmem.arena_allocator(&r.arena)
 	assert(
@@ -142,9 +136,7 @@ registry_get_by_name :: proc(
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
 
-	if idx, exists := r.hash_to_idx[name_hash]; exists {
-		return &r.entries[idx].value, true
-	}
+	if idx, exists := r.hash_to_idx[name_hash]; exists do return &r.entries[idx].value, true
 	return nil, false
 }
 
@@ -161,9 +153,7 @@ registry_get_by_hash :: proc(
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
 
-	if idx, exists := r.hash_to_idx[hash]; exists {
-		return &r.entries[idx].value, true
-	}
+	if idx, exists := r.hash_to_idx[hash]; exists do return &r.entries[idx].value, true
 	return nil, false
 }
 
@@ -180,9 +170,7 @@ registry_get_by_index :: proc(
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
 
-	if idx < 0 || idx >= r.count {
-		return nil, false
-	}
+	if idx < 0 || idx >= r.count do return nil, false
 	return &r.entries[idx].value, true
 }
 
@@ -199,9 +187,7 @@ registry_get_hash :: proc(
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
 
-	if idx < 0 || idx >= r.count {
-		return 0, false
-	}
+	if idx < 0 || idx >= r.count do return 0, false
 	return r.entries[idx].name_hash, true
 }
 
@@ -218,9 +204,7 @@ registry_get_name :: proc(
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
 
-	if idx < 0 || idx >= r.count {
-		return "", false
-	}
+	if idx < 0 || idx >= r.count do return "", false
 	return r.entries[idx].name, true
 }
 
@@ -237,9 +221,7 @@ registry_get_name_by_hash :: proc(
 	sync.shared_lock(&r.mtx)
 	defer sync.shared_unlock(&r.mtx)
 
-	if idx, exists := r.hash_to_idx[hash]; exists {
-		return r.entries[idx].name, true
-	}
+	if idx, exists := r.hash_to_idx[hash]; exists do return r.entries[idx].name, true
 	return "", false
 }
 
@@ -263,9 +245,7 @@ registry_count :: proc(r: ^Name_Registry($T, $N)) -> int {
 
 
 registry_destroy :: proc(r: ^Name_Registry($T, $N)) {
-	if !sync.atomic_load(&r.initialized) {
-		return
-	}
+	if !sync.atomic_load(&r.initialized) do return
 	vmem.arena_destroy(&r.arena)
 	sync.atomic_store(&r.initialized, false)
 }

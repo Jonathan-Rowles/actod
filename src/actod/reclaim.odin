@@ -35,9 +35,7 @@ tls_reclaim_overflow: bool
 
 @(private = "file")
 reclaim_claim_slot :: proc() -> int {
-	if tls_reclaim_slot1 != 0 {
-		return tls_reclaim_slot1 - 1
-	}
+	if tls_reclaim_slot1 != 0 do return tls_reclaim_slot1 - 1
 
 	idx := sync.atomic_add(&NODE.reclaim.slot_count, 1)
 	if idx < MAX_RECLAIM_SLOTS {
@@ -97,9 +95,7 @@ reclaim_retire :: proc(actor_ptr: rawptr) {
 }
 
 reclaim_scan :: proc() {
-	if !sync.mutex_try_lock(&NODE.reclaim.scan_lock) {
-		return
-	}
+	if !sync.mutex_try_lock(&NODE.reclaim.scan_lock) do return
 	defer sync.mutex_unlock(&NODE.reclaim.scan_lock)
 
 	sync.atomic_add(&NODE.reclaim.epoch, 1)
@@ -108,9 +104,7 @@ reclaim_scan :: proc() {
 	have_active := false
 	n := sync.atomic_load(&NODE.reclaim.slot_count)
 
-	if n > MAX_RECLAIM_SLOTS {
-		n = MAX_RECLAIM_SLOTS
-	}
+	if n > MAX_RECLAIM_SLOTS do n = MAX_RECLAIM_SLOTS
 
 	for i in 0 ..< n {
 		e := sync.atomic_load_explicit(&NODE.reclaim.slots[i].active_epoch, .Acquire)

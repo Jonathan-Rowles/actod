@@ -25,13 +25,13 @@ MPSC_Queue :: struct($T: typeid, $N: int) where N >= 0, (N & (N - 1)) == 0 {
 }
 
 @(private)
-init_mpsc :: proc(q: ^MPSC_Queue($T, $N)) {
-	#assert(N > 0, "init_mpsc needs an embedded buffer, use init_mpsc_external for N == 0")
-	init_mpsc_external(q, q.buffer[:])
+mpsc_init :: proc(q: ^MPSC_Queue($T, $N)) {
+	#assert(N > 0, "mpsc_init needs an embedded buffer, use mpsc_init_external for N == 0")
+	mpsc_init_external(q, q.buffer[:])
 }
 
 @(private)
-init_mpsc_external :: proc(q: ^MPSC_Queue($T, $N), entries: []Entry(T)) {
+mpsc_init_external :: proc(q: ^MPSC_Queue($T, $N), entries: []Entry(T)) {
 	assert(len(entries) > 0 && (len(entries) & (len(entries) - 1)) == 0)
 
 	q.write_index = 0
@@ -105,23 +105,17 @@ mpsc_pop_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {
 		pos := start_pos + u64(count)
 		entry := &entries[pos & mask]
 
-		if count + 3 < max_count {
-			intrinsics.prefetch_read_data(&entries[(pos + 1) & mask], 3)
-		}
+		if count + 3 < max_count do intrinsics.prefetch_read_data(&entries[(pos + 1) & mask], 3)
 
 		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
 
-		if seq != pos + 1 {
-			break
-		}
+		if seq != pos + 1 do break
 
 		items[count] = entry.data
 		count += 1
 	}
 
-	if count == 0 {
-		return 0
-	}
+	if count == 0 do return 0
 
 	sync.atomic_store_explicit(&q.read_index, start_pos + u64(count), .Relaxed)
 
@@ -139,13 +133,9 @@ mpsc_size :: proc(q: ^MPSC_Queue($T, $N)) -> int {
 	read_idx := q.read_index
 
 	size := i64(write_idx) - i64(read_idx)
-	if size < 0 {
-		return 0
-	}
+	if size < 0 do return 0
 	capacity := i64(q.r_mask) + 1
-	if size > capacity {
-		return int(capacity)
-	}
+	if size > capacity do return int(capacity)
 	return int(size)
 }
 

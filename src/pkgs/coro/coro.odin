@@ -130,9 +130,7 @@ prepare_jumpin :: proc(co: ^Coro) {
 prepare_jumpout :: proc(co: ^Coro) {
 	prev_co := co.prev_co
 	co.prev_co = nil
-	if prev_co != nil {
-		prev_co.state = .Running
-	}
+	if prev_co != nil do prev_co.state = .Running
 	current_co = prev_co
 }
 
@@ -159,15 +157,9 @@ page_align :: proc "contextless" (size: uint) -> uint {
 }
 
 validate_desc :: proc(desc: ^Desc) -> Result {
-	if desc == nil {
-		return .Invalid_Arguments
-	}
-	if desc.func == nil {
-		return .Invalid_Arguments
-	}
-	if desc.stack_size < MIN_STACK_SIZE {
-		return .Invalid_Arguments
-	}
+	if desc == nil do return .Invalid_Arguments
+	if desc.func == nil do return .Invalid_Arguments
+	if desc.stack_size < MIN_STACK_SIZE do return .Invalid_Arguments
 	return .Success
 }
 
@@ -175,9 +167,7 @@ validate_desc :: proc(desc: ^Desc) -> Result {
 desc_init :: proc(func: Func, stack_size: uint = 0) -> Desc {
 	ss := stack_size
 	if ss != 0 {
-		if ss < MIN_STACK_SIZE {
-			ss = MIN_STACK_SIZE
-		}
+		if ss < MIN_STACK_SIZE do ss = MIN_STACK_SIZE
 	} else {
 		ss = DEFAULT_STACK_SIZE
 	}
@@ -189,13 +179,9 @@ desc_init :: proc(func: Func, stack_size: uint = 0) -> Desc {
 }
 
 uninit :: proc(co: ^Coro) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
+	if co == nil do return .Invalid_Coroutine
 	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow, stale pointer, or double destroy")
-	if !(co.state == .Suspended || co.state == .Dead) {
-		return .Invalid_Operation
-	}
+	if !(co.state == .Suspended || co.state == .Dead) do return .Invalid_Operation
 	co.state = .Dead
 	return .Success
 }
@@ -210,14 +196,10 @@ region_size :: proc "contextless" (stack_size: uint) -> uint {
 
 stack_canary_intact :: proc "contextless" (co: ^Coro) -> bool {
 	when CANARY_ENABLED {
-		if co == nil || co.canary_base == nil {
-			return true
-		}
+		if co == nil || co.canary_base == nil do return true
 		words := cast([^]u64)co.canary_base
 		for i in 0 ..< STACK_CANARY_SIZE / size_of(u64) {
-			if words[i] != STACK_CANARY_WORD {
-				return false
-			}
+			if words[i] != STACK_CANARY_WORD do return false
 		}
 	}
 	return true
@@ -240,9 +222,7 @@ init_at :: proc(desc: ^Desc, base: uintptr, region: uint) -> (^Coro, Result) {
 	usable_base := rawptr(base + STACK_CANARY_SIZE)
 	stack_size := uint(header_at - uintptr(usable_base))
 
-	if res := makectx(co, usable_base, stack_size); res != .Success {
-		return nil, res
-	}
+	if res := makectx(co, usable_base, stack_size); res != .Success do return nil, res
 
 	co.canary_base = rawptr(base)
 	co.stack_base = usable_base
@@ -256,18 +236,14 @@ init_at :: proc(desc: ^Desc, base: uintptr, region: uint) -> (^Coro, Result) {
 
 create :: proc(desc: ^Desc) -> (^Coro, Result) {
 	res := validate_desc(desc)
-	if res != .Success {
-		return nil, res
-	}
+	if res != .Success do return nil, res
 
 	stack_size := page_align(desc.stack_size)
 	region := region_size(stack_size)
 	mapping_size := STACK_GUARD_SIZE + region
 
 	mapping, reserve_err := vmem.reserve(mapping_size)
-	if reserve_err != nil {
-		return nil, .Out_Of_Memory
-	}
+	if reserve_err != nil do return nil, .Out_Of_Memory
 
 	base := uintptr(raw_data(mapping))
 	region_base := rawptr(base + STACK_GUARD_SIZE)
@@ -289,20 +265,14 @@ create :: proc(desc: ^Desc) -> (^Coro, Result) {
 
 create_in :: proc(desc: ^Desc, region: []byte) -> (^Coro, Result) {
 	res := validate_desc(desc)
-	if res != .Success {
-		return nil, res
-	}
+	if res != .Success do return nil, res
 
 	stack_size := page_align(desc.stack_size)
 	needed := region_size(stack_size)
-	if uint(len(region)) < needed {
-		return nil, .Not_Enough_Space
-	}
+	if uint(len(region)) < needed do return nil, .Not_Enough_Space
 
 	co, init_res := init_at(desc, uintptr(raw_data(region)), needed)
-	if init_res != .Success {
-		return nil, init_res
-	}
+	if init_res != .Success do return nil, init_res
 
 	co.mapping_base = nil
 	co.mapping_size = 0
@@ -310,30 +280,20 @@ create_in :: proc(desc: ^Desc, region: []byte) -> (^Coro, Result) {
 }
 
 destroy :: proc(co: ^Coro) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
+	if co == nil do return .Invalid_Coroutine
 	if !stack_canary_intact(co) {
 		panic("coro stack overflow: the canary below the stack was overwritten")
 	}
 	res := uninit(co)
-	if res != .Success {
-		return res
-	}
-	if co.mapping_base != nil {
-		vmem.release(co.mapping_base, co.mapping_size)
-	}
+	if res != .Success do return res
+	if co.mapping_base != nil do vmem.release(co.mapping_base, co.mapping_size)
 	return .Success
 }
 
 resume :: proc(co: ^Coro) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
+	if co == nil do return .Invalid_Coroutine
 	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
-	if co.state != .Suspended {
-		return .Not_Suspended
-	}
+	if co.state != .Suspended do return .Not_Suspended
 	co.state = .Running
 	jumpin(co)
 	return .Success
@@ -355,9 +315,7 @@ resume_top_level :: proc(co: ^Coro) {
 
 
 yield :: proc(co: ^Coro) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
+	if co == nil do return .Invalid_Coroutine
 	when ODIN_DEBUG {
 		dummy: uint
 		stack_addr := uint(uintptr(&dummy))
@@ -367,25 +325,19 @@ yield :: proc(co: ^Coro) -> Result {
 			return .Stack_Overflow
 		}
 	}
-	if co.state != .Running {
-		return .Not_Running
-	}
+	if co.state != .Running do return .Not_Running
 	co.state = .Suspended
 	jumpout(co)
 	return .Success
 }
 
 status :: proc(co: ^Coro) -> State {
-	if co != nil {
-		return co.state
-	}
+	if co != nil do return co.state
 	return .Dead
 }
 
 get_user_data :: proc(co: ^Coro) -> rawptr {
-	if co != nil {
-		return co.user_data
-	}
+	if co != nil do return co.user_data
 	return nil
 }
 

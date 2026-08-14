@@ -25,9 +25,7 @@ send_message_any :: proc(to: PID, content: any, loc := #caller_location) -> Send
 
 @(private)
 send_unreliable_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
-	if is_local_pid(to) {
-		return send_message_any(to, content, loc)
-	}
+	if is_local_pid(to) do return send_message_any(to, content, loc)
 	@(static) sentinel: Message_Type_Info
 	info, ok := get_type_info_ptr(content.id, loc)
 	if !ok do info = &sentinel
@@ -51,16 +49,12 @@ broadcast_any :: proc(content: any, loc := #caller_location) {
 
 	list := &NODE.type_subscribers[actor_type]
 	block := load_subscriber_block(list)
-	if block == nil {
-		return
-	}
+	if block == nil do return
 	n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
 
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
-		if pid != 0 && pid != self_pid {
-			send_message_any(pid, content, loc)
-		}
+		if pid != 0 && pid != self_pid do send_message_any(pid, content, loc)
 	}
 }
 
@@ -75,9 +69,7 @@ publish_any :: proc(topic: ^Topic, content: any, loc := #caller_location) {
 
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
-		if pid != 0 && pid != self_pid {
-			send_message_any(pid, content, loc)
-		}
+		if pid != 0 && pid != self_pid do send_message_any(pid, content, loc)
 	}
 }
 
@@ -176,12 +168,12 @@ spawn_from_raw :: proc(
 			append(&actor.opts.children, child)
 		}
 	}
-	if actor.opts.message_batch <= 0 {
+	if actor.opts.page_size <= 0 {
 		panic_at(
 			loc,
-			"spawn('%s'): opts.message_batch is %d. Build the config with make_actor_config() rather than a raw Actor_Config{{}}%s",
+			"spawn('%s'): opts.page_size is %d. Build the config with make_actor_config() rather than a raw Actor_Config{{}}%s",
 			name,
-			actor.opts.message_batch,
+			actor.opts.page_size,
 			config_origin(actor.opts.loc),
 		)
 	}
@@ -216,9 +208,9 @@ spawn_from_raw :: proc(
 		free(actor, actor_system_allocator)
 		return 0, false
 	}
-	init_mpsc(&actor.system_mailbox)
-	init_mpsc_external(&actor.mailbox, mailbox_entries)
-	init_pool(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(DEFAULT_MAIL_BOX_SIZE))
+	mpsc_init(&actor.system_mailbox)
+	mpsc_init_external(&actor.mailbox, mailbox_entries)
+	pool_init(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(DEFAULT_MAIL_BOX_SIZE))
 
 	pid, ok := add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
@@ -256,9 +248,7 @@ spawn_from_raw :: proc(
 		}
 
 		coro_stack := uint(actor.opts.coro_stack_size)
-		if coro_stack < coro.MIN_STACK_SIZE {
-			coro_stack = coro.MIN_STACK_SIZE
-		}
+		if coro_stack < coro.MIN_STACK_SIZE do coro_stack = coro.MIN_STACK_SIZE
 		handle.coro_stack = coro_stack
 		desc := coro.desc_init(coro_entry, coro_stack)
 		desc.user_data = handle
@@ -307,7 +297,7 @@ spawn_from_raw :: proc(
 		ready_push(handle.home_worker, handle)
 		sync.atomic_sema_post(&handle.home_worker.wake_sema)
 	} else {
-		actor.thread = threads_act.create_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
+		actor.thread = threads_act.make_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
 				actor_loop(cast(^Actor(int))actor_ptr)
 			}, uint(actor.opts.stack_size_dedicated_os_thread))
 		if actor.thread == nil {
@@ -465,9 +455,7 @@ Hot_Reload_Actor_Data :: struct {
 @(private)
 spawn_hot_reload_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 	pid, ok := start_hot_reload_actor(parent_pid)
-	if !ok {
-		log.panic("hot reload actor failed to start")
-	}
+	if !ok do log.panic("hot reload actor failed to start")
 	return pid, ok
 }
 
@@ -487,9 +475,7 @@ start_hot_reload_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 		),
 		parent_pid = parent_pid,
 	)
-	if ok {
-		NODE.hot_reload_pid = pid
-	}
+	if ok do NODE.hot_reload_pid = pid
 	return pid, ok
 }
 
@@ -548,7 +534,7 @@ hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 		_ = send_message(NODE.hot_reload_pid, msg)
 	}
 
-	w, ok := hot_reload.create_watcher(watcher_callback, nil)
+	w, ok := hot_reload.make_watcher(watcher_callback, nil)
 	if !ok {
 		log.error("hot reload: failed to create file watcher")
 		return
@@ -605,9 +591,7 @@ hot_reload_terminate :: proc(data: ^Hot_Reload_Actor_Data) {
 
 	for pkg_path, actors in &data.package_actors {
 		tmp_path := join_path({pkg_path, "tmp"})
-		if tmp_path != "" && os.is_dir(tmp_path) {
-			os.remove_all(tmp_path)
-		}
+		if tmp_path != "" && os.is_dir(tmp_path) do os.remove_all(tmp_path)
 		delete(actors)
 	}
 	delete(data.package_actors)
@@ -711,9 +695,7 @@ handle_register :: proc(data: ^Hot_Reload_Actor_Data, reg: Register_Hot_Actor) {
 			meta.package_path = pkg_path
 
 			tmp_path := join_path({pkg_path, "tmp"})
-			if tmp_path != "" && !os.is_dir(tmp_path) {
-				os.make_directory(tmp_path)
-			}
+			if tmp_path != "" && !os.is_dir(tmp_path) do os.make_directory(tmp_path)
 
 			if pkg_path not_in data.package_actors {
 				if data.watcher != nil {
@@ -1095,9 +1077,7 @@ extract_import_path :: proc(line: string) -> string {
 	if !strings.has_prefix(trimmed, "import") do return ""
 
 	after_import := trimmed[len("import"):]
-	if len(after_import) == 0 || (after_import[0] != ' ' && after_import[0] != '\t') {
-		return ""
-	}
+	if len(after_import) == 0 || (after_import[0] != ' ' && after_import[0] != '\t') do return ""
 
 	quote_start := strings.index_byte(line, '"')
 	if quote_start < 0 do return ""
@@ -1139,14 +1119,10 @@ rewrite_imports_in_source :: proc(
 			}
 		}
 
-		if output_line == line {
-			output_line = rewrite_import_line(line, original_dir, dep_map)
-		}
+		if output_line == line do output_line = rewrite_import_line(line, original_dir, dep_map)
 
 		strings.write_string(&b, output_line)
-		if nl >= 0 {
-			strings.write_byte(&b, '\n')
-		}
+		if nl >= 0 do strings.write_byte(&b, '\n')
 	}
 
 	return strings.to_string(b)
@@ -1253,9 +1229,7 @@ strip_init_procs :: proc(source: string) -> string {
 			for c in line {
 				if c == '{' do brace_depth += 1
 			}
-			if brace_depth > 0 {
-				skip_until_closing_brace = true
-			}
+			if brace_depth > 0 do skip_until_closing_brace = true
 			continue
 		}
 

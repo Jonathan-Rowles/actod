@@ -41,9 +41,7 @@ spawner_behaviour := actod.Actor_Behaviour(Spawner) {
 					Idle{},
 					actod.Actor_Behaviour(Idle){handle_message = idle_handle},
 				)
-				if !ok {
-					break
-				}
+				if !ok do break
 				append(&data.children, pid)
 			}
 			sync.atomic_add(&spawner_children_made, len(data.children))
@@ -64,9 +62,7 @@ spawner_behaviour := actod.Actor_Behaviour(Spawner) {
 wait_for_counter :: proc(counter: ^int, target: int) -> bool {
 	start := time.tick_now()
 	for time.tick_since(start) < SPAWNER_READY_TIMEOUT {
-		if sync.atomic_load(counter) >= target {
-			return true
-		}
+		if sync.atomic_load(counter) >= target do return true
 		time.sleep(SPAWNER_POLL)
 	}
 	return false
@@ -74,9 +70,7 @@ wait_for_counter :: proc(counter: ^int, target: int) -> bool {
 
 per_second :: proc(n: int, d: time.Duration) -> f64 {
 	ns := f64(time.duration_nanoseconds(d))
-	if ns <= 0 {
-		return 0
-	}
+	if ns <= 0 do return 0
 	return f64(n) / (ns / 1e9)
 }
 
@@ -94,9 +88,7 @@ run_concurrent_spawn :: proc(total: int, spawner_count: int, baseline_live: int)
 	}
 
 	per_spawner := total / spawner_count
-	if per_spawner < 1 {
-		per_spawner = 1
-	}
+	if per_spawner < 1 do per_spawner = 1
 
 	sync.atomic_store(&spawner_children_made, 0)
 	sync.atomic_store(&spawner_spawn_done, 0)

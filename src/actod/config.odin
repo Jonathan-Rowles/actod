@@ -138,7 +138,6 @@ DEFAULT_SYSTEM_CONFIG := System_Config {
 		page_size = DEFAULT_PAGE_SIZE,
 		arena_headroom = DEFAULT_ARENA_HEADROOM,
 		spin_strategy = .WAKE_SEMA,
-		message_batch = BATCH_SIZE,
 		logging = Log_Config {
 			level = .Info,
 			console_opts = log.Options{.Level, .Terminal_Color, .Short_File_Path, .Line} |
@@ -228,7 +227,6 @@ DEFAULT_ARENA_HEADROOM :: #config(ACTOD_ARENA_HEADROOM, mem.Megabyte * 16)
 Actor_Config :: struct {
 	children:                       [dynamic]SPAWN,
 	spin_strategy:                  SPIN_STRATEGY,
-	message_batch:                  int,
 	logging:                        Log_Config,
 	page_size:                      int,
 	arena_headroom:                 int,
@@ -250,7 +248,6 @@ make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
 	spin_strategy: SPIN_STRATEGY = NODE.config.actor_config.spin_strategy,
 	logging: Log_Config = NODE.config.actor_config.logging,
-	message_batch: int = NODE.config.actor_config.message_batch,
 	page_size: int = NODE.config.actor_config.page_size,
 	arena_headroom: int = NODE.config.actor_config.arena_headroom,
 	supervision_strategy: Supervision_Strategy = NODE.config.actor_config.supervision_strategy,
@@ -264,9 +261,6 @@ make_actor_config :: proc(
 	stack_size_dedicated_os_thread: int = NODE.config.actor_config.stack_size_dedicated_os_thread,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Actor_Config {
-	if message_batch <= 0 {
-		panic_at(loc, "make_actor_config: message_batch must be > 0, got %d", message_batch)
-	}
 	if page_size < CACHE_LINE_SIZE * 2 {
 		panic_at(
 			loc,
@@ -301,7 +295,6 @@ make_actor_config :: proc(
 		logging = logging,
 		spin_strategy = spin_strategy,
 		children = children,
-		message_batch = message_batch,
 		page_size = page_size,
 		arena_headroom = arena_headroom,
 		supervision_strategy = supervision_strategy,

@@ -100,13 +100,13 @@ Remote_Spawn_Response :: struct {
 }
 
 Subscribe_Remote :: struct {
-	subscriber_pid: PID,
 	type_name_hash: u64,
+	count:          u32,
 }
 
 Unsubscribe_Remote :: struct {
-	subscriber_pid: PID,
 	type_name_hash: u64,
+	count:          u32,
 }
 
 @(init)
@@ -247,14 +247,12 @@ get_node_log_ctx :: proc() -> log.Logger {
 node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	sys_allocator := get_system_allocator()
 	cloned_name := strings.clone(name, sys_allocator)
-	if len(NODE.name) > 0 {
-		delete(NODE.name, sys_allocator)
-	}
+	if len(NODE.name) > 0 do delete(NODE.name, sys_allocator)
 	NODE.name = cloned_name
 
 	logging_config := opts.actor_config.logging
 	logging_config.ident = NODE.name
-	NODE.logger = init_logger(logging_config)
+	NODE.logger = make_logger(logging_config)
 	context.logger = NODE.logger
 
 	old_auth := NODE.config.network.auth_password
@@ -264,15 +262,9 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.config = opts
 	NODE.config.network.auth_password = cloned_auth
 	NODE.config.network.bind_address = cloned_bind
-	if len(old_auth) > 0 {
-		delete(old_auth, sys_allocator)
-	}
-	if len(old_bind) > 0 {
-		delete(old_bind, sys_allocator)
-	}
-	if NODE.config.loc.file_path == "" {
-		NODE.config.loc = loc
-	}
+	if len(old_auth) > 0 do delete(old_auth, sys_allocator)
+	if len(old_bind) > 0 do delete(old_bind, sys_allocator)
+	if NODE.config.loc.file_path == "" do NODE.config.loc = loc
 
 	bind_addr, bind_ok := parse_bind_address(NODE.config.network.bind_address)
 	if !bind_ok {
@@ -327,10 +319,8 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.connection_actors = {}
 
 	registry_size := opts.actor_registry_size
-	if registry_size == 0 {
-		registry_size = 256
-	}
-	init_pid_map(&NODE.actor_registry, registry_size)
+	if registry_size == 0 do registry_size = 256
+	pid_map_init(&NODE.actor_registry, registry_size)
 
 	if opts.actor_slab_slots > 0 {
 		slot_size := actor_arena_slot_size(opts.actor_config)
@@ -352,21 +342,15 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	}
 
 	worker_count := opts.worker_count
-	if worker_count == 0 {
-		worker_count = threads_act.get_cpu_count()
-	}
-	init_worker_pool(worker_count)
+	if worker_count == 0 do worker_count = threads_act.get_cpu_count()
+	worker_pool_init(worker_count)
 
 	system_config := opts.actor_config
 
 	system_children: [dynamic]SPAWN
 	append(&system_children, spawn_timer_child)
-	if opts.enable_observer {
-		append(&system_children, spawn_observer_child)
-	}
-	if opts.hot_reload_dev {
-		append(&system_children, spawn_hot_reload_child)
-	}
+	if opts.enable_observer do append(&system_children, spawn_observer_child)
+	if opts.hot_reload_dev do append(&system_children, spawn_hot_reload_child)
 	if system_config.children != nil {
 		for child in system_config.children {
 			append(&system_children, child)
@@ -378,9 +362,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 
 	NODE.pid, NODE.started = spawn(name, Node_Actor_Data{name = NODE.name}, Node_Behaviour, system_config, 0, loc)
 	delete(system_children)
-	if !NODE.started {
-		panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
-	}
+	if !NODE.started do panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
 
 	if opts.blocking_child != nil {
 		log.info("Starting blocking child on main thread")
@@ -528,9 +510,7 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 	case string:
 		log.debugf("node received a string message from %s: %s", actor_origin(from), v)
 		err := send_message(from, "received message")
-		if err != .OK {
-			log.warnf("node could not reply to %s: %v", actor_origin(from), err)
-		}
+		if err != .OK do log.warnf("node could not reply to %s: %v", actor_origin(from), err)
 	case:
 		log.warnf(
 			"the node actor received a message of type %T from %s that it does not handle",
@@ -542,32 +522,24 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 
 @(private)
 cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
-	if _, active := get(&NODE.actor_registry, pid); !active {
-		return
-	}
+	if _, active := get(&NODE.actor_registry, pid); !active do return
 
 	remove(&NODE.actor_registry, pid)
 
 	actor_typed := cast(^Actor(int))actor_ptr
 	sync.atomic_store(&actor_typed.stopped_closed, true)
-	if pid != NODE.pid {
-		drain_stop_signals_to_node(actor_typed)
-	}
+	if pid != NODE.pid do drain_stop_signals_to_node(actor_typed)
 
 	if sync.atomic_load(&NODE.shutting_down) {
 		append(&NODE.shutdown_deferred_frees, actor_ptr)
-		if pid == NODE.pid {
-			NODE.pid = 0
-		}
+		if pid == NODE.pid do NODE.pid = 0
 		return
 	}
 
 	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
 	current := sync.atomic_load(state_ptr)
 
-	if current == .TERMINATED {
-		return
-	}
+	if current == .TERMINATED do return
 
 	if current == .STOPPING || current == .THREAD_STOPPED {
 		pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
@@ -609,9 +581,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		current = sync.atomic_load(state_ptr)
 	}
 
-	if !try_transition_state(state_ptr, .THREAD_STOPPED, .TERMINATED) {
-		return
-	}
+	if !try_transition_state(state_ptr, .THREAD_STOPPED, .TERMINATED) do return
 
 	children_ptr := cast(^[dynamic]PID)(uintptr(actor_ptr) + offset_of(Actor(int), children))
 
@@ -634,9 +604,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	reclaim_retire(actor_ptr)
 	reclaim_scan()
 
-	if pid == NODE.pid {
-		NODE.pid = 0
-	}
+	if pid == NODE.pid do NODE.pid = 0
 }
 
 node_shutdown :: shutdown_node
@@ -676,18 +644,12 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	clear_all_subscriptions()
 
-	if NODE.observer_pid != {} {
-		stop_observer()
-	}
+	if NODE.observer_pid != {} do stop_observer()
 
-	if NODE.hot_reload_pid != 0 {
-		stop_hot_reload_actor()
-	}
+	if NODE.hot_reload_pid != 0 do stop_hot_reload_actor()
 
 	system_actors := 1
-	if NODE.timer_pid != 0 {
-		system_actors += 1
-	}
+	if NODE.timer_pid != 0 do system_actors += 1
 	if !wait_for_actors_to_clear(max_remaining = system_actors, max_wait_ms = 1000) {
 		log.warnf(
 			"shutdown: %d actors were still alive after 1000 ms and are being torn down anyway",
@@ -734,12 +696,8 @@ send_terminate_to_active_actors_and_wait :: proc() {
 		if valid {
 			parent_ptr := cast(^PID)(uintptr(actor_ptr) + offset_of(Actor(int), parent))
 			parent := parent_ptr^
-			if parent != 0 && parent != NODE.pid {
-				continue
-			}
-			if terminate_actor(pid) {
-				append(&actors_to_wait, pid)
-			}
+			if parent != 0 && parent != NODE.pid do continue
+			if terminate_actor(pid) do append(&actors_to_wait, pid)
 		}
 	}
 
@@ -760,9 +718,7 @@ terminate_connection_actors_and_wait :: proc() {
 
 	for i in 0 ..< MAX_NODES {
 		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
-		if conn_pid != 0 && terminate_actor(conn_pid, .SHUTDOWN) {
-			append(&conn_actors, conn_pid)
-		}
+		if conn_pid != 0 && terminate_actor(conn_pid, .SHUTDOWN) do append(&conn_actors, conn_pid)
 	}
 
 	wait_for_pids(conn_actors[:])
@@ -771,9 +727,7 @@ terminate_connection_actors_and_wait :: proc() {
 is_connection_actor :: proc(pid: PID) -> bool {
 	for i in 0 ..< MAX_NODES {
 		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
-		if conn_pid != 0 && conn_pid == pid {
-			return true
-		}
+		if conn_pid != 0 && conn_pid == pid do return true
 	}
 	return false
 }
@@ -789,9 +743,7 @@ cleanup_node_actor :: proc() {
 	n, ok := get_actor_from_pointer(node_ptr, true)
 	if ok && n != nil {
 		n.termination_reason = .SHUTDOWN
-		if n.behaviour.terminate != nil {
-			n.behaviour.terminate(n.data)
-		}
+		if n.behaviour.terminate != nil do n.behaviour.terminate(n.data)
 	}
 
 	cleanup_terminated_actor(NODE.pid, node_ptr)
@@ -839,12 +791,8 @@ wait_for_actors_to_clear :: proc(
 
 	for i := 0; i < iterations; i += 1 {
 		drain_node_stop_signals()
-		if num_used(&NODE.actor_registry) <= max_remaining {
-			return true
-		}
-		if NODE.config.sim_mode && sim_pump() {
-			continue
-		}
+		if num_used(&NODE.actor_registry) <= max_remaining do return true
+		if NODE.config.sim_mode && sim_pump() do continue
 		runtime_sleep(time.Duration(poll_interval_ms) * time.Millisecond)
 	}
 
@@ -883,9 +831,7 @@ wait_for_pids :: proc(
 				break
 			}
 		}
-		if all_done {
-			return
-		}
+		if all_done do return
 		elapsed := wall_since(start)
 		if elapsed > max_wait {
 			log.warnf(
@@ -902,9 +848,7 @@ wait_for_pids :: proc(
 			handle.wants_reschedule = true
 			coro.yield(co)
 		} else if NODE.config.sim_mode {
-			if !sim_pump() {
-				runtime_sleep(poll_interval)
-			}
+			if !sim_pump() do runtime_sleep(poll_interval)
 		} else {
 			runtime_sleep(poll_interval)
 		}
@@ -932,9 +876,7 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 await_signal :: proc() {
 	setup_signal_handler()
 	sync.atomic_sema_wait(&NODE.signal_wake)
-	if NODE.pid != 0 {
-		shutdown_node()
-	}
+	if NODE.pid != 0 do shutdown_node()
 }
 
 is_system_actod_pid :: proc(pid: PID) -> bool {

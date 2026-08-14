@@ -37,9 +37,7 @@ take_snapshot :: proc() -> Snapshot {
 }
 
 per_actor :: proc(after: int, before: int, actors: int) -> f64 {
-	if after < 0 || before < 0 || actors <= 0 {
-		return 0
-	}
+	if after < 0 || before < 0 || actors <= 0 do return 0
 	return f64(after - before) / f64(actors)
 }
 
@@ -57,9 +55,7 @@ slab_in_use :: proc() -> i64 {
 wait_for_slab_release :: proc(target: i64) -> bool {
 	start := time.now()
 	for time.since(start) < REAP_TIMEOUT {
-		if slab_in_use() <= target {
-			return true
-		}
+		if slab_in_use() <= target do return true
 		time.sleep(REAP_POLL_INTERVAL)
 	}
 	return false
@@ -68,9 +64,7 @@ wait_for_slab_release :: proc(target: i64) -> bool {
 wait_for_reap :: proc(target: int) -> (elapsed: time.Duration, ok: bool) {
 	start := time.now()
 	for time.since(start) < REAP_TIMEOUT {
-		if live_actor_count() <= target {
-			return time.since(start), true
-		}
+		if live_actor_count() <= target do return time.since(start), true
 		time.sleep(REAP_POLL_INTERVAL)
 	}
 	return time.since(start), false
@@ -104,18 +98,14 @@ terminate_cohort :: proc(pids: []actod.PID) -> (elapsed: time.Duration) {
 }
 
 us_per :: proc(d: time.Duration, n: int) -> f64 {
-	if n <= 0 {
-		return 0
-	}
+	if n <= 0 do return 0
 	return f64(time.duration_nanoseconds(d)) / f64(n) / 1000.0
 }
 
 env_int :: proc(name: string, fallback: int) -> int {
 	if v, ok := os.lookup_env(name, context.allocator); ok {
 		defer delete(v)
-		if n, parse_ok := strconv.parse_int(v); parse_ok && n > 0 {
-			return n
-		}
+		if n, parse_ok := strconv.parse_int(v); parse_ok && n > 0 do return n
 	}
 	return fallback
 }
@@ -162,9 +152,7 @@ main :: proc() {
 	}
 	print_arena_usage(n)
 	print_coro_usage(n)
-	if MEM_STATS_AVAILABLE {
-		print_vma_breakdown(6)
-	}
+	if MEM_STATS_AVAILABLE do print_vma_breakdown(6)
 
 	fmt.println()
 	fmt.println("--- lifecycle cost ---")
@@ -227,16 +215,12 @@ print_provenance_header :: proc(count: int) {
 	fmt.printf("build:              -o:aggressive -no-bounds-check -disable-assert -microarch:native\n")
 	fmt.printf("actors:             %d\n", count)
 	fmt.printf("mailbox default:    %d slots\n", actod.DEFAULT_MAIL_BOX_SIZE)
-	if mmc := read_max_map_count(); mmc > 0 {
-		fmt.printf("vm.max_map_count:   %d\n", mmc)
-	}
+	if mmc := read_max_map_count(); mmc > 0 do fmt.printf("vm.max_map_count:   %d\n", mmc)
 	fmt.println()
 }
 
 print_slab_rss :: proc(actors: int) {
-	if !MEM_STATS_AVAILABLE || actors <= 0 {
-		return
-	}
+	if !MEM_STATS_AVAILABLE || actors <= 0 do return
 	Slab_Line :: struct {
 		prefix: string,
 		memory: []byte,
@@ -255,9 +239,7 @@ print_slab_rss :: proc(actors: int) {
 
 print_coro_usage :: proc(actors: int) {
 	slab := &actod.NODE.coro_slab
-	if !slab.enabled || actors <= 0 {
-		return
-	}
+	if !slab.enabled || actors <= 0 do return
 	fmt.printf(
 		"  coro slot size:   %d B (%d B header + stack), %d slots in use\n",
 		slab.slot_size,
@@ -268,9 +250,7 @@ print_coro_usage :: proc(actors: int) {
 
 print_arena_usage :: proc(actors: int) {
 	slab := &actod.NODE.actor_slab
-	if !slab.enabled || actors <= 0 {
-		return
-	}
+	if !slab.enabled || actors <= 0 do return
 	fmt.printf(
 		"  arena slot size:  %d B reserved per actor (%d slots in use)\n",
 		slab.slot_size,
@@ -281,9 +261,7 @@ print_arena_usage :: proc(actors: int) {
 	sampled := 0
 	for i in 0 ..< min(actors, int(slab.slot_count)) {
 		block := cast(^vmem.Memory_Block)raw_data(actod.slot_slab_slot(slab, u32(i)))
-		if block.used == 0 || block.used > slab.slot_size {
-			continue
-		}
+		if block.used == 0 || block.used > slab.slot_size do continue
 		total += block.used
 		sampled += 1
 	}

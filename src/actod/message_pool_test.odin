@@ -22,7 +22,7 @@ Test_Message :: struct {
 @(test)
 test_pool_init :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	testing.expect(t, pool.pages == nil, "Page pool bookkeeping should not be allocated at init")
@@ -39,7 +39,7 @@ test_pool_init :: proc(t: ^testing.T) {
 @(test)
 test_basic_alloc_free :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	size := 256
@@ -63,7 +63,7 @@ test_basic_alloc_free :: proc(t: ^testing.T) {
 @(test)
 test_multiple_allocations :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	sizes := []int{64, 256, 1024, 2048, 3000}
@@ -85,7 +85,7 @@ test_multiple_allocations :: proc(t: ^testing.T) {
 @(test)
 test_large_allocation :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	size := pool.page_size
@@ -102,7 +102,7 @@ test_large_allocation :: proc(t: ^testing.T) {
 @(test)
 test_concurrent_allocations :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	num_threads :: 8
@@ -168,7 +168,7 @@ test_concurrent_allocations :: proc(t: ^testing.T) {
 @(test)
 test_batch_free :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	buffer: Batch_Free_Buffer
@@ -199,7 +199,7 @@ test_batch_free :: proc(t: ^testing.T) {
 @(test)
 test_pool_exhaustion :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	ptrs := make([]rawptr, pool.max_pages + 10)
@@ -252,7 +252,7 @@ test_pool_exhaustion :: proc(t: ^testing.T) {
 @(test)
 test_message_reuse :: proc(t: ^testing.T) {
 	pool: Pool
-	init_pool(&pool, context.allocator)
+	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
 	size := 1024

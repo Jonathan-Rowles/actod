@@ -114,7 +114,7 @@ Observer_Data :: struct {
 
 Observer_Behaviour := Actor_Behaviour(Observer_Data) {
 	handle_message = handle_observer_message,
-	init           = init_observer,
+	init           = observer_init,
 	terminate      = terminate_observer,
 }
 
@@ -131,7 +131,7 @@ spawn_observer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 }
 
 @(private)
-init_observer :: proc(data: ^Observer_Data) {
+observer_init :: proc(data: ^Observer_Data) {
 	data^ = Observer_Data{}
 
 	data.active_stats = make(map[PID]Actor_Stats)
@@ -165,9 +165,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 		data.total_actors_monitored = len(data.active_stats) + len(data.terminated_stats)
 
 	case Set_Collection_Interval:
-		if data.auto_collect {
-			cancel_timer(data.collection_timer_id)
-		}
+		if data.auto_collect do cancel_timer(data.collection_timer_id)
 		data.collection_interval = m.interval
 		data.auto_collect = m.interval > 0
 		if data.auto_collect {
@@ -250,9 +248,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 
 @(private)
 broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
-	if get_subscriber_count(OBSERVER_TYPE) == 0 {
-		return
-	}
+	if get_subscriber_count(OBSERVER_TYPE) == 0 do return
 
 	snapshot: Stats_Snapshot
 
@@ -339,14 +335,10 @@ collect_all_stats :: proc(data: ^Observer_Data) {
 	actor_count := 0
 	for {
 		_, pid, ok := iter(&it)
-		if !ok {
-			break
-		}
+		if !ok do break
 
 		actor := get(&NODE.actor_registry, pid)
-		if actor == nil || pid == NODE.pid || pid == NODE.observer_pid {
-			continue
-		}
+		if actor == nil || pid == NODE.pid || pid == NODE.observer_pid do continue
 
 		actor_count += 1
 
@@ -437,16 +429,12 @@ start_observer :: proc(
 stop_observer :: proc() {
 	if NODE.observer_pid != {} {
 		a_ptr, ok := get(&NODE.actor_registry, NODE.observer_pid)
-		if !ok {
-			return
-		}
+		if !ok do return
 
 		a, actor_ok := get_actor_from_pointer(a_ptr, true)
 		if actor_ok && a != nil {
 			for i := 0; i < 100; i += 1 {
-				if mpsc_size(&a.mailbox) == 0 {
-					break
-				}
+				if mpsc_size(&a.mailbox) == 0 do break
 				runtime_sleep(10 * time.Millisecond)
 			}
 		} else {
@@ -458,9 +446,7 @@ stop_observer :: proc() {
 
 		_ = terminate_actor(NODE.observer_pid, .SHUTDOWN)
 		for i := 0; i < 100; i += 1 {
-			if _, active := get(&NODE.actor_registry, NODE.observer_pid); !active {
-				break
-			}
+			if _, active := get(&NODE.actor_registry, NODE.observer_pid); !active do break
 			runtime_sleep(10 * time.Millisecond)
 		}
 		NODE.observer_pid = {}
@@ -502,9 +488,7 @@ trigger_stats_collection :: proc(loc := #caller_location) -> bool {
 	}
 	msg := Trigger_Collection{}
 	err := send_message(NODE.observer_pid, msg)
-	if err != .OK {
-		log_observer_send_failed("trigger_stats_collection", err, loc)
-	}
+	if err != .OK do log_observer_send_failed("trigger_stats_collection", err, loc)
 	return err == .OK
 }
 
@@ -521,9 +505,7 @@ request_actor_stats :: proc(actor_pid: PID, requester: PID, loc := #caller_locat
 	}
 
 	err := send_message(NODE.observer_pid, request)
-	if err != .OK {
-		log_observer_send_failed("request_actor_stats", err, loc)
-	}
+	if err != .OK do log_observer_send_failed("request_actor_stats", err, loc)
 	return err == .OK
 }
 
@@ -539,9 +521,7 @@ request_all_stats :: proc(requester: PID, loc := #caller_location) -> bool {
 	}
 
 	err := send_message(NODE.observer_pid, request)
-	if err != .OK {
-		log_observer_send_failed("request_all_stats", err, loc)
-	}
+	if err != .OK do log_observer_send_failed("request_all_stats", err, loc)
 	return err == .OK
 }
 
@@ -554,9 +534,7 @@ set_stats_collection_interval :: proc(interval: time.Duration, loc := #caller_lo
 		interval = interval,
 	}
 	err := send_message(NODE.observer_pid, msg)
-	if err != .OK {
-		log_observer_send_failed("set_stats_collection_interval", err, loc)
-	}
+	if err != .OK do log_observer_send_failed("set_stats_collection_interval", err, loc)
 	return err == .OK
 }
 
@@ -567,9 +545,7 @@ clear_terminated_stats :: proc(loc := #caller_location) -> bool {
 	}
 	msg := Clear_Terminated_Stats{}
 	err := send_message(NODE.observer_pid, msg)
-	if err != .OK {
-		log_observer_send_failed("clear_terminated_stats", err, loc)
-	}
+	if err != .OK do log_observer_send_failed("clear_terminated_stats", err, loc)
 	return err == .OK
 }
 

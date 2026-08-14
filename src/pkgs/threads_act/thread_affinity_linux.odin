@@ -20,9 +20,7 @@ posix_pthread_t :: distinct u64
 
 set_thread_affinity :: proc(t: ^thread.Thread, core_id: int) -> bool {
 	cpu_count := get_cpu_count()
-	if core_id < 0 || core_id >= cpu_count {
-		return false
-	}
+	if core_id < 0 || core_id >= cpu_count do return false
 
 	cpuset: cpu_set_t
 	word := uint(core_id) / 64

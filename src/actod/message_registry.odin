@@ -83,9 +83,7 @@ get_type_info_by_hash :: #force_inline proc(
 	^Message_Type_Info,
 	bool,
 ) {
-	if type_hash != 0 && g_type_hash_cache_key == type_hash {
-		return g_type_hash_cache_val, true
-	}
+	if type_hash != 0 && g_type_hash_cache_key == type_hash do return g_type_hash_cache_val, true
 	info, ok := registry_get_by_hash(&g_message_registry, type_hash, loc)
 	if ok {
 		g_type_hash_cache_key = type_hash
@@ -141,9 +139,7 @@ register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location
 	registry_ensure_init(&g_message_registry, loc)
 
 	for i in 0 ..< g_message_registry.count {
-		if g_message_registry.entries[i].value.type_id == T {
-			return
-		}
+		if g_message_registry.entries[i].value.type_id == T do return
 	}
 
 	ti := type_info_of(T)
@@ -480,9 +476,7 @@ check_type_safety :: proc(
 				return false, msg
 			}
 
-			if len(variant_temps[i].var_fields) > 0 {
-				any_has_variable_data = true
-			}
+			if len(variant_temps[i].var_fields) > 0 do any_has_variable_data = true
 		}
 
 		if any_has_variable_data {

@@ -27,7 +27,7 @@ actor_thread_entry :: proc "c" (t_raw: rawptr) -> rawptr {
 	return nil
 }
 
-create_thread_with_stack_size :: proc(
+make_thread_with_stack_size :: proc(
 	data: rawptr,
 	fn: proc(data: rawptr),
 	stack_size: uint,
@@ -49,9 +49,7 @@ create_thread_with_stack_size :: proc(
 	posix.pthread_attr_init(&attrs)
 	defer posix.pthread_attr_destroy(&attrs)
 
-	if stack_size > 0 {
-		posix.pthread_attr_setstacksize(&attrs, stack_size)
-	}
+	if stack_size > 0 do posix.pthread_attr_setstacksize(&attrs, stack_size)
 
 	posix.pthread_attr_setdetachstate(&attrs, .CREATE_JOINABLE)
 	posix.pthread_create(&t.unix_thread, &attrs, actor_thread_entry, t)

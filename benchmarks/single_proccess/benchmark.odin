@@ -68,9 +68,7 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 						shared.track_send_error(data.state, err)
 						err = actod.send_message(target, v)
 					}
-					if err != .OK {
-						shared.track_send_error(data.state, err)
-					}
+					if err != .OK do shared.track_send_error(data.state, err)
 				}
 
 				sync.sema_post(data.warmup_sema)
@@ -228,9 +226,7 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	for {
 		sent := sync.atomic_load(&global_benchmark_state.send_count)
 		received := sync.atomic_load(&global_benchmark_state.receive_count)
-		if received + slack >= sent || time.tick_now()._nsec - wait_start > 100_000_000 {
-			break
-		}
+		if received + slack >= sent || time.tick_now()._nsec - wait_start > 100_000_000 do break
 		intrinsics.cpu_relax()
 	}
 
@@ -281,8 +277,6 @@ wait_for_actors_cleanup :: proc() {
 		total := actod.num_used(&actod.NODE.actor_registry)
 		if total <= 3 do break
 		time.sleep(100 * time.Millisecond)
-		if attempt == max_wait - 1 {
-			fmt.printf("WARNING: %d actors still active\n", total - 3)
-		}
+		if attempt == max_wait - 1 do fmt.printf("WARNING: %d actors still active\n", total - 3)
 	}
 }

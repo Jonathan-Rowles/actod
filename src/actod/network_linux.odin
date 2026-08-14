@@ -47,9 +47,7 @@ platform_gen_random :: proc(buf: rawptr, len: uint) {
 	filled: uint
 	for filled < len {
 		n := libc_getrandom(rawptr(uintptr(buf) + uintptr(filled)), len - filled, 0)
-		if n <= 0 {
-			panic("getrandom failed, cannot generate secure random bytes")
-		}
+		if n <= 0 do panic("getrandom failed, cannot generate secure random bytes")
 		filled += uint(n)
 	}
 }

@@ -85,9 +85,7 @@ exercise_node_api :: proc() {
 	_, _ = act.spawn_remote("spawn_probe", "probe-4", "other-node")
 
 	pid, found := act.get_actor_pid("probe-1")
-	if found {
-		log.info(act.get_actor_name(pid), act.is_local_pid(pid), act.get_node_id(pid))
-	}
+	if found do log.info(act.get_actor_name(pid), act.is_local_pid(pid), act.get_node_id(pid))
 	handle, node_id := act.unpack_pid(pid)
 	_ = act.pack_pid(handle, node_id)
 	_ = act.get_actor_type(pid)

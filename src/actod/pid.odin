@@ -65,9 +65,7 @@ get_node_id :: #force_inline proc(pid: PID) -> Node_ID {
 @(init)
 pid_formatter_init :: proc "contextless" () {
 	context = runtime.default_context()
-	if fmt._user_formatters == nil {
-		fmt.set_user_formatters(new(map[typeid]fmt.User_Formatter))
-	}
+	if fmt._user_formatters == nil do fmt.set_user_formatters(new(map[typeid]fmt.User_Formatter))
 	fmt.register_user_formatter(typeid_of(PID), pid_formatter)
 }
 
@@ -128,9 +126,7 @@ register_actor_type :: proc(name: string) -> (Actor_Type, bool) {
 		return g_actor_type_registry.entries[idx].value.local_id, true
 	}
 
-	if g_actor_type_registry.count >= MAX_ACTOR_TYPES - 1 {
-		return 0, false
-	}
+	if g_actor_type_registry.count >= MAX_ACTOR_TYPES - 1 do return 0, false
 
 	idx := g_actor_type_registry.count
 	local_id := Actor_Type(idx + 1)
@@ -160,9 +156,7 @@ get_actor_type_name :: proc(actor_type: Actor_Type) -> (string, bool) {
 
 get_actor_type_by_name :: proc(name: string) -> (Actor_Type, bool) {
 	value, found := registry_get_by_name(&g_actor_type_registry, name)
-	if found {
-		return value.local_id, true
-	}
+	if found do return value.local_id, true
 	return 0, false
 }
 
@@ -179,8 +173,6 @@ get_actor_type_hash :: proc(actor_type: Actor_Type) -> (u64, bool) {
 
 get_actor_type_by_hash :: proc(hash: u64) -> (Actor_Type, bool) {
 	value, found := registry_get_by_hash(&g_actor_type_registry, hash)
-	if found {
-		return value.local_id, true
-	}
+	if found do return value.local_id, true
 	return 0, false
 }

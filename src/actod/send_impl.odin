@@ -13,7 +13,7 @@ Msg_Class :: enum u8 {
 }
 
 @(private)
-create_message_impl :: proc(
+make_message_impl :: proc(
 	msg: ^Message,
 	pool: ^Pool,
 	data: rawptr,
@@ -36,9 +36,7 @@ create_message_impl :: proc(
 		aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size, CACHE_LINE_SIZE)
 
 		buffer, alloc_err := message_alloc(pool, aligned_size)
-		if alloc_err != .OK {
-			return alloc_err, aligned_size
-		}
+		if alloc_err != .OK do return alloc_err, aligned_size
 
 		header := cast(^Type_Header)buffer
 		header.type_id = tid
@@ -67,9 +65,7 @@ create_message_impl :: proc(
 	aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size + variable_size, CACHE_LINE_SIZE)
 
 	buffer, alloc_err := message_alloc(pool, aligned_size)
-	if alloc_err != .OK {
-		return alloc_err, aligned_size
-	}
+	if alloc_err != .OK do return alloc_err, aligned_size
 
 	header := cast(^Type_Header)buffer
 	header.type_id = tid
@@ -138,9 +134,7 @@ send_user_backpressure_loop :: proc(
 			handle.wants_reschedule = true
 			coro.yield(co)
 		} else if NODE.config.sim_mode {
-			if !sim_pump() {
-				runtime_sleep(SEND_RETRY_DELAY)
-			}
+			if !sim_pump() do runtime_sleep(SEND_RETRY_DELAY)
 		} else {
 			runtime_sleep(SEND_RETRY_DELAY)
 		}
@@ -169,7 +163,7 @@ send_user_backpressure_loop :: proc(
 				sync.atomic_load_explicit(&target.pool.allocated_count, .Relaxed) <
 					target.pool.max_pages
 			if pool_has_room {
-				alloc_err, attempted_size := create_message_impl(
+				alloc_err, attempted_size := make_message_impl(
 					msg,
 					&target.pool,
 					data,
@@ -258,9 +252,7 @@ send_to_actor_impl :: proc(
 	token: u64 = 0,
 ) -> Send_Error {
 	when class == .User {
-		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
-			return .SYSTEM_SHUTTING_DOWN
-		}
+		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) do return .SYSTEM_SHUTTING_DOWN
 	}
 
 	current_state := sync.atomic_load(&actor.state)
@@ -285,7 +277,7 @@ send_to_actor_impl :: proc(
 		msg.content = nil
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
 	} else {
-		alloc_err, attempted_size := create_message_impl(&msg, &actor.pool, data, size, tid, info, token)
+		alloc_err, attempted_size := make_message_impl(&msg, &actor.pool, data, size, tid, info, token)
 		when class == .User {
 			if alloc_err == .POOL_EXHAUSTED || alloc_err == .ALLOC_CONTENDED {
 				return send_user_backpressure(to, &msg, false, data, size, tid, info, token, loc)
@@ -333,14 +325,10 @@ send_message_impl :: proc(
 	loc := #caller_location,
 	token: u64 = 0,
 ) -> Send_Error {
-	if to == 0 {
-		return .ACTOR_NOT_FOUND
-	}
+	if to == 0 do return .ACTOR_NOT_FOUND
 
 	when class == .User {
-		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) {
-			return .SYSTEM_SHUTTING_DOWN
-		}
+		if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) do return .SYSTEM_SHUTTING_DOWN
 	}
 
 	if !is_local_pid(to) {
@@ -352,9 +340,7 @@ send_message_impl :: proc(
 	}
 
 	actor_ptr, home_worker, ok := get_relaxed_loc(&NODE.actor_registry, to)
-	if !ok || actor_ptr == nil {
-		return .ACTOR_NOT_FOUND
-	}
+	if !ok || actor_ptr == nil do return .ACTOR_NOT_FOUND
 
 	if current_worker != nil && home_worker == i32(current_worker.id) + 1 {
 		return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc, token)
@@ -389,9 +375,7 @@ send_self_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
-	if !ok {
-		return .ACTOR_NOT_FOUND
-	}
+	if !ok do return .ACTOR_NOT_FOUND
 	return send_to_actor_impl(actor.pid, actor, data, size, tid, info, class, loc)
 }
 
@@ -409,9 +393,7 @@ send_message_to_parent_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
-	if !ok {
-		return .ACTOR_NOT_FOUND
-	}
+	if !ok do return .ACTOR_NOT_FOUND
 	if actor.parent == 0 {
 		log.errorf(
 			"send_message_to_parent(%v) failed: actor '%s' has no parent (it was spawned without one)",
@@ -452,15 +434,11 @@ send_message_to_children_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
-	if !ok {
-		return .ACTOR_NOT_FOUND
-	}
+	if !ok do return .ACTOR_NOT_FOUND
 	for child_pid in actor.children {
 		if !is_local_pid(child_pid) {
 			err := send_message_impl(child_pid, data, size, tid, info, class, loc)
-			if err != .OK {
-				return err
-			}
+			if err != .OK do return err
 			continue
 		}
 		child_actor, child_ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
@@ -475,9 +453,283 @@ send_message_to_children_impl :: proc(
 			return .ACTOR_NOT_FOUND
 		}
 		err := send_to_actor_impl(child_pid, child_actor, data, size, tid, info, class, loc)
-		if err != .OK {
-			return err
-		}
+		if err != .OK do return err
 	}
 	return .OK
+}
+
+@(private)
+fixup_inline_pointers :: proc(inline_data: ^[INLINE_MESSAGE_SIZE]byte, type_id: typeid) {
+	info, ok := get_type_info_ptr(type_id)
+	if !ok || info.flags == {} do return
+
+	struct_size := info.type_info.size
+	offset := struct_size
+
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(inline_data) + field.offset)
+			if f.len > 0 {
+				f.data = rawptr(uintptr(inline_data) + uintptr(offset))
+				offset += f.len
+			}
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, variant_ok := get_active_union_variant(inline_data, uf)
+			if !variant_ok do continue
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(inline_data) + field.offset)
+				if f.len > 0 {
+					f.data = rawptr(uintptr(inline_data) + uintptr(offset))
+					offset += f.len
+				}
+			}
+		}
+	}
+}
+
+@(private)
+calculate_variable_data_size :: #force_inline proc(
+	value_ptr: rawptr,
+	info: ^Message_Type_Info,
+) -> int {
+	total := 0
+
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(value_ptr) + field.offset)
+			total += f.len
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(value_ptr, uf)
+			if !ok do continue
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(value_ptr) + field.offset)
+				total += f.len
+			}
+		}
+	}
+
+	return total
+}
+
+@(private)
+copy_variable_data :: #force_inline proc(
+	dest_base: rawptr,
+	struct_ptr: rawptr,
+	src_value_ptr: rawptr,
+	info: ^Message_Type_Info,
+	start_offset: int,
+) {
+	offset := start_offset
+
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			src := cast(^mem.Raw_Slice)(uintptr(src_value_ptr) + field.offset)
+			dst := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
+
+			if src.len > 0 {
+				dest := rawptr(uintptr(dest_base) + uintptr(offset))
+				intrinsics.mem_copy_non_overlapping(dest, src.data, src.len)
+				dst^ = mem.Raw_Slice {
+					data = dest,
+					len  = src.len,
+				}
+				offset += src.len
+			} else {
+				dst^ = mem.Raw_Slice{}
+			}
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(src_value_ptr, uf)
+			if !ok do continue
+			for field in variant.var_fields {
+				src := cast(^mem.Raw_Slice)(uintptr(src_value_ptr) + field.offset)
+				dst := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
+
+				if src.len > 0 {
+					dest := rawptr(uintptr(dest_base) + uintptr(offset))
+					intrinsics.mem_copy_non_overlapping(dest, src.data, src.len)
+					dst^ = mem.Raw_Slice {
+						data = dest,
+						len  = src.len,
+					}
+					offset += src.len
+				} else {
+					dst^ = mem.Raw_Slice{}
+				}
+			}
+		}
+	}
+}
+
+@(private)
+create_message_from_payload :: #force_inline proc(
+	msg: ^Message,
+	pool: ^Pool,
+	payload: []byte,
+	info: ^Message_Type_Info,
+	token: u64 = 0,
+) -> (
+	Alloc_Error,
+	int,
+) {
+	struct_size := info.size
+
+	if len(payload) < struct_size do return .MALFORMED_PAYLOAD, 0
+
+	if info.flags == {} {
+		if struct_size <= INLINE_MESSAGE_SIZE && token == 0 {
+			msg.inline_type = info.type_id
+			msg.content = nil
+			intrinsics.mem_copy_non_overlapping(
+				&msg.inline_data[0],
+				raw_data(payload),
+				struct_size,
+			)
+			return .OK, 0
+		}
+
+		aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + struct_size, CACHE_LINE_SIZE)
+		buffer, alloc_err := message_alloc(pool, aligned_size)
+		if alloc_err != .OK do return alloc_err, aligned_size
+
+		header := cast(^Type_Header)buffer
+		header.type_id = info.type_id
+		header.size = i32(aligned_size)
+		intrinsics.mem_copy_non_overlapping(
+			rawptr(uintptr(buffer) + TYPE_HEADER_SIZE),
+			raw_data(payload),
+			struct_size,
+		)
+
+		msg.content = buffer
+		msg.inline_type = nil
+		msg.ask_token = token
+		return .OK, 0
+	}
+
+	// SLOW PATH
+	variable_size := len(payload) - struct_size
+	total_message_size := struct_size + variable_size
+
+	if total_message_size <= INLINE_MESSAGE_SIZE && token == 0 {
+		msg.inline_type = info.type_id
+		msg.content = INLINE_NEEDS_FIXUP
+		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], raw_data(payload), struct_size)
+		if !copy_variable_data_from_payload(
+			&msg.inline_data[0],
+			&msg.inline_data[0],
+			payload,
+			info,
+			struct_size,
+		) {
+			return .MALFORMED_PAYLOAD, 0
+		}
+		return .OK, 0
+	}
+
+	aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + total_message_size, CACHE_LINE_SIZE)
+	buffer, alloc_err := message_alloc(pool, aligned_size)
+	if alloc_err != .OK do return alloc_err, aligned_size
+
+	header := cast(^Type_Header)buffer
+	header.type_id = info.type_id
+	header.size = i32(aligned_size)
+
+	data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
+	intrinsics.mem_copy_non_overlapping(data_ptr, raw_data(payload), struct_size)
+	if !copy_variable_data_from_payload(
+		buffer,
+		data_ptr,
+		payload,
+		info,
+		TYPE_HEADER_SIZE + struct_size,
+	) {
+		free_message(pool, buffer)
+		return .MALFORMED_PAYLOAD, 0
+	}
+
+	msg.content = buffer
+	msg.inline_type = nil
+	msg.ask_token = token
+	return .OK, 0
+}
+
+@(private)
+copy_variable_data_from_payload :: #force_inline proc(
+	dest_base: rawptr,
+	struct_ptr: rawptr,
+	payload: []byte,
+	info: ^Message_Type_Info,
+	dest_start_offset: int,
+) -> bool {
+	dest_offset := dest_start_offset
+	payload_offset := info.size
+	payload_len := len(payload)
+
+	if .Has_Var_Fields in info.flags {
+		for field in info.var_fields {
+			f := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
+			field_len := f.len
+
+			if field_len > 0 {
+				if field_len > payload_len - payload_offset do return false
+				dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
+				intrinsics.mem_copy_non_overlapping(
+					dest,
+					raw_data(payload[payload_offset:]),
+					field_len,
+				)
+				f^ = mem.Raw_Slice {
+					data = dest,
+					len  = field_len,
+				}
+				dest_offset += field_len
+				payload_offset += field_len
+			} else {
+				f^ = mem.Raw_Slice{}
+			}
+		}
+	}
+
+	if .Has_Unions in info.flags {
+		for uf in info.union_fields {
+			variant, ok := get_active_union_variant(struct_ptr, uf)
+			if !ok do continue
+			for field in variant.var_fields {
+				f := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
+				field_len := f.len
+
+				if field_len > 0 {
+					if field_len > payload_len - payload_offset do return false
+					dest := rawptr(uintptr(dest_base) + uintptr(dest_offset))
+					intrinsics.mem_copy_non_overlapping(
+						dest,
+						raw_data(payload[payload_offset:]),
+						field_len,
+					)
+					f^ = mem.Raw_Slice {
+						data = dest,
+						len  = field_len,
+					}
+					dest_offset += field_len
+					payload_offset += field_len
+				} else {
+					f^ = mem.Raw_Slice{}
+				}
+			}
+		}
+	}
+
+	return true
 }

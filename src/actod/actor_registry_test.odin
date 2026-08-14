@@ -17,7 +17,7 @@ TEST_REGISTRY_SIZE :: 2048
 
 make_test_registry :: proc() -> ^PID_Map(rawptr, PID) {
 	reg := new(PID_Map(rawptr, PID))
-	init_pid_map(reg, TEST_REGISTRY_SIZE)
+	pid_map_init(reg, TEST_REGISTRY_SIZE)
 	return reg
 }
 
@@ -1035,7 +1035,7 @@ registry_growth_keeps_entries_stable :: proc(t: ^testing.T) {
 	defer NODE.config.allow_registry_growth = saved_growth
 
 	reg := new(PID_Map(rawptr, PID))
-	init_pid_map(reg, 64)
+	pid_map_init(reg, 64)
 	defer {
 		destroy(reg)
 		free(reg)

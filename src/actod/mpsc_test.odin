@@ -8,7 +8,7 @@ import "core:thread"
 @(test)
 test_mpsc_basic_operations :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 16)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	{
 		ok := mpsc_push(&queue, 42)
@@ -50,7 +50,7 @@ test_mpsc_basic_operations :: proc(t: ^testing.T) {
 test_mpsc_capacity :: proc(t: ^testing.T) {
 	CAPACITY :: 8
 	queue: MPSC_Queue(int, CAPACITY)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	for i := 0; i < CAPACITY; i += 1 {
 		ok := mpsc_push(&queue, i)
@@ -87,7 +87,7 @@ test_mpsc_capacity :: proc(t: ^testing.T) {
 @(test)
 test_mpsc_peek :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 8)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	{
 		value: int
@@ -122,7 +122,7 @@ test_mpsc_peek :: proc(t: ^testing.T) {
 @(test)
 test_mpsc_batch_operations :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 64)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	ITEM_COUNT :: 50
 	for i := 0; i < ITEM_COUNT; i += 1 {
@@ -168,7 +168,7 @@ test_mpsc_batch_operations :: proc(t: ^testing.T) {
 @(test)
 test_mpsc_spsc :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 32)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	ITEM_COUNT :: 100
 	done := false
@@ -236,7 +236,7 @@ test_mpsc_spsc :: proc(t: ^testing.T) {
 @(test)
 test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 256)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	PRODUCER_COUNT :: 3
 	ITEMS_PER_PRODUCER :: 50
@@ -347,7 +347,7 @@ test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 @(test)
 test_mpsc_concurrent_stress :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 128)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	TARGET_ITEMS :: 100000
 	stop_flag := false
@@ -420,7 +420,7 @@ test_mpsc_concurrent_stress :: proc(t: ^testing.T) {
 @(test)
 test_mpsc_state_functions :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 8)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	testing.expect(t, mpsc_is_empty(&queue), "New queue should be empty")
 
@@ -465,7 +465,7 @@ test_mpsc_data_integrity :: proc(t: ^testing.T) {
 	}
 
 	queue: MPSC_Queue(Test_Struct, 32)
-	init_mpsc(&queue)
+	mpsc_init(&queue)
 
 	TEST_COUNT :: 20
 	for i := 0; i < TEST_COUNT; i += 1 {

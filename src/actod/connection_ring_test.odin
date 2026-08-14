@@ -41,7 +41,7 @@ make_test_ring :: proc(slot_count: u32, slot_size: u32) -> ^Connection_Ring {
 		send_slot_size   = slot_size,
 		recv_buffer_size = 1024,
 	}
-	ring := create_connection_ring(config)
+	ring := make_connection_ring(config)
 	if ring != nil {
 		ring.state = .Ready
 	}
@@ -222,7 +222,7 @@ test_create_destroy_connection_ring :: proc(t: ^testing.T) {
 		tcp_nodelay      = true,
 	}
 
-	ring := create_connection_ring(config)
+	ring := make_connection_ring(config)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
 
@@ -250,7 +250,7 @@ test_connection_ring_config_validation :: proc(t: ^testing.T) {
 			send_slot_size   = 1024,
 			recv_buffer_size = 4096,
 		}
-		ring := create_connection_ring(config)
+		ring := make_connection_ring(config)
 		if ring != nil {
 			testing.expect(t, ring.send_slot_count == count, "Slot count should match")
 			destroy_connection_ring(ring)
@@ -266,7 +266,7 @@ test_acquire_slot :: proc(t: ^testing.T) {
 		recv_buffer_size = 1024,
 	}
 
-	ring := create_connection_ring(config)
+	ring := make_connection_ring(config)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
 
@@ -1424,16 +1424,16 @@ pool_test_config :: Connection_Ring_Config {
 
 @(test)
 test_pool_add_park_reuse :: proc(t: ^testing.T) {
-	pool := create_connection_pool(5, pool_test_config)
+	pool := make_connection_pool(5, pool_test_config)
 	defer free(pool)
 
-	ring0 := create_connection_ring(pool_test_config)
+	ring0 := make_connection_ring(pool_test_config)
 	defer destroy_connection_ring(ring0)
 	ring0.pool = pool
 	atomic_store_ring_ptr(&pool.rings[0], ring0)
 	sync.atomic_store(&pool.ring_count, u32(1))
 
-	ring1 := create_connection_ring(pool_test_config)
+	ring1 := make_connection_ring(pool_test_config)
 	defer destroy_connection_ring(ring1)
 
 	testing.expect(t, pool_add_ring(pool, ring1), "add should succeed")
@@ -1455,12 +1455,12 @@ test_pool_add_park_reuse :: proc(t: ^testing.T) {
 
 @(test)
 test_pool_round_robin_skips_parked :: proc(t: ^testing.T) {
-	pool := create_connection_pool(6, pool_test_config)
+	pool := make_connection_pool(6, pool_test_config)
 	defer free(pool)
 
 	rings: [3]^Connection_Ring
 	for i in 0 ..< 3 {
-		rings[i] = create_connection_ring(pool_test_config)
+		rings[i] = make_connection_ring(pool_test_config)
 		rings[i].state = .Ready
 	}
 	defer for i in 0 ..< 3 do destroy_connection_ring(rings[i])
@@ -1488,7 +1488,7 @@ test_pool_round_robin_skips_parked :: proc(t: ^testing.T) {
 
 @(test)
 test_pool_contention_sets_scale_request :: proc(t: ^testing.T) {
-	pool := create_connection_pool(7, pool_test_config)
+	pool := make_connection_pool(7, pool_test_config)
 	defer free(pool)
 
 	pool_note_contention(pool)

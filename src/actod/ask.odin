@@ -40,9 +40,7 @@ ask :: #force_inline proc(
 	}
 
 	timer_id, timer_err := set_timer(timeout, false, loc)
-	if timer_err != .OK {
-		return 0, timer_err
-	}
+	if timer_err != .OK do return 0, timer_err
 
 	token := ctx.next_ask_token + 1
 	v := content
@@ -62,14 +60,10 @@ ask :: #force_inline proc(
 @(require_results)
 reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {
-		if err, ok := ti.intercept_reply(content); ok {
-			return Send_Error(err)
-		}
+		if err, ok := ti.intercept_reply(content); ok do return Send_Error(err)
 	}
 	ctx := current_actor_context
-	if ctx == nil || ctx.current_ask_token == 0 {
-		return .NOT_ASKED
-	}
+	if ctx == nil || ctx.current_ask_token == 0 do return .NOT_ASKED
 
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
@@ -93,9 +87,7 @@ replying_to :: proc() -> (Ask_Token, bool) {
 		}
 	}
 	ctx := current_actor_context
-	if ctx == nil || ctx.current_reply_token == 0 {
-		return 0, false
-	}
+	if ctx == nil || ctx.current_reply_token == 0 do return 0, false
 	return Ask_Token(ctx.current_reply_token), true
 }
 

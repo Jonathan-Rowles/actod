@@ -93,33 +93,25 @@ run_benchmark_tests :: proc() {
 		port    = 17200,
 	}
 	_, ok := actod.register_node("BenchmarkReceiver", remote_addr, .TCP_Custom_Protocol)
-	if !ok {
-		panic("Failed to register remote receiver node")
-	}
+	if !ok do panic("Failed to register remote receiver node")
 
 	coordinator_data := 0
 	coordinator_behaviour := create_sender_coordinator_behaviour()
 	coordinator_pid: actod.PID
 	coordinator_pid, ok = actod.spawn("TestCoordinator", coordinator_data, coordinator_behaviour)
-	if !ok {
-		panic("Failed to spawn test coordinator")
-	}
+	if !ok do panic("Failed to spawn test coordinator")
 	global_coordinator_pid = coordinator_pid
 
 	stats_data := 0
 	stats_behaviour := create_sender_stats_behaviour()
 	_, ok = actod.spawn("StatsCollector", stats_data, stats_behaviour)
-	if !ok {
-		panic("Failed to spawn stats collector")
-	}
+	if !ok do panic("Failed to spawn stats collector")
 
 	time.sleep(1 * time.Second)
 
 	arena: vmem.Arena
 	arena_err := vmem.arena_init_static(&arena)
-	if arena_err != nil {
-		panic("Failed to initialize arena")
-	}
+	if arena_err != nil do panic("Failed to initialize arena")
 	defer vmem.arena_destroy(&arena)
 	context.allocator = vmem.arena_allocator(&arena)
 

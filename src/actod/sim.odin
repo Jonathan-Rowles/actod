@@ -32,22 +32,16 @@ sim_trace_enable :: proc(enabled: bool) {
 }
 
 sim_trace_reset :: proc() {
-	if g_sim_trace_ready {
-		builtin.clear(&g_sim_trace)
-	}
+	if g_sim_trace_ready do builtin.clear(&g_sim_trace)
 }
 
 sim_trace_events :: proc() -> []Sim_Trace_Event {
-	if !g_sim_trace_ready {
-		return nil
-	}
+	if !g_sim_trace_ready do return nil
 	return g_sim_trace[:]
 }
 
 sim_trace_record :: #force_inline proc(kind: Sim_Trace_Kind, a: u64, b: u64) {
-	if !g_sim_trace_enabled {
-		return
-	}
+	if !g_sim_trace_enabled do return
 	append(&g_sim_trace, Sim_Trace_Event{kind = kind, a = a, b = b})
 }
 
@@ -78,9 +72,7 @@ sim_resume_next :: proc(w: ^Worker) {
 		w.runnext = nil
 	} else {
 		handle = ready_pop(w)
-		if handle == nil {
-			return
-		}
+		if handle == nil do return
 	}
 	sim_trace_record(.Actor_Resume, u64(w.id), u64((cast(^Actor(int))handle.actor_ptr).pid))
 	worker_resume_handle(w, handle)
@@ -111,9 +103,7 @@ sim_bind_node :: proc(node: ^Node_State) -> ^Node_State {
 }
 
 sim_destroy_node :: proc(node: ^Node_State) {
-	if len(node.name) > 0 {
-		delete(node.name, get_system_allocator())
-	}
+	if len(node.name) > 0 do delete(node.name, get_system_allocator())
 	if len(node.config.network.auth_password) > 0 {
 		delete(node.config.network.auth_password, get_system_allocator())
 	}
@@ -124,9 +114,7 @@ sim_destroy_node :: proc(node: ^Node_State) {
 }
 
 sim_pump :: proc() -> bool {
-	if !NODE.config.sim_mode || !NODE.worker_pool.initialized {
-		return false
-	}
+	if !NODE.config.sim_mode || !NODE.worker_pool.initialized do return false
 
 	previous_worker := current_worker
 	defer current_worker = previous_worker
@@ -139,19 +127,13 @@ sim_pump :: proc() -> bool {
 	if sim_rng != 0 {
 		ready_count := 0
 		for i in 0 ..< pool.worker_count {
-			if sim_worker_has_work(&pool.workers[i]) {
-				ready_count += 1
-			}
+			if sim_worker_has_work(&pool.workers[i]) do ready_count += 1
 		}
-		if ready_count == 0 {
-			return fired || io_progress
-		}
+		if ready_count == 0 do return fired || io_progress
 		pick := int(sim_rand() % u64(ready_count))
 		for i in 0 ..< pool.worker_count {
 			w := &pool.workers[i]
-			if !sim_worker_has_work(w) {
-				continue
-			}
+			if !sim_worker_has_work(w) do continue
 			if pick == 0 {
 				sim_resume_next(w)
 				return true

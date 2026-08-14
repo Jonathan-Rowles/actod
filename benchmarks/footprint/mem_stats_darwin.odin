@@ -22,17 +22,13 @@ task_info :: proc() -> (darwin.proc_taskinfo, bool) {
 
 read_rss_kb :: proc() -> int {
 	info, ok := task_info()
-	if !ok {
-		return -1
-	}
+	if !ok do return -1
 	return int(info.pti_resident_size / 1024)
 }
 
 read_virtual_kb :: proc() -> int {
 	info, ok := task_info()
-	if !ok {
-		return -1
-	}
+	if !ok do return -1
 	return int(info.pti_virtual_size / 1024)
 }
 
@@ -87,9 +83,7 @@ next_region :: proc(address: u64) -> (Region, bool) {
 		if result != .Success {
 			return {}, false
 		}
-		if !info.is_submap {
-			break
-		}
+		if !info.is_submap do break
 		depth += 1
 	}
 
@@ -106,14 +100,10 @@ walk_regions :: proc(visit: proc(region: Region, user: rawptr), user: rawptr) {
 	address: u64 = 0
 	for {
 		region, ok := next_region(address)
-		if !ok {
-			return
-		}
+		if !ok do return
 		visit(region, user)
 		next := region.address + region.size
-		if next <= address {
-			return
-		}
+		if next <= address do return
 		address = next
 	}
 }
@@ -132,23 +122,17 @@ read_max_map_count :: proc() -> int {
 
 read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 	page_size := u64(posix.sysconf(._PAGESIZE))
-	if page_size == 0 {
-		return -1
-	}
+	if page_size == 0 do return -1
 
 	resident_pages: u64 = 0
 	cursor := u64(address)
 	limit := u64(address) + u64(size)
 	for cursor < limit {
 		region, ok := next_region(cursor)
-		if !ok || region.address >= limit {
-			break
-		}
+		if !ok || region.address >= limit do break
 		resident_pages += u64(region.pages_resident)
 		next := region.address + region.size
-		if next <= cursor {
-			break
-		}
+		if next <= cursor do break
 		cursor = next
 	}
 	return int(resident_pages * page_size / 1024)

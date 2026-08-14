@@ -84,9 +84,7 @@ create_network_benchmark_behaviour :: proc(
 						u64(global_receiver_state.current_test.actor_count)
 					total_expected := warmup_per_actor + test_per_actor
 
-					if data.message_count == warmup_per_actor + 1 {
-						data.start_time = time.now()
-					}
+					if data.message_count == warmup_per_actor + 1 do data.start_time = time.now()
 
 					if data.message_count >= total_expected {
 						data.last_msg_time = time.now()
@@ -153,9 +151,7 @@ create_stats_collector_behaviour :: proc() -> actod.Actor_Behaviour(Stats_Collec
 					}
 
 					err := actod.send_remote_by_name("BenchmarkSender", "StatsCollector", report)
-					if err != .OK {
-						fmt.printf("Failed to send stats report: %v\n", err)
-					}
+					if err != .OK do fmt.printf("Failed to send stats report: %v\n", err)
 
 					global_receiver_state.test_complete = true
 				}
@@ -183,9 +179,7 @@ spawn_benchmark_actor :: proc($T: typeid, id: int) -> actod.PID {
 		),
 	)
 
-	if !ok {
-		panic(fmt.tprintf("Failed to spawn benchmark actor %d", id))
-	}
+	if !ok do panic(fmt.tprintf("Failed to spawn benchmark actor %d", id))
 
 	return pid
 }
@@ -232,9 +226,7 @@ handle_start_test :: proc(msg: shared.Start_Test_Message) {
 	}
 
 	err := actod.send_remote_by_name("BenchmarkSender", "TestCoordinator", ready_msg)
-	if err != .OK {
-		fmt.printf("Failed to send ready message: %v\n", err)
-	}
+	if err != .OK do fmt.printf("Failed to send ready message: %v\n", err)
 }
 
 create_test_coordinator_behaviour :: proc() -> actod.Actor_Behaviour(int) {
@@ -251,9 +243,7 @@ create_test_coordinator_behaviour :: proc() -> actod.Actor_Behaviour(int) {
 run_receiver_node :: proc() {
 	port_str := os.lookup_env("BENCH_PORT", context.temp_allocator) or_else "17200"
 	port, port_ok := strconv.parse_int(port_str)
-	if !port_ok {
-		port = 17200
-	}
+	if !port_ok do port = 17200
 
 	auth := os.lookup_env("BENCH_AUTH", context.temp_allocator) or_else "bench_password"
 
@@ -283,17 +273,13 @@ run_receiver_node :: proc() {
 	stats_data := Stats_Collector_Data{}
 	stats_behaviour := create_stats_collector_behaviour()
 	stats_pid, ok := actod.spawn("StatsCollector", stats_data, stats_behaviour)
-	if !ok {
-		panic("Failed to spawn stats collector")
-	}
+	if !ok do panic("Failed to spawn stats collector")
 	global_receiver_state.stats_collector = stats_pid
 
 	coordinator_data := 0
 	coordinator_behaviour := create_test_coordinator_behaviour()
 	_, ok = actod.spawn("TestCoordinator", coordinator_data, coordinator_behaviour)
-	if !ok {
-		panic("Failed to spawn test coordinator")
-	}
+	if !ok do panic("Failed to spawn test coordinator")
 
 	fmt.println("[Receiver] Node started, waiting for tests...")
 

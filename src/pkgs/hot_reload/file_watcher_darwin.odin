@@ -96,7 +96,7 @@ File_Watcher :: struct {
 	started:     bool,
 }
 
-create_watcher :: proc(
+make_watcher :: proc(
 	callback: Watch_Callback,
 	user_data: rawptr,
 	debounce_ms: int = 100,
@@ -132,26 +132,20 @@ add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> b
 	}
 	watcher.watch_count += 1
 
-	if watcher.started {
-		restart_stream(watcher)
-	}
+	if watcher.started do restart_stream(watcher)
 
 	return true
 }
 
 start_watcher :: proc(watcher: ^File_Watcher) {
-	if watcher.queue == nil {
-		watcher.queue = dispatch_queue_create("actod.fsevents", nil)
-	}
+	if watcher.queue == nil do watcher.queue = dispatch_queue_create("actod.fsevents", nil)
 	watcher.started = true
 
-	if watcher.watch_count > 0 {
-		create_stream(watcher)
-	}
+	if watcher.watch_count > 0 do make_stream(watcher)
 }
 
 @(private)
-create_stream :: proc(watcher: ^File_Watcher) {
+make_stream :: proc(watcher: ^File_Watcher) {
 	if watcher.watch_count == 0 || watcher.queue == nil do return
 
 	unique_paths: [MAX_WATCHES]string
@@ -215,7 +209,7 @@ restart_stream :: proc(watcher: ^File_Watcher) {
 		FSEventStreamRelease(watcher.stream)
 		watcher.stream = nil
 	}
-	create_stream(watcher)
+	make_stream(watcher)
 }
 
 fsevents_callback :: proc "c" (

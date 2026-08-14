@@ -77,9 +77,7 @@ frame_tap :: proc(
 	dup: bool,
 	corrupt: bool,
 ) {
-	if sync.atomic_load_explicit(&g_frame_fault_count, .Relaxed) == 0 {
-		return false, false, false
-	}
+	if sync.atomic_load_explicit(&g_frame_fault_count, .Relaxed) == 0 do return false, false, false
 	sync.mutex_lock(&g_frame_fault_mutex)
 	defer sync.mutex_unlock(&g_frame_fault_mutex)
 	for i in 0 ..< sync.atomic_load_explicit(&g_frame_fault_count, .Relaxed) {
@@ -96,9 +94,7 @@ frame_tap :: proc(
 		case .Duplicate:
 			return false, true, false
 		case .Corrupt:
-			if len(frame) > 0 {
-				frame[len(frame) - 1] ~= 0xFF
-			}
+			if len(frame) > 0 do frame[len(frame) - 1] ~= 0xFF
 			return false, false, true
 		}
 	}

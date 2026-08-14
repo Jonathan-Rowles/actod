@@ -102,9 +102,7 @@ Connection_Actor_Behaviour :: Actor_Behaviour(Connection_Actor_Data) {
 
 connection_actor_init :: proc(data: ^Connection_Actor_Data) {
 	data.encrypted = NODE.config.network.enable_encryption
-	if data.node_id != 0 {
-		data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
-	}
+	if data.node_id != 0 do data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
 }
 
 connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
@@ -182,14 +180,10 @@ release_pending_incoming :: proc(data: ^Connection_Actor_Data) {
 connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: any) {
 	switch m in msg {
 	case Connect_Request:
-		if data.state != .Disconnected && data.state != .Failed {
-			return
-		}
+		if data.state != .Disconnected && data.state != .Failed do return
 		cancel_timer(data.reconnect_timer_id)
 		data.address = m.address
-		if data.node_id == 0 {
-			data.node_id = m.node_id
-		}
+		if data.node_id == 0 do data.node_id = m.node_id
 		data.state = .Connecting
 		if !initiate_connection(data) {
 			data.state = .Failed
@@ -197,16 +191,12 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 		}
 
 	case Close_Connection:
-		if data.state == .Disconnected || data.state == .Failed {
-			return
-		}
+		if data.state == .Disconnected || data.state == .Failed do return
 		log.infof("Closing connection to node %d: %s", data.node_id, m.reason)
 		close_connection(data)
 
 	case Start_Receiving:
-		if !data.is_incoming || data.tcp_socket == 0 || data.state != .Disconnected {
-			return
-		}
+		if !data.is_incoming || data.tcp_socket == 0 || data.state != .Disconnected do return
 		data.state = .Connecting
 		result := establish_connection(data)
 		release_pending_incoming(data)
@@ -243,9 +233,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 			count := pool_active_count(pool)
 			for i: u32 = 1; i < count; i += 1 {
 				pr := get_pool_ring_at(pool, i)
-				if pr == nil || u64(uintptr(pr)) != m.ring_ptr {
-					continue
-				}
+				if pr == nil || u64(uintptr(pr)) != m.ring_ptr do continue
 				if sync.atomic_load(&pr.park_state) == .Active {
 					sync.atomic_store(&pr.park_state, Ring_Park_State.Park_Asked)
 				}
@@ -332,12 +320,8 @@ build_hello_body :: proc(
 	pool_join: bool,
 ) -> []byte {
 	flags: u8 = 0
-	if data.encrypted {
-		flags |= HELLO_FLAG_ENCRYPTED
-	}
-	if pool_join {
-		flags |= HELLO_FLAG_POOL_JOIN
-	}
+	if data.encrypted do flags |= HELLO_FLAG_ENCRYPTED
+	if pool_join do flags |= HELLO_FLAG_POOL_JOIN
 
 	total := 1 + 4 + 1 + 2 + 2 + (2 + len(NODE.name)) + 8 + 8 + 8 + 8
 	body := make([]byte, total)
@@ -371,12 +355,8 @@ parse_hello :: proc(payload: []byte) -> (info: Hello_Info, ok: bool) {
 	info.node_name = ctrl_get_str(&r)
 	info.nonce = ctrl_get_u64(&r)
 	info.join_token = ctrl_get_u64(&r)
-	if r.pos + 8 <= len(r.data) {
-		info.incarnation = ctrl_get_u64(&r)
-	}
-	if r.pos + 8 <= len(r.data) {
-		info.gossip_seq = ctrl_get_u64(&r)
-	}
+	if r.pos + 8 <= len(r.data) do info.incarnation = ctrl_get_u64(&r)
+	if r.pos + 8 <= len(r.data) do info.gossip_seq = ctrl_get_u64(&r)
 	info.encrypted = flags & HELLO_FLAG_ENCRYPTED != 0
 	info.pool_join = flags & HELLO_FLAG_POOL_JOIN != 0
 	return info, r.ok && len(info.node_name) > 0
@@ -399,9 +379,7 @@ perform_plaintext_auth :: proc(
 	info: Hello_Info,
 	deadline: time.Time,
 ) -> bool {
-	if data.encrypted || data.auth_password == "" {
-		return true
-	}
+	if data.encrypted || data.auth_password == "" do return true
 
 	proof := compute_auth_proof(data.auth_password, NODE.name, info.nonce)
 	body := make([]byte, 1 + 2 + len(proof))
@@ -411,9 +389,7 @@ perform_plaintext_auth :: proc(
 	}
 	ctrl_put_u8(&w, CTRL_MSG_AUTH)
 	ctrl_put_str(&w, proof)
-	if !handshake_send_ctrl(sock, body[:w.pos]) {
-		return false
-	}
+	if !handshake_send_ctrl(sock, body[:w.pos]) do return false
 
 	raw, payload := handshake_recv_ctrl(sock, CTRL_MSG_AUTH, deadline)
 	if raw == nil {
@@ -428,9 +404,7 @@ perform_plaintext_auth :: proc(
 		ok   = true,
 	}
 	peer_proof := ctrl_get_str(&r)
-	if !r.ok {
-		return false
-	}
+	if !r.ok do return false
 
 	expected := compute_auth_proof(data.auth_password, info.node_name, my_nonce)
 	if crypto.compare_constant_time(transmute([]byte)peer_proof, transmute([]byte)expected) != 1 {
@@ -463,9 +437,7 @@ handshake_recv_ctrl :: proc(
 	payload: []byte,
 ) {
 	raw = tcp_recv_framed_message(sock, deadline)
-	if raw == nil {
-		return nil, nil
-	}
+	if raw == nil do return nil, nil
 	when ODIN_TEST {
 		drop, _, _ := frame_tap(.In, FRAME_TAP_HANDSHAKE, raw)
 		if drop {
@@ -515,14 +487,10 @@ run_noise_handshake :: proc(
 
 	if initiator {
 		msg1, _, ok1 := noise_handshake_step(&hs, nil)
-		if !ok1 || msg1 == nil {
-			return false
-		}
+		if !ok1 || msg1 == nil do return false
 		sent1 := send_noise_ctrl(sock, CTRL_MSG_NOISE_1, msg1)
 		delete(msg1)
-		if !sent1 {
-			return false
-		}
+		if !sent1 do return false
 
 		raw2, payload2 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_2, deadline)
 		if raw2 == nil {
@@ -532,9 +500,7 @@ run_noise_handshake :: proc(
 		defer delete(raw2, actor_system_allocator)
 
 		out, done, ok2 := noise_handshake_step(&hs, payload2[1:])
-		if out != nil {
-			delete(out)
-		}
+		if out != nil do delete(out)
 		if !ok2 || !done {
 			log.error("Noise handshake failed (wrong cluster password?)")
 			return false
@@ -554,9 +520,7 @@ run_noise_handshake :: proc(
 		}
 		sent2 := send_noise_ctrl(sock, CTRL_MSG_NOISE_2, msg2)
 		delete(msg2)
-		if !sent2 {
-			return false
-		}
+		if !sent2 do return false
 	}
 
 	return noise_handshake_finish(&hs, keys)
@@ -574,9 +538,7 @@ send_noise_ctrl :: proc(sock: net.TCP_Socket, ctrl_type: u8, msg: []byte) -> boo
 @(private)
 establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	sock := data.tcp_socket
-	if !sim_is_socket(sock) {
-		net.set_blocking(sock, true)
-	}
+	if !sim_is_socket(sock) do net.set_blocking(sock, true)
 	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
 	deadline := time.time_add(now(), HANDSHAKE_TIMEOUT)
 
@@ -598,9 +560,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 			return .Failed
 		}
 	} else {
-		if !handshake_send_ctrl(sock, my_hello) {
-			return .Failed
-		}
+		if !handshake_send_ctrl(sock, my_hello) do return .Failed
 		peer_raw, peer_payload = handshake_recv_ctrl(sock, CTRL_MSG_HELLO, deadline)
 		if peer_raw == nil {
 			log.warnf("Failed to read HELLO from node %d", data.node_id)
@@ -632,9 +592,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 		)
 		return .Failed
 	}
-	if !perform_plaintext_auth(data, sock, my_nonce, info, deadline) {
-		return .Failed
-	}
+	if !perform_plaintext_auth(data, sock, my_nonce, info, deadline) do return .Failed
 
 	if info.pool_join {
 		if !data.is_incoming {
@@ -654,14 +612,10 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	set_recv_timeout(sock, 0)
 
 	if data.is_incoming {
-		if !resolve_incoming_peer(data, info) {
-			return .Failed
-		}
+		if !resolve_incoming_peer(data, info) do return .Failed
 	}
 
-	if data.ring == nil {
-		data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
-	}
+	if data.ring == nil do data.ring = get_or_create_node_ring(data.node_id, data.ring_config)
 	if data.ring == nil {
 		log.errorf("No connection ring available for node %d", data.node_id)
 		return .Failed
@@ -671,9 +625,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	ring.node_id = data.node_id
 	ring.conn_pid = get_self_pid()
 	ring.tcp_socket = data.tcp_socket
-	if data.encrypted {
-		ring.transport_keys = keys
-	}
+	if data.encrypted do ring.transport_keys = keys
 	replaced := get_connection_ring(data.node_id)
 	register_connection_ring(data.node_id, ring)
 	if replaced != nil &&
@@ -688,9 +640,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 		}
 	}
 
-	if !start_connection_io(data) {
-		return .Failed
-	}
+	if !start_connection_io(data) do return .Failed
 
 	registry_name, _ := get_node_name(data.node_id)
 	data.node_name = registry_name
@@ -785,12 +735,8 @@ handle_incoming_pool_join :: proc(
 @(private)
 establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	pool := data.ring != nil ? data.ring.pool : nil
-	if pool == nil || data.peer_join_token == 0 {
-		return false
-	}
-	if pool_active_count(pool) >= pool.max_rings {
-		return false
-	}
+	if pool == nil || data.peer_join_token == 0 do return false
+	if pool_active_count(pool) >= pool.max_rings do return false
 
 	dial_endpoint := net.Endpoint {
 		address = data.address.address,
@@ -802,9 +748,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 		return false
 	}
 
-	if !sim_is_socket(sock) {
-		net.set_blocking(sock, true)
-	}
+	if !sim_is_socket(sock) do net.set_blocking(sock, true)
 	set_recv_timeout(sock, HANDSHAKE_TIMEOUT_SECS)
 	deadline := time.time_add(now(), HANDSHAKE_TIMEOUT)
 
@@ -815,9 +759,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	my_hello := build_hello_body(data, my_nonce, data.peer_join_token, true)
 	defer delete(my_hello)
 
-	if !handshake_send_ctrl(sock, my_hello) {
-		return false
-	}
+	if !handshake_send_ctrl(sock, my_hello) do return false
 	peer_raw, peer_payload := handshake_recv_ctrl(sock, CTRL_MSG_HELLO, deadline)
 	if peer_raw == nil {
 		log.warnf("Pool scale-up: no HELLO reply from node %d", data.node_id)
@@ -829,9 +771,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	if !parsed || info.version != WIRE_PROTOCOL_VERSION || info.encrypted != data.encrypted {
 		return false
 	}
-	if !perform_plaintext_auth(data, sock, my_nonce, info, deadline) {
-		return false
-	}
+	if !perform_plaintext_auth(data, sock, my_nonce, info, deadline) do return false
 
 	keys: Noise_Transport
 	if data.encrypted {
@@ -842,9 +782,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	set_recv_timeout(sock, 0)
 
-	if !attach_pool_ring(data, sock, keys) {
-		return false
-	}
+	if !attach_pool_ring(data, sock, keys) do return false
 
 	ok = true
 	log.infof(
@@ -863,32 +801,24 @@ attach_pool_ring :: proc(
 	keys: Noise_Transport,
 ) -> bool {
 	pool := data.ring != nil ? data.ring.pool : nil
-	if pool == nil {
-		return false
-	}
+	if pool == nil do return false
 
 	ring := pool_take_parked(pool)
 	if ring == nil {
-		ring = create_connection_ring(data.ring_config, data.encrypted, get_system_allocator())
+		ring = make_connection_ring(data.ring_config, data.encrypted, get_system_allocator())
 	}
-	if ring == nil {
-		return false
-	}
+	if ring == nil do return false
 
 	ring.node_id = data.node_id
 	ring.conn_pid = get_self_pid()
 	ring.tcp_socket = sock
 	sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
-	if data.encrypted {
-		ring.transport_keys = keys
-	}
+	if data.encrypted do ring.transport_keys = keys
 
 	if !set_tcp_nodelay(sock, ring.tcp_nodelay) {
 		log.warn("Failed to set TCP_NODELAY on pool ring")
 	}
-	if !set_socket_buffers(sock) {
-		log.warn("Failed to set socket buffers on pool ring")
-	}
+	if !set_socket_buffers(sock) do log.warn("Failed to set socket buffers on pool ring")
 
 	if !pool_add_ring(pool, ring) {
 		ring.tcp_socket = 0
@@ -907,9 +837,7 @@ attach_pool_ring :: proc(
 
 @(private)
 free_boxed_keys :: proc(keys_ptr: u64) {
-	if keys_ptr == 0 {
-		return
-	}
+	if keys_ptr == 0 do return
 	keys_box := cast(^Noise_Transport)rawptr(uintptr(keys_ptr))
 	crypto.zero_explicit(keys_box, size_of(Noise_Transport))
 	free(keys_box, get_system_allocator())
@@ -948,28 +876,20 @@ adopt_pool_ring :: proc(data: ^Connection_Actor_Data, msg: Adopt_Pool_Ring) {
 @(private)
 pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
 	pool := data.ring != nil ? data.ring.pool : nil
-	if pool == nil {
-		return
-	}
+	if pool == nil do return
 
 	finalize_parked_rings(data, pool)
 
 	idle_secs := data.ring_config.scale_down_idle_seconds
-	if idle_secs == 0 {
-		idle_secs = 10
-	}
+	if idle_secs == 0 do idle_secs = 10
 	idle_ns := i64(idle_secs) * 1_000_000_000
 	now_ns := time.to_unix_nanoseconds(now())
 
 	count := pool_active_count(pool)
 	for i: u32 = 1; i < count; i += 1 {
 		ring := get_pool_ring_at(pool, i)
-		if ring == nil {
-			continue
-		}
-		if sync.atomic_load(&ring.park_state) != .Active {
-			continue
-		}
+		if ring == nil do continue
+		if sync.atomic_load(&ring.park_state) != .Active do continue
 		last := sync.atomic_load(&ring.last_send_time)
 		if last != 0 && (now_ns - last) > idle_ns {
 			sync.atomic_store(&ring.park_state, Ring_Park_State.Park_Asked)
@@ -988,16 +908,10 @@ finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Po
 	count := pool_active_count(pool)
 	for i := count; i > 1; i -= 1 {
 		ring := get_pool_ring_at(pool, i - 1)
-		if ring == nil {
-			continue
-		}
-		if sync.atomic_load(&ring.park_state) != .Park_Acked {
-			continue
-		}
+		if ring == nil do continue
+		if sync.atomic_load(&ring.park_state) != .Park_Acked do continue
 		pool_remove_active(pool, ring)
-		if ring.tcp_socket != 0 {
-			close_tcp(ring.tcp_socket)
-		}
+		if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
 		if primary := get_pool_ring_at(pool, 0); primary != nil && primary != ring {
 			_ = ring_migrate_slots(ring, primary)
 		}
@@ -1031,20 +945,14 @@ drain_pool_rings_into_primary :: proc(data: ^Connection_Actor_Data) {
 @(private)
 teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 	pool := data.ring != nil ? data.ring.pool : nil
-	if pool == nil {
-		return
-	}
+	if pool == nil do return
 
 	count := pool_active_count(pool)
 	for i := count; i > 1; i -= 1 {
 		ring := get_pool_ring_at(pool, i - 1)
-		if ring == nil {
-			continue
-		}
+		if ring == nil do continue
 		pool_remove_active(pool, ring)
-		if ring.tcp_socket != 0 {
-			close_tcp(ring.tcp_socket)
-		}
+		if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
 		ring_reset(ring)
 		pool_park(pool, ring)
 	}
@@ -1124,9 +1032,7 @@ wait_for_actor_exit :: proc(pid: PID, timeout: time.Duration) -> bool {
 			handle.wants_reschedule = true
 			coro.yield(co)
 		} else if NODE.config.sim_mode {
-			if !sim_pump() {
-				runtime_sleep(1 * time.Millisecond)
-			}
+			if !sim_pump() do runtime_sleep(1 * time.Millisecond)
 		} else {
 			runtime_sleep(1 * time.Millisecond)
 		}
@@ -1139,16 +1045,10 @@ wait_for_actor_exit :: proc(pid: PID, timeout: time.Duration) -> bool {
 start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 	ring := data.ring
 
-	if NODE.config.sim_mode {
-		return sim_start_connection_io(data)
-	}
+	if NODE.config.sim_mode do return sim_start_connection_io(data)
 
-	if !set_tcp_nodelay(data.tcp_socket, ring.tcp_nodelay) {
-		log.warn("Failed to set TCP_NODELAY")
-	}
-	if !set_socket_buffers(data.tcp_socket) {
-		log.warn("Failed to set socket buffers")
-	}
+	if !set_tcp_nodelay(data.tcp_socket, ring.tcp_nodelay) do log.warn("Failed to set TCP_NODELAY")
+	if !set_socket_buffers(data.tcp_socket) do log.warn("Failed to set socket buffers")
 
 	ctx := new(IO_Context)
 	ctx.ring = ring
@@ -1177,13 +1077,9 @@ start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 @(private)
 stop_connection_io :: proc(data: ^Connection_Actor_Data) {
 	ring := data.ring
-	if ring == nil {
-		return
-	}
+	if ring == nil do return
 	sync.atomic_store(&ring.io_stop, 1)
-	if NODE.config.sim_mode {
-		sim_stop_connection_io(ring)
-	}
+	if NODE.config.sim_mode do sim_stop_connection_io(ring)
 	if ring.io_thread != nil {
 		thread.join(ring.io_thread)
 		thread.destroy(ring.io_thread)
@@ -1197,9 +1093,7 @@ stop_connection_io :: proc(data: ^Connection_Actor_Data) {
 }
 
 is_active_connection :: proc(data: ^Connection_Actor_Data) -> bool {
-	if data.node_id == 0 || data.node_id >= MAX_NODES {
-		return false
-	}
+	if data.node_id == 0 || data.node_id >= MAX_NODES do return false
 	current_conn := PID(
 		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[data.node_id], .Acquire),
 	)
@@ -1216,9 +1110,7 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 		udp_clear_peer(data.node_id)
 	}
 
-	if data.ring != nil {
-		sync.atomic_store(&data.ring.io_stop, 1)
-	}
+	if data.ring != nil do sync.atomic_store(&data.ring.io_stop, 1)
 	if data.tcp_socket != 0 {
 		close_tcp(data.tcp_socket)
 		data.tcp_socket = 0
@@ -1312,9 +1204,7 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 		}
 		node_id := Node_ID(ctrl_get_u16(&r))
 		reason := ctrl_get_str(&r)
-		if !r.ok {
-			return
-		}
+		if !r.ok do return
 		log.infof("Node %s (id=%d) graceful disconnect: %s", data.node_name, node_id, reason)
 		data.peer_initiated_disconnect = true
 		close_connection(data)
@@ -1329,17 +1219,11 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 
 @(private)
 ring_append_ctrl :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
-	if ring == nil {
-		return false
-	}
+	if ring == nil do return false
 	total := u32(4 + NETWORK_HEADER_SIZE + len(ctrl_body))
-	if total > ring.usable_slot_size {
-		return false
-	}
+	if total > ring.usable_slot_size do return false
 	dst, sid, ok := batch_reserve(ring, total)
-	if !ok {
-		return false
-	}
+	if !ok do return false
 	_ = frame_control_message(ctrl_body, dst)
 	batch_commit(ring, sid)
 	return true
@@ -1348,9 +1232,7 @@ ring_append_ctrl :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
 @(private)
 ring_append_ctrl_retry :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		if ring_append_ctrl(ring, ctrl_body) {
-			return true
-		}
+		if ring_append_ctrl(ring, ctrl_body) do return true
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
@@ -1385,9 +1267,7 @@ check_heartbeat_timeout :: proc(data: ^Connection_Actor_Data) {
 
 @(private)
 send_udp_info :: proc(data: ^Connection_Actor_Data) {
-	if NODE.config.network.udp_port <= 0 {
-		return
-	}
+	if NODE.config.network.udp_port <= 0 do return
 
 	data.my_udp_token = generate_udp_token()
 
@@ -1406,13 +1286,9 @@ send_udp_info :: proc(data: ^Connection_Actor_Data) {
 	ctrl_put_u16(&w, u16(NODE.config.network.udp_port))
 	ctrl_put_u32(&w, data.my_udp_token)
 	ctrl_put_u8(&w, u8(seed_len))
-	if include_seed {
-		ctrl_put_bytes(&w, data.udp_seed[:])
-	}
+	if include_seed do ctrl_put_bytes(&w, data.udp_seed[:])
 
-	if !ring_append_ctrl_retry(data.ring, body[:w.pos]) {
-		log.warn("Failed to send UDP lane info")
-	}
+	if !ring_append_ctrl_retry(data.ring, body[:w.pos]) do log.warn("Failed to send UDP lane info")
 }
 
 @(private)
@@ -1435,9 +1311,7 @@ handle_udp_info :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) {
 			return
 		}
 		seed_bytes := ctrl_get_bytes(&r, seed_len)
-		if !r.ok {
-			return
-		}
+		if !r.ok do return
 		copy(data.udp_seed[:], seed_bytes)
 		data.udp_seed_set = true
 	}
@@ -1449,23 +1323,13 @@ handle_udp_info :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) {
 
 @(private)
 try_activate_udp :: proc(data: ^Connection_Actor_Data) {
-	if data.udp_activated || data.state != .Connected {
-		return
-	}
-	if !udp_local_enabled() {
-		return
-	}
-	if data.peer_udp_port == 0 || data.peer_udp_token == 0 || data.my_udp_token == 0 {
-		return
-	}
-	if data.encrypted && !data.udp_seed_set {
-		return
-	}
+	if data.udp_activated || data.state != .Connected do return
+	if !udp_local_enabled() do return
+	if data.peer_udp_port == 0 || data.peer_udp_token == 0 || data.my_udp_token == 0 do return
+	if data.encrypted && !data.udp_seed_set do return
 
 	keys: Udp_Keys
-	if data.encrypted {
-		keys = derive_udp_keys(data.udp_seed[:], !data.is_incoming)
-	}
+	if data.encrypted do keys = derive_udp_keys(data.udp_seed[:], !data.is_incoming)
 
 	endpoint := net.Endpoint {
 		address = data.address.address,
@@ -1484,14 +1348,10 @@ try_activate_udp :: proc(data: ^Connection_Actor_Data) {
 }
 
 broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {
-	if disconnected_node_id == 0 || disconnected_node_id == NODE.node_id {
-		return
-	}
+	if disconnected_node_id == 0 || disconnected_node_id == NODE.node_id do return
 
 	source_name, name_ok := get_node_name(disconnected_node_id)
-	if !name_ok {
-		return
-	}
+	if !name_ok do return
 	source_info, _ := get_node_info(disconnected_node_id)
 
 	num_items := sync.atomic_load_explicit(&NODE.actor_registry.num_items, .Acquire)
@@ -1500,14 +1360,10 @@ broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {
 		entry := &NODE.actor_registry.items[i]
 
 		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-		if (seq & 1) == 0 {
-			continue
-		}
+		if (seq & 1) == 0 do continue
 
 		pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
-		if get_node_id(pid) != disconnected_node_id {
-			continue
-		}
+		if get_node_id(pid) != disconnected_node_id do continue
 
 		actor_name := entry.remote_name
 		if at_idx := strings.index_byte(actor_name, '@'); at_idx >= 0 {
@@ -1652,9 +1508,7 @@ handle_remote_spawn_request :: proc(from_node: Node_ID, payload: []byte) {
 		log.warn("Remote spawn request payload truncated at actor_name")
 		return
 	}
-	if name_len > 0 {
-		msg.actor_name = string(payload[name_start:name_start + name_len])
-	}
+	if name_len > 0 do msg.actor_name = string(payload[name_start:name_start + name_len])
 
 	spawn_func, found := get_spawn_func_by_hash(msg.spawn_func_name_hash)
 	if !found {
@@ -1705,9 +1559,7 @@ handle_remote_spawn_response :: proc(payload: []byte) {
 		log.warn("Remote spawn response payload truncated at error_msg")
 		return
 	}
-	if error_len > 0 {
-		msg.error_msg = string(payload[str_start:str_start + error_len])
-	}
+	if error_len > 0 do msg.error_msg = string(payload[str_start:str_start + error_len])
 
 	resolve_spawn_request(msg)
 }
@@ -1733,15 +1585,11 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 		entry := &NODE.actor_registry.items[i]
 
 		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-		if (seq & 1) == 0 {
-			continue
-		}
+		if (seq & 1) == 0 do continue
 
 		pid := sync.atomic_load_explicit(&entry.pid, .Acquire)
 
-		if pid == NODE.pid || pid == NODE.observer_pid {
-			continue
-		}
+		if pid == NODE.pid || pid == NODE.observer_pid do continue
 
 		actor_name := get_actor_name(pid)
 		origin_name := NODE.name
@@ -1752,21 +1600,15 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 
 		if !is_local_pid(pid) {
 			origin_id := get_node_id(pid)
-			if origin_id == data.node_id {
-				continue
-			}
+			if origin_id == data.node_id do continue
 			origin_info, origin_ok := get_node_info(origin_id)
-			if !origin_ok || origin_info.node_name == "" {
-				continue
-			}
+			if !origin_ok || origin_info.node_name == "" do continue
 			origin_name = origin_info.node_name
 			origin_port = u16(origin_info.address.port)
 			origin_ip = ipv4_to_u32(origin_info.address.address)
 			origin_incarnation = origin_info.incarnation
 			ttl = DEFAULT_BROADCAST_TTL - 1
-			if at := strings.index_byte(actor_name, '@'); at >= 0 {
-				actor_name = actor_name[:at]
-			}
+			if at := strings.index_byte(actor_name, '@'); at >= 0 do actor_name = actor_name[:at]
 		}
 
 		msg := Actor_Spawned_Broadcast {
@@ -1823,9 +1665,7 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 		total_size += 2 + len(info.node_name) + 4 + 2
 	}
 
-	if entry_count == 0 {
-		return
-	}
+	if entry_count == 0 do return
 
 	ctrl_data := make([]byte, total_size)
 	defer delete(ctrl_data)
@@ -1883,14 +1723,10 @@ handle_node_directory :: proc(ctrl_data: []byte) {
 			port    = int(port),
 		}
 		_, ok := register_node(node_name, endpoint, .TCP_Custom_Protocol)
-		if ok {
-			registered += 1
-		}
+		if ok do registered += 1
 	}
 
-	if registered > 0 {
-		log.infof("Registered %d nodes from node directory", registered)
-	}
+	if registered > 0 do log.infof("Registered %d nodes from node directory", registered)
 }
 
 @(private)
@@ -1917,9 +1753,7 @@ hearsay_death_about_connected_node :: proc(
 	msg: Actor_Terminated_Broadcast,
 	source_node_id, from_node: Node_ID,
 ) -> bool {
-	if !msg.inferred_from_disconnect || source_node_id == from_node {
-		return false
-	}
+	if !msg.inferred_from_disconnect || source_node_id == from_node do return false
 	ring := get_connection_ring(source_node_id)
 	return ring != nil && sync.atomic_load(&ring.state) == .Ready
 }
@@ -1937,9 +1771,7 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 		}
 	}
 
-	if source_name == NODE.name {
-		return
-	}
+	if source_name == NODE.name do return
 
 	source_node_id, found := get_node_by_name(source_name)
 	if !found {
@@ -1951,12 +1783,8 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 		}
 	}
 
-	if relayed_gossip_incarnation_stale(source_node_id, from_node, msg.source_incarnation) {
-		return
-	}
-	if from_node != source_node_id && gossip_seq_covered(source_node_id, msg.source_seq) {
-		return
-	}
+	if relayed_gossip_incarnation_stale(source_node_id, from_node, msg.source_incarnation) do return
+	if from_node != source_node_id && gossip_seq_covered(source_node_id, msg.source_seq) do return
 
 	handle, _ := unpack_pid(msg.pid)
 	remapped_pid := pack_pid(handle, source_node_id)
@@ -1985,24 +1813,14 @@ handle_terminate_broadcast :: proc(msg: Actor_Terminated_Broadcast, from_node: N
 		}
 	}
 
-	if source_name == NODE.name {
-		return
-	}
+	if source_name == NODE.name do return
 
 	source_node_id, found := get_node_by_name(source_name)
-	if !found {
-		return
-	}
+	if !found do return
 
-	if relayed_gossip_incarnation_stale(source_node_id, from_node, msg.source_incarnation) {
-		return
-	}
-	if from_node != source_node_id && gossip_seq_covered(source_node_id, msg.source_seq) {
-		return
-	}
-	if hearsay_death_about_connected_node(msg, source_node_id, from_node) {
-		return
-	}
+	if relayed_gossip_incarnation_stale(source_node_id, from_node, msg.source_incarnation) do return
+	if from_node != source_node_id && gossip_seq_covered(source_node_id, msg.source_seq) do return
+	if hearsay_death_about_connected_node(msg, source_node_id, from_node) do return
 
 	handle, _ := unpack_pid(msg.pid)
 	remapped_pid := pack_pid(handle, source_node_id)

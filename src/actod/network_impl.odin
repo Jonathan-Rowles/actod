@@ -14,13 +14,9 @@ wire_format_exact_size_impl :: proc(
 	token: u64 = 0,
 ) -> u32 {
 	base := 4 + NETWORK_HEADER_SIZE + name_len + info.size
-	if token != 0 {
-		base += 8
-	}
+	if token != 0 do base += 8
 
-	if info.flags == {} {
-		return u32(base)
-	}
+	if info.flags == {} do return u32(base)
 
 	return u32(base + calculate_variable_data_size(data, info))
 }
@@ -93,9 +89,7 @@ build_wire_format_into_buffer_impl :: proc(
 	if info.flags == {} {
 		message_size := NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size
 		total_buffer_size := 4 + message_size
-		if total_buffer_size > len(buffer) {
-			return 0
-		}
+		if total_buffer_size > len(buffer) do return 0
 
 		endian.put_u32(buffer[0:4], .Little, u32(message_size))
 		write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
@@ -120,9 +114,7 @@ build_wire_format_into_buffer_impl :: proc(
 
 	message_size := NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size + total_variable_size
 	total_buffer_size := 4 + message_size
-	if total_buffer_size > len(buffer) {
-		return 0
-	}
+	if total_buffer_size > len(buffer) do return 0
 
 	endian.put_u32(buffer[0:4], .Little, u32(message_size))
 	write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
@@ -229,23 +221,17 @@ send_to_connection_ring_body :: proc(
 					return .NETWORK_ERROR
 				}
 				when ODIN_TEST {
-					if corrupt && len(staged_dst) > 0 {
-						staged_dst[len(staged_dst) - 1] ~= 0xFF
-					}
+					if corrupt && len(staged_dst) > 0 do staged_dst[len(staged_dst) - 1] ~= 0xFF
 				}
 				return .OK
 			}
 			return .NETWORK_RING_FULL
 		}
-		if !staging_flush_ring(ring) {
-			return .NETWORK_RING_FULL
-		}
+		if !staging_flush_ring(ring) do return .NETWORK_RING_FULL
 	}
 
 	dst, sid, ok := batch_reserve(ring, exact_size)
-	if !ok {
-		return .NETWORK_RING_FULL
-	}
+	if !ok do return .NETWORK_RING_FULL
 
 	msg_len := build_wire_format_into_buffer_impl(
 		dst,
@@ -274,9 +260,7 @@ send_to_connection_ring_body :: proc(
 	}
 
 	when ODIN_TEST {
-		if corrupt && len(dst) > 0 {
-			dst[len(dst) - 1] ~= 0xFF
-		}
+		if corrupt && len(dst) > 0 do dst[len(dst) - 1] ~= 0xFF
 	}
 
 	batch_commit(ring, sid)
@@ -368,14 +352,10 @@ send_to_connection_ring_by_name_body :: proc(
 		return .MESSAGE_TOO_LARGE
 	}
 
-	if current_worker != nil && !staging_flush_ring(ring) {
-		return .NETWORK_RING_FULL
-	}
+	if current_worker != nil && !staging_flush_ring(ring) do return .NETWORK_RING_FULL
 
 	dst, sid, ok := batch_reserve(ring, exact_size)
-	if !ok {
-		return .NETWORK_RING_FULL
-	}
+	if !ok do return .NETWORK_RING_FULL
 
 	msg_len := build_wire_format_into_buffer_impl(
 		dst,
@@ -406,9 +386,7 @@ send_to_connection_ring_by_name_body :: proc(
 	}
 
 	when ODIN_TEST {
-		if corrupt && len(dst) > 0 {
-			dst[len(dst) - 1] ~= 0xFF
-		}
+		if corrupt && len(dst) > 0 do dst[len(dst) - 1] ~= 0xFF
 	}
 
 	batch_commit(ring, sid)
@@ -420,12 +398,8 @@ send_to_connection_ring_by_name_body :: proc(
 @(private)
 ensure_ring_for_node :: proc(node_id: Node_ID) -> ^Connection_Ring {
 	ring := get_connection_ring(node_id)
-	if ring != nil && sync.atomic_load(&ring.state) == .Ready {
-		return ring
-	}
-	if get_or_create_connection(node_id) == 0 {
-		return nil
-	}
+	if ring != nil && sync.atomic_load(&ring.state) == .Ready do return ring
+	if get_or_create_connection(node_id) == 0 do return nil
 	return get_connection_ring(node_id)
 }
 
@@ -453,9 +427,7 @@ send_remote_impl :: proc(
 
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		result := send_to_connection_ring_impl(ring, to, data, info, base_flags, loc, token)
-		if result != .NETWORK_RING_FULL {
-			return result
-		}
+		if result != .NETWORK_RING_FULL do return result
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
@@ -506,9 +478,7 @@ send_remote_by_name_impl :: proc(
 
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
 		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, {}, loc)
-		if result != .NETWORK_RING_FULL {
-			return result
-		}
+		if result != .NETWORK_RING_FULL do return result
 		if retry < RING_SEND_SPIN_RETRIES {
 			intrinsics.cpu_relax()
 		} else {
@@ -532,9 +502,7 @@ send_unreliable :: #force_inline proc(
 	content: $T,
 	loc := #caller_location,
 ) -> Send_Error {
-	if is_local_pid(to) {
-		return send_message(to, content)
-	}
+	if is_local_pid(to) do return send_message(to, content)
 	v := content
 	return send_unreliable_remote_impl(to, &v, get_validated_message_info_ptr(T), loc)
 }
@@ -564,9 +532,7 @@ send_unreliable_remote_impl :: proc(
 				{},
 				"",
 			)
-			if msg_len != 0 && udp_try_send(node_id, buf[:msg_len]) {
-				return .OK
-			}
+			if msg_len != 0 && udp_try_send(node_id, buf[:msg_len]) do return .OK
 		}
 	}
 

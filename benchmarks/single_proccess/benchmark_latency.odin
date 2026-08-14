@@ -118,25 +118,17 @@ destroy_latency_collector :: proc() {
 }
 
 record_latency :: #force_inline proc(seq_count: u64, send_time_ns: i64) {
-	if !sync.atomic_load(&global_latency_collector.warmup_done) {
-		return
-	}
+	if !sync.atomic_load(&global_latency_collector.warmup_done) do return
 
-	if seq_count & (LATENCY_SAMPLE_EVERY - 1) != 0 {
-		return
-	}
+	if seq_count & (LATENCY_SAMPLE_EVERY - 1) != 0 do return
 
 	recv_time_ns := time.tick_now()._nsec
 	latency := recv_time_ns - send_time_ns
 
-	if latency < 0 {
-		return
-	}
+	if latency < 0 do return
 
 	idx := sync.atomic_add(&global_latency_collector.count, 1) - 1
-	if idx < MAX_LATENCY_SAMPLES {
-		global_latency_collector.samples[idx] = latency
-	}
+	if idx < MAX_LATENCY_SAMPLES do global_latency_collector.samples[idx] = latency
 }
 
 compute_latency_stats :: proc() -> Latency_Stats {
@@ -220,9 +212,7 @@ spawn_latency_actor :: proc() -> actod.PID {
 	)
 
 	pid, ok := actod.spawn("latency_actor", data, behaviour, actor_config)
-	if !ok {
-		panic("Failed to spawn latency actor")
-	}
+	if !ok do panic("Failed to spawn latency actor")
 	return pid
 }
 
@@ -263,9 +253,7 @@ wait_for_messages :: proc(expected: u64, timeout_ms: int) -> bool {
 
 	for time.tick_now()._nsec < deadline {
 		received := sync.atomic_load(&global_latency_collector.received_count)
-		if received + 0xFF >= expected {
-			return true
-		}
+		if received + 0xFF >= expected do return true
 		intrinsics.cpu_relax()
 	}
 	return false
@@ -512,9 +500,7 @@ run_pingpong_test :: proc(size: Latency_Size, count: int) -> Latency_Stats {
 		receiver_behaviour,
 		receiver_config,
 	)
-	if !ok_r {
-		panic("Failed to spawn pingpong receiver")
-	}
+	if !ok_r do panic("Failed to spawn pingpong receiver")
 	defer _ = actod.terminate_actor(receiver)
 
 	sender_data := Pingpong_Sender_Data {
@@ -530,9 +516,7 @@ run_pingpong_test :: proc(size: Latency_Size, count: int) -> Latency_Stats {
 		home_worker = 0,
 	)
 	sender, ok_s := actod.spawn("pingpong_sender", sender_data, sender_behaviour, sender_config)
-	if !ok_s {
-		panic("Failed to spawn pingpong sender")
-	}
+	if !ok_s do panic("Failed to spawn pingpong sender")
 	defer _ = actod.terminate_actor(sender)
 
 	time.sleep(5 * time.Millisecond)

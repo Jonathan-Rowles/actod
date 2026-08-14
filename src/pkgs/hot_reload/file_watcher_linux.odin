@@ -64,7 +64,7 @@ File_Watcher :: struct {
 	thread:      ^thread.Thread,
 }
 
-create_watcher :: proc(
+make_watcher :: proc(
 	callback: Watch_Callback,
 	user_data: rawptr,
 	debounce_ms: int = 100,
@@ -73,9 +73,7 @@ create_watcher :: proc(
 	bool,
 ) {
 	fd := _inotify_init1(O_NONBLOCK)
-	if fd < 0 {
-		return nil, false
-	}
+	if fd < 0 do return nil, false
 
 	w := new(File_Watcher)
 	w.fd = fd
@@ -93,9 +91,7 @@ add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> b
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	mask := IN_MODIFY | IN_CREATE | IN_DELETE | IN_MOVED_TO
 	wd := _inotify_add_watch(watcher.fd, cpath, mask)
-	if wd < 0 {
-		return false
-	}
+	if wd < 0 do return false
 
 	watcher.watches[watcher.watch_count] = Watch_Entry {
 		wd         = wd,

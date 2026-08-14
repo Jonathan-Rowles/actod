@@ -26,7 +26,6 @@ Hot_API :: struct {
 		children: [dynamic]SPAWN,
 		spin_strategy: SPIN_STRATEGY,
 		logging: Log_Config,
-		message_batch: int,
 		page_size: int,
 		arena_headroom: int,
 		supervision_strategy: Supervision_Strategy,

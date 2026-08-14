@@ -95,7 +95,6 @@ make_node_config :: proc(
 default children = nil
 default spin_strategy = .WAKE_SEMA
 default logging = {}
-default message_batch = 64
 default page_size = 65536
 default arena_headroom = 16777216
 default supervision_strategy = .ONE_FOR_ONE
@@ -107,13 +106,12 @@ default affinity = nil
 default coro_stack_size = 57344
 default use_dedicated_os_thread = false
 default stack_size_dedicated_os_thread = 131072
-return hot_api.make_actor_config(children, spin_strategy, logging, message_batch, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
+return hot_api.make_actor_config(children, spin_strategy, logging, page_size, arena_headroom, supervision_strategy, restart_policy, max_restarts, restart_window, home_worker, affinity, coro_stack_size, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 `)
 make_actor_config :: proc(
 	children: [dynamic]SPAWN = nil,
 	spin_strategy: Spin_Strategy = actod.NODE.config.actor_config.spin_strategy,
 	logging: Log_Config = actod.NODE.config.actor_config.logging,
-	message_batch: int = actod.NODE.config.actor_config.message_batch,
 	page_size: int = actod.NODE.config.actor_config.page_size,
 	arena_headroom: int = actod.NODE.config.actor_config.arena_headroom,
 	supervision_strategy: Supervision_Strategy = actod.NODE.config.actor_config.supervision_strategy,
@@ -131,7 +129,6 @@ make_actor_config :: proc(
 		children,
 		spin_strategy,
 		logging,
-		message_batch,
 		page_size,
 		arena_headroom,
 		supervision_strategy,

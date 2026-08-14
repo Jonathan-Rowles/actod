@@ -29,7 +29,7 @@ File_Watcher :: struct {
 	thread:         ^thread.Thread,
 }
 
-create_watcher :: proc(
+make_watcher :: proc(
 	callback: Watch_Callback,
 	user_data: rawptr,
 	debounce_ms: int = 100,
@@ -59,9 +59,7 @@ add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> b
 		win32.FILE_FLAG_BACKUP_SEMANTICS | win32.FILE_FLAG_OVERLAPPED,
 		nil,
 	)
-	if handle == win32.INVALID_HANDLE_VALUE {
-		return false
-	}
+	if handle == win32.INVALID_HANDLE_VALUE do return false
 
 	event := win32.CreateEventW(nil, win32.TRUE, win32.FALSE, nil)
 	if event == nil {

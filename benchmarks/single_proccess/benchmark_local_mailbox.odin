@@ -58,9 +58,7 @@ run_local_throughput :: proc(
 	receiver_behaviour := actod.Actor_Behaviour(Flood_Receiver_Data) {
 		handle_message = proc(data: ^Flood_Receiver_Data, from: actod.PID, msg: any) {
 			data.count += 1
-			if data.count & 0xFF == 0 {
-				sync.atomic_add(&local_received, 256)
-			}
+			if data.count & 0xFF == 0 do sync.atomic_add(&local_received, 256)
 		},
 		init = proc(data: ^Flood_Receiver_Data) {},
 	}
@@ -125,9 +123,7 @@ run_local_throughput :: proc(
 	wait_start := time.tick_now()._nsec
 	for {
 		received := sync.atomic_load(&local_received)
-		if received + 0xFF >= sent || time.tick_now()._nsec - wait_start > 100_000_000 {
-			break
-		}
+		if received + 0xFF >= sent || time.tick_now()._nsec - wait_start > 100_000_000 do break
 		intrinsics.cpu_relax()
 	}
 	elapsed_ns := time.tick_now()._nsec - start_ns

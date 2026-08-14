@@ -20,9 +20,7 @@ setup_signal_handler :: proc() {
 
 	stdin_monitor :: proc(t: ^thread.Thread) {
 		stdin_handle := win32.GetStdHandle(win32.STD_INPUT_HANDLE)
-		if stdin_handle == win32.INVALID_HANDLE_VALUE || stdin_handle == nil {
-			return
-		}
+		if stdin_handle == win32.INVALID_HANDLE_VALUE || stdin_handle == nil do return
 
 		file_type := win32.GetFileType(stdin_handle)
 
@@ -44,7 +42,5 @@ setup_signal_handler :: proc() {
 		}
 	}
 	monitor_thread := thread.create(stdin_monitor)
-	if monitor_thread != nil {
-		thread.start(monitor_thread)
-	}
+	if monitor_thread != nil do thread.start(monitor_thread)
 }

@@ -7,7 +7,7 @@ import "core:testing"
 test_add_watch_rejects_tmp_path :: proc(t: ^testing.T) {
 	cb :: proc(event: Watch_Event, user_data: rawptr) {}
 
-	w, ok := create_watcher(cb, nil)
+	w, ok := make_watcher(cb, nil)
 	testing.expect(t, ok, "should create watcher")
 	if !ok do return
 	defer destroy_watcher(w)

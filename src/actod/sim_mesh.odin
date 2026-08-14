@@ -29,13 +29,9 @@ Sim_Mesh :: struct {
 g_sim_active_mesh: ^Sim_Mesh
 
 sim_pump_any :: proc() -> bool {
-	if sim_pump() {
-		return true
-	}
+	if sim_pump() do return true
 	mesh := g_sim_active_mesh
-	if mesh == nil {
-		return false
-	}
+	if mesh == nil do return false
 	previous := NODE
 	progress := sim_mesh_pump(mesh)
 	NODE = previous
@@ -121,9 +117,7 @@ sim_mesh_boot_node :: proc(mesh: ^Sim_Mesh, i: int) -> ^Node_State {
 @(private = "file")
 sim_mesh_register_peers :: proc(mesh: ^Sim_Mesh, i: int) {
 	for j in 0 ..< len(mesh.nodes) {
-		if j == i {
-			continue
-		}
+		if j == i do continue
 		_, _ = register_node(
 			mesh.names[j],
 			net.Endpoint{address = net.IP4_Loopback, port = mesh.ports[j]},
@@ -146,9 +140,7 @@ sim_mesh_bind :: proc(mesh: ^Sim_Mesh, i: int) -> ^Node_State {
 
 sim_mesh_pump :: proc(mesh: ^Sim_Mesh) -> bool {
 	n := len(mesh.nodes)
-	if n == 0 {
-		return false
-	}
+	if n == 0 do return false
 	start: int
 	if mesh.rng != 0 {
 		mesh.rng = mesh.rng * 6364136223846793005 + 1442695040888963407
@@ -159,9 +151,7 @@ sim_mesh_pump :: proc(mesh: ^Sim_Mesh) -> bool {
 	}
 	for k in 0 ..< n {
 		i := (start + k) % n
-		if mesh.crashed[i] {
-			continue
-		}
+		if mesh.crashed[i] do continue
 		_ = sim_bind_node(mesh.nodes[i])
 		if sim_pump() {
 			sim_trace_record(.Node_Step, u64(i), 0)
@@ -182,14 +172,10 @@ sim_mesh_run_until_idle :: proc(mesh: ^Sim_Mesh, max_steps: int = 1_000_000) -> 
 sim_mesh_connect_full :: proc(mesh: ^Sim_Mesh, max_rounds: int = 10) -> bool {
 	n := len(mesh.nodes)
 	for i in 0 ..< n {
-		if mesh.crashed[i] {
-			continue
-		}
+		if mesh.crashed[i] do continue
 		_ = sim_bind_node(mesh.nodes[i])
 		for j in i + 1 ..< n {
-			if mesh.crashed[j] {
-				continue
-			}
+			if mesh.crashed[j] do continue
 			if node_id, ok := get_node_by_name(mesh.names[j]); ok {
 				_ = get_or_create_connection(node_id)
 			}
@@ -212,22 +198,14 @@ sim_mesh_connect_full :: proc(mesh: ^Sim_Mesh, max_rounds: int = 10) -> bool {
 sim_mesh_all_connected :: proc(mesh: ^Sim_Mesh) -> bool {
 	n := len(mesh.nodes)
 	for i in 0 ..< n {
-		if mesh.crashed[i] {
-			continue
-		}
+		if mesh.crashed[i] do continue
 		_ = sim_bind_node(mesh.nodes[i])
 		for j in 0 ..< n {
-			if j == i || mesh.crashed[j] {
-				continue
-			}
+			if j == i || mesh.crashed[j] do continue
 			node_id, ok := get_node_by_name(mesh.names[j])
-			if !ok {
-				return false
-			}
+			if !ok do return false
 			ring := get_connection_ring(node_id)
-			if ring == nil || sync.atomic_load(&ring.state) != .Ready {
-				return false
-			}
+			if ring == nil || sync.atomic_load(&ring.state) != .Ready do return false
 		}
 	}
 	return true
@@ -250,18 +228,12 @@ sim_mesh_settle_pools :: proc(mesh: ^Sim_Mesh, max_rounds: int = 10) -> bool {
 @(private = "file")
 sim_mesh_pools_primary_only :: proc(mesh: ^Sim_Mesh) -> bool {
 	for i in 0 ..< len(mesh.nodes) {
-		if mesh.crashed[i] {
-			continue
-		}
+		if mesh.crashed[i] do continue
 		_ = sim_bind_node(mesh.nodes[i])
 		for node_id in 1 ..< Node_ID(MAX_NODES) {
 			pool := get_connection_pool(node_id)
-			if pool == nil {
-				continue
-			}
-			if sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 {
-				return false
-			}
+			if pool == nil do continue
+			if sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 do return false
 		}
 	}
 	return true
@@ -269,9 +241,7 @@ sim_mesh_pools_primary_only :: proc(mesh: ^Sim_Mesh) -> bool {
 
 sim_mesh_advance_clock :: proc(mesh: ^Sim_Mesh, d: time.Duration) {
 	mesh.det.virtual_now = time.time_add(mesh.det.virtual_now, d)
-	if mesh.det.virtual_tick_ns != 0 {
-		mesh.det.virtual_tick_ns += i64(d)
-	}
+	if mesh.det.virtual_tick_ns != 0 do mesh.det.virtual_tick_ns += i64(d)
 	sim_wake_transport_waiters()
 }
 
@@ -288,24 +258,18 @@ sim_mesh_heal :: proc(mesh: ^Sim_Mesh, i, j: int) {
 }
 
 sim_mesh_crash :: proc(mesh: ^Sim_Mesh, i: int) {
-	if mesh.crashed[i] {
-		return
-	}
+	if mesh.crashed[i] do return
 	mesh.crashed[i] = true
 	node := mesh.nodes[i]
 	sim_transport_drop_node(node)
 	for j in 0 ..< len(mesh.nodes) {
-		if j != i {
-			sim_unblock_link(node, mesh.nodes[j])
-		}
+		if j != i do sim_unblock_link(node, mesh.nodes[j])
 	}
 	append(&mesh.graveyard, node)
 }
 
 sim_mesh_restart :: proc(mesh: ^Sim_Mesh, i: int) -> ^Node_State {
-	if !mesh.crashed[i] {
-		return mesh.nodes[i]
-	}
+	if !mesh.crashed[i] do return mesh.nodes[i]
 	mesh.nodes[i] = sim_mesh_boot_node(mesh, i)
 	mesh.crashed[i] = false
 	sim_mesh_register_peers(mesh, i)
@@ -314,23 +278,17 @@ sim_mesh_restart :: proc(mesh: ^Sim_Mesh, i: int) -> ^Node_State {
 }
 
 sim_mesh_destroy :: proc(mesh: ^Sim_Mesh) {
-	if g_sim_active_mesh == mesh {
-		g_sim_active_mesh = nil
-	}
+	if g_sim_active_mesh == mesh do g_sim_active_mesh = nil
 	for i in 0 ..< len(mesh.nodes) {
 		for j in i + 1 ..< len(mesh.nodes) {
 			sim_unblock_link(mesh.nodes[i], mesh.nodes[j])
 		}
 	}
 	for i in 0 ..< len(mesh.nodes) {
-		if !mesh.crashed[i] {
-			sim_transport_drop_node(mesh.nodes[i])
-		}
+		if !mesh.crashed[i] do sim_transport_drop_node(mesh.nodes[i])
 	}
 	for i in 0 ..< len(mesh.nodes) {
-		if mesh.crashed[i] {
-			continue
-		}
+		if mesh.crashed[i] do continue
 		_ = sim_bind_node(mesh.nodes[i])
 		node_shutdown()
 		sim_destroy_node(mesh.nodes[i])

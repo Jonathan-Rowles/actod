@@ -26,7 +26,7 @@ actor_thread_entry_win :: proc "system" (t_raw: rawptr) -> win32.DWORD {
 	return 0
 }
 
-create_thread_with_stack_size :: proc(
+make_thread_with_stack_size :: proc(
 	data: rawptr,
 	fn: proc(data: rawptr),
 	stack_size: uint,

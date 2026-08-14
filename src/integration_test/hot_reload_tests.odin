@@ -358,7 +358,7 @@ test_file_watcher_detection :: proc(t: ^testing.T) {
 		name_len = &callback_name_len,
 	}
 
-	w, ok := hot_reload.create_watcher(cb, &cb_data, debounce_ms = 10)
+	w, ok := hot_reload.make_watcher(cb, &cb_data, debounce_ms = 10)
 	expect(t, ok, "should create watcher")
 	if !ok do return
 	defer hot_reload.destroy_watcher(w)
@@ -408,7 +408,7 @@ test_file_watcher_excludes_tmp :: proc(t: ^testing.T) {
 		sync.atomic_store_explicit(fired, true, .Release)
 	}
 
-	w, ok := hot_reload.create_watcher(cb, &callback_fired, debounce_ms = 10)
+	w, ok := hot_reload.make_watcher(cb, &callback_fired, debounce_ms = 10)
 	expect(t, ok, "should create watcher")
 	if !ok do return
 	defer hot_reload.destroy_watcher(w)

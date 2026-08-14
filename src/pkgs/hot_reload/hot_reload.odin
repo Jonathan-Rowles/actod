@@ -121,9 +121,7 @@ load_module :: proc(
 	}
 
 	entry_point, ep_found := dynlib.symbol_address(lib, "_odin_entry_point")
-	if ep_found && entry_point != nil {
-		(cast(proc "c" ())entry_point)()
-	}
+	if ep_found && entry_point != nil do (cast(proc "c" ())entry_point)()
 
 	symbols: [dynamic]Resolved_Symbol
 	symbols.allocator = allocator
@@ -197,9 +195,7 @@ load_module :: proc(
 unload_module :: proc(mod: ^Hot_Module, allocator := context.allocator) {
 	if mod == nil do return
 
-	if mod.lib != nil {
-		dynlib.unload_library(mod.lib)
-	}
+	if mod.lib != nil do dynlib.unload_library(mod.lib)
 
 	delete(mod.path, allocator)
 	delete(mod.symbols)
@@ -364,16 +360,12 @@ discover_actors_dir :: proc(start_path: string) -> (string, bool) {
 		candidate := join({current, "actors"})
 		if os.is_dir(candidate) {
 			abs_path, abs_err := filepath.abs(candidate, context.temp_allocator)
-			if abs_err == nil {
-				return abs_path, true
-			}
+			if abs_err == nil do return abs_path, true
 			return candidate, true
 		}
 
 		parent := filepath.dir(current)
-		if parent == current || parent == "" || parent == "." {
-			return "", false
-		}
+		if parent == current || parent == "" || parent == "." do return "", false
 		current = parent
 	}
 }
@@ -398,9 +390,7 @@ discover_collections :: proc(start_path: string, allocator := context.allocator)
 			break
 		}
 		parent := filepath.dir(current)
-		if parent == current || parent == "" || parent == "." {
-			return nil
-		}
+		if parent == current || parent == "" || parent == "." do return nil
 		current = parent
 	}
 

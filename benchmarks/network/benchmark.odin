@@ -86,9 +86,7 @@ create_sender_coordinator_behaviour :: proc() -> actod.Actor_Behaviour(int) {
 		handle_message = proc(data: ^int, from: actod.PID, msg: any) {
 			switch m in msg {
 			case shared.Ready_Message:
-				if m.test_id == global_test_status.test_id {
-					global_test_status.ready = true
-				}
+				if m.test_id == global_test_status.test_id do global_test_status.ready = true
 			case shared.Get_PID_Response:
 				if m.request_id >= 0 && m.request_id < MAX_CACHED_PIDS {
 					global_pid_cache.pids[m.request_id] = from
@@ -141,9 +139,7 @@ network_sender_worker :: proc($T: typeid) -> proc(_: rawptr) {
 				target_pid := global_pid_cache.pids[actor_id]
 
 				err := actod.send_message(target_pid, msg)
-				if err != .OK {
-					shared.track_send_error(&global_send_state, err)
-				}
+				if err != .OK do shared.track_send_error(&global_send_state, err)
 			}
 
 			for i in 0 ..< work_data.messages_to_send {
@@ -259,9 +255,7 @@ run_network_benchmark :: proc(
 		}, config.sender_count)
 	defer {
 		for wd in work_datas {
-			if wd != nil {
-				free(wd)
-			}
+			if wd != nil do free(wd)
 		}
 		delete(work_datas)
 	}

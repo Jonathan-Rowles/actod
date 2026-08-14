@@ -31,9 +31,7 @@ generate_nonzero_nonce :: proc() -> u64 {
 }
 
 set_tcp_nodelay :: proc(sock: net.TCP_Socket, enabled: bool = true) -> bool {
-	if sim_is_socket(sock) {
-		return true
-	}
+	if sim_is_socket(sock) do return true
 	val: i32 = enabled ? 1 : 0
 	result := platform_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, size_of(i32))
 	return result == 0
@@ -44,9 +42,7 @@ set_socket_buffers :: proc(
 	recv_size: int = 4 * 1024 * 1024,
 	send_size: int = 4 * 1024 * 1024,
 ) -> bool {
-	if sim_is_socket(sock) {
-		return true
-	}
+	if sim_is_socket(sock) do return true
 	recv_val: i32 = i32(recv_size)
 	send_val: i32 = i32(send_size)
 	r1 := platform_setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &recv_val, size_of(i32))
@@ -55,9 +51,7 @@ set_socket_buffers :: proc(
 }
 
 set_recv_timeout :: proc(sock: net.TCP_Socket, seconds: i64) -> bool {
-	if sim_is_socket(sock) {
-		return true
-	}
+	if sim_is_socket(sock) do return true
 	return platform_set_recv_timeout(sock, seconds)
 }
 
@@ -86,12 +80,8 @@ Gossip_Window :: struct {
 
 @(private)
 parse_bind_address :: proc(bind_address: string) -> (net.Address, bool) {
-	if bind_address == "" {
-		return net.IP4_Loopback, true
-	}
-	if _, port, _ := net.split_port(bind_address); port != 0 {
-		return nil, false
-	}
+	if bind_address == "" do return net.IP4_Loopback, true
+	if _, port, _ := net.split_port(bind_address); port != 0 do return nil, false
 	addr := net.parse_address(bind_address)
 	return addr, addr != nil
 }
@@ -109,9 +99,7 @@ address_is_loopback :: proc(addr: net.Address) -> bool {
 
 @(private)
 get_auth_password :: proc() -> string {
-	if NODE.config.network.auth_password != "" {
-		return NODE.config.network.auth_password
-	}
+	if NODE.config.network.auth_password != "" do return NODE.config.network.auth_password
 	if env_pass := os.get_env("ACTOD_AUTH_PASSWORD", context.temp_allocator); env_pass != "" {
 		return env_pass
 	}
@@ -137,18 +125,14 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	sync.rw_mutex_unlock(&NODE.node_registry_lock)
 
 
-	if NODE.config.network.port == 0 {
-		return
-	}
+	if NODE.config.network.port == 0 do return
 
 	if NODE.config.sim_mode {
 		sim_listen(NODE.config.network.port)
 		return
 	}
 
-	if !nbio_available() {
-		return
-	}
+	if !nbio_available() do return
 
 	if NODE.network_listener_thread != nil {
 		log.warnf(
@@ -222,9 +206,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 				break
 			}
 
-			if !accept_incoming_connection(client_sock, client_addr) {
-				net.close(client_sock)
-			}
+			if !accept_incoming_connection(client_sock, client_addr) do net.close(client_sock)
 		}
 
 		sync.atomic_store(&NODE.network_listener_running, 0)
@@ -301,13 +283,9 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 }
 
 tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
-	if len(data) == 0 {
-		return true
-	}
+	if len(data) == 0 do return true
 
-	if sim_is_socket(socket) {
-		return sim_stream_write(socket, data)
-	}
+	if sim_is_socket(socket) do return sim_stream_write(socket, data)
 
 	total_sent := 0
 	wouldblock_spins: u32 = 0
@@ -316,9 +294,7 @@ tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
 		if err != nil {
 			if err == .Would_Block {
 				wouldblock_spins += 1
-				if wouldblock_spins > 100_000 {
-					return false
-				}
+				if wouldblock_spins > 100_000 do return false
 				intrinsics.cpu_relax()
 				continue
 			}
@@ -337,14 +313,10 @@ tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
 
 tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []byte {
 	size_buf: [4]byte
-	if !tcp_recv_exactly(sock, size_buf[:], deadline) {
-		return nil
-	}
+	if !tcp_recv_exactly(sock, size_buf[:], deadline) do return nil
 
 	msg_size := endian.unchecked_get_u32le(size_buf[:])
-	if msg_size == 0 || msg_size > HANDSHAKE_MAX_FRAME_SIZE {
-		return nil
-	}
+	if msg_size == 0 || msg_size > HANDSHAKE_MAX_FRAME_SIZE do return nil
 
 	msg := make([]byte, msg_size, actor_system_allocator)
 	if !tcp_recv_exactly(sock, msg, deadline) {
@@ -355,20 +327,14 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []
 }
 
 tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time) -> bool {
-	if sim_is_socket(sock) {
-		return sim_stream_read_exactly(sock, buf, deadline)
-	}
+	if sim_is_socket(sock) do return sim_stream_read_exactly(sock, buf, deadline)
 
 	total := 0
 	for total < len(buf) {
 		n, err := net.recv_tcp(sock, buf[total:])
-		if err != nil || n == 0 {
-			return false
-		}
+		if err != nil || n == 0 do return false
 		total += n
-		if total < len(buf) && time.diff(deadline, now()) > 0 {
-			return false
-		}
+		if total < len(buf) && time.diff(deadline, now()) > 0 do return false
 	}
 	return true
 }
@@ -468,15 +434,11 @@ deliver_broadcast_locally :: proc(
 	list := &NODE.type_subscribers[local_type]
 	n := sync.atomic_load_explicit(&list.local_count, .Acquire)
 	block := load_subscriber_block(list)
-	if block == nil {
-		return true
-	}
+	if block == nil do return true
 
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
-		if pid != 0 {
-			send_from_payload(pid, from_pid, payload, type_info)
-		}
+		if pid != 0 do send_from_payload(pid, from_pid, payload, type_info)
 	}
 
 	return true
@@ -488,18 +450,12 @@ send_remote :: #force_inline proc(to: PID, content: $T, loc := #caller_location)
 }
 
 get_or_create_connection :: proc(node_id: Node_ID) -> PID {
-	if node_id == 0 || node_id >= MAX_NODES {
-		return 0
-	}
+	if node_id == 0 || node_id >= MAX_NODES do return 0
 
-	if !nbio_available() {
-		return 0
-	}
+	if !nbio_available() do return 0
 
 	node_info, info_ok := get_node_info(node_id)
-	if !info_ok {
-		return 0
-	}
+	if !info_ok do return 0
 
 	existing_pid := PID(
 		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[node_id], .Acquire),
@@ -517,9 +473,7 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		sync.atomic_store_explicit(cast(^u64)&NODE.connection_actors[node_id], u64(0), .Release)
 	}
 
-	if get_or_create_node_ring(node_id, NODE.config.network.connection_ring) == nil {
-		return 0
-	}
+	if get_or_create_node_ring(node_id, NODE.config.network.connection_ring) == nil do return 0
 
 	conn_data := Connection_Actor_Data {
 		node_id                 = node_id,
@@ -601,13 +555,9 @@ build_endpoint_from_broadcast :: proc(msg: Actor_Spawned_Broadcast) -> net.Endpo
 DEFAULT_BROADCAST_TTL :: 3
 
 broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, parent_pid: PID) {
-	if NODE.shutting_down {
-		return
-	}
+	if NODE.shutting_down do return
 
-	if pid == NODE.pid || pid == NODE.observer_pid {
-		return
-	}
+	if pid == NODE.pid || pid == NODE.observer_pid do return
 
 	local_info := NODE.node_registry[NODE.node_id]
 
@@ -628,13 +578,9 @@ broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, 
 }
 
 broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_Reason) {
-	if NODE.shutting_down {
-		return
-	}
+	if NODE.shutting_down do return
 
-	if pid == NODE.pid || pid == NODE.observer_pid {
-		return
-	}
+	if pid == NODE.pid || pid == NODE.observer_pid do return
 
 	msg := Actor_Terminated_Broadcast {
 		pid                = pid,
@@ -660,9 +606,7 @@ broadcast_to_all_nodes :: proc(msg: $T) {
 
 broadcast_to_others :: proc(msg: $T, except: Node_ID) {
 	for node_id in 2 ..< MAX_NODES {
-		if Node_ID(node_id) == except {
-			continue
-		}
+		if Node_ID(node_id) == except do continue
 		ring := get_connection_ring(Node_ID(node_id))
 		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
 			send_lifecycle_message(ring, msg)
@@ -671,9 +615,7 @@ broadcast_to_others :: proc(msg: $T, except: Node_ID) {
 }
 
 send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
-	if ring == nil {
-		return
-	}
+	if ring == nil do return
 
 	from_handle, _ := unpack_pid(get_self_pid())
 
@@ -683,9 +625,7 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 	value := msg
 	info := get_validated_message_info_ptr(T)
 	needed := 4 + NETWORK_HEADER_SIZE + info.size + calculate_variable_data_size(&value, info)
-	if needed > len(buf) {
-		buf = make([]byte, needed, context.temp_allocator)
-	}
+	if needed > len(buf) do buf = make([]byte, needed, context.temp_allocator)
 
 	msg_len := build_wire_format_into_buffer(
 		buf,
@@ -711,9 +651,7 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 
 get_node_name :: proc(node_id: Node_ID) -> (string, bool) {
 	info, ok := get_node_info(node_id)
-	if !ok {
-		return "", false
-	}
+	if !ok do return "", false
 	return info.node_name, true
 }
 
@@ -924,18 +862,12 @@ spawn_remote_impl :: proc(
 
 @(private)
 spawn_response_wait :: proc(sema: ^sync.Atomic_Sema, timeout: time.Duration) -> bool {
-	if !NODE.config.sim_mode {
-		return sync.atomic_sema_wait_with_timeout(sema, timeout)
-	}
+	if !NODE.config.sim_mode do return sync.atomic_sema_wait_with_timeout(sema, timeout)
 	deadline := time.time_add(now(), timeout)
 	co := coro.running()
 	for _ in 0 ..< 1_000_000 {
-		if sync.atomic_sema_wait_with_timeout(sema, time.Microsecond) {
-			return true
-		}
-		if time.diff(deadline, now()) > 0 {
-			return false
-		}
+		if sync.atomic_sema_wait_with_timeout(sema, time.Microsecond) do return true
+		if time.diff(deadline, now()) > 0 do return false
 		if co != nil {
 			handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
 			handle.wants_reschedule = true

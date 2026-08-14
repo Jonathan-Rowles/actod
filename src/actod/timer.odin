@@ -127,9 +127,7 @@ fire_due_timers :: proc() -> int {
 	sync.mutex_lock(&reg.lock)
 	for pq.len(reg.heap) > 0 && fired_count < MAX_FIRE_BATCH {
 		top := pq.peek(reg.heap)
-		if time.diff(fire_time, top.next_fire) > 0 {
-			break
-		}
+		if time.diff(fire_time, top.next_fire) > 0 do break
 
 		entry, _ := pq.pop_safe(&reg.heap)
 		delete_key(&reg.index_map, Timer_Key{entry.id, entry.owner})
@@ -165,9 +163,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 	sync.atomic_store(&data.should_stop, 0)
 	pq.init(&NODE.timer_registry.heap, timer_heap_less, timer_heap_swap)
 
-	if NODE.config.sim_mode {
-		return
-	}
+	if NODE.config.sim_mode do return
 
 	ctx := new(Timer_Thread_Context)
 	ctx.data = data
@@ -178,9 +174,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 
 	timer_thread_proc :: proc(t: ^thread.Thread) {
 		ctx := cast(^Timer_Thread_Context)t.user_args[0]
-		if ctx == nil {
-			return
-		}
+		if ctx == nil do return
 		context.allocator = ctx.allocator
 		context.logger = ctx.logger
 		data := ctx.data
@@ -193,9 +187,7 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 			if heap_len > 0 {
 				top := pq.peek(reg.heap)
 				sleep_duration = time.diff(now(), top.next_fire)
-				if sleep_duration < 0 {
-					sleep_duration = 0
-				}
+				if sleep_duration < 0 do sleep_duration = 0
 			}
 			sync.mutex_unlock(&reg.lock)
 
@@ -203,14 +195,10 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 				sync.sema_wait(&data.wake_sema)
 				continue
 			} else if sleep_duration > 0 {
-				if sync.sema_wait_with_timeout(&data.wake_sema, sleep_duration) {
-					continue
-				}
+				if sync.sema_wait_with_timeout(&data.wake_sema, sleep_duration) do continue
 			}
 
-			if sync.atomic_load(&data.should_stop) != 0 {
-				break
-			}
+			if sync.atomic_load(&data.should_stop) != 0 do break
 
 			fire_due_timers()
 		}
@@ -360,9 +348,7 @@ set_timer :: proc(
 	when ODIN_TEST {if id, err, ok := ti.intercept_set_timer(interval, repeat); ok do return id, Send_Error(err)}
 
 	id := sync.atomic_add(&NODE.next_timer_id, 1) + 1
-	if current_actor_context != nil {
-		append(&current_actor_context.timers, Timer_Registration(id))
-	}
+	if current_actor_context != nil do append(&current_actor_context.timers, Timer_Registration(id))
 
 	if NODE.timer_pid == 0 {
 		log.errorf(

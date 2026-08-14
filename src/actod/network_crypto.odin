@@ -76,9 +76,7 @@ noise_handshake_begin :: proc(
 	eph_bytes: [32]byte
 	actod_rand_bytes(eph_bytes[:])
 	eph: ecdh.Private_Key
-	if !ecdh.private_key_set_bytes(&eph, .X25519, eph_bytes[:]) {
-		return false
-	}
+	if !ecdh.private_key_set_bytes(&eph, .X25519, eph_bytes[:]) do return false
 	crypto.zero_explicit(raw_data(eph_bytes[:]), len(eph_bytes))
 	return(
 		noise.handshake_init(hs, initiator, prologue, nil, nil, NOISE_PROTOCOL_NAME, psk, &eph) ==
@@ -108,9 +106,7 @@ noise_handshake_step :: proc(
 	case .Handshake_Complete:
 		return msg, true, true
 	}
-	if msg != nil {
-		delete(msg, allocator)
-	}
+	if msg != nil do delete(msg, allocator)
 	return nil, false, false
 }
 
@@ -122,26 +118,18 @@ noise_handshake_finish :: proc(hs: ^Noise_Handshake, keys: ^Noise_Transport) -> 
 
 // Wire: [inner_len:u32][ciphertext = seal(plaintext)], implicit counter nonces.
 envelope_seal :: proc(keys: ^Noise_Transport, plaintext: []byte, dst: []byte) -> (int, bool) {
-	if len(plaintext) == 0 || len(plaintext) > MAX_ENVELOPE_PLAINTEXT {
-		return 0, false
-	}
+	if len(plaintext) == 0 || len(plaintext) > MAX_ENVELOPE_PLAINTEXT do return 0, false
 	total := ENVELOPE_OVERHEAD + len(plaintext)
-	if total > len(dst) {
-		return 0, false
-	}
+	if total > len(dst) do return 0, false
 	endian.put_u32(dst[0:4], .Little, u32(len(plaintext) + ENVELOPE_TAG_SIZE))
 	_, status := noise.seal_message(keys, nil, plaintext, dst[4:total])
 	return total, status == .Ok
 }
 
 envelope_open :: proc(keys: ^Noise_Transport, ciphertext: []byte, dst: []byte) -> ([]byte, bool) {
-	if len(ciphertext) <= ENVELOPE_TAG_SIZE {
-		return nil, false
-	}
+	if len(ciphertext) <= ENVELOPE_TAG_SIZE do return nil, false
 	pt_len := len(ciphertext) - ENVELOPE_TAG_SIZE
-	if pt_len > len(dst) {
-		return nil, false
-	}
+	if pt_len > len(dst) do return nil, false
 	_, status := noise.open_message(keys, nil, ciphertext, dst[:pt_len])
 	return dst[:pt_len], status == .Ok
 }
@@ -181,9 +169,7 @@ udp_nonce :: #force_inline proc(seq: u64) -> [UDP_NONCE_SIZE]byte {
 
 udp_seal :: proc(key: []byte, seq: u64, aad: []byte, plaintext: []byte, dst: []byte) -> (int, bool) {
 	total := len(plaintext) + UDP_TAG_SIZE
-	if len(plaintext) == 0 || total > len(dst) {
-		return 0, false
-	}
+	if len(plaintext) == 0 || total > len(dst) do return 0, false
 	iv := udp_nonce(seq)
 	aead.seal_oneshot(
 		.CHACHA20POLY1305,
@@ -198,13 +184,9 @@ udp_seal :: proc(key: []byte, seq: u64, aad: []byte, plaintext: []byte, dst: []b
 }
 
 udp_open :: proc(key: []byte, seq: u64, aad: []byte, sealed: []byte, dst: []byte) -> ([]byte, bool) {
-	if len(sealed) <= UDP_TAG_SIZE {
-		return nil, false
-	}
+	if len(sealed) <= UDP_TAG_SIZE do return nil, false
 	pt_len := len(sealed) - UDP_TAG_SIZE
-	if pt_len > len(dst) {
-		return nil, false
-	}
+	if pt_len > len(dst) do return nil, false
 	iv := udp_nonce(seq)
 	ok := aead.open_oneshot(
 		.CHACHA20POLY1305,
@@ -229,16 +211,10 @@ Replay_Window :: struct {
 // Check before authenticating; commit only after the datagram authenticates,
 // so forged sequence numbers cannot advance the window.
 replay_check :: proc(w: ^Replay_Window, seq: u64) -> bool {
-	if seq == 0 {
-		return false
-	}
-	if seq > w.max_seq {
-		return true
-	}
+	if seq == 0 do return false
+	if seq > w.max_seq do return true
 	offset := w.max_seq - seq
-	if offset >= UDP_REPLAY_WINDOW {
-		return false
-	}
+	if offset >= UDP_REPLAY_WINDOW do return false
 	return w.mask & (u64(1) << offset) == 0
 }
 
@@ -254,9 +230,7 @@ replay_commit :: proc(w: ^Replay_Window, seq: u64) {
 }
 
 replay_accept :: proc(w: ^Replay_Window, seq: u64) -> bool {
-	if !replay_check(w, seq) {
-		return false
-	}
+	if !replay_check(w, seq) do return false
 	replay_commit(w, seq)
 	return true
 }

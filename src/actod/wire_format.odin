@@ -124,15 +124,9 @@ process_recv_frames :: proc(
 	for read_pos + 4 <= write_pos {
 		msg_size := endian.unchecked_get_u32le(data[read_pos:])
 
-		if msg_size == 0 {
-			return 0, .Zero_Size
-		}
-		if msg_size > MAX_MESSAGE_SIZE {
-			return 0, .Too_Large
-		}
-		if read_pos + 4 + msg_size > write_pos {
-			break
-		}
+		if msg_size == 0 do return 0, .Zero_Size
+		if msg_size > MAX_MESSAGE_SIZE do return 0, .Too_Large
+		if read_pos + 4 + msg_size > write_pos do break
 
 		process_msg(ctx, data[read_pos + 4:read_pos + 4 + msg_size])
 		read_pos += 4 + msg_size

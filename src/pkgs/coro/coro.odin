@@ -5,7 +5,6 @@ import "core:mem"
 import vmem "core:mem/virtual"
 
 MIN_STACK_SIZE :: 16 * mem.Kilobyte
-DEFAULT_STORAGE_SIZE :: 1024
 DEFAULT_STACK_SIZE :: 56 * 1024
 STACK_GUARD_SIZE :: 16 * mem.Kilobyte
 CANARY_ENABLED :: #config(ACTOD_CORO_CANARY, true)
@@ -76,9 +75,9 @@ asan_arrived :: #force_inline proc "contextless" (
 Coro :: struct #align (64) {
 	state:        State,
 	prev_co:      ^Coro,
-	magic_number: uint, // yield stack-overflow check (debug only)
-	stack_base:   rawptr, // yield stack-overflow check (debug only)
-	stack_size:   uint, // yield stack-overflow check (debug only)
+	magic_number: uint,
+	stack_base:   rawptr,
+	stack_size:   uint,
 	user_data:    rawptr,
 	func:         Func,
 	mapping_base: rawptr,
@@ -86,9 +85,6 @@ Coro :: struct #align (64) {
 	canary_base:  rawptr,
 	coro_ctx:     Ctx_Buf,
 	back_ctx:     Ctx_Buf,
-	storage:      [^]u8,
-	bytes_stored: uint,
-	storage_size: uint,
 	caller_stack:      rawptr,
 	caller_stack_size: uint,
 	asan_save_caller:  rawptr,
@@ -98,7 +94,6 @@ Coro :: struct #align (64) {
 Desc :: struct {
 	func:         Func,
 	user_data:    rawptr,
-	storage_size: uint,
 	stack_size:   uint,
 }
 
@@ -189,7 +184,6 @@ desc_init :: proc(func: Func, stack_size: uint = 0) -> Desc {
 
 	desc: Desc
 	desc.func = func
-	desc.storage_size = DEFAULT_STORAGE_SIZE
 	desc.stack_size = page_align(ss)
 	return desc
 }
@@ -206,12 +200,12 @@ uninit :: proc(co: ^Coro) -> Result {
 	return .Success
 }
 
-header_size :: proc "contextless" (storage_size: uint) -> uint {
-	return align_forward(align_forward(size_of(Coro), 64) + storage_size, 16)
+header_size :: proc "contextless" () -> uint {
+	return align_forward(align_forward(size_of(Coro), 64), 16)
 }
 
-region_size :: proc "contextless" (stack_size: uint, storage_size: uint) -> uint {
-	return page_align(STACK_CANARY_SIZE + stack_size + header_size(storage_size))
+region_size :: proc "contextless" (stack_size: uint) -> uint {
+	return page_align(STACK_CANARY_SIZE + stack_size + header_size())
 }
 
 stack_canary_intact :: proc "contextless" (co: ^Coro) -> bool {
@@ -230,8 +224,8 @@ stack_canary_intact :: proc "contextless" (co: ^Coro) -> bool {
 }
 
 @(private)
-init_at :: proc(desc: ^Desc, base: uintptr, region: uint, storage_size: uint) -> (^Coro, Result) {
-	header_at := base + uintptr(region) - uintptr(header_size(storage_size))
+init_at :: proc(desc: ^Desc, base: uintptr, region: uint) -> (^Coro, Result) {
+	header_at := base + uintptr(region) - uintptr(header_size())
 
 	co := cast(^Coro)header_at
 	co^ = {}
@@ -253,8 +247,6 @@ init_at :: proc(desc: ^Desc, base: uintptr, region: uint, storage_size: uint) ->
 	co.canary_base = rawptr(base)
 	co.stack_base = usable_base
 	co.stack_size = stack_size
-	co.storage = cast([^]u8)(uintptr(co) + uintptr(align_forward(size_of(Coro), 64)))
-	co.storage_size = storage_size
 	co.state = .Suspended
 	co.func = desc.func
 	co.user_data = desc.user_data
@@ -269,7 +261,7 @@ create :: proc(desc: ^Desc) -> (^Coro, Result) {
 	}
 
 	stack_size := page_align(desc.stack_size)
-	region := region_size(stack_size, desc.storage_size)
+	region := region_size(stack_size)
 	mapping_size := STACK_GUARD_SIZE + region
 
 	mapping, reserve_err := vmem.reserve(mapping_size)
@@ -284,7 +276,7 @@ create :: proc(desc: ^Desc) -> (^Coro, Result) {
 		return nil, .Out_Of_Memory
 	}
 
-	co, init_res := init_at(desc, base + STACK_GUARD_SIZE, region, desc.storage_size)
+	co, init_res := init_at(desc, base + STACK_GUARD_SIZE, region)
 	if init_res != .Success {
 		vmem.release(rawptr(base), mapping_size)
 		return nil, init_res
@@ -302,12 +294,12 @@ create_in :: proc(desc: ^Desc, region: []byte) -> (^Coro, Result) {
 	}
 
 	stack_size := page_align(desc.stack_size)
-	needed := region_size(stack_size, desc.storage_size)
+	needed := region_size(stack_size)
 	if uint(len(region)) < needed {
 		return nil, .Not_Enough_Space
 	}
 
-	co, init_res := init_at(desc, uintptr(raw_data(region)), needed, desc.storage_size)
+	co, init_res := init_at(desc, uintptr(raw_data(region)), needed)
 	if init_res != .Success {
 		return nil, init_res
 	}
@@ -395,71 +387,6 @@ get_user_data :: proc(co: ^Coro) -> rawptr {
 		return co.user_data
 	}
 	return nil
-}
-
-push :: proc(co: ^Coro, src: rawptr, len: uint) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
-	if len > 0 {
-		bytes_stored := co.bytes_stored + len
-		if bytes_stored > co.storage_size {
-			return .Not_Enough_Space
-		}
-		if src == nil {
-			return .Invalid_Pointer
-		}
-		mem.copy(&co.storage[co.bytes_stored], src, int(len))
-		co.bytes_stored = bytes_stored
-	}
-	return .Success
-}
-
-pop :: proc(co: ^Coro, dest: rawptr, len: uint) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
-	if len > 0 {
-		if len > co.bytes_stored {
-			return .Not_Enough_Space
-		}
-		bytes_stored := co.bytes_stored - len
-		if dest != nil {
-			mem.copy(dest, &co.storage[bytes_stored], int(len))
-		}
-		co.bytes_stored = bytes_stored
-	}
-	return .Success
-}
-
-peek :: proc(co: ^Coro, dest: rawptr, len: uint) -> Result {
-	if co == nil {
-		return .Invalid_Coroutine
-	}
-	if len > 0 {
-		if len > co.bytes_stored {
-			return .Not_Enough_Space
-		}
-		if dest == nil {
-			return .Invalid_Pointer
-		}
-		mem.copy(dest, &co.storage[co.bytes_stored - len], int(len))
-	}
-	return .Success
-}
-
-get_bytes_stored :: proc(co: ^Coro) -> uint {
-	if co == nil {
-		return 0
-	}
-	return co.bytes_stored
-}
-
-get_storage_size :: proc(co: ^Coro) -> uint {
-	if co == nil {
-		return 0
-	}
-	return co.storage_size
 }
 
 result_description :: proc(res: Result) -> string {

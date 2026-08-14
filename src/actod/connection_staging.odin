@@ -3,8 +3,6 @@ package actod
 import "base:intrinsics"
 import "core:sync"
 
-ACTOD_NET_STAGING :: #config(ACTOD_NET_STAGING, true)
-
 STAGING_DESTS :: 4
 STAGING_BUF_SIZE :: 8192
 STAGE_FRAME_MAX :: 1024
@@ -18,47 +16,41 @@ Staging_Entry :: struct {
 
 Net_Staging :: struct {
 	entries: [STAGING_DESTS]Staging_Entry,
-	active:  u32,
 }
 
 @(thread_local)
 net_staging: Net_Staging
 
-staging_reserve :: proc(ring: ^Connection_Ring, size: u32) -> (dst: []byte, ok: bool) {
+staging_reserve :: proc(
+	ring: ^Connection_Ring,
+	size: u32,
+) -> (
+	dst: []byte,
+	reserved: ^Staging_Entry,
+	ok: bool,
+) {
 	entry := staging_entry_for(ring)
 	if entry == nil || size > entry.cap {
-		return nil, false
+		return nil, nil, false
 	}
 	if entry.len + size > entry.cap {
 		if !staging_flush_entry(entry) {
-			return nil, false
+			return nil, nil, false
 		}
-		entry.ring = ring
-		entry.cap = staging_entry_cap(ring)
-		net_staging.active += 1
+		staging_entry_reset(entry, ring)
 	}
 	offset := entry.len
 	entry.len += size
-	return entry.buf[offset:offset + size], true
+	return entry.buf[offset:offset + size], entry, true
 }
 
-staging_unreserve :: proc(ring: ^Connection_Ring, size: u32) {
-	for &entry in net_staging.entries {
-		if entry.ring == ring && entry.len >= size {
-			entry.len -= size
-			if entry.len == 0 {
-				entry.ring = nil
-				net_staging.active -= 1
-			}
-			return
-		}
-	}
+staging_unreserve :: proc(entry: ^Staging_Entry, size: u32) {
+	if entry == nil || entry.len < size do return
+	entry.len -= size
+	if entry.len == 0 do entry.ring = nil
 }
 
 staging_flush_ring :: proc(ring: ^Connection_Ring) -> bool {
-	if net_staging.active == 0 {
-		return true
-	}
 	for &entry in net_staging.entries {
 		if entry.ring == ring {
 			return staging_flush_entry(&entry)
@@ -68,9 +60,6 @@ staging_flush_ring :: proc(ring: ^Connection_Ring) -> bool {
 }
 
 staging_flush_all :: proc() -> bool {
-	if net_staging.active == 0 {
-		return true
-	}
 	all_clear := true
 	for &entry in net_staging.entries {
 		if entry.ring != nil && !staging_flush_entry(&entry) {
@@ -81,7 +70,17 @@ staging_flush_all :: proc() -> bool {
 }
 
 staging_has_pending :: #force_inline proc() -> bool {
-	return net_staging.active != 0
+	for &entry in net_staging.entries {
+		if entry.ring != nil do return true
+	}
+	return false
+}
+
+@(private = "file")
+staging_entry_reset :: proc(entry: ^Staging_Entry, ring: ^Connection_Ring) {
+	entry.ring = ring
+	entry.len = 0
+	entry.cap = staging_entry_cap(ring)
 }
 
 @(private = "file")
@@ -111,10 +110,7 @@ staging_entry_for :: proc(ring: ^Connection_Ring) -> ^Staging_Entry {
 			return nil
 		}
 	}
-	free_entry.ring = ring
-	free_entry.len = 0
-	free_entry.cap = staging_entry_cap(ring)
-	net_staging.active += 1
+	staging_entry_reset(free_entry, ring)
 	return free_entry
 }
 
@@ -125,7 +121,6 @@ staging_flush_entry :: proc(entry: ^Staging_Entry) -> bool {
 	}
 	if entry.len == 0 {
 		entry.ring = nil
-		net_staging.active -= 1
 		return true
 	}
 
@@ -136,19 +131,15 @@ staging_flush_entry :: proc(entry: ^Staging_Entry) -> bool {
 		}
 	}
 
-	if !batch_append_blob(ring, entry.buf[:entry.len]) {
+	if !batch_append_raw(ring, entry.buf[:entry.len]) {
 		return false
 	}
 	entry.len = 0
 	entry.ring = nil
-	net_staging.active -= 1
 	return true
 }
 
 staging_drop_node_rings :: proc() {
-	if net_staging.active == 0 {
-		return
-	}
 	for &entry in net_staging.entries {
 		ring := entry.ring
 		if ring == nil {
@@ -159,7 +150,6 @@ staging_drop_node_rings :: proc() {
 		}
 		entry.ring = nil
 		entry.len = 0
-		net_staging.active -= 1
 	}
 }
 
@@ -185,9 +175,7 @@ node_owns_ring :: proc(ring: ^Connection_Ring) -> bool {
 }
 
 staging_flush_before_park :: proc() -> bool {
-	if net_staging.active == 0 {
-		return true
-	}
+	if !staging_has_pending() do return true
 	for attempt := 0; attempt < 64; attempt += 1 {
 		if staging_flush_all() {
 			return true

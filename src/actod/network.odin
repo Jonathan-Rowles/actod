@@ -354,9 +354,6 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []
 	return msg
 }
 
-// deadline bounds the whole read, not each recv: SO_RCVTIMEO alone lets a peer
-// dribble one byte per timeout window forever, so a total wall-clock deadline
-// is required to defeat slowloris-style handshake stalls.
 tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time) -> bool {
 	if sim_is_socket(sock) {
 		return sim_stream_read_exactly(sock, buf, deadline)
@@ -652,8 +649,6 @@ broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_R
 	broadcast_to_all_nodes(msg)
 }
 
-// Gossip goes only to live connections; reconnecting peers re-sync via the
-// registry snapshot exchanged on handshake.
 broadcast_to_all_nodes :: proc(msg: $T) {
 	for node_id in 2 ..< MAX_NODES {
 		ring := get_connection_ring(Node_ID(node_id))
@@ -772,10 +767,6 @@ spawn_remote :: proc(
 	return spawn_remote_impl(spawn_func_name, actor_name, target_node, parent_pid, timeout, true, loc)
 }
 
-// register_with_parent sends Add_Child to parent_pid so the parent supervises the
-// remote child (children list, child_restarts, on_child_terminated). restart_child
-// passes false: it already re-links the restarted pid in place, and the redundant
-// Add_Child would only trip the duplicate-child guard.
 @(private)
 spawn_remote_impl :: proc(
 	spawn_func_name: string,

@@ -204,43 +204,41 @@ send_to_connection_ring_body :: proc(
 		return .MESSAGE_TOO_LARGE
 	}
 
-	when ACTOD_NET_STAGING {
-		if current_worker != nil {
-			if exact_size <= STAGE_FRAME_MAX {
-				if staged_dst, staged := staging_reserve(ring, exact_size); staged {
-					staged_len := build_wire_format_into_buffer_impl(
-						staged_dst,
-						data,
-						info,
-						to_handle,
-						from_handle,
-						base_flags,
-						"",
-						token,
+	if current_worker != nil {
+		if exact_size <= STAGE_FRAME_MAX {
+			if staged_dst, staged_entry, staged := staging_reserve(ring, exact_size); staged {
+				staged_len := build_wire_format_into_buffer_impl(
+					staged_dst,
+					data,
+					info,
+					to_handle,
+					from_handle,
+					base_flags,
+					"",
+					token,
+				)
+				if staged_len == 0 {
+					staging_unreserve(staged_entry, exact_size)
+					log.errorf(
+						"Failed to serialize '%s' (%d bytes) for node %d; the message type may contain a field the wire format cannot encode",
+						info.name,
+						exact_size,
+						ring.node_id,
+						location = loc,
 					)
-					if staged_len == 0 {
-						staging_unreserve(ring, exact_size)
-						log.errorf(
-							"Failed to serialize '%s' (%d bytes) for node %d; the message type may contain a field the wire format cannot encode",
-							info.name,
-							exact_size,
-							ring.node_id,
-							location = loc,
-						)
-						return .NETWORK_ERROR
-					}
-					when ODIN_TEST {
-						if corrupt && len(staged_dst) > 0 {
-							staged_dst[len(staged_dst) - 1] ~= 0xFF
-						}
-					}
-					return .OK
+					return .NETWORK_ERROR
 				}
-				return .NETWORK_RING_FULL
+				when ODIN_TEST {
+					if corrupt && len(staged_dst) > 0 {
+						staged_dst[len(staged_dst) - 1] ~= 0xFF
+					}
+				}
+				return .OK
 			}
-			if !staging_flush_ring(ring) {
-				return .NETWORK_RING_FULL
-			}
+			return .NETWORK_RING_FULL
+		}
+		if !staging_flush_ring(ring) {
+			return .NETWORK_RING_FULL
 		}
 	}
 
@@ -370,10 +368,8 @@ send_to_connection_ring_by_name_body :: proc(
 		return .MESSAGE_TOO_LARGE
 	}
 
-	when ACTOD_NET_STAGING {
-		if current_worker != nil && !staging_flush_ring(ring) {
-			return .NETWORK_RING_FULL
-		}
+	if current_worker != nil && !staging_flush_ring(ring) {
+		return .NETWORK_RING_FULL
 	}
 
 	dst, sid, ok := batch_reserve(ring, exact_size)

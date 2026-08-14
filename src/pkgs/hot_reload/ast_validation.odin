@@ -498,8 +498,8 @@ format_validation_error :: proc(err: Validation_Error, actor_name: string) -> st
 }
 
 Proc_Name_Mapping :: struct {
-	field_name: string, // e.g. "handle_message"
-	proc_name:  string, // e.g. "handle_pair_message"
+	field_name: string,
+	proc_name:  string,
 }
 
 discover_package_procs :: proc(package_path: string, allocator := context.allocator) -> []string {

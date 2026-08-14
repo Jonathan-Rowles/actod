@@ -31,9 +31,15 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 	msg_ctx:          rawptr,
 	next_ready:       ^Pooled_Actor_Handle,
 	coro_stack:       uint,
-	started_once:     bool,
-	parked_cold:      bool,
+	lifecycle:        Handle_Lifecycle,
+	acquire_warned:   bool,
 	terminated:       bool,
+}
+
+Handle_Lifecycle :: enum u8 {
+	Fresh       = 0,
+	Started     = 1,
+	Parked_Cold = 2,
 }
 
 #assert(offset_of(Pooled_Actor_Handle, in_ready_queue) % CACHE_LINE_SIZE == 0)
@@ -180,11 +186,11 @@ wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
 @(private)
 coro_entry :: proc(co: ^coro.Coro) {
 	handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-	if handle.started_once {
+	if handle.lifecycle != .Fresh {
 		handle.resume_fn(handle.actor_ptr)
 		return
 	}
-	handle.started_once = true
+	handle.lifecycle = .Started
 	handle.main_fn(handle.actor_ptr)
 }
 
@@ -206,12 +212,18 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 	current_actor_file_logger = handle.file_logger
 
 	if handle.co == nil && !handle_acquire_coro(handle) {
-		log.errorf("could not reacquire a coroutine stack to wake a parked actor")
+		if !handle.acquire_warned {
+			handle.acquire_warned = true
+			log.errorf(
+				"could not reacquire a coroutine stack for a parked actor; it stays parked with its mailbox intact and retries on its next wake",
+			)
+		}
 		sync.atomic_store_explicit(&handle.in_ready_queue, false, .Release)
 		current_actor_context = nil
 		current_actor_file_logger = nil
 		return
 	}
+	handle.acquire_warned = false
 
 	reclaim_pin()
 
@@ -220,8 +232,8 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 	current_actor_context = nil
 	current_actor_file_logger = nil
 
-	if handle.parked_cold {
-		handle.parked_cold = false
+	if handle.lifecycle == .Parked_Cold {
+		handle.lifecycle = .Started
 		coro_release(handle.co, &handle.coro_slot, false)
 		handle.co = nil
 	} else if coro.status(handle.co) == .Dead {
@@ -295,9 +307,7 @@ worker_loop :: proc(worker: ^Worker) {
 
 		reclaim_scan()
 
-		when ACTOD_NET_STAGING {
-			if !staging_flush_before_park() do continue
-		}
+		if !staging_flush_before_park() do continue
 
 		sync.atomic_store_explicit(&worker.parked, true, .Relaxed)
 		sync.atomic_thread_fence(.Seq_Cst)
@@ -307,17 +317,13 @@ worker_loop :: proc(worker: ^Worker) {
 		sync.atomic_store_explicit(&worker.parked, false, .Relaxed)
 	}
 
-	when ACTOD_NET_STAGING {
-		_ = staging_flush_before_park()
-	}
+	_ = staging_flush_before_park()
 }
 
 @(private)
 worker_flush_staging :: #force_inline proc() {
-	when ACTOD_NET_STAGING {
-		if staging_has_pending() {
-			_ = staging_flush_all()
-		}
+	if staging_has_pending() {
+		_ = staging_flush_all()
 	}
 }
 

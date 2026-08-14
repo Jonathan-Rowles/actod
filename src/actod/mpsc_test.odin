@@ -14,16 +14,16 @@ test_mpsc_basic_operations :: proc(t: ^testing.T) {
 		ok := mpsc_push(&queue, 42)
 		testing.expect(t, ok, "Should be able to push to empty queue")
 
-		value: int
-		ok = mpsc_pop(&queue, &value)
-		testing.expect(t, ok, "Should be able to pop from non-empty queue")
-		testing.expect_value(t, value, 42)
+		batch: [1]int
+		count := mpsc_pop_batch(&queue, batch[:])
+		testing.expect(t, count == 1, "Should be able to pop from non-empty queue")
+		testing.expect_value(t, batch[0], 42)
 	}
 
 	{
-		value: int
-		ok := mpsc_pop(&queue, &value)
-		testing.expect(t, !ok, "Should not be able to pop from empty queue")
+		batch: [1]int
+		count := mpsc_pop_batch(&queue, batch[:])
+		testing.expect(t, count == 0, "Should not be able to pop from empty queue")
 
 		empty := mpsc_is_empty(&queue)
 		testing.expect(t, empty, "Queue should be empty")
@@ -35,11 +35,13 @@ test_mpsc_basic_operations :: proc(t: ^testing.T) {
 			testing.expect(t, ok, fmt.tprintf("Should push item %d", i))
 		}
 
+		batch: [10]int
+		count := mpsc_pop_batch(&queue, batch[:])
+		testing.expect(t, count == 10, "Should pop all 10 items")
+
 		for i := 0; i < 10; i += 1 {
-			value: int
-			ok := mpsc_pop(&queue, &value)
-			testing.expect(t, ok, fmt.tprintf("Should pop item %d", i))
-			testing.expect_value(t, value, i)
+			testing.expect(t, i < count, fmt.tprintf("Should pop item %d", i))
+			testing.expect_value(t, batch[i], i)
 		}
 	}
 }
@@ -57,18 +59,26 @@ test_mpsc_capacity :: proc(t: ^testing.T) {
 
 	ok := mpsc_push(&queue, CAPACITY)
 	if ok {
-		value: int
-		mpsc_pop(&queue, &value)
+		batch: [1]int
+		mpsc_pop_batch(&queue, batch[:])
 		ok = mpsc_push(&queue, CAPACITY)
 		ok = mpsc_push(&queue, CAPACITY + 1)
 		testing.expect(t, !ok, "Should not be able to push beyond capacity")
 	}
 
 	count := 0
-	value: int
-	for mpsc_pop(&queue, &value) {
-		testing.expect(t, value == count, fmt.tprintf("Expected value %d, got %d", count, value))
-		count += 1
+	for {
+		batch: [CAPACITY]int
+		n := mpsc_pop_batch(&queue, batch[:])
+		if n == 0 do break
+		for i := 0; i < n; i += 1 {
+			testing.expect(
+				t,
+				batch[i] == count,
+				fmt.tprintf("Expected value %d, got %d", count, batch[i]),
+			)
+			count += 1
+		}
 	}
 
 	testing.expect(t, count >= CAPACITY, "Should have popped at least CAPACITY items")
@@ -98,9 +108,10 @@ test_mpsc_peek :: proc(t: ^testing.T) {
 		testing.expect(t, ok, "Second peek should succeed")
 		testing.expect_value(t, value, 100)
 
-		ok = mpsc_pop(&queue, &value)
-		testing.expect(t, ok, "Pop should succeed after peek")
-		testing.expect_value(t, value, 100)
+		batch: [1]int
+		count := mpsc_pop_batch(&queue, batch[:])
+		testing.expect(t, count == 1, "Pop should succeed after peek")
+		testing.expect_value(t, batch[0], 100)
 
 		ok = mpsc_peek(&queue, &value)
 		testing.expect(t, ok, "Peek should see next item")
@@ -188,12 +199,19 @@ test_mpsc_spsc :: proc(t: ^testing.T) {
 	defer delete(received)
 
 	for len(received) < ITEM_COUNT {
-		value: int
-		if mpsc_pop(&queue, &value) {
-			append(&received, value)
+		batch: [8]int
+		n := mpsc_pop_batch(&queue, batch[:])
+		if n > 0 {
+			for i := 0; i < n; i += 1 {
+				append(&received, batch[i])
+			}
 		} else if sync.atomic_load(&done) {
-			for mpsc_pop(&queue, &value) {
-				append(&received, value)
+			for {
+				n2 := mpsc_pop_batch(&queue, batch[:])
+				if n2 == 0 do break
+				for i := 0; i < n2; i += 1 {
+					append(&received, batch[i])
+				}
 			}
 			break
 		} else {
@@ -274,20 +292,29 @@ test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 	defer delete(received)
 
 	for len(received) < TOTAL_ITEMS {
-		value: int
-		if mpsc_pop(&queue, &value) {
-			_, exists := received[value]
-			if exists {
-				testing.fail_now(t, fmt.tprintf("Duplicate value received: %d", value))
-			}
-			received[value] = true
-		} else if sync.atomic_load(&producers_done) == PRODUCER_COUNT {
-			for mpsc_pop(&queue, &value) {
+		batch: [16]int
+		n := mpsc_pop_batch(&queue, batch[:])
+		if n > 0 {
+			for i := 0; i < n; i += 1 {
+				value := batch[i]
 				_, exists := received[value]
 				if exists {
 					testing.fail_now(t, fmt.tprintf("Duplicate value received: %d", value))
 				}
 				received[value] = true
+			}
+		} else if sync.atomic_load(&producers_done) == PRODUCER_COUNT {
+			for {
+				n2 := mpsc_pop_batch(&queue, batch[:])
+				if n2 == 0 do break
+				for i := 0; i < n2; i += 1 {
+					value := batch[i]
+					_, exists := received[value]
+					if exists {
+						testing.fail_now(t, fmt.tprintf("Duplicate value received: %d", value))
+					}
+					received[value] = true
+				}
 			}
 			break
 		} else {
@@ -355,9 +382,10 @@ test_mpsc_concurrent_stress :: proc(t: ^testing.T) {
 	})
 
 	for total_popped < TARGET_ITEMS {
-		value: int
-		if mpsc_pop(&queue, &value) {
-			total_popped += 1
+		batch: [64]int
+		n := mpsc_pop_batch(&queue, batch[:])
+		if n > 0 {
+			total_popped += n
 		} else if sync.atomic_load(&stop_flag) {
 			break
 		} else {
@@ -369,9 +397,11 @@ test_mpsc_concurrent_stress :: proc(t: ^testing.T) {
 	thread.join(producer)
 	thread.destroy(producer)
 
-	value: int
-	for mpsc_pop(&queue, &value) {
-		total_popped += 1
+	for {
+		batch: [64]int
+		n := mpsc_pop_batch(&queue, batch[:])
+		if n == 0 do break
+		total_popped += n
 	}
 
 	pushed := sync.atomic_load(&total_pushed)
@@ -406,10 +436,12 @@ test_mpsc_state_functions :: proc(t: ^testing.T) {
 		fmt.println("Queue appears to be full at 8 items")
 	}
 
-	value: int
 	count := 0
-	for mpsc_pop(&queue, &value) {
-		count += 1
+	for {
+		batch: [8]int
+		n := mpsc_pop_batch(&queue, batch[:])
+		if n == 0 do break
+		count += n
 	}
 
 	testing.expect(t, mpsc_is_empty(&queue), "Queue should be empty after draining")
@@ -447,11 +479,18 @@ test_mpsc_data_integrity :: proc(t: ^testing.T) {
 		testing.expect(t, ok, fmt.tprintf("Should push item %d", i))
 	}
 
-	for i := 0; i < TEST_COUNT; i += 1 {
-		item: Test_Struct
-		ok := mpsc_pop(&queue, &item)
-		testing.expect(t, ok, fmt.tprintf("Should pop item %d", i))
+	items: [TEST_COUNT]Test_Struct
+	popped := mpsc_pop_batch(&queue, items[:])
+	testing.expect(
+		t,
+		popped == TEST_COUNT,
+		fmt.tprintf("Should pop all items: expected %d, got %d", TEST_COUNT, popped),
+	)
 
+	for i := 0; i < TEST_COUNT; i += 1 {
+		testing.expect(t, i < popped, fmt.tprintf("Should pop item %d", i))
+
+		item := items[i]
 		expected_checksum := make_checksum(&item)
 		testing.expect(
 			t,

@@ -92,41 +92,6 @@ mpsc_push :: proc(q: ^MPSC_Queue($T, $N), data: T) -> bool {
 	}
 }
 
-// Pop - single consumer
-@(private)
-mpsc_pop :: proc(q: ^MPSC_Queue($T, $N), data: ^T) -> bool {
-	mask := q.r_mask
-
-	pos := q.read_index
-	entry := &q.r_entries[pos & mask]
-	seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
-
-	if seq != pos + 1 {
-		return false
-	}
-
-	data^ = entry.data
-
-	sync.atomic_store_explicit(&entry.sequence, pos + mask + 1, .Release)
-
-	sync.atomic_store_explicit(&q.read_index, pos + 1, .Relaxed)
-
-	return true
-}
-
-// Push batch - thread safe TODO: actually batch
-@(private)
-mpsc_push_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {
-	count := 0
-	for item in items {
-		if !mpsc_push(q, item) {
-			break
-		}
-		count += 1
-	}
-	return count
-}
-
 // Pop batch - single consumer, deferred sequence release
 @(private)
 mpsc_pop_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {

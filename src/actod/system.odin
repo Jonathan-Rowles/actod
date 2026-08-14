@@ -141,12 +141,12 @@ Node_Actor_Data :: struct {
 
 Node_Behaviour :: Actor_Behaviour(Node_Actor_Data) {
 	handle_message = handle_node_message,
-	init           = init_system,
+	init           = system_actor_init,
 	terminate      = terminate_system,
 }
 
 @(private)
-init_system :: proc(data: ^Node_Actor_Data) {
+system_actor_init :: proc(data: ^Node_Actor_Data) {
 	NODE.node_id = 1
 	init_network(NODE.node_id, data.name, NODE.config.loc)
 	init_udp(NODE.config.loc)

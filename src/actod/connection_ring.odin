@@ -69,9 +69,6 @@ MAX_POOL_RINGS :: 16
 
 Scale_Up_Request :: struct {}
 
-// Messages must stay pointer-free for the actor-safety validator; rings are
-// NODE-owned and never freed, so the address travels as a u64 handle and the
-// receiver validates it against its own active pool rings before use.
 Pool_Ring_Closed :: struct {
 	ring_ptr: u64,
 }
@@ -82,9 +79,6 @@ Ring_Park_State :: enum u32 {
 	Park_Acked = 2,
 }
 
-// Pool and all its rings are NODE-owned: scale-down parks rings for reuse,
-// nothing is freed until destroy_all_connection_rings. rings[0] is the primary
-// and always == NODE.connection_rings[node_id]; it never scales down.
 Connection_Pool :: struct {
 	rings:                [MAX_POOL_RINGS]^Connection_Ring,
 	ring_count:           u32,
@@ -463,8 +457,6 @@ pool_note_contention :: proc(pool: ^Connection_Pool) {
 	}
 }
 
-// Seals current batch slot. force=true always seals (SEALED if writers active),
-// force=false only seals when no active writers.
 @(private)
 batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 	slot_idx := ring.batch_slot_idx
@@ -589,13 +581,12 @@ batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	when ODIN_TEST {
 		drop, dup, _ := frame_tap(.Out, frame_tap_out_hash(msg_data), msg_data, ring.node_id)
 		if drop do return true
-		if dup do _ = batch_append_message_impl(ring, msg_data)
+		if dup do _ = batch_append_raw(ring, msg_data)
 	}
-	return batch_append_message_impl(ring, msg_data)
+	return batch_append_raw(ring, msg_data)
 }
 
-@(private = "file")
-batch_append_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
+batch_append_raw :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	msg_len := u32(len(msg_data))
 	if msg_len == 0 {
 		return true
@@ -624,18 +615,14 @@ batch_append_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) -> b
 	return true
 }
 
-batch_append_blob :: proc(ring: ^Connection_Ring, blob: []byte) -> bool {
-	return batch_append_message_impl(ring, blob)
-}
-
 batch_append_message_retry :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	when ODIN_TEST {
 		drop, dup, _ := frame_tap(.Out, frame_tap_out_hash(msg_data), msg_data, ring.node_id)
 		if drop do return true
-		if dup do _ = batch_append_message_impl(ring, msg_data)
+		if dup do _ = batch_append_raw(ring, msg_data)
 	}
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		if batch_append_message_impl(ring, msg_data) {
+		if batch_append_raw(ring, msg_data) {
 			return true
 		}
 		if retry < RING_SEND_SPIN_RETRIES {
@@ -725,7 +712,6 @@ batch_reserve :: proc(
 	return data[0:exact_size], new_slot_idx, true
 }
 
-// Last writer on a SEALED slot promotes it to READY.
 @(private)
 batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 	slot := &ring.send_slots[slot_idx]
@@ -760,7 +746,6 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 	}
 }
 
-// Writes a valid padding frame on reserve failure to preserve stream integrity.
 @(private)
 batch_abort :: proc(ring: ^Connection_Ring, slot_idx: u32, dst: []byte) {
 	if len(dst) >= 4 {

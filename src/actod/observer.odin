@@ -57,8 +57,8 @@ Actor_Stats :: struct {
 	parent_pid:          PID,
 	messages_received:   u64,
 	messages_sent:       u64,
-	received_from:       map[PID]u64, // PID -> count
-	sent_to:             map[PID]u64, // PID -> count
+	received_from:       map[PID]u64,
+	sent_to:             map[PID]u64,
 	mailbox_size:        int,
 	system_mailbox_size: int,
 	state:               Actor_State,

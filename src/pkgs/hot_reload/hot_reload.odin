@@ -47,10 +47,10 @@ Load_Error_Kind :: enum {
 Load_Error :: struct {
 	kind:           Load_Error_Kind,
 	module_path:    string,
-	symbol_name:    string, // for Missing_Required_Symbol
-	expected_size:  int, // for State_Size_Mismatch
-	actual_size:    int, // for State_Size_Mismatch
-	system_message: string, // OS-level error from dlopen
+	symbol_name:    string,
+	expected_size:  int,
+	actual_size:    int,
+	system_message: string,
 }
 
 load_error_message :: proc(err: Load_Error) -> string {
@@ -147,7 +147,7 @@ load_module :: proc(
 			}
 		}
 
-		resolved_ptr: rawptr = nil
+		resolved_ptr: rawptr
 		if found && ptr != nil {
 			getter := cast(proc "c" () -> rawptr)ptr
 			resolved_ptr = getter()
@@ -207,8 +207,8 @@ unload_module :: proc(mod: ^Hot_Module, allocator := context.allocator) {
 }
 
 Export_Proc :: struct {
-	field_name: string, // behaviour field: "handle_message"
-	proc_name:  string, // actual proc in source: "handle_pair_message"
+	field_name: string,
+	proc_name:  string,
 }
 
 Actor_Export :: struct {

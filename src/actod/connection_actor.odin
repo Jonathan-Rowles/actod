@@ -44,9 +44,6 @@ Reconnect :: struct {
 	delay: time.Duration,
 }
 
-// keys_ptr boxes a Noise_Transport on the system heap (messages must be
-// pointer-free for the validator, and cipher contexts contain unions); the
-// adopting actor copies, wipes, and frees it on every path.
 Adopt_Pool_Ring :: struct {
 	socket:   net.TCP_Socket,
 	keys_ptr: u64,
@@ -234,8 +231,6 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 					establish_pool_ring(data)
 					sync.atomic_store(&pool.scale_up_requested, u32(0))
 				}
-				// At max_rings the flag stays set so producers stop
-				// re-requesting; the heartbeat tick re-arms it.
 			}
 		}
 
@@ -329,8 +324,6 @@ Hello_Info :: struct {
 	gossip_seq:  u64,
 }
 
-// Primary handshakes carry the token we issue for pool joins towards us;
-// pool-join handshakes echo the token the target issued.
 @(private)
 build_hello_body :: proc(
 	data: ^Connection_Actor_Data,
@@ -578,10 +571,6 @@ send_noise_ctrl :: proc(sock: net.TCP_Socket, ctrl_type: u8, msg: []byte) -> boo
 	return handshake_send_ctrl(sock, body)
 }
 
-// Synchronous v2 handshake plus connection setup, run on the actor's dedicated
-// thread: HELLO exchange, optional Noise NNpsk0, peer registration and
-// duplicate tiebreak, ring adoption, IO thread start. Incoming pool-join
-// handshakes divert to the owning connection actor instead.
 @(private)
 establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	sock := data.tcp_socket
@@ -742,8 +731,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	return .Established
 }
 
-// Runs on the temporary incoming actor: finish the join handshake, then hand
-// the socket (and session keys) to the connection actor that owns the pool.
+// Runs on the temporary incoming actor.
 @(private)
 handle_incoming_pool_join :: proc(
 	data: ^Connection_Actor_Data,
@@ -794,8 +782,6 @@ handle_incoming_pool_join :: proc(
 	return .Transferred
 }
 
-// Outgoing scale-up: dial another connection to the peer and run a pool-join
-// handshake presenting the token the peer issued on the primary handshake.
 @(private)
 establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	pool := data.ring != nil ? data.ring.pool : nil
@@ -1026,8 +1012,7 @@ finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Po
 	}
 }
 
-// Called with the IO thread already stopped and joined: every pool ring is
-// quiesced, so reset them all and park for reuse by the next session.
+// Called with the IO thread already stopped and joined.
 @(private)
 drain_pool_rings_into_primary :: proc(data: ^Connection_Actor_Data) {
 	pool := data.ring != nil ? data.ring.pool : nil
@@ -1041,6 +1026,8 @@ drain_pool_rings_into_primary :: proc(data: ^Connection_Actor_Data) {
 	}
 }
 
+// Called with the IO thread already stopped and joined: every pool ring is
+// quiesced, so reset them all and park for reuse by the next session.
 @(private)
 teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 	pool := data.ring != nil ? data.ring.pool : nil
@@ -1950,12 +1937,10 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 		}
 	}
 
-	// Skip our own actors (can happen in mesh forwarding loops)
 	if source_name == NODE.name {
 		return
 	}
 
-	// Get or register source node (ensures we have connection info for lazy connections)
 	source_node_id, found := get_node_by_name(source_name)
 	if !found {
 		endpoint := build_endpoint_from_broadcast(msg)

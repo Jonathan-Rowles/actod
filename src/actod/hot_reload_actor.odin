@@ -240,7 +240,7 @@ spawn_from_raw :: proc(
 
 	broadcast_actor_spawned(pid, name, behaviour.actor_type, parent_pid)
 
-	started: bool = false
+	started: bool
 	actor.started = &started
 
 	if !opts.use_dedicated_os_thread && !opts.blocking && NODE.worker_pool.initialized {
@@ -449,16 +449,16 @@ Actor_Type_Meta :: struct {
 }
 
 Hot_Reload_Actor_Data :: struct {
-	modules:            map[string]^hot_reload.Hot_Module, // actor_name -> current module
-	prev_modules:       map[string][dynamic]^hot_reload.Hot_Module, // actor_name -> recent modules kept alive
-	actor_meta:         map[string]Actor_Type_Meta, // actor_name -> meta
-	package_actors:     map[string][dynamic]string, // package_path -> actor_names sharing this package
+	modules:            map[string]^hot_reload.Hot_Module,
+	prev_modules:       map[string][dynamic]^hot_reload.Hot_Module,
+	actor_meta:         map[string]Actor_Type_Meta,
+	package_actors:     map[string][dynamic]string,
 	watch_path:         string,
 	watcher:            ^hot_reload.File_Watcher,
 	generation:         u32,
-	collections:        []hot_reload.Collection, // from ols.json
-	collection_flags:   []string, // ["-collection:src=/abs/src", ...]
-	collection_dep_map: map[string][dynamic]string, // collection_dep_path -> [actor_pkg_paths]
+	collections:        []hot_reload.Collection,
+	collection_flags:   []string,
+	collection_dep_map: map[string][dynamic]string,
 }
 
 
@@ -893,13 +893,13 @@ prepare_build_dir :: proc(
 
 	deps: [dynamic]Build_Dep
 	deps.allocator = context.temp_allocator
-	dep_map: map[string]string // clean(real_path) -> build_name
-	dep_map.allocator = context.temp_allocator
+	build_name_by_path: map[string]string
+	build_name_by_path.allocator = context.temp_allocator
 	used_names: map[string]bool
 	used_names.allocator = context.temp_allocator
 
 	norm_pkg := clean_path(pkg_path)
-	dep_map[norm_pkg] = strings.clone(pkg_name, context.temp_allocator)
+	build_name_by_path[norm_pkg] = strings.clone(pkg_name, context.temp_allocator)
 	used_names[strings.clone(pkg_name, context.temp_allocator)] = true
 	used_names["_hot_actod"] = true
 	append(&deps, Build_Dep{real_path = norm_pkg, build_name = pkg_name})
@@ -913,7 +913,7 @@ prepare_build_dir :: proc(
 		for import_path in import_paths {
 			resolved := clean_path(join_path({dep.real_path, import_path}))
 			if !os.is_dir(resolved) do continue
-			if resolved in dep_map do continue
+			if resolved in build_name_by_path do continue
 
 			base := filepath.base(resolved)
 			name := strings.clone(base, context.temp_allocator)
@@ -923,7 +923,7 @@ prepare_build_dir :: proc(
 				counter += 1
 			}
 
-			dep_map[resolved] = name
+			build_name_by_path[resolved] = name
 			used_names[name] = true
 			append(&deps, Build_Dep{real_path = resolved, build_name = name})
 		}
@@ -933,7 +933,7 @@ prepare_build_dir :: proc(
 		dst_dir := join_path({build_root, dep.build_name})
 		os.make_directory(dst_dir)
 
-		if !copy_package_with_rewrites(dep.real_path, dst_dir, dep.build_name, dep_map) {
+		if !copy_package_with_rewrites(dep.real_path, dst_dir, dep.build_name, build_name_by_path) {
 			return "", false
 		}
 	}
@@ -1272,12 +1272,14 @@ is_actod_import_path :: proc(path: string) -> bool {
 	if strings.has_suffix(path, "/actod") do return true
 	if strings.has_suffix(path, "\\actod") do return true
 	if strings.has_prefix(path, "act:") do return true
-	// A relative path of only ".." segments (e.g. "../../..") points to the actod root.
-	// Paths with named segments (e.g. "../../messages") are sibling packages, not actod.
+	return is_parent_only_relative_path(path)
+}
+
+@(private)
+is_parent_only_relative_path :: proc(path: string) -> bool {
 	clean := clean_path(path)
 	base := filepath.base(clean)
-	if base == ".." do return true
-	return false
+	return base == ".."
 }
 
 @(private)

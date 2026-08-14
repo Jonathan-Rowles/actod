@@ -58,7 +58,7 @@ test_unmapped_coro_uses_a_canary_instead_of_a_guard :: proc(t: ^testing.T) {
 	}
 
 	desc := desc_init(noop_entry)
-	region := make([]byte, region_size(page_align(desc.stack_size), desc.storage_size))
+	region := make([]byte, region_size(page_align(desc.stack_size)))
 	defer delete(region)
 
 	co, res := create_in(&desc, region)
@@ -75,7 +75,7 @@ test_unmapped_coro_uses_a_canary_instead_of_a_guard :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		uintptr(co) + uintptr(header_size(co.storage_size)) <=
+		uintptr(co) + uintptr(header_size()) <=
 		uintptr(raw_data(region)) + uintptr(len(region)),
 		"the header should sit at the top of the region",
 	)

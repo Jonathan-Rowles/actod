@@ -127,7 +127,7 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 			if n <= 0 do continue
 
 			changed_actors: [MAX_WATCHES]string
-			changed_count: int = 0
+			changed_count: int
 
 			collect_events :: proc(
 				buf: []u8,
@@ -136,7 +136,7 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 				actors: ^[MAX_WATCHES]string,
 				count: ^int,
 			) {
-				offset: int = 0
+				offset: int
 				for offset < n {
 					event := cast(^Inotify_Event)&buf[offset]
 					event_size := size_of(Inotify_Event) + int(event.len)

@@ -355,12 +355,6 @@ get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
 	return sync.atomic_load_explicit(&NODE.type_subscribers[actor_type].count, .Acquire)
 }
 
-// Re-announce every local subscription to a peer whose connection just reached
-// Ready. Subscribe_Remote otherwise only goes out at subscribe time, so a peer
-// that connected later (or reconnected, which cleared its counts) would never
-// learn about existing subscribers. A subscription created during the Ready
-// transition can be announced twice; the count-based bookkeeping then over-counts
-// by one until the next disconnect clears it, which costs a no-op wire broadcast.
 announce_subscriptions_to_node :: proc(node_id: Node_ID) {
 	ring := get_connection_ring(node_id)
 	if ring == nil {

@@ -450,16 +450,12 @@ add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool,
 
 	register_name_bucket(m, name_hash, idx)
 
-	// if another thread inserted the same name concurrently,
-	// the canonical entry is whichever find_by_name_hash resolves first.
-	// If that's not us, roll back.
 	if canonical_idx, found := find_by_name_hash(m, name_hash); found && canonical_idx != idx {
 		deregister_name_bucket(m, name_hash, idx)
 		sync.atomic_store_explicit(&entry.sequence, 0, .Release)
 
 		freelist_push(m, idx)
 
-		// Update canonical entry's PID if stale
 		canonical_entry := &m.items[canonical_idx]
 		stored_pid := sync.atomic_load_explicit(&canonical_entry.pid, .Acquire)
 		if stored_pid != remote_pid {
@@ -507,9 +503,6 @@ remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT) -> bool {
 
 		deregister_name_bucket(m, entry.name_hash, idx)
 
-		// remote_name is intentionally NOT freed here.
-		// A concurrent reader may still hold a pointer to it.
-		// The stale string is freed when the slot is reused in add_remote.
 		freelist_push(m, idx)
 		return true
 	}
@@ -813,7 +806,6 @@ clear :: proc(m: ^PID_Map($T, $HT)) {
 		sync.atomic_store_explicit(&m.items[i].pid, HT{}, .Release)
 	}
 
-	// Zero out the unused_items slice content
 	if committed > 0 {
 		intrinsics.mem_zero(raw_data(m.unused_items), int(committed) * size_of(u32))
 	}
@@ -1079,9 +1071,6 @@ gossip_seq_reset :: proc(node_id: Node_ID, frontier: u64) {
 	builtin.clear(&window.ahead)
 }
 
-// Rings are NODE-owned singletons: created once per node, adopted by
-// connection actors, freed only in destroy_all_connection_rings at shutdown.
-// Producers may therefore hold a ring pointer across connection churn.
 get_or_create_node_ring :: proc(
 	node_id: Node_ID,
 	config: Connection_Ring_Config,
@@ -1269,7 +1258,6 @@ unregister_node :: proc(node_id: Node_ID) {
 	if conn_pid != 0 {
 		_ = send_message(conn_pid, Terminate{})
 
-		// TODO: be more deterministic
 		runtime_sleep(10 * time.Millisecond)
 	}
 }

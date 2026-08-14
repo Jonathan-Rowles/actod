@@ -9,6 +9,7 @@ import "core:sync"
 import "core:time"
 
 SIM_SOCKET_BASE :: 1 << 30
+SIM_EPHEMERAL_PORT_BASE :: 40000
 
 Sim_Endpoint :: struct {
 	sock:        net.TCP_Socket,
@@ -40,7 +41,7 @@ g_sim_pending_accepts: [dynamic]Sim_Pending_Accept
 @(private = "file")
 g_sim_next_socket := net.TCP_Socket(SIM_SOCKET_BASE)
 @(private = "file")
-g_sim_next_ephemeral_port := 40000
+g_sim_next_ephemeral_port := SIM_EPHEMERAL_PORT_BASE
 @(private = "file")
 g_sim_recv_chunk: int
 @(private = "file")
@@ -76,7 +77,7 @@ sim_transport_reset_counters_if_idle :: proc() {
 		return
 	}
 	g_sim_next_socket = net.TCP_Socket(SIM_SOCKET_BASE)
-	g_sim_next_ephemeral_port = 40000
+	g_sim_next_ephemeral_port = SIM_EPHEMERAL_PORT_BASE
 }
 
 sim_wake_transport_waiters :: proc() {

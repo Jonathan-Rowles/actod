@@ -23,7 +23,7 @@ SEND_RETRY_DELAY :: 1 * time.Microsecond
 SEND_STALL_TIMEOUT :: #config(ACTOD_SEND_STALL_TIMEOUT_MS, 100) * time.Millisecond
 SEND_MAX_BLOCK_TIMEOUT :: #config(ACTOD_SEND_MAX_BLOCK_MS, 100) * time.Millisecond
 THREAD_SEND_SPIN_TRIES :: 4096
-BATCH_SIZE :: 64
+BATCH_SIZE :: LOCAL_MAILBOX_SIZE
 FREE_BATCH_SIZE :: BATCH_SIZE
 SPAWN :: proc(name: string, parent_pid: PID) -> (PID, bool)
 
@@ -678,7 +678,7 @@ actor_panic_handler :: proc(prefix, message: string, loc: runtime.Source_Code_Lo
 @(private)
 actor_loop :: proc(actor: ^Actor($T)) {
 	if actor.state != .INIT {
-		log.panicf("Actor '%v' already started or terminated\n", actor.name)
+		panic_at(actor.spawn_loc, "Actor '%v' already started or terminated\n", actor.name)
 	}
 
 	if actor.opts.blocking {
@@ -744,7 +744,7 @@ actor_run_phase :: proc(
 ) {
 	run_message_loop(actor, ctx)
 
-	if actor.pool_handle != nil && actor.pool_handle.parked_cold {
+	if actor.pool_handle != nil && actor.pool_handle.lifecycle == .Parked_Cold {
 		return
 	}
 
@@ -821,7 +821,7 @@ actor_panic_teardown :: proc(actor: ^Actor($T), actor_ctx: ^Actor_Context) {
 
 @(private)
 setup_actor_runtime :: proc(actor: ^Actor($T)) -> (log.Logger, ^Actor_Context) {
-	if actor.pid == 0 do log.panic("Actor started with PID 0!")
+	if actor.pid == 0 do panic_at(actor.spawn_loc, "Actor started with PID 0!")
 
 	context.allocator = actor.allocator
 
@@ -837,7 +837,7 @@ spawn_initial_children :: proc(actor: ^Actor($T)) {
 
 	for child_spawn, idx in actor.opts.children {
 		pid, ok := child_spawn("", actor.pid)
-		if !ok do log.panicf("Failed to start child in %s", actor.name)
+		if !ok do panic_at(actor.spawn_loc, "Failed to start child in %s", actor.name)
 
 		child_node_id: Node_ID = 0
 		if !is_local_pid(pid) {
@@ -941,7 +941,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 		}
 		if !mailbox_has_messages(actor) {
 			if actor.pool_handle != nil {
-				actor.pool_handle.parked_cold = true
+				actor.pool_handle.lifecycle = .Parked_Cold
 				return
 			}
 			coro.yield(co)
@@ -1102,15 +1102,6 @@ wake_actor :: #force_inline proc(actor: ^Actor(int)) {
 		wake_pooled_actor(actor.pool_handle)
 	} else if actor.opts.spin_strategy == .WAKE_SEMA {
 		sync.atomic_sema_post(&actor.wake_sema)
-	}
-}
-
-@(private)
-shutdown_children :: proc(actor: ^Actor($T)) {
-	for child_pid in actor.children {
-		if !terminate_actor(child_pid, .SHUTDOWN) {
-			log.panicf("Failed to shutdown %d", child_pid)
-		}
 	}
 }
 
@@ -1997,7 +1988,6 @@ add_child_existing :: proc(
 }
 
 // Remove a child from a supervisor
-// remote??
 @(require_results)
 remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
@@ -2031,7 +2021,6 @@ remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 }
 
 // Get list of children for an actor
-// remote??
 get_children :: proc(parent: PID) -> []PID {
 	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
 	if !ok {
@@ -2050,7 +2039,6 @@ get_parent_pid :: proc() -> PID {
 	return actor.parent
 }
 
-// remote??
 get_actor_name :: #force_inline proc(pid: PID) -> string {
 	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return "<unknown>"
@@ -2930,7 +2918,6 @@ track_max_mailbox_size :: proc(mailbox: ^ACTOR_MAILBOX) {
 	}
 }
 
-// TODO: slow for hot path
 @(private)
 collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
 	stats := Actor_Stats {
@@ -3040,7 +3027,6 @@ cleanup_actor_thread :: proc(actor_ptr: rawptr) {
 	}
 }
 
-// cleanup_actor_pool is no longer needed - arena handles all pool memory
 try_transition_state :: proc(state_ptr: ^Actor_State, from: Actor_State, to: Actor_State) -> bool {
 	_, swapped := sync.atomic_compare_exchange_strong(state_ptr, from, to)
 	return swapped

@@ -140,7 +140,6 @@ register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location
 	context = runtime.default_context()
 	registry_ensure_init(&g_message_registry, loc)
 
-	// Fast path: already registered?
 	for i in 0 ..< g_message_registry.count {
 		if g_message_registry.entries[i].value.type_id == T {
 			return
@@ -432,8 +431,6 @@ check_type_safety :: proc(
 	case runtime.Type_Info_Dynamic_Array:
 		return false, build_error(path, "dynamic array")
 	case runtime.Type_Info_Map:
-		// Allow maps for internal system messages Actor_Stats
-		// Allocated on in globally allocator.
 		if path == "stats.received_from" ||
 		   path == "stats.sent_to" ||
 		   path == "active_stats" ||
@@ -504,7 +501,6 @@ check_type_safety :: proc(
 					},
 				)
 			} else {
-				// No union_fields accumulator, clean up variant temps
 				for &vt in variant_temps {
 					delete(vt.var_fields)
 				}

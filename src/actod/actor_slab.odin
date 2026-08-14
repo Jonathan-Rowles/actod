@@ -46,6 +46,7 @@ Slot_Slab :: struct #align (CACHE_LINE_SIZE) {
 	committed:     uint,
 	commit_mutex:  sync.Mutex,
 	enabled:       bool,
+	warned:        bool,
 }
 
 SLAB_KEEP_WARM :: #config(ACTOD_SLAB_KEEP_WARM, 64)
@@ -64,7 +65,7 @@ slot_slab_init :: proc(slab: ^Slot_Slab, slot_size: uint, slot_count: u64) -> bo
 		return false
 	}
 
-	aligned_slot := uint(align_forward_uint(slot_size, uint(mem.PAGE_SIZE)))
+	aligned_slot := mem.align_forward_uint(slot_size, uint(mem.PAGE_SIZE))
 	total := aligned_slot * uint(slot_count)
 	if total / aligned_slot != uint(slot_count) {
 		return false
@@ -112,11 +113,6 @@ slot_slab_destroy :: proc(slab: ^Slot_Slab) {
 }
 
 @(private = "file")
-align_forward_uint :: proc(value: uint, alignment: uint) -> uint {
-	return (value + alignment - 1) & ~(alignment - 1)
-}
-
-@(private = "file")
 slab_pack_head :: proc(index: u32, generation: u32) -> u64 {
 	return (u64(generation) << 32) | u64(index)
 }
@@ -135,7 +131,7 @@ slab_ensure_committed :: proc(slab: ^Slot_Slab, slot_index: u64) -> bool {
 		return true
 	}
 
-	target := align_forward_uint(required, SLAB_COMMIT_CHUNK)
+	target := mem.align_forward_uint(required, SLAB_COMMIT_CHUNK)
 	if target > len(slab.memory) {
 		target = len(slab.memory)
 	}
@@ -216,7 +212,7 @@ slot_slab_give :: proc(slab: ^Slot_Slab, index: u32, touched: uint) {
 		return
 	}
 
-	purge := align_forward_uint(min(touched, slab.slot_size), uint(mem.PAGE_SIZE))
+	purge := mem.align_forward_uint(min(touched, slab.slot_size), uint(mem.PAGE_SIZE))
 	if purge > 0 && slab_spare_slots(slab) >= SLAB_KEEP_WARM {
 		sync.atomic_store_explicit(&slab.slot_purged[index], u32(purge), .Release)
 		vmem.decommit(raw_data(slot_slab_slot(slab, index)), purge)
@@ -235,15 +231,9 @@ slot_slab_in_use :: proc(slab: ^Slot_Slab) -> i64 {
 	return sync.atomic_load(&slab.in_use)
 }
 
-slab_exhausted_warned: bool
-
 @(private)
 warn_slab_exhausted :: proc(what: string, slab: ^Slot_Slab) {
-	if sync.atomic_load_explicit(&slab_exhausted_warned, .Relaxed) {
-		return
-	}
-	if _, first := sync.atomic_compare_exchange_strong(&slab_exhausted_warned, false, true);
-	   !first {
+	if _, first := sync.atomic_compare_exchange_strong(&slab.warned, false, true); !first {
 		return
 	}
 	log.warnf(
@@ -415,7 +405,7 @@ actor_arena_acquire :: proc(
 }
 
 coro_header_bytes :: proc() -> uint {
-	return coro.header_size(coro.DEFAULT_STORAGE_SIZE)
+	return coro.header_size()
 }
 
 coro_slot_size :: proc(stack_size: uint) -> uint {
@@ -423,7 +413,7 @@ coro_slot_size :: proc(stack_size: uint) -> uint {
 	if stack < coro.MIN_STACK_SIZE {
 		stack = coro.MIN_STACK_SIZE
 	}
-	return coro.region_size(coro.page_align(stack), coro.DEFAULT_STORAGE_SIZE)
+	return coro.region_size(coro.page_align(stack))
 }
 
 coro_acquire :: proc(

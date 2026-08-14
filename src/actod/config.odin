@@ -7,7 +7,7 @@ import "core:log"
 import "core:mem"
 import "core:time"
 
-CACHE_LINE_SIZE :: 64 // TODO:
+CACHE_LINE_SIZE :: 64
 SYSTEM_MAILBOX_SIZE :: 16
 
 DEFAULT_CORO_STACK_SIZE :: mem.Kilobyte * 56 when !coro.ASAN_FIBERS else mem.Kilobyte * 512
@@ -114,21 +114,21 @@ System_Config :: struct {
 	actor_slab_slots:      int,
 	allow_registry_growth: bool,
 	enable_observer:       bool,
-	observer_interval:     time.Duration, // Collection interval, 0 for manual only
+	observer_interval:     time.Duration,
 	network:               Network_Config,
 	actor_config:          Actor_Config,
-	blocking_child:        SPAWN, // For main thread blocking actor
-	worker_count:          int, // 0 = auto (CPU count)
-	hot_reload_dev:        bool, // Spawns Hot_Reload_Actor, enables file watching + auto-reload
-	hot_reload_watch_path: string, // Override actors directory (default "" = auto-discover)
+	blocking_child:        SPAWN,
+	worker_count:          int,
+	hot_reload_dev:        bool,
+	hot_reload_watch_path: string,
 	sim_mode:              bool,
 	loc:                   runtime.Source_Code_Location,
 }
 
 DEFAULT_SYSTEM_CONFIG := System_Config {
-	actor_registry_size = 256, // Default: 16K actors (power-of-2)
+	actor_registry_size = 256,
 	actor_slab_slots = DEFAULT_ACTOR_SLAB_SLOTS,
-	allow_registry_growth = true, // Enable auto-growth
+	allow_registry_growth = true,
 	enable_observer = false,
 	observer_interval = 0,
 	network = DEFAULT_NETWORK_CONFIG,
@@ -231,21 +231,16 @@ Actor_Config :: struct {
 	message_batch:                  int,
 	logging:                        Log_Config,
 	page_size:                      int,
-	arena_headroom:                 int, // extra arena reserve beyond the computed worst case, for runtime allocations
-	// Supervision configuration
+	arena_headroom:                 int,
 	supervision_strategy:           Supervision_Strategy,
 	restart_policy:                 Restart_Policy,
 	max_restarts:                   int,
 	restart_window:                 time.Duration,
-	home_worker:                    int, // -1 = auto round-robin (default), 0+ = pin to worker index
-	affinity:                       Actor_Ref, // co-locate with this actor (by PID or name)
-	// Coroutine stack size for pooled actors (default 16KB)
+	home_worker:                    int,
+	affinity:                       Actor_Ref,
 	coro_stack_size:                int,
-	// Run on a dedicated OS thread instead of the worker pool
 	use_dedicated_os_thread:        bool,
-	// Internal use only - set via blocking_child in node config
 	blocking:                       bool,
-	// Stack size per actor thread in bytes (0 = OS default)
 	stack_size_dedicated_os_thread: int,
 	loc:                            runtime.Source_Code_Location,
 }

@@ -109,6 +109,16 @@ Unsubscribe_Remote :: struct {
 	count:          u32,
 }
 
+Fan_Task :: struct {
+	from_pid:   PID,
+	exclude:    PID,
+	type_hash:  u64,
+	actor_type: Actor_Type,
+	start:      u32,
+	end:        u32,
+	payload:    []u8,
+}
+
 @(init)
 init_system_messages :: proc "contextless" () {
 	register_message_type(PID)
@@ -133,6 +143,7 @@ init_system_messages :: proc "contextless" () {
 	register_message_type(Pool_Ring_Closed)
 	register_message_type(Adopt_Pool_Ring)
 	register_message_type(Reload_Behaviour)
+	register_message_type(Fan_Task)
 }
 
 Node_Actor_Data :: struct {
@@ -170,6 +181,11 @@ terminate_system :: proc(data: ^Node_Actor_Data) {
 		NODE.node_name_to_id = nil
 	}
 	NODE.connection_actors = {}
+	NODE.lifecycle_stream_peers = {}
+	if NODE.fanout_pids != nil {
+		delete(NODE.fanout_pids, get_system_allocator())
+		NODE.fanout_pids = nil
+	}
 }
 
 Node_State :: struct {
@@ -192,17 +208,21 @@ Node_State :: struct {
 	logger:                   runtime.Logger,
 	logger_data:              ^Actor_Logger_Data,
 	shutdown_deferred_frees:  [dynamic]rawptr,
+	shutdown_deferred_lock:   sync.Mutex,
 	signal_wake:              sync.Atomic_Sema,
 	reclaim:                  Reclaim_State,
 	cluster_psk:              Cluster_Psk_State,
 	incarnation:              u64,
 	gossip_seq:               u64,
+	gossip_relay_rotation:    u64,
 	node_registry:            [MAX_NODES]Node_Info,
 	connection_rings:         [MAX_NODES]^Connection_Ring, // NODE-owned, see get_or_create_node_ring
 	connection_pools:         [MAX_NODES]^Connection_Pool, // NODE-owned, rings park instead of freeing
 	node_name_to_id:          map[string]Node_ID,
 	node_registry_lock:       sync.RW_Mutex,
 	connection_actors:        [MAX_NODES]PID,
+	lifecycle_stream_peers:   [MAX_NODES]bool,
+	fanout_pids:              []PID,
 	network_listener_thread:  ^thread.Thread,
 	network_listener_running: i32, // Atomic flag: 0 = stopped, 1 = running
 	network_listener_socket:  net.TCP_Socket,
@@ -315,6 +335,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	}
 
 	NODE.connection_actors = {}
+	NODE.lifecycle_stream_peers = {}
 
 	registry_size := opts.actor_registry_size
 	if registry_size == 0 do registry_size = 256
@@ -361,6 +382,8 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.pid, NODE.started = spawn(name, Node_Actor_Data{name = NODE.name}, Node_Behaviour, system_config, 0, loc)
 	delete(system_children)
 	if !NODE.started do panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
+
+	spawn_fanout_helpers()
 
 	if opts.blocking_child != nil {
 		log.info("Starting blocking child on main thread")
@@ -529,7 +552,9 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	if pid != NODE.pid do drain_stop_signals_to_node(actor_typed)
 
 	if sync.atomic_load(&NODE.shutting_down) {
+		sync.mutex_lock(&NODE.shutdown_deferred_lock)
 		append(&NODE.shutdown_deferred_frees, actor_ptr)
+		sync.mutex_unlock(&NODE.shutdown_deferred_lock)
 		if pid == NODE.pid do NODE.pid = 0
 		return
 	}
@@ -660,6 +685,7 @@ shutdown_node :: proc(loc := #caller_location) {
 	cleanup_node_actor()
 	shutdown_worker_pool()
 
+	sync.mutex_lock(&NODE.shutdown_deferred_lock)
 	for ptr in NODE.shutdown_deferred_frees {
 		cleanup_actor_arena(ptr)
 		free(ptr, actor_system_allocator)
@@ -667,6 +693,7 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	delete(NODE.shutdown_deferred_frees)
 	NODE.shutdown_deferred_frees = {}
+	sync.mutex_unlock(&NODE.shutdown_deferred_lock)
 
 	reclaim_drain_all()
 
@@ -770,6 +797,7 @@ reset_node_state :: proc() {
 		NODE.node_name_to_id = nil
 	}
 	NODE.connection_actors = {}
+	NODE.lifecycle_stream_peers = {}
 	NODE.network_listener_thread = nil
 	sync.atomic_store(&NODE.network_listener_running, 0)
 	NODE.network_listener_socket = {}
@@ -883,6 +911,6 @@ is_system_actod_pid :: proc(pid: PID) -> bool {
 		pid == NODE.pid ||
 		pid == NODE.observer_pid ||
 		pid == NODE.timer_pid ||
-		pid == NODE.hot_reload_pid \
+		pid == NODE.hot_reload_pid
 	)
 }

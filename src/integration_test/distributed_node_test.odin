@@ -413,6 +413,11 @@ test_connection_lifecycle :: proc(t: ^testing.T) {
 }
 
 test_lifecycle_broadcast :: proc(t: ^testing.T) {
+	_, _ = actod.register_node(
+		"BroadcastNode",
+		net.Endpoint{address = net.IP4_Loopback, port = test_base_port + 1},
+		.TCP_Custom_Protocol,
+	)
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
 		stderr  = os.stderr,
@@ -452,6 +457,11 @@ test_lifecycle_broadcast :: proc(t: ^testing.T) {
 }
 
 test_registry_exchange :: proc(t: ^testing.T) {
+	_, _ = actod.register_node(
+		"RegistryNode",
+		net.Endpoint{address = net.IP4_Loopback, port = test_base_port + 1},
+		.TCP_Custom_Protocol,
+	)
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
 		stderr  = os.stderr,
@@ -1403,6 +1413,37 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	)
 	expect(t, node_b_id != 0, "Failed to register MeshNodeB")
 
+	node_c_id: actod.Node_ID
+	node_c_known := false
+	for _ in 0 ..< scaled_attempts(30) {
+		if id, ok := actod.get_node_by_name("MeshNodeC"); ok {
+			node_c_id = id
+			node_c_known = true
+			break
+		}
+		time.sleep(100 * time.Millisecond)
+	}
+	expect(
+		t,
+		node_c_known,
+		"MeshNodeC should be discovered by TestNode1 via MeshNodeB's node directory",
+	)
+	if !node_c_known {
+		return
+	}
+
+	_, premature := actod.get_actor_pid("mesh_actor@MeshNodeC")
+	expect(t, !premature, "actors of an unregistered node must not be mirrored")
+
+	node_c_info, node_c_info_ok := actod.get_node_info(node_c_id)
+	expect(t, node_c_info_ok, "discovered MeshNodeC must expose its directory address")
+	_, _ = actod.register_node(
+		"MeshNodeC",
+		node_c_info.address,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
+
 	found := false
 	mesh_actor_pid: actod.PID
 	for _ in 0 ..< scaled_attempts(30) {
@@ -1418,7 +1459,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	expect(
 		t,
 		found,
-		"Actor on MeshNodeC should be discovered by TestNode1 via MeshNodeB forwarding within 8 seconds",
+		"registering MeshNodeC should deliver its actor snapshot within 8 seconds",
 	)
 
 	if !found {

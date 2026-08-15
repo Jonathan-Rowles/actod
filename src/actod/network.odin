@@ -65,10 +65,16 @@ Transport_Strategy :: enum {
 	TCP_Custom_Protocol,
 }
 
+Node_Origin :: enum u8 {
+	Discovered = 0,
+	Registered = 1,
+}
+
 Node_Info :: struct {
 	node_name:   string,
 	address:     net.Endpoint,
 	transport:   Transport_Strategy,
+	origin:      Node_Origin,
 	incarnation: u64,
 	gossip:      Gossip_Window,
 }
@@ -440,6 +446,11 @@ deliver_broadcast_locally :: proc(
 	block := load_subscriber_block(list)
 	if block == nil do return true
 
+	if n >= FANOUT_SHARD_THRESHOLD && len(NODE.fanout_pids) > 0 {
+		deliver_broadcast_sharded(from_pid, type_hash, local_type, n, payload)
+		return true
+	}
+
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
 		if pid != 0 do send_from_payload(pid, from_pid, payload, type_info)
@@ -553,6 +564,8 @@ broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, 
 
 	if pid == NODE.pid || pid == NODE.observer_pid do return
 
+	if sync.atomic_load(&NODE.next_node_id) <= 2 do return
+
 	local_info := NODE.node_registry[NODE.node_id]
 
 	msg := Actor_Spawned_Broadcast {
@@ -568,13 +581,15 @@ broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, 
 		source_ip          = ipv4_to_u32(local_info.address.address),
 	}
 
-	broadcast_to_others(msg)
+	broadcast_to_others(msg, only_stream_peers = true)
 }
 
 broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_Reason) {
 	if NODE.shutting_down do return
 
 	if pid == NODE.pid || pid == NODE.observer_pid do return
+
+	if sync.atomic_load(&NODE.next_node_id) <= 2 do return
 
 	msg := Actor_Terminated_Broadcast {
 		pid                = pid,
@@ -586,34 +601,72 @@ broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_R
 		source_node_name   = NODE.name,
 	}
 
-	broadcast_to_others(msg)
+	broadcast_to_others(msg, only_stream_peers = true)
 }
 
-broadcast_to_others :: proc(msg: $T, except: Node_ID = 0) {
-	for node_id in 2 ..< MAX_NODES {
+broadcast_to_others :: proc(msg: $T, except: Node_ID = 0, only_stream_peers := false) {
+	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
+	frame: []byte
+	registered_limit := int(sync.atomic_load(&NODE.next_node_id))
+	for node_id in 2 ..< registered_limit {
 		if Node_ID(node_id) == except do continue
+		if only_stream_peers && !sync.atomic_load(&NODE.lifecycle_stream_peers[node_id]) do continue
 		ring := get_connection_ring(Node_ID(node_id))
 		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
-			send_lifecycle_message(ring, msg)
+			if frame == nil {
+				built: bool
+				frame, built = build_lifecycle_frame(stack_buf[:], msg)
+				if !built do return
+			}
+			if !batch_append_message_retry(ring, frame) {
+				log.warnf(
+					"Failed to append lifecycle message to ring for node %d",
+					ring.node_id,
+				)
+			}
 		}
 	}
 }
 
-send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
-	if ring == nil do return
+GOSSIP_RELAY_FANOUT :: 3
 
-	from_handle, _ := unpack_pid(get_self_pid())
-
+relay_broadcast :: proc(msg: $T, from_node: Node_ID, source_node: Node_ID) {
+	registered_limit := int(sync.atomic_load(&NODE.next_node_id))
+	span := registered_limit - 2
+	if span <= 0 do return
 	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
-	buf := stack_buf[:]
+	frame: []byte
+	relayed := 0
+	offset := int(sync.atomic_add(&NODE.gossip_relay_rotation, 1))
+	for i in 0 ..< span {
+		node_id := Node_ID(2 + (offset + i) % span)
+		if node_id == from_node || node_id == source_node do continue
+		if !sync.atomic_load(&NODE.lifecycle_stream_peers[node_id]) do continue
+		ring := get_connection_ring(node_id)
+		if ring == nil || sync.atomic_load(&ring.state) != .Ready do continue
+		if frame == nil {
+			built: bool
+			frame, built = build_lifecycle_frame(stack_buf[:], msg)
+			if !built do return
+		}
+		_ = batch_append_message(ring, frame)
+		relayed += 1
+		if relayed == GOSSIP_RELAY_FANOUT do break
+	}
+}
+
+@(private)
+build_lifecycle_frame :: proc(buf: []byte, msg: $T) -> ([]byte, bool) {
+	from_handle, _ := unpack_pid(get_self_pid())
 
 	value := msg
 	info := get_validated_message_info_ptr(T)
 	needed := 4 + NETWORK_HEADER_SIZE + info.size + calculate_variable_data_size(&value, info)
-	if needed > len(buf) do buf = make([]byte, needed, context.temp_allocator)
+	frame := buf
+	if needed > len(frame) do frame = make([]byte, needed, context.temp_allocator)
 
 	msg_len := build_wire_format_into_buffer(
-		buf,
+		frame,
 		msg,
 		Handle{},
 		from_handle,
@@ -626,10 +679,19 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 			typeid_of(T),
 			needed,
 		)
-		return
+		return nil, false
 	}
+	return frame[:msg_len], true
+}
 
-	if !batch_append_message_retry(ring, buf[:msg_len]) {
+send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
+	if ring == nil do return
+
+	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
+	frame, built := build_lifecycle_frame(stack_buf[:], msg)
+	if !built do return
+
+	if !batch_append_message_retry(ring, frame) {
 		log.warnf("Failed to append lifecycle message to ring for node %d", ring.node_id)
 	}
 }

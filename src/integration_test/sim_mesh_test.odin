@@ -255,15 +255,22 @@ test_sim_mesh_discovery :: proc(t: ^testing.T) {
 	expect_value(t, g_mesh_counts[1], 2)
 
 	_ = actod.sim_mesh_bind(mesh, 2)
-	_, knows_a := actod.get_node_by_name("mesh0")
+	a_id, knows_a := actod.get_node_by_name("mesh0")
 	expect(t, knows_a, "node directory gossip did not teach C about A")
-	_, sees_a_actor := actod.get_actor_pid("mc@mesh0")
-	expect(t, sees_a_actor, "spawn gossip did not propagate A's actor to C")
+	_, premature := actod.get_actor_pid("mc@mesh0")
+	expect(t, !premature, "C must not mirror actors of a node it never registered")
+
+	a_info, a_info_ok := actod.get_node_info(a_id)
+	expect(t, a_info_ok, "discovered node A must expose its directory address")
+	_, _ = actod.register_node("mesh0", a_info.address, .TCP_Custom_Protocol)
 
 	err := actod.send_remote_by_name("mesh0", "mc", Integration_Test_Message{})
 	expect(t, err == .OK, "send to gossip-discovered node failed")
 	_ = actod.sim_mesh_run_until_idle(mesh)
 	expect_value(t, g_mesh_counts[0], 1)
+
+	_, sees_a_actor := actod.get_actor_pid("mc@mesh0")
+	expect(t, sees_a_actor, "registering node A must deliver its actor snapshot to C")
 }
 
 test_sim_mesh_pool_scale_up :: proc(t: ^testing.T) {

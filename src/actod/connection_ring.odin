@@ -957,6 +957,7 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 	idle_ticks: u32 = 0
 
 	for sync.atomic_load(&ring.io_stop) == 0 {
+		free_all(context.temp_allocator)
 		if sync.atomic_exchange(&ring.batch_pending, 0) != 0 do batch_flush(ring)
 		submit_nbio_sends(ring)
 
@@ -1145,9 +1146,17 @@ process_complete_message :: proc(ring: ^Connection_Ring, msg_data: []byte) {
 
 @(private = "file")
 process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) {
+	if sync.atomic_load(&ring.io_stop) != 0 do return
+
 	header, ok := parse_network_header(msg_data)
 	if !ok {
 		log.warn("Failed to parse network header")
+		return
+	}
+
+	if .LIFECYCLE_EVENT in header.flags &&
+	   !sim_is_socket(ring.tcp_socket) &&
+	   handle_lifecycle_event_inline(ring.node_id, header.type_hash, header.payload) {
 		return
 	}
 

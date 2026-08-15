@@ -13,7 +13,9 @@ import "core:time"
 ACTOR_REGISTRY_SIZE :: 1024
 REGISTRY_MAX_CAPACITY :: 1 << 20
 MAX_NODES :: 256
-NAME_BUCKET_COUNT :: 4096
+NAME_BUCKET_COUNT :: 2 * REGISTRY_MAX_CAPACITY
+NAME_BUCKET_MASK :: u64(NAME_BUCKET_COUNT - 1)
+GOSSIP_AHEAD_LIMIT :: 64
 NAME_BUCKET_TOMBSTONE :: 0xFFFFFFFF
 
 @(private)
@@ -24,9 +26,10 @@ PID_Map :: struct($T: typeid, $HT: typeid) {
 	next_unused:  u64,
 	unused_items: []u32,
 	num_unused:   u32,
-	name_buckets: [NAME_BUCKET_COUNT]u32,
+	name_buckets: []u32,
 	items_backing:  []byte,
 	unused_backing: []byte,
+	name_buckets_backing: []byte,
 	mutex:        sync.Mutex,
 }
 
@@ -52,24 +55,26 @@ pid_map_init :: proc(m: ^PID_Map($T, $HT), initial_capacity: int) {
 	assert(items_err == nil, "Failed to reserve address space for PID_Map items")
 	unused_backing, unused_err := vmem.reserve(REGISTRY_MAX_CAPACITY * size_of(u32))
 	assert(unused_err == nil, "Failed to reserve address space for the PID_Map freelist")
+	buckets_backing, buckets_err := vmem.reserve(NAME_BUCKET_COUNT * size_of(u32))
+	assert(buckets_err == nil, "Failed to reserve address space for the PID_Map name buckets")
 
 	items_commit := vmem.commit(raw_data(items_backing), uint(capacity) * size_of(PID_Entry(T, HT)))
 	assert(items_commit == nil, "Failed to commit PID_Map items")
 	unused_commit := vmem.commit(raw_data(unused_backing), uint(capacity) * size_of(u32))
 	assert(unused_commit == nil, "Failed to commit the PID_Map freelist")
+	buckets_commit := vmem.commit(raw_data(buckets_backing), NAME_BUCKET_COUNT * size_of(u32))
+	assert(buckets_commit == nil, "Failed to commit the PID_Map name buckets")
 
 	m.items_backing = items_backing
 	m.unused_backing = unused_backing
+	m.name_buckets_backing = buckets_backing
 	m.items = mem.slice_data_cast([]PID_Entry(T, HT), items_backing)
 	m.unused_items = mem.slice_data_cast([]u32, unused_backing)
+	m.name_buckets = mem.slice_data_cast([]u32, buckets_backing)
 	m.capacity = u32(capacity)
 	m.num_items = 0
 	m.next_unused = 0
 	m.num_unused = 0
-
-	for i in 0 ..< NAME_BUCKET_COUNT {
-		m.name_buckets[i] = 0
-	}
 }
 
 @(private)
@@ -259,9 +264,9 @@ add :: proc(
 
 @(private)
 register_name_bucket :: proc(m: ^PID_Map($T, $HT), name_hash: u64, idx: u32) {
-	bucket := name_hash % NAME_BUCKET_COUNT
+	bucket := name_hash & NAME_BUCKET_MASK
 	for i in 0 ..< NAME_BUCKET_COUNT {
-		probe := (bucket + u64(i)) % NAME_BUCKET_COUNT
+		probe := (bucket + u64(i)) & NAME_BUCKET_MASK
 		stored := sync.atomic_load_explicit(&m.name_buckets[probe], .Acquire)
 
 		if stored == 0 || stored == NAME_BUCKET_TOMBSTONE {
@@ -275,13 +280,18 @@ register_name_bucket :: proc(m: ^PID_Map($T, $HT), name_hash: u64, idx: u32) {
 			if ok do return
 		}
 	}
+	log.errorf(
+		"name bucket table exhausted (%d slots), entry %d is not findable by name",
+		NAME_BUCKET_COUNT,
+		idx,
+	)
 }
 
 @(private)
 deregister_name_bucket :: proc(m: ^PID_Map($T, $HT), name_hash: u64, idx: u32) {
-	bucket := name_hash % NAME_BUCKET_COUNT
+	bucket := name_hash & NAME_BUCKET_MASK
 	for i in 0 ..< NAME_BUCKET_COUNT {
-		probe := (bucket + u64(i)) % NAME_BUCKET_COUNT
+		probe := (bucket + u64(i)) & NAME_BUCKET_MASK
 		stored_idx := sync.atomic_load_explicit(&m.name_buckets[probe], .Acquire)
 
 		if stored_idx == 0 do break
@@ -303,10 +313,10 @@ deregister_name_bucket :: proc(m: ^PID_Map($T, $HT), name_hash: u64, idx: u32) {
 
 get_by_name :: proc(m: ^PID_Map($T, $HT), name: string) -> (HT, bool) {
 	name_hash := fnv1a_hash(name)
-	bucket := name_hash % NAME_BUCKET_COUNT
+	bucket := name_hash & NAME_BUCKET_MASK
 
 	for i in 0 ..< NAME_BUCKET_COUNT {
-		probe := (bucket + u64(i)) % NAME_BUCKET_COUNT
+		probe := (bucket + u64(i)) & NAME_BUCKET_MASK
 		idx := sync.atomic_load_explicit(&m.name_buckets[probe], .Acquire)
 
 		if idx == 0 {
@@ -328,9 +338,9 @@ get_by_name :: proc(m: ^PID_Map($T, $HT), name: string) -> (HT, bool) {
 
 @(private)
 find_by_name_hash :: proc(m: ^PID_Map($T, $HT), name_hash: u64) -> (u32, bool) {
-	bucket := name_hash % NAME_BUCKET_COUNT
+	bucket := name_hash & NAME_BUCKET_MASK
 	for i in 0 ..< NAME_BUCKET_COUNT {
-		probe := (bucket + u64(i)) % NAME_BUCKET_COUNT
+		probe := (bucket + u64(i)) & NAME_BUCKET_MASK
 		idx := sync.atomic_load_explicit(&m.name_buckets[probe], .Acquire)
 		if idx == 0 do return 0, false
 		if idx == NAME_BUCKET_TOMBSTONE do continue
@@ -433,7 +443,14 @@ remove_entry_at :: proc(m: ^PID_Map($T, $HT), idx: u32) -> bool {
 	return true
 }
 
-remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT) -> bool {
+remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> bool {
+	if idx, found := find_by_name_hash(m, fnv1a_hash(name)); found {
+		entry := &m.items[idx]
+		if sync.atomic_load_explicit(&entry.pid, .Acquire) == remote_pid {
+			return remove_entry_at(m, idx)
+		}
+	}
+
 	num_items := sync.atomic_load_explicit(&m.num_items, .Acquire)
 	for idx in 1 ..< num_items {
 		entry := &m.items[idx]
@@ -669,7 +686,9 @@ clear :: proc(m: ^PID_Map($T, $HT)) {
 	}
 
 	if committed > 0 do intrinsics.mem_zero(raw_data(m.unused_items), int(committed) * size_of(u32))
-	intrinsics.mem_zero(&m.name_buckets, size_of(m.name_buckets))
+	if m.name_buckets != nil {
+		intrinsics.mem_zero(raw_data(m.name_buckets), len(m.name_buckets) * size_of(u32))
+	}
 }
 
 destroy :: proc(m: ^PID_Map($T, $HT)) {
@@ -678,10 +697,15 @@ destroy :: proc(m: ^PID_Map($T, $HT)) {
 	if m.unused_backing != nil {
 		vmem.release(raw_data(m.unused_backing), uint(len(m.unused_backing)))
 	}
+	if m.name_buckets_backing != nil {
+		vmem.release(raw_data(m.name_buckets_backing), uint(len(m.name_buckets_backing)))
+	}
 	m.items_backing = nil
 	m.unused_backing = nil
+	m.name_buckets_backing = nil
 	m.items = nil
 	m.unused_items = nil
+	m.name_buckets = nil
 }
 
 get_valid_actor :: proc(
@@ -752,7 +776,17 @@ register_node :: proc(
 ) {
 	context.logger = diagnostic_logger(context.logger)
 
-	node_id, newly_registered := register_node_entry(name, address, transport, loc)
+	node_id, newly_registered := register_node_entry(name, address, transport, .Registered, loc)
+
+	if newly_registered do announce_node_to_peers(name, address, node_id)
+
+	if node_id != 0 {
+		ring := get_connection_ring(node_id)
+		if ring != nil && sync.atomic_load(&ring.state) == .Ready {
+			body := [1]u8{CTRL_MSG_LIFECYCLE_STREAM}
+			_ = ring_append_ctrl_retry(ring, body[:])
+		}
+	}
 
 	if connect && node_id != 0 {
 		if ensure_ring_for_node(node_id) == nil {
@@ -768,11 +802,26 @@ register_node :: proc(
 	return node_id, newly_registered
 }
 
+register_discovered_node :: proc(
+	name: string,
+	address: net.Endpoint,
+	transport: Transport_Strategy,
+	loc := #caller_location,
+) -> (
+	Node_ID,
+	bool,
+) {
+	node_id, newly_registered := register_node_entry(name, address, transport, .Discovered, loc)
+	if newly_registered do announce_node_to_peers(name, address, node_id)
+	return node_id, newly_registered
+}
+
 @(private)
 register_node_entry :: proc(
 	name: string,
 	address: net.Endpoint,
 	transport: Transport_Strategy,
+	origin: Node_Origin,
 	loc := #caller_location,
 ) -> (
 	Node_ID,
@@ -795,6 +844,7 @@ register_node_entry :: proc(
 		)
 		NODE.node_registry[existing_id].address = address
 		NODE.node_registry[existing_id].transport = transport
+		if origin == .Registered do NODE.node_registry[existing_id].origin = .Registered
 		return existing_id, false
 	}
 
@@ -816,6 +866,7 @@ register_node_entry :: proc(
 		node_name = cloned_name,
 		address   = address,
 		transport = transport,
+		origin    = origin,
 	}
 
 	NODE.node_name_to_id[cloned_name] = node_id
@@ -873,6 +924,25 @@ gossip_seq_record :: proc(node_id: Node_ID, seq: u64) {
 		if window.ahead == nil do window.ahead = make([dynamic]u64, get_system_allocator())
 		append(&window.ahead, seq)
 	}
+	drain_gossip_window(window)
+	for len(window.ahead) > GOSSIP_AHEAD_LIMIT {
+		lowest := window.ahead[0]
+		for applied in window.ahead {
+			if applied < lowest do lowest = applied
+		}
+		log.warnf(
+			"gossip window for node %d skipped sequences %d to %d after dropped frames",
+			node_id,
+			window.next_seq,
+			lowest - 1,
+		)
+		window.next_seq = lowest
+		drain_gossip_window(window)
+	}
+}
+
+@(private)
+drain_gossip_window :: proc(window: ^Gossip_Window) {
 	for {
 		drained := false
 		for applied, idx in window.ahead {

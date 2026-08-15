@@ -637,11 +637,17 @@ remove_remote_test :: proc(t: ^testing.T) {
 	_, found := get_by_name(test_registry, "temp_remote@node4")
 	testing.expect(t, found)
 
-	removed := remove_remote(test_registry, remote_pid)
+	removed := remove_remote(test_registry, remote_pid, "temp_remote@node4")
 	testing.expect(t, removed)
 
 	_, found_after := get_by_name(test_registry, "temp_remote@node4")
 	testing.expect(t, !found_after)
+
+	add_remote(test_registry, remote_pid, "fallback_remote@node4")
+	removed_by_scan := remove_remote(test_registry, remote_pid, "wrong_name@node4")
+	testing.expect(t, removed_by_scan, "pid scan fallback must still remove on a name miss")
+	_, scan_found := get_by_name(test_registry, "fallback_remote@node4")
+	testing.expect(t, !scan_found)
 }
 
 @(test)
@@ -1005,7 +1011,7 @@ add_remote_split_brain_full_scenario_test :: proc(t: ^testing.T) {
 	ok1, new1 := add_remote(test_registry, old_pid, "worker@nodeC")
 	testing.expect(t, ok1 && new1)
 
-	removed := remove_remote(test_registry, old_pid)
+	removed := remove_remote(test_registry, old_pid, "worker@nodeC")
 	testing.expect(t, removed, "Should remove old entry")
 
 	new_pid := pack_pid(Handle{idx = 8, gen = 1, actor_type = 0}, Node_ID(3))
@@ -1067,4 +1073,52 @@ registry_growth_keeps_entries_stable :: proc(t: ^testing.T) {
 		testing.expect(t, ok, "entry added before or during growth must stay readable")
 		testing.expect(t, data == sentinel, "entry data must survive growth intact")
 	}
+}
+
+@(test)
+name_bucket_saturation_test :: proc(t: ^testing.T) {
+	reg := make_test_registry()
+	defer {
+		destroy(reg)
+		free(reg)
+	}
+
+	total := 5000
+	pids: [dynamic]PID
+	defer delete(pids)
+
+	for i in 0 ..< total {
+		name := fmt.tprintf("bucket_actor_%d", i)
+		pid, ok := add(reg, rawptr(uintptr(i + 1)), name)
+		testing.expectf(t, ok, "add %d should succeed", i)
+		append(&pids, pid)
+	}
+
+	for i in 0 ..< total {
+		name := fmt.tprintf("bucket_actor_%d", i)
+		found_pid, found := get_by_name(reg, name)
+		testing.expectf(t, found, "actor %d must stay findable by name past 4096 registrations", i)
+		if found do testing.expect_value(t, found_pid, pids[i])
+	}
+}
+
+@(test)
+gossip_window_bounded_after_dropped_seq_test :: proc(t: ^testing.T) {
+	node := Node_ID(199)
+	gossip_seq_reset(node, 0)
+
+	gossip_seq_record(node, 1)
+	for seq: u64 = 3; seq < 203; seq += 1 {
+		gossip_seq_record(node, seq)
+	}
+
+	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
+	ahead_len := len(NODE.node_registry[node].gossip.ahead)
+	next_seq := NODE.node_registry[node].gossip.next_seq
+	sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
+
+	testing.expectf(t, ahead_len <= GOSSIP_AHEAD_LIMIT, "ahead grew to %d entries past a dropped seq", ahead_len)
+	testing.expectf(t, next_seq > 3, "frontier stuck at %d behind the hole", next_seq)
+	testing.expect(t, gossip_seq_covered(node, 150), "sequences past the hole must count as covered")
+	gossip_seq_reset(node, 0)
 }

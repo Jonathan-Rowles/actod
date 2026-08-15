@@ -25,6 +25,7 @@ CTRL_MSG_NOISE_1 :: 7
 CTRL_MSG_NOISE_2 :: 8
 CTRL_MSG_UDP_INFO :: 9
 CTRL_MSG_AUTH :: 10
+CTRL_MSG_LIFECYCLE_STREAM :: 11
 
 HELLO_FLAG_ENCRYPTED: u8 : 1 << 0
 HELLO_FLAG_POOL_JOIN: u8 : 1 << 1
@@ -169,6 +170,7 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 				}
 			}
 		}
+		sync.atomic_store(&NODE.lifecycle_stream_peers[data.node_id], false)
 		sync.atomic_store_explicit(
 			cast(^u64)&NODE.connection_actors[data.node_id],
 			u64(0),
@@ -672,11 +674,11 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 		data.encrypted,
 	)
 
-	send_registry_snapshot(data)
+	announce_subscriptions_to_node(data.node_id)
 	send_node_directory(data)
 	send_udp_info(data)
 	try_activate_udp(data)
-	announce_subscriptions_to_node(data.node_id)
+	request_lifecycle_stream(data)
 
 	if data.heartbeat_interval > 0 {
 		data.heartbeat_timer_id, _ = set_timer(data.heartbeat_interval, true)
@@ -976,7 +978,7 @@ resolve_incoming_peer :: proc(data: ^Connection_Actor_Data, info: Hello_Info) ->
 		port    = int(info.listen_port),
 	}
 
-	local_node_id, registered := register_node(info.node_name, peer_endpoint, .TCP_Custom_Protocol)
+	local_node_id, registered := register_discovered_node(info.node_name, peer_endpoint, .TCP_Custom_Protocol)
 	if !registered {
 		local_node_id, registered = get_node_by_name(info.node_name)
 		if !registered {
@@ -1111,6 +1113,7 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 	is_active := is_active_connection(data)
 
 	if data.node_id != 0 && is_active {
+		sync.atomic_store(&NODE.lifecycle_stream_peers[data.node_id], false)
 		clear_subscriptions_for_node(data.node_id)
 		broadcast_disconnect_terminations(data.node_id)
 		handle_node_disconnect(data.node_id)
@@ -1215,6 +1218,12 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 
 	case CTRL_MSG_UDP_INFO:
 		handle_udp_info(data, ctrl_data)
+
+	case CTRL_MSG_LIFECYCLE_STREAM:
+		if data.node_id != 0 && data.node_id < MAX_NODES {
+			sync.atomic_store(&NODE.lifecycle_stream_peers[data.node_id], true)
+			send_registry_snapshot(data)
+		}
 
 	case:
 		log.warnf("Unexpected control message type %d", ctrl_data[0])
@@ -1383,7 +1392,7 @@ broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {
 			source_node_name         = source_name,
 		}
 
-		broadcast_to_others(msg, disconnected_node_id)
+		broadcast_to_others(msg, disconnected_node_id, only_stream_peers = true)
 	}
 }
 
@@ -1420,7 +1429,7 @@ decode_wire_payload :: proc(
 	return true
 }
 
-handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) {
+handle_lifecycle_event_inline :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) -> bool {
 	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
 	terminated_info := get_validated_message_info_ptr(Actor_Terminated_Broadcast)
 
@@ -1430,32 +1439,34 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 			{&msg.name, "name"},
 			{&msg.source_node_name, "source_node_name"},
 		}
-		if !decode_wire_payload(&msg, payload, "Spawn broadcast", fields[:]) do return
-		handle_spawn_broadcast(msg, from_node)
+		if decode_wire_payload(&msg, payload, "Spawn broadcast", fields[:]) {
+			handle_spawn_broadcast(msg, from_node)
+		}
+		return true
+	}
 
-	} else if type_hash == terminated_info.type_hash {
+	if type_hash == terminated_info.type_hash {
 		msg: Actor_Terminated_Broadcast
 		fields := [?]Wire_String_Field {
 			{&msg.name, "name"},
 			{&msg.source_node_name, "source_node_name"},
 		}
-		if !decode_wire_payload(&msg, payload, "Terminate broadcast", fields[:]) do return
-		handle_terminate_broadcast(msg, from_node)
+		if decode_wire_payload(&msg, payload, "Terminate broadcast", fields[:]) {
+			handle_terminate_broadcast(msg, from_node)
+		}
+		return true
+	}
 
-	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Request).type_hash {
-		handle_remote_spawn_request(from_node, payload)
-
-	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Response).type_hash {
-		handle_remote_spawn_response(payload)
-
-	} else if type_hash == get_validated_message_info_ptr(Subscribe_Remote).type_hash {
+	if type_hash == get_validated_message_info_ptr(Subscribe_Remote).type_hash {
 		if len(payload) >= size_of(Subscribe_Remote) {
 			msg: Subscribe_Remote
 			intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Subscribe_Remote))
 			handle_remote_subscribe(msg, from_node)
 		}
+		return true
+	}
 
-	} else if type_hash == get_validated_message_info_ptr(Unsubscribe_Remote).type_hash {
+	if type_hash == get_validated_message_info_ptr(Unsubscribe_Remote).type_hash {
 		if len(payload) >= size_of(Unsubscribe_Remote) {
 			msg: Unsubscribe_Remote
 			intrinsics.mem_copy_non_overlapping(
@@ -1465,7 +1476,19 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 			)
 			handle_remote_unsubscribe(msg, from_node)
 		}
+		return true
+	}
 
+	return false
+}
+
+handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) {
+	if handle_lifecycle_event_inline(from_node, type_hash, payload) do return
+
+	if type_hash == get_validated_message_info_ptr(Remote_Spawn_Request).type_hash {
+		handle_remote_spawn_request(from_node, payload)
+	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Response).type_hash {
+		handle_remote_spawn_response(payload)
 	} else {
 		log.warnf("Unknown lifecycle event type hash: %x", type_hash)
 	}
@@ -1526,6 +1549,16 @@ send_spawn_response :: proc(to_node: Node_ID, response: Remote_Spawn_Response) {
 		send_lifecycle_message(ring, response)
 	} else {
 		log.warnf("Cannot send spawn response to node %d - not connected", to_node)
+	}
+}
+
+@(private)
+request_lifecycle_stream :: proc(data: ^Connection_Actor_Data) {
+	info, ok := get_node_info(data.node_id)
+	if !ok || info.origin != .Registered do return
+	body := [1]u8{CTRL_MSG_LIFECYCLE_STREAM}
+	if !ring_append_ctrl_retry(data.ring, body[:]) {
+		log.warnf("Failed to request the lifecycle stream from node %d", data.node_id)
 	}
 }
 
@@ -1648,6 +1681,27 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 	}
 }
 
+announce_node_to_peers :: proc(name: string, address: net.Endpoint, subject: Node_ID) {
+	if address.port == 0 || len(name) > 255 do return
+	ctrl_buf: [3 + 2 + 256 + 4 + 2]byte
+	w := Ctrl_Writer {
+		buf = ctrl_buf[:],
+	}
+	ctrl_put_u8(&w, CTRL_MSG_NODE_DIRECTORY)
+	ctrl_put_u16(&w, 1)
+	ctrl_put_str(&w, name)
+	ctrl_put_u32(&w, ipv4_to_u32(address.address))
+	ctrl_put_u16(&w, u16(address.port))
+
+	registered_limit := int(sync.atomic_load(&NODE.next_node_id))
+	for node_id in 2 ..< registered_limit {
+		if Node_ID(node_id) == subject do continue
+		ring := get_connection_ring(Node_ID(node_id))
+		if ring == nil || sync.atomic_load(&ring.state) != .Ready do continue
+		_ = ring_append_ctrl(ring, ctrl_buf[:w.pos])
+	}
+}
+
 handle_node_directory :: proc(ctrl_data: []byte) {
 	r := Ctrl_Reader {
 		data = ctrl_data,
@@ -1677,7 +1731,7 @@ handle_node_directory :: proc(ctrl_data: []byte) {
 			address = u32_to_ipv4(ip),
 			port    = int(port),
 		}
-		_, ok := register_node(node_name, endpoint, .TCP_Custom_Protocol)
+		_, ok := register_discovered_node(node_name, endpoint, .TCP_Custom_Protocol)
 		if ok do registered += 1
 	}
 
@@ -1713,6 +1767,22 @@ hearsay_death_about_connected_node :: proc(
 	return ring != nil && sync.atomic_load(&ring.state) == .Ready
 }
 
+@(private)
+qualified_remote_name :: proc(buf: []byte, actor_name: string, source_name: string) -> (string, bool) {
+	total := len(actor_name) + 1 + len(source_name)
+	if total > len(buf) do return "", false
+	copy(buf, actor_name)
+	buf[len(actor_name)] = '@'
+	copy(buf[len(actor_name) + 1:], source_name)
+	return string(buf[:total]), true
+}
+
+@(private)
+mirror_source_registered :: proc(source_node_id: Node_ID) -> bool {
+	info, ok := get_node_info(source_node_id)
+	return ok && info.origin == .Registered
+}
+
 handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID) {
 	source_name: string
 	if msg.source_node_name != "" {
@@ -1731,12 +1801,14 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 	source_node_id, found := get_node_by_name(source_name)
 	if !found {
 		endpoint := build_endpoint_from_broadcast(msg)
-		source_node_id, _ = register_node(source_name, endpoint, .TCP_Custom_Protocol)
+		source_node_id, _ = register_discovered_node(source_name, endpoint, .TCP_Custom_Protocol)
 		if source_node_id == 0 {
 			log.warnf("Failed to register source node %s from spawn broadcast", source_name)
 			return
 		}
 	}
+
+	if !mirror_source_registered(source_node_id) do return
 
 	if relayed_gossip_incarnation_stale(source_node_id, from_node, msg.source_incarnation) do return
 	if from_node != source_node_id && gossip_seq_covered(source_node_id, msg.source_seq) do return
@@ -1744,14 +1816,23 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 	handle, _ := unpack_pid(msg.pid)
 	remapped_pid := pack_pid(handle, source_node_id)
 
-	qualified_name := fmt.tprintf("%s@%s", msg.name, source_name)
+	name_buf: [1024]byte
+	qualified_name, name_fits := qualified_remote_name(name_buf[:], msg.name, source_name)
+	if !name_fits {
+		log.warnf(
+			"Spawn broadcast for '%s' dropped, qualified name needs %d bytes",
+			msg.name,
+			len(msg.name) + 1 + len(source_name),
+		)
+		return
+	}
 	_, is_new := add_remote(&NODE.actor_registry, remapped_pid, qualified_name)
 	gossip_seq_record(source_node_id, msg.source_seq)
 
 	if is_new && msg.ttl > 0 {
 		forward_msg := msg
 		forward_msg.ttl -= 1
-		broadcast_to_others(forward_msg, except = from_node)
+		relay_broadcast(forward_msg, from_node, source_node_id)
 	}
 }
 
@@ -1773,6 +1854,8 @@ handle_terminate_broadcast :: proc(msg: Actor_Terminated_Broadcast, from_node: N
 	source_node_id, found := get_node_by_name(source_name)
 	if !found do return
 
+	if !mirror_source_registered(source_node_id) do return
+
 	if relayed_gossip_incarnation_stale(source_node_id, from_node, msg.source_incarnation) do return
 	if from_node != source_node_id && gossip_seq_covered(source_node_id, msg.source_seq) do return
 	if hearsay_death_about_connected_node(msg, source_node_id, from_node) do return
@@ -1780,13 +1863,15 @@ handle_terminate_broadcast :: proc(msg: Actor_Terminated_Broadcast, from_node: N
 	handle, _ := unpack_pid(msg.pid)
 	remapped_pid := pack_pid(handle, source_node_id)
 
-	removed := remove_remote(&NODE.actor_registry, remapped_pid)
+	name_buf: [1024]byte
+	qualified_name, _ := qualified_remote_name(name_buf[:], msg.name, source_name)
+	removed := remove_remote(&NODE.actor_registry, remapped_pid, qualified_name)
 	gossip_seq_record(source_node_id, msg.source_seq)
 
 	if removed && msg.ttl > 0 {
 		forward_msg := msg
 		forward_msg.ttl -= 1
-		broadcast_to_others(forward_msg, except = from_node)
+		relay_broadcast(forward_msg, from_node, source_node_id)
 	}
 }
 

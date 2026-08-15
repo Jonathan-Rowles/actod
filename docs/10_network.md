@@ -116,6 +116,10 @@ err := act.send_message(remote_pid, MyMessage{data = 42})
 err = act.send_message_name("worker@nodeA", MyMessage{data = 42})
 ```
 
+`actor@node` sends resolve on the owning node and need no mirror.
+`get_actor_pid("worker@nodeA")` is a local lookup and only covers registered
+nodes' mirrors.
+
 The PID encodes the node ID in the upper 16 bits. `send_message` checks `is_local_pid(to)` and routes to the connection ring automatically.
 
 **`.OK` means buffered, not delivered.** For a remote send, `send_message` returns `.OK` as soon as the message is accepted into that node's per-node send buffer. The buffer keeps filling even while the peer is disconnected, and its contents are flushed when the connection (re)establishes. So `.OK` does *not* mean the message was delivered, or even that the peer is currently reachable. There is no "is this node connected?" helper yet; design for messages that may sit buffered until a peer comes back. A remote send only returns an error (for example `.NODE_DISCONNECTED` or `.NETWORK_RING_FULL`) when it cannot even be buffered. The full local/remote send contract is in [Delivery Semantics](14_delivery-semantics.md).
@@ -140,31 +144,39 @@ _ = act.send_message(remote_pid, Work_Item{...})
 
 `spawn_remote` sends a request to the target node, which calls the registered spawn function and returns the new PID. The calling node creates a remote proxy in its local registry.
 
-## Actor Lifecycle Broadcasting
+## Node Discovery and Actor Mirrors
 
-When nodes are connected, actor lifecycle events are broadcast across the mesh automatically:
+How this node learned about a peer decides what it gets from it:
 
-**On spawn:** Every node is notified when an actor is spawned on any connected node. The broadcast includes the PID, name, actor type, and parent PID. Remote nodes register a proxy in their local registry so they can route messages to the new actor.
+- **Registered** (`register_node`): the peer's actor mirror: a registry snapshot
+  at handshake plus live spawn/terminate broadcasts. `get_actor_pid("worker@nodeA")`
+  resolves locally.
+- **Discovered** (node directory, incoming connection, gossip): the node is known
+  and addressable. `actor@node` sends resolve on the owning node, PIDs route,
+  pub/sub works. No mirror.
 
-**On termination:** When an actor terminates, all connected nodes receive a termination broadcast with the PID, name, and reason. Remote nodes clean up their proxy entries.
-
-This means each node has a view of the actors across the mesh. You can `send_message` to any remote actor by PID without manually tracking which node it lives on. The registry already knows.
+Mirrors are per direction. Registering a discovered node requests the stream
+immediately on a live connection, otherwise at the next handshake.
 
 ### Mesh Propagation
 
-Lifecycle broadcasts propagate through the mesh via gossip. Each broadcast carries a TTL (default 3). When a node receives a broadcast, it registers the actor locally and forwards the message to its other peers with TTL decremented. This means nodes that aren't directly connected still learn about each other's actors through intermediate hops:
+Node existence spreads transitively through handshake node directories,
+independent of mirrors. Lifecycle broadcasts go only to stream subscribers, carry
+a TTL (default 3), and are relayed to a small rotating fanout, not flooded. A
+receiver only applies mirror entries from source nodes it registered. Duplicates
+are ignored.
 
-```
-Node A spawns "worker-1"
-  → broadcast to Node B (direct connection), TTL=3
-  → Node B registers proxy, forwards to Node C (TTL=2)
-  → Node C registers proxy, forwards to Node D (TTL=1)
-  → Node D registers proxy, even though A and D are not directly connected
-```
+The per-source out-of-order window is bounded (`GOSSIP_AHEAD_LIMIT`); on
+overflow the frontier skips lost sequences, healed by the next snapshot.
 
-The same applies to termination. Proxy entries are cleaned up across the entire mesh, not just direct peers. Duplicate broadcasts are ignored (if the actor is already registered or already removed).
-
-Gossip is trusted per **incarnation** and deduplicated per **event**: every node generates a random incarnation id at boot and stamps each lifecycle broadcast it originates with the incarnation plus a dense per-event sequence number; the handshake carries both the incarnation and the current sequence frontier. A relayed broadcast stamped with a different incarnation than the one learned from that node's last handshake is dropped, so gossip from a crashed incarnation, however delayed by partitions, can never evict a restarted node's fresh actors. A relayed event whose sequence number the receiver has already covered (directly, or via the handshake snapshot's frontier) is likewise dropped, so a partition-delayed relay of a spawn the source has since terminated can never resurrect the dead proxy; an uncovered relay is a genuine heal of a lost direct broadcast and is applied and forwarded. Broadcasts arriving on the source's own connection are always authoritative and refresh the stored incarnation. Death detection is the one hearsay case: when a peer infers terminations from a lost connection, nodes that still hold a live connection to the affected node ignore the inference and trust their own view.
+Gossip is trusted per **incarnation** and deduplicated per **event**: a node
+generates a random incarnation id at boot, stamps every broadcast it originates
+with it plus a dense sequence number, and the handshake carries both with the
+current frontier. Receivers drop relays with a stale incarnation, and events
+already covered directly or by the frontier; uncovered relays are applied and
+forwarded. Broadcasts on the source's own connection are authoritative and
+refresh the incarnation. Terminations inferred from a lost connection are
+ignored by nodes still connected to the affected node.
 
 ## PID Routing
 
@@ -191,13 +203,13 @@ sub, ok := act.subscribe_type(LOGGER_TYPE)
 act.broadcast(Log_Entry{text = "hello from B"})
 ```
 
-Subscription state is synced between nodes. Each node tracks remote subscriber counts per actor type. Subscriptions are announced when they are created and re-announced to every peer whose connection completes a handshake, so subscribers are seen by broadcaster nodes that connect (or reconnect) later.
+Subscription state is synced between nodes. Each node tracks remote subscriber counts per actor type. Subscriptions are announced when they are created and re-announced to every peer whose connection completes a handshake, so subscribers are seen by broadcaster nodes that connect (or reconnect) later. This lane is independent of actor mirrors; no `register_node` is needed on either side.
 
 ## Failure Handling
 
 - **Heartbeats**: Sent at `heartbeat_interval` (default 30s). Node marked dead after `heartbeat_timeout` (default 90s).
 - **Reconnection**: Automatic with exponential backoff. `reconnect_initial_delay` (2s) then `reconnect_retry_delay` (3s) between attempts.
-- **Cleanup**: Remote actor proxies are removed from the registry when a node disconnects. Local actors sending to dead remotes get `NODE_DISCONNECTED` errors.
+- **Cleanup**: Mirrored actor proxies (registered nodes) are removed from the registry when a node disconnects. Local actors sending to dead remotes get `NODE_DISCONNECTED` errors.
 
 ## Fan-Out and RLIMIT_MEMLOCK (Linux)
 

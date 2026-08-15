@@ -2,6 +2,7 @@ package actod
 
 import "../../test_harness/ti"
 _ :: ti
+import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:sync"
@@ -280,9 +281,15 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 
 	if block != nil {
 		n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
-		for i in 0 ..< n {
-			pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
-			if pid != 0 && pid != self_pid do _ = send_message(pid, msg)
+		sharded := false
+		if n >= FANOUT_SHARD_THRESHOLD && len(NODE.fanout_pids) > 0 {
+			sharded = broadcast_local_sharded(self_pid, actor_type, n, msg)
+		}
+		if !sharded {
+			for i in 0 ..< n {
+				pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
+				if pid != 0 && pid != self_pid do _ = send_message(pid, msg)
+			}
 		}
 	}
 
@@ -296,7 +303,8 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 		return
 	}
 
-	for node_id in 2 ..< u16(MAX_NODES) {
+	registered_limit := u16(sync.atomic_load(&NODE.next_node_id))
+	for node_id in 2 ..< registered_limit {
 		if sync.atomic_load_explicit(&list.remote_node_sub_count[node_id], .Acquire) > 0 {
 			send_broadcast_to_node(Node_ID(node_id), type_hash, msg)
 		}
@@ -336,6 +344,108 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 			log.warnf("Broadcast to node %d dropped, ring full", node_id)
 		}
 	}
+}
+
+FANOUT_SHARD_THRESHOLD :: 1024
+
+Fanout_Data :: struct {}
+
+Fanout_Behaviour :: Actor_Behaviour(Fanout_Data) {
+	handle_message = fanout_handle_message,
+}
+
+@(private)
+fanout_handle_message :: proc(data: ^Fanout_Data, from: PID, msg: any) {
+	if task, ok := msg.(Fan_Task); ok do deliver_fan_range(task)
+}
+
+@(private)
+deliver_fan_range :: proc(task: Fan_Task) {
+	type_info, info_ok := get_type_info_by_hash(task.type_hash)
+	if !info_ok do return
+	list := &NODE.type_subscribers[task.actor_type]
+	block := load_subscriber_block(list)
+	if block == nil do return
+	n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
+	limit := min(task.end, n)
+	for i in task.start ..< limit {
+		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
+		if pid != 0 && pid != task.exclude {
+			send_from_payload(pid, task.from_pid, task.payload, type_info)
+		}
+	}
+}
+
+@(private)
+spawn_fanout_helpers :: proc() {
+	if !NODE.worker_pool.initialized do return
+	count := NODE.worker_pool.worker_count
+	if count <= 1 do return
+	if NODE.fanout_pids != nil do delete(NODE.fanout_pids, get_system_allocator())
+	NODE.fanout_pids = make([]PID, count, get_system_allocator())
+	for i in 0 ..< count {
+		pid, ok := spawn(
+			fmt.tprintf("broadcast_fan_%d", i),
+			Fanout_Data{},
+			Fanout_Behaviour,
+			make_actor_config(home_worker = i),
+			parent_pid = NODE.pid,
+		)
+		if ok do NODE.fanout_pids[i] = pid
+	}
+}
+
+@(private)
+deliver_broadcast_sharded :: proc(
+	from_pid: PID,
+	type_hash: u64,
+	actor_type: Actor_Type,
+	subscriber_count: u32,
+	payload: []byte,
+	exclude: PID = 0,
+) {
+	shards := u32(len(NODE.fanout_pids))
+	chunk := (subscriber_count + shards - 1) / shards
+	start: u32
+	for i in 0 ..< shards {
+		if start >= subscriber_count do break
+		task := Fan_Task {
+			from_pid   = from_pid,
+			exclude    = exclude,
+			type_hash  = type_hash,
+			actor_type = actor_type,
+			start      = start,
+			end        = min(start + chunk, subscriber_count),
+			payload    = payload,
+		}
+		helper := NODE.fanout_pids[i]
+		if helper == 0 {
+			deliver_fan_range(task)
+		} else if err := send_message(helper, task); err != .OK {
+			log.warnf(
+				"broadcast fan-out slice %d..%d dropped, helper backlogged: %v",
+				task.start,
+				task.end,
+				err,
+			)
+		}
+		start = task.end
+	}
+}
+
+@(private)
+broadcast_local_sharded :: proc(self_pid: PID, actor_type: Actor_Type, n: u32, msg: $T) -> bool {
+	info := get_validated_message_info_ptr(T)
+	from_handle, _ := unpack_pid(self_pid)
+	value := msg
+	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
+	needed := 4 + NETWORK_HEADER_SIZE + info.size + calculate_variable_data_size(&value, info)
+	if needed > len(stack_buf) do return false
+	msg_len := build_wire_format_into_buffer(stack_buf[:], msg, Handle{}, from_handle, {}, "")
+	if msg_len == 0 do return false
+	payload := stack_buf[4 + NETWORK_HEADER_SIZE:msg_len]
+	deliver_broadcast_sharded(self_pid, info.type_hash, actor_type, n, payload, exclude = self_pid)
+	return true
 }
 
 get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {

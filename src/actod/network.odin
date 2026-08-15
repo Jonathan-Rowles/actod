@@ -446,7 +446,7 @@ deliver_broadcast_locally :: proc(
 	block := load_subscriber_block(list)
 	if block == nil do return true
 
-	if n >= FANOUT_SHARD_THRESHOLD && len(NODE.fanout_pids) > 0 {
+	if n >= FANOUT_SHARD_THRESHOLD && sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) {
 		deliver_broadcast_sharded(from_pid, type_hash, local_type, n, payload)
 		return true
 	}

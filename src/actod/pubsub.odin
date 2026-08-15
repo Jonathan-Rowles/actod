@@ -193,6 +193,12 @@ subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subs
 		return {}, false
 	}
 
+	list_count := sync.atomic_load_explicit(
+		&NODE.type_subscribers[actor_type].local_count,
+		.Acquire,
+	)
+	if list_count >= FANOUT_SHARD_THRESHOLD do ensure_fanout_helpers()
+
 	sub := Subscription {
 		actor_type = actor_type,
 		pid        = pid,
@@ -282,7 +288,7 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 	if block != nil {
 		n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
 		sharded := false
-		if n >= FANOUT_SHARD_THRESHOLD && len(NODE.fanout_pids) > 0 {
+		if n >= FANOUT_SHARD_THRESHOLD && sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) {
 			sharded = broadcast_local_sharded(self_pid, actor_type, n, msg)
 		}
 		if !sharded {
@@ -392,6 +398,15 @@ spawn_fanout_helpers :: proc() {
 			parent_pid = NODE.pid,
 		)
 		if ok do NODE.fanout_pids[i] = pid
+	}
+	sync.atomic_store_explicit(&NODE.fanout_ready, true, .Release)
+}
+
+@(private)
+ensure_fanout_helpers :: proc() {
+	if sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) do return
+	if _, won := sync.atomic_compare_exchange_strong(&NODE.fanout_claim, 0, 1); won {
+		spawn_fanout_helpers()
 	}
 }
 

@@ -74,7 +74,14 @@ spawn_alloc_actor :: proc(
 		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor(%v)", name, typeid_of(T))
 	}
 
-	if !actor_arena_acquire(&actor.arena, &actor.arena_slot, size_of(T), mailbox_size, opts) {
+	arena_fresh, arena_ok := actor_arena_acquire(
+		&actor.arena,
+		&actor.arena_slot,
+		size_of(T),
+		mailbox_size,
+		opts,
+	)
+	if !arena_ok {
 		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
 	}
 	actor.allocator = actor_arena_allocator(&actor.arena)
@@ -131,6 +138,14 @@ spawn_alloc_actor :: proc(
 		)
 	}
 
+	actor.actor_ctx = new(Actor_Context, actor.allocator)
+	actor.msg_ctx = new(Message_Processing_Context, actor.allocator)
+	if !opts.use_dedicated_os_thread || NODE.config.sim_mode {
+		handle := new(Pooled_Actor_Handle, actor.allocator)
+		sync.atomic_store(&handle.in_ready_queue, true)
+		actor.pool_handle = handle
+	}
+
 	if parent_pid > 0 {
 		if is_local_pid(parent_pid) {
 			_, parent_alive := get(&NODE.actor_registry, parent_pid)
@@ -153,7 +168,11 @@ spawn_alloc_actor :: proc(
 		"mailbox size must be a power of two",
 		loc,
 	)
-	mailbox_entries, mailbox_alloc_err := make([]Entry(Message), mailbox_size, actor.allocator)
+	mailbox_raw, mailbox_alloc_err := mem.alloc_bytes_non_zeroed(
+		mailbox_size * size_of(Entry(Message)),
+		align_of(Entry(Message)),
+		actor.allocator,
+	)
 	if mailbox_alloc_err != nil {
 		log.errorf(
 			"spawn('%s') failed: could not allocate a %d-slot mailbox (%d B) from the actor arena: %v",
@@ -165,8 +184,27 @@ spawn_alloc_actor :: proc(
 		)
 		return actor, 0, false
 	}
-	mpsc_init(&actor.system_mailbox)
-	mpsc_init_external(&actor.mailbox, mailbox_entries)
+	mailbox_entries := mem.slice_data_cast([]Entry(Message), mailbox_raw)
+	system_raw, system_alloc_err := mem.alloc_bytes_non_zeroed(
+		SYSTEM_MAILBOX_SIZE * size_of(Entry(Message)),
+		align_of(Entry(Message)),
+		actor.allocator,
+	)
+	if system_alloc_err != nil {
+		log.errorf(
+			"spawn('%s') failed: could not allocate the system mailbox from the actor arena: %v",
+			name,
+			system_alloc_err,
+			location = loc,
+		)
+		return actor, 0, false
+	}
+	mpsc_init_external(
+		&actor.system_mailbox,
+		mem.slice_data_cast([]Entry(Message), system_raw),
+		entries_zeroed = arena_fresh,
+	)
+	mpsc_init_external(&actor.mailbox, mailbox_entries, entries_zeroed = arena_fresh)
 	pool_init(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(mailbox_size))
 
 	pid, ok = add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
@@ -257,13 +295,15 @@ spawn_impl :: proc(
 		}
 		actor.blocking = true
 		actor.opts.use_dedicated_os_thread = true
+		actor.pool_handle = nil
 		spawning_blocking_child = false
 		actor_loop(actor)
 		return actor.pid, true
 	}
 
+	needs_first_run_wait := behaviour.init != nil || opts.children != nil
 	started: bool = false
-	actor.started = &started
+	if needs_first_run_wait do actor.started = &started
 
 	pool_this_actor := !opts.use_dedicated_os_thread
 	if NODE.config.sim_mode do pool_this_actor = true
@@ -273,6 +313,7 @@ spawn_impl :: proc(
 			return 0, false
 		}
 	} else {
+		actor.pool_handle = nil
 		actor.thread = threads_act.make_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
 				actor_loop(cast(^Actor(T))actor_ptr)
 			}, uint(actor.opts.stack_size_dedicated_os_thread))
@@ -289,7 +330,7 @@ spawn_impl :: proc(
 		}
 	}
 
-	spawn_wait_started(&started)
+	if needs_first_run_wait do spawn_wait_started(&started)
 
 	register_for_hot_reload(T, actor.pid, name)
 
@@ -298,7 +339,8 @@ spawn_impl :: proc(
 
 @(private)
 spawn_schedule_pooled :: proc(actor: ^Actor($T), name: string, pid: PID, loc := #caller_location) -> bool {
-	handle := new(Pooled_Actor_Handle, actor.allocator)
+	handle := actor.pool_handle
+	if handle == nil do handle = new(Pooled_Actor_Handle, actor.allocator)
 	handle.actor_ptr = actor
 	handle.mailbox = &actor.mailbox
 	handle.system_mailbox = &actor.system_mailbox

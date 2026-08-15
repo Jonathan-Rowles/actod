@@ -186,6 +186,8 @@ terminate_system :: proc(data: ^Node_Actor_Data) {
 		delete(NODE.fanout_pids, get_system_allocator())
 		NODE.fanout_pids = nil
 	}
+	sync.atomic_store_explicit(&NODE.fanout_ready, false, .Release)
+	sync.atomic_store_explicit(&NODE.fanout_claim, 0, .Release)
 }
 
 Node_State :: struct {
@@ -223,6 +225,8 @@ Node_State :: struct {
 	connection_actors:        [MAX_NODES]PID,
 	lifecycle_stream_peers:   [MAX_NODES]bool,
 	fanout_pids:              []PID,
+	fanout_claim:             u32,
+	fanout_ready:             bool,
 	network_listener_thread:  ^thread.Thread,
 	network_listener_running: i32, // Atomic flag: 0 = stopped, 1 = running
 	network_listener_socket:  net.TCP_Socket,
@@ -382,8 +386,6 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.pid, NODE.started = spawn(name, Node_Actor_Data{name = NODE.name}, Node_Behaviour, system_config, 0, loc)
 	delete(system_children)
 	if !NODE.started do panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
-
-	spawn_fanout_helpers()
 
 	if opts.blocking_child != nil {
 		log.info("Starting blocking child on main thread")

@@ -5,7 +5,6 @@ _ :: ti
 import "../pkgs/coro"
 import "base:intrinsics"
 import "base:runtime"
-import "core:c/libc"
 import "core:log"
 import "core:mem"
 import "core:strings"
@@ -123,12 +122,13 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	local_buf:          ^[LOCAL_MAILBOX_SIZE]Message,
 	pool_handle:        ^Pooled_Actor_Handle,
 	msg_ctx:            ^Message_Processing_Context,
+	actor_ctx:          ^Actor_Context,
 	data:               ^T,
 	handle_message:     proc(data: ^T, from: PID, content: any),
 	pid:                PID,
 	pool:               Pool,
 	mailbox:            ACTOR_MAILBOX,
-	system_mailbox:     MPSC_Queue(Message, SYSTEM_MAILBOX_SIZE),
+	system_mailbox:     ACTOR_MAILBOX,
 	wake_sema:          sync.Atomic_Sema,
 	behaviour:          Actor_Behaviour(T),
 	opts:               Actor_Config,
@@ -153,13 +153,17 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	started:            ^bool,
 }
 
+Panic_Jmp_Buf :: struct #align (16) {
+	_: [512]byte,
+}
+
 @(private)
 Actor_Context :: struct {
 	pid:                 PID,
 	name:                string,
 	panic_teardown_started: bool,
 	panic_recovery_done: bool,
-	panic_jmp_buf:       libc.jmp_buf,
+	panic_jmp_buf:       Panic_Jmp_Buf,
 	panic_message:       [PANIC_MESSAGE_BUF_SIZE]u8,
 	panic_message_len:   int,
 	panic_location:      runtime.Source_Code_Location,
@@ -184,6 +188,7 @@ Actor_Context :: struct {
 		received_from:     map[PID]u64,
 		sent_to:           map[PID]u64,
 	},
+	logger_data:         Actor_Logger_Data,
 }
 
 ARENA_COMMIT_SIZE :: mem.Kilobyte * 64
@@ -195,7 +200,7 @@ actor_arena_reserve :: proc(data_size: int, mailbox_size: int, opts: Actor_Confi
 	pool_pages := max_pages * opts.page_size
 	pool_bookkeeping :=
 		next_power_of_two(max_pages) * size_of(Pool_Entry) + max_pages * size_of(rawptr)
-	mailbox_bytes := mailbox_size * size_of(Entry(Message))
+	mailbox_bytes := (mailbox_size + SYSTEM_MAILBOX_SIZE) * size_of(Entry(Message))
 	local_bytes := size_of([LOCAL_MAILBOX_SIZE]Message)
 	static_worst :=
 		data_size +
@@ -436,7 +441,14 @@ retry_local_send_loop :: proc(
 
 @(private)
 ensure_local_buf :: #force_inline proc(actor: ^Actor(int)) {
-	if actor.local_buf == nil do actor.local_buf = new([LOCAL_MAILBOX_SIZE]Message, actor.allocator)
+	if actor.local_buf == nil {
+		raw, err := mem.alloc_bytes_non_zeroed(
+			size_of([LOCAL_MAILBOX_SIZE]Message),
+			align_of([LOCAL_MAILBOX_SIZE]Message),
+			actor.allocator,
+		)
+		if err == nil do actor.local_buf = cast(^[LOCAL_MAILBOX_SIZE]Message)raw_data(raw)
+	}
 }
 
 @(private)

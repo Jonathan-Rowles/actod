@@ -16,7 +16,7 @@ Pooled_Actor_Handle :: struct #align (CACHE_LINE_SIZE) {
 	file_logger:      ^Actor_File_Logger,
 	actor_ptr:        rawptr,
 	mailbox:          ^ACTOR_MAILBOX,
-	system_mailbox:   ^MPSC_Queue(Message, SYSTEM_MAILBOX_SIZE),
+	system_mailbox:   ^ACTOR_MAILBOX,
 	home_worker:      ^Worker,
 	coro_slot:        u32,
 	wants_reschedule: bool,

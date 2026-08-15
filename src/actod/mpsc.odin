@@ -5,9 +5,9 @@ import "core:sync"
 
 @(private)
 Entry :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
-	sequence: u64,
-	data:     T,
-	_pad:     [CACHE_LINE_SIZE - size_of(u64) - size_of(T)]byte,
+	sequence_offset: u64,
+	data:            T,
+	_pad:            [CACHE_LINE_SIZE - size_of(u64) - size_of(T)]byte,
 }
 
 @(private)
@@ -31,7 +31,7 @@ mpsc_init :: proc(q: ^MPSC_Queue($T, $N)) {
 }
 
 @(private)
-mpsc_init_external :: proc(q: ^MPSC_Queue($T, $N), entries: []Entry(T)) {
+mpsc_init_external :: proc(q: ^MPSC_Queue($T, $N), entries: []Entry(T), entries_zeroed := false) {
 	assert(len(entries) > 0 && (len(entries) & (len(entries) - 1)) == 0)
 
 	q.write_index = 0
@@ -41,8 +41,10 @@ mpsc_init_external :: proc(q: ^MPSC_Queue($T, $N), entries: []Entry(T)) {
 	q.w_entries = raw_data(entries)
 	q.r_entries = raw_data(entries)
 
-	for i in 0 ..< len(entries) {
-		q.w_entries[i].sequence = u64(i)
+	if !entries_zeroed {
+		for i in 0 ..< len(entries) {
+			q.w_entries[i].sequence_offset = 0
+		}
 	}
 
 	sync.atomic_thread_fence(.Release)
@@ -56,14 +58,15 @@ mpsc_push :: proc(q: ^MPSC_Queue($T, $N), data: T) -> bool {
 
 	for {
 		pos := sync.atomic_load_explicit(&q.write_index, .Relaxed)
+		idx := pos & mask
 
-		entry := &entries[pos & mask]
+		entry := &entries[idx]
 
 		intrinsics.prefetch_write_data(entry, 3)
 		next_entry := &entries[(pos + 1) & mask]
 		intrinsics.prefetch_write_data(next_entry, 2)
 
-		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
+		seq := sync.atomic_load_explicit(&entry.sequence_offset, .Acquire) + idx
 
 		diff := i64(seq) - i64(pos)
 
@@ -79,7 +82,7 @@ mpsc_push :: proc(q: ^MPSC_Queue($T, $N), data: T) -> bool {
 			if ok {
 				entry.data = data
 
-				sync.atomic_store_explicit(&entry.sequence, pos + 1, .Release)
+				sync.atomic_store_explicit(&entry.sequence_offset, pos + 1 - idx, .Release)
 				return true
 			}
 
@@ -103,11 +106,12 @@ mpsc_pop_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {
 
 	for count < max_count {
 		pos := start_pos + u64(count)
-		entry := &entries[pos & mask]
+		idx := pos & mask
+		entry := &entries[idx]
 
 		if count + 3 < max_count do intrinsics.prefetch_read_data(&entries[(pos + 1) & mask], 3)
 
-		seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
+		seq := sync.atomic_load_explicit(&entry.sequence_offset, .Acquire) + idx
 
 		if seq != pos + 1 do break
 
@@ -122,7 +126,8 @@ mpsc_pop_batch :: proc(q: ^MPSC_Queue($T, $N), items: []T) -> int {
 	sync.atomic_thread_fence(.Release)
 	for i in 0 ..< count {
 		pos := start_pos + u64(i)
-		sync.atomic_store_explicit(&entries[pos & mask].sequence, pos + mask + 1, .Relaxed)
+		idx := pos & mask
+		sync.atomic_store_explicit(&entries[idx].sequence_offset, pos + mask + 1 - idx, .Relaxed)
 	}
 
 	return count
@@ -142,23 +147,26 @@ mpsc_size :: proc(q: ^MPSC_Queue($T, $N)) -> int {
 mpsc_is_empty_relaxed :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
 	pos := q.read_index
 	mask := q.r_mask
-	entry := &q.r_entries[pos & mask]
-	seq := sync.atomic_load_explicit(&entry.sequence, .Relaxed)
+	idx := pos & mask
+	entry := &q.r_entries[idx]
+	seq := sync.atomic_load_explicit(&entry.sequence_offset, .Relaxed) + idx
 	return seq != pos + 1
 }
 
 mpsc_has_ready_acquire :: proc(q: ^MPSC_Queue($T, $N)) -> bool {
 	pos := q.read_index
 	mask := q.r_mask
-	entry := &q.r_entries[pos & mask]
-	return sync.atomic_load_explicit(&entry.sequence, .Acquire) == pos + 1
+	idx := pos & mask
+	entry := &q.r_entries[idx]
+	return sync.atomic_load_explicit(&entry.sequence_offset, .Acquire) + idx == pos + 1
 }
 
 mpsc_peek :: proc(q: ^MPSC_Queue($T, $N), data: ^T) -> bool {
 	mask := q.r_mask
 	pos := q.read_index
-	entry := &q.r_entries[pos & mask]
-	seq := sync.atomic_load_explicit(&entry.sequence, .Acquire)
+	idx := pos & mask
+	entry := &q.r_entries[idx]
+	seq := sync.atomic_load_explicit(&entry.sequence_offset, .Acquire) + idx
 
 	if seq == pos + 1 {
 		data^ = entry.data

@@ -110,7 +110,13 @@ spawn_from_raw :: proc(
 		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
 	}
 
-	if !actor_arena_acquire(&actor.arena, &actor.arena_slot, data_size, DEFAULT_MAIL_BOX_SIZE, opts) {
+	if _, arena_ok := actor_arena_acquire(
+		&actor.arena,
+		&actor.arena_slot,
+		data_size,
+		DEFAULT_MAIL_BOX_SIZE,
+		opts,
+	); !arena_ok {
 		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
 	}
 	actor.allocator = actor_arena_allocator(&actor.arena)
@@ -205,7 +211,18 @@ spawn_from_raw :: proc(
 		spawn_fail(actor, 0)
 		return 0, false
 	}
-	mpsc_init(&actor.system_mailbox)
+	system_entries, system_alloc_err := make([]Entry(Message), SYSTEM_MAILBOX_SIZE, actor.allocator)
+	if system_alloc_err != nil {
+		log.errorf(
+			"spawn('%s') failed: could not allocate the system mailbox from the actor arena: %v",
+			name,
+			system_alloc_err,
+			location = loc,
+		)
+		spawn_fail(actor, 0)
+		return 0, false
+	}
+	mpsc_init_external(&actor.system_mailbox, system_entries, entries_zeroed = true)
 	mpsc_init_external(&actor.mailbox, mailbox_entries)
 	pool_init(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(DEFAULT_MAIL_BOX_SIZE))
 

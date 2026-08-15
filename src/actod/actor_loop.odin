@@ -36,7 +36,7 @@ actor_panic_handler :: proc(prefix, message: string, loc: runtime.Source_Code_Lo
 	}
 
 	coro.asan_before_longjmp()
-	libc.longjmp(&ctx.panic_jmp_buf, 1)
+	libc.longjmp(cast(^libc.jmp_buf)&ctx.panic_jmp_buf, 1)
 }
 
 @(private)
@@ -58,7 +58,7 @@ actor_loop :: proc(actor: ^Actor($T)) {
 		actor.pool_handle.logger = logger
 	}
 
-	if libc.setjmp(&actor_ctx.panic_jmp_buf) != 0 {
+	if libc.setjmp(cast(^libc.jmp_buf)&actor_ctx.panic_jmp_buf) != 0 {
 		// Landed here from longjmp, actor panicked
 		actor_panic_teardown(actor, actor_ctx)
 		return
@@ -66,9 +66,12 @@ actor_loop :: proc(actor: ^Actor($T)) {
 
 	spawn_initial_children(actor)
 
-	ctx := new(Message_Processing_Context, actor.allocator)
+	ctx := actor.msg_ctx
+	if ctx == nil {
+		ctx = new(Message_Processing_Context, actor.allocator)
+		actor.msg_ctx = ctx
+	}
 	ctx^ = message_processing_context_init(actor, actor.allocator)
-	actor.msg_ctx = ctx
 
 	call_init_handler(actor)
 	sync.atomic_store(&actor.state, .RUNNING)
@@ -86,7 +89,7 @@ actor_resume :: proc(actor: ^Actor($T)) {
 	context.logger = actor.pool_handle.logger
 	context.assertion_failure_proc = actor_panic_handler
 
-	if libc.setjmp(&actor_ctx.panic_jmp_buf) != 0 {
+	if libc.setjmp(cast(^libc.jmp_buf)&actor_ctx.panic_jmp_buf) != 0 {
 		actor_panic_teardown(actor, actor_ctx)
 		return
 	}
@@ -177,7 +180,13 @@ setup_actor_runtime :: proc(actor: ^Actor($T)) -> (log.Logger, ^Actor_Context) {
 
 	context.allocator = actor.allocator
 
-	return setup_actor_context(actor.pid, actor.name, actor.opts.logging, actor.allocator)
+	return setup_actor_context(
+		actor.pid,
+		actor.name,
+		actor.opts.logging,
+		actor.allocator,
+		actor.actor_ctx,
+	)
 }
 
 @(private)
@@ -238,8 +247,20 @@ ensure_message_batch :: #force_inline proc(
 	ctx: ^Message_Processing_Context,
 ) {
 	if ctx.message_batch != nil do return
-	ctx.message_batch = make([]Message, ctx.batch_size, actor.allocator)
-	ctx.free_buffer.entries = make([]rawptr, FREE_BATCH_SIZE, actor.allocator)
+	batch_raw, batch_err := mem.alloc_bytes_non_zeroed(
+		ctx.batch_size * size_of(Message),
+		align_of(Message),
+		actor.allocator,
+	)
+	if batch_err != nil do return
+	free_raw, free_err := mem.alloc_bytes_non_zeroed(
+		FREE_BATCH_SIZE * size_of(rawptr),
+		align_of(rawptr),
+		actor.allocator,
+	)
+	if free_err != nil do return
+	ctx.message_batch = mem.slice_data_cast([]Message, batch_raw)
+	ctx.free_buffer.entries = mem.slice_data_cast([]rawptr, free_raw)
 }
 
 @(private)

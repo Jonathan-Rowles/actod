@@ -57,6 +57,7 @@ Actor_File_Logger :: struct {
 @(private)
 Actor_Logger_Data :: struct {
 	console_logger: log.Logger,
+	console_data:   log.File_Console_Logger_Data,
 	log_config:     Log_Config,
 	name:           string,
 	pid:            PID,
@@ -167,13 +168,15 @@ setup_actor_context :: proc(
 	name: string,
 	config: Log_Config = NODE.config.actor_config.logging,
 	actor_allocator: mem.Allocator,
+	preallocated: ^Actor_Context = nil,
 ) -> (
 	log.Logger,
 	^Actor_Context,
 ) {
-	actor_ctx := new(Actor_Context, actor_allocator)
+	actor_ctx := preallocated
+	if actor_ctx == nil do actor_ctx = new(Actor_Context, actor_allocator)
 	actor_ctx.pid = pid
-	actor_ctx.name = strings.clone(name, actor_allocator)
+	actor_ctx.name = name
 
 	actor_ctx.subscriptions = make([dynamic]Subscription, actor_allocator)
 	actor_ctx.topic_subscriptions = make([dynamic]Topic_Subscription, actor_allocator)
@@ -246,13 +249,16 @@ setup_actor_context :: proc(
 		}
 	}
 
-	actor_log_data := new(Actor_Logger_Data, actor_allocator)
-	actor_log_data.console_logger = log.create_console_logger(
-		lowest = config.level,
-		opt = config.console_opts,
+	actor_log_data := &actor_ctx.logger_data
+	actor_log_data.console_data = log.File_Console_Logger_Data {
 		ident = NODE.name,
-		allocator = actor_allocator,
-	)
+	}
+	actor_log_data.console_logger = log.Logger {
+		log.console_logger_proc,
+		&actor_log_data.console_data,
+		config.level,
+		config.console_opts,
+	}
 	actor_log_data.log_config = config
 	actor_log_data.name = actor_ctx.name
 	actor_log_data.pid = pid

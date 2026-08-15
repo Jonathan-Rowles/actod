@@ -121,8 +121,8 @@ slab_ensure_committed :: proc(slab: ^Slot_Slab, slot_index: u64) -> bool {
 	return true
 }
 
-slot_slab_take :: proc(slab: ^Slot_Slab) -> (index: u32, ok: bool) {
-	if !slab.enabled do return 0, false
+slot_slab_take :: proc(slab: ^Slot_Slab) -> (index: u32, fresh: bool, ok: bool) {
+	if !slab.enabled do return 0, false, false
 
 	for {
 		head := sync.atomic_load_explicit(&slab.free_head, .Acquire)
@@ -144,20 +144,20 @@ slot_slab_take :: proc(slab: ^Slot_Slab) -> (index: u32, ok: bool) {
 				if vmem.commit(raw_data(slot), uint(purged)) != nil {
 					sync.atomic_store_explicit(&slab.slot_purged[free_index], purged, .Release)
 					slab_push_free(slab, free_index)
-					return 0, false
+					return 0, false, false
 				}
 			}
 			sync.atomic_add(&slab.in_use, 1)
-			return free_index, true
+			return free_index, false, true
 		}
 	}
 
 	claimed := sync.atomic_add(&slab.cursor, 1)
-	if claimed >= slab.slot_count do return 0, false
-	if !slab_ensure_committed(slab, claimed) do return 0, false
+	if claimed >= slab.slot_count do return 0, false, false
+	if !slab_ensure_committed(slab, claimed) do return 0, false, false
 
 	sync.atomic_add(&slab.in_use, 1)
-	return u32(claimed), true
+	return u32(claimed), true, true
 }
 
 @(private = "file")
@@ -330,21 +330,24 @@ actor_arena_acquire :: proc(
 	data_size: int,
 	mailbox_size: int,
 	opts: Actor_Config,
-) -> bool {
+) -> (
+	fresh: bool,
+	ok: bool,
+) {
 	slot_ref^ = 0
 	arena^ = {}
 	reserve := actor_arena_reserve(data_size, mailbox_size, opts)
 	arena.spill_reserve = reserve
 
 	if NODE.actor_slab.enabled && uint(data_size) < NODE.actor_slab.slot_size {
-		if index, took := slot_slab_take(&NODE.actor_slab); took {
+		if index, slot_fresh, took := slot_slab_take(&NODE.actor_slab); took {
 			if vmem.arena_init_buffer(
 				   &arena.primary,
 				   slot_slab_slot(&NODE.actor_slab, index),
 			   ) ==
 			   nil {
 				slot_ref^ = index + 1
-				return true
+				return slot_fresh, true
 			}
 			slot_slab_give(&NODE.actor_slab, index, 0)
 		} else {
@@ -352,7 +355,7 @@ actor_arena_acquire :: proc(
 		}
 	}
 
-	return vmem.arena_init_static(&arena.primary, reserve, ARENA_COMMIT_SIZE) == nil
+	return true, vmem.arena_init_static(&arena.primary, reserve, ARENA_COMMIT_SIZE) == nil
 }
 
 coro_header_bytes :: proc() -> uint {
@@ -376,7 +379,7 @@ coro_acquire :: proc(
 	slot_ref^ = 0
 
 	if NODE.coro_slab.enabled && coro_slot_size(stack_size) <= NODE.coro_slab.slot_size {
-		if index, took := slot_slab_take(&NODE.coro_slab); took {
+		if index, _, took := slot_slab_take(&NODE.coro_slab); took {
 			co, res := coro.create_in(desc, slot_slab_slot(&NODE.coro_slab, index))
 			if res == .Success {
 				slot_ref^ = index + 1

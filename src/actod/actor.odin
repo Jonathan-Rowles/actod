@@ -368,13 +368,7 @@ retry_local_send :: #force_no_inline proc(
 		return .RECEIVER_BACKLOGGED
 	}
 
-	entered_pinned := tls_reclaim_depth > 0
-	if entered_pinned do reclaim_unpin()
-
-	result := retry_local_send_loop(co, msg, to, actor.local_read, loc)
-
-	if entered_pinned do reclaim_pin()
-	return result
+	return retry_local_send_loop(co, msg, to, actor.local_read, loc)
 }
 
 @(private)

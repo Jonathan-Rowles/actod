@@ -228,6 +228,7 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 		handle.co = nil
 	} else if coro.status(handle.co) == .Dead {
 		if tls_reclaim_depth > 0 do reclaim_unpin()
+		check_reclaim_balance()
 		sync.atomic_store_explicit(&handle.terminated, true, .Release)
 		return
 	}
@@ -256,6 +257,21 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 	}
 
 	if tls_reclaim_depth > 0 do reclaim_unpin()
+	check_reclaim_balance()
+}
+
+@(private = "file")
+reclaim_imbalance_warned: bool
+
+@(private = "file")
+check_reclaim_balance :: proc() {
+	if tls_reclaim_depth != 0 && !reclaim_imbalance_warned {
+		reclaim_imbalance_warned = true
+		log.errorf(
+			"reclaim pin depth %d survived a coroutine resume, a frozen reclaim slot would stop dead-actor arenas from ever being freed",
+			tls_reclaim_depth,
+		)
+	}
 }
 
 @(private)

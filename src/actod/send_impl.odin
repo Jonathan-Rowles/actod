@@ -100,7 +100,7 @@ send_user_backpressure :: #force_no_inline proc(
 	token: u64 = 0,
 	loc := #caller_location,
 ) -> Send_Error {
-	entered_pinned := tls_reclaim_depth > 0
+	entered_pinned := coro.running() == nil && tls_reclaim_depth > 0
 	if entered_pinned do reclaim_unpin()
 
 	result := send_user_backpressure_loop(to, msg, msg_ready, data, size, tid, info, token, loc)

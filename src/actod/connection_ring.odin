@@ -32,7 +32,10 @@ Send_Slot :: struct #align (CACHE_LINE_SIZE) {
 	state:          Send_Slot_State,
 	length:         u32,
 	active_writers: i32,
+	seal_id:        u64,
 }
+
+g_seal_counter: u64
 
 @(private)
 slot_data :: #force_inline proc(ring: ^Connection_Ring, slot_idx: u32) -> []byte {
@@ -464,6 +467,7 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 	if !force && active > 0 do return
 
 	slot.length = write_pos
+	sync.atomic_store(&slot.seal_id, sync.atomic_add(&g_seal_counter, 1) + 1)
 	ring.batch_slot_idx = -1
 	ring.batch_write_pos = 0
 
@@ -484,7 +488,30 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 		sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
 	} else {
 		sync.atomic_store(&slot.state, .SEALED)
+		if sync.atomic_load(&slot.active_writers) == 0 {
+			batch_promote_sealed(ring, u32(slot_idx))
+		}
 	}
+}
+
+@(private)
+batch_promote_sealed :: proc(ring: ^Connection_Ring, slot_idx: u32) {
+	slot := &ring.send_slots[slot_idx]
+	when ODIN_DEBUG {
+		data := slot_data(ring, slot_idx)
+		if !validate_batch_messages(data[:slot.length], i32(slot_idx), slot.length) {
+			log.errorf(
+				"CRITICAL: Corrupted batch in slot %d on commit, releasing",
+				slot_idx,
+			)
+			_, _ = sync.atomic_compare_exchange_strong(&slot.state, .SEALED, .FREE)
+			return
+		}
+	}
+	_, swapped := sync.atomic_compare_exchange_strong(&slot.state, .SEALED, .READY)
+	if !swapped do return
+	ring_signal_batch(ring)
+	sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
 }
 
 @(private)
@@ -682,20 +709,7 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 			return
 		}
 		if state == .SEALED {
-			when ODIN_DEBUG {
-				data := slot_data(ring, slot_idx)
-				if !validate_batch_messages(data[:slot.length], i32(slot_idx), slot.length) {
-					log.errorf(
-						"CRITICAL: Corrupted batch in slot %d on commit, releasing",
-						slot_idx,
-					)
-					sync.atomic_store(&slot.state, .FREE)
-					return
-				}
-			}
-			sync.atomic_store(&slot.state, .READY)
-			ring_signal_batch(ring)
-			sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
+			batch_promote_sealed(ring, slot_idx)
 		} else if state == .WRITING {
 			ring_signal_batch(ring)
 		}

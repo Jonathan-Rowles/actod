@@ -6,6 +6,7 @@ import "core:log"
 import "core:sync"
 import "core:testing"
 import "core:thread"
+import "core:time"
 
 SEQ_FRAME_SIZE :: 20
 SEQ_MAX_THREADS :: 16
@@ -21,17 +22,34 @@ Seq_Violation :: struct {
 	slot_length:  u32,
 	frame_offset: u32,
 	frames_seen:  int,
+	seal_before:  u64,
+	seal_after:   u64,
+	sum_changed:  bool,
+}
+
+seq_slot_checksum :: proc(data: []byte, length: u32) -> u64 {
+	sum: u64 = 1469598103934665603
+	for i in 0 ..< length {
+		sum = (sum ~ u64(data[i])) * 1099511628211
+	}
+	return sum
 }
 
 Seq_Drainer_Context :: struct {
 	ring:             ^Connection_Ring,
 	stop:             bool,
+	starve_pause:     time.Duration,
+	read_dwell:       time.Duration,
 	frames_seen:      int,
 	order_violations: int,
 	malformed:        int,
 	next_seq:         [SEQ_MAX_THREADS]u64,
 	submit_idx:       u32,
 	slot_idx:         u32,
+	seal_before:      u64,
+	seal_after:       u64,
+	sum_changed:      bool,
+	mutated_ready:    int,
 	violations:       [SEQ_MAX_RECORDED_VIOLATIONS]Seq_Violation,
 	recorded:         int,
 }
@@ -61,6 +79,9 @@ seq_validate_slot :: proc(ctx: ^Seq_Drainer_Context, data: []byte, length: u32) 
 							slot_length  = length,
 							frame_offset = offset,
 							frames_seen  = ctx.frames_seen,
+							seal_before  = ctx.seal_before,
+							seal_after   = ctx.seal_after,
+							sum_changed  = ctx.sum_changed,
 						}
 						ctx.recorded += 1
 					}
@@ -90,7 +111,18 @@ seq_drain_ready :: proc(ctx: ^Seq_Drainer_Context) -> int {
 		}
 		ctx.submit_idx = ring.send_submit_idx
 		ctx.slot_idx = slot_idx
-		seq_validate_slot(ctx, slot_data(ring, slot_idx), slot.length)
+		length := slot.length
+		data := slot_data(ring, slot_idx)
+		ctx.seal_before = sync.atomic_load(&slot.seal_id)
+		if ctx.read_dwell > 0 do time.sleep(ctx.read_dwell)
+		sum_before := seq_slot_checksum(data, length)
+		ctx.sum_changed = false
+		seq_validate_slot(ctx, data, length)
+		ctx.seal_after = sync.atomic_load(&slot.seal_id)
+		if seq_slot_checksum(data, length) != sum_before {
+			ctx.sum_changed = true
+			ctx.mutated_ready += 1
+		}
 		slot.length = 0
 		sync.atomic_store(&slot.state, .FREE)
 		ring.send_submit_idx += 1
@@ -109,8 +141,12 @@ seq_drainer_proc :: proc(data: rawptr) {
 			batch_flush(ctx.ring)
 		}
 		seq_drain_ready(ctx)
-		for _ in 0 ..< 500 {
-			intrinsics.cpu_relax()
+		if ctx.starve_pause > 0 {
+			time.sleep(ctx.starve_pause)
+		} else {
+			for _ in 0 ..< 500 {
+				intrinsics.cpu_relax()
+			}
 		}
 	}
 	batch_flush(ctx.ring)
@@ -155,7 +191,12 @@ seq_writer_proc :: proc(data: rawptr) {
 	}
 }
 
-run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
+run_seq_stress :: proc(
+	t: ^testing.T,
+	writer: proc(data: rawptr),
+	starve_pause: time.Duration = 0,
+	read_dwell: time.Duration = 0,
+) {
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -164,7 +205,9 @@ run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
 	MSGS_PER_THREAD :: 50_000
 
 	drainer_ctx := Seq_Drainer_Context {
-		ring = ring,
+		ring         = ring,
+		starve_pause = starve_pause,
+		read_dwell   = read_dwell,
 	}
 	drainer := thread.create_and_start_with_data(&drainer_ctx, seq_drainer_proc)
 
@@ -197,7 +240,7 @@ run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
 	for i in 0 ..< drainer_ctx.recorded {
 		v := drainer_ctx.violations[i]
 		log.errorf(
-			"seq violation %d: producer=%d expected=%d got=%d delta=%d submit_idx=%d slot_idx=%d slot_length=%d frame_offset=%d frames_seen=%d",
+			"seq violation %d: producer=%d expected=%d got=%d delta=%d submit_idx=%d slot_idx=%d slot_length=%d frame_offset=%d frames_seen=%d seal_before=%d seal_after=%d sum_changed=%v",
 			i,
 			v.producer,
 			v.expected,
@@ -208,6 +251,9 @@ run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
 			v.slot_length,
 			v.frame_offset,
 			v.frames_seen,
+			v.seal_before,
+			v.seal_after,
+			v.sum_changed,
 		)
 	}
 	testing.expect_value(t, drainer_ctx.order_violations, 0)
@@ -221,6 +267,16 @@ run_seq_stress :: proc(t: ^testing.T, writer: proc(data: rawptr)) {
 @(test)
 test_stress_per_producer_order :: proc(t: ^testing.T) {
 	run_seq_stress(t, seq_writer_proc)
+}
+
+@(test)
+test_stress_per_producer_order_starved_drainer :: proc(t: ^testing.T) {
+	run_seq_stress(
+		t,
+		seq_writer_proc,
+		starve_pause = 3 * time.Millisecond,
+		read_dwell = 500 * time.Microsecond,
+	)
 }
 
 seq_staged_writer_proc :: proc(data: rawptr) {

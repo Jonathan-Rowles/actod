@@ -561,6 +561,17 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 			log.warn("Failed to read HELLO from incoming connection")
 			return .Failed
 		}
+		if pre_info, pre_parsed := parse_hello(peer_payload); pre_parsed && pre_info.pool_join {
+			_, owner_pool := find_pool_owner_by_join_token(pre_info.join_token)
+			if owner_pool != nil && pool_active_count(owner_pool) >= owner_pool.max_rings {
+				log.infof(
+					"Pool join from %s refused before HELLO reply, pool is full",
+					pre_info.node_name,
+				)
+				delete(peer_raw, actor_system_allocator)
+				return .Failed
+			}
+		}
 		if !handshake_send_ctrl(sock, my_hello) {
 			delete(peer_raw, actor_system_allocator)
 			return .Failed
@@ -707,7 +718,7 @@ handle_incoming_pool_join :: proc(
 
 	set_recv_timeout(sock, 0)
 
-	owner_pid := find_pool_owner_by_join_token(info.join_token)
+	owner_pid, _ := find_pool_owner_by_join_token(info.join_token)
 	if owner_pid == 0 {
 		log.warnf("Pool join from %s with unknown token", info.node_name)
 		return .Failed
@@ -788,7 +799,11 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	set_recv_timeout(sock, 0)
 
-	if !attach_pool_ring(data, sock, keys) do return false
+	if !attach_pool_ring(data, sock, keys) {
+		ok = true
+		reject_pool_ring(data, pool, sock, keys)
+		return false
+	}
 
 	ok = true
 	log.infof(
@@ -864,11 +879,11 @@ adopt_pool_ring :: proc(data: ^Connection_Actor_Data, msg: Adopt_Pool_Ring) {
 		return
 	}
 	if pool_active_count(pool) >= pool.max_rings {
-		close_tcp(msg.socket)
+		reject_pool_ring(data, pool, msg.socket, keys)
 		return
 	}
 	if !attach_pool_ring(data, msg.socket, keys) {
-		close_tcp(msg.socket)
+		reject_pool_ring(data, pool, msg.socket, keys)
 		return
 	}
 	log.infof(
@@ -907,6 +922,38 @@ pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
 		establish_pool_ring(data)
 	}
 	sync.atomic_store(&pool.scale_up_requested, 0)
+}
+
+// The peer has already attached its side of this socket and may be sending
+// into it, so a refused ring gets the same half-close drain as a park: the
+// peer's in-flight frames are read and dispatched, and its EOF releases the
+// socket.
+@(private)
+reject_pool_ring :: proc(
+	data: ^Connection_Actor_Data,
+	pool: ^Connection_Pool,
+	sock: net.TCP_Socket,
+	keys: Noise_Transport,
+) {
+	ring := pool_take_parked(pool)
+	if ring == nil {
+		ring = make_connection_ring(data.ring_config, data.encrypted, get_system_allocator())
+	}
+	if ring == nil {
+		close_tcp(sock)
+		return
+	}
+	ring.node_id = data.node_id
+	ring.conn_pid = get_self_pid()
+	ring.tcp_socket = sock
+	if data.encrypted do ring.transport_keys = keys
+	ring_shutdown_write(ring)
+	sync.atomic_store(&ring.park_state, Ring_Park_State.Draining)
+	if ring_drain_socket(ring) {
+		finish_park_pool_ring(pool, ring)
+		return
+	}
+	pool_add_draining(pool, ring)
 }
 
 @(private)

@@ -1480,16 +1480,16 @@ get_connection_pool :: #force_inline proc(node_id: Node_ID) -> ^Connection_Pool 
 	)
 }
 
-find_pool_owner_by_join_token :: proc(token: u64) -> PID {
-	if token == 0 do return 0
+find_pool_owner_by_join_token :: proc(token: u64) -> (PID, ^Connection_Pool) {
+	if token == 0 do return 0, nil
 	for i in 2 ..< MAX_NODES {
 		pool := get_connection_pool(Node_ID(i))
 		if pool == nil do continue
 		if sync.atomic_load_explicit(&pool.join_token, .Acquire) == token {
-			return PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
+			return PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire)), pool
 		}
 	}
-	return 0
+	return 0, nil
 }
 
 register_connection_ring :: proc(node_id: Node_ID, ring: ^Connection_Ring) {

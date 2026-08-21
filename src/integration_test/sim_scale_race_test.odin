@@ -20,6 +20,24 @@ SCALE_RACE_MAX_IDS :: 4096
 @(private = "file")
 g_scale_race_seen: [2][SCALE_RACE_MAX_IDS]u8
 
+@(private = "file")
+g_scale_race_sent: [2]int
+
+@(private = "file")
+g_scale_race_sent_ids: [2][SCALE_RACE_MAX_IDS]u8
+
+@(private = "file")
+g_scale_race_last_id: [2]int
+
+@(private = "file")
+g_scale_race_order_violations: [2]int
+
+@(private = "file")
+g_scale_race_first_violation: [2][2]int
+
+@(private = "file")
+g_scale_race_names: [2]string
+
 Scale_Race_Counter_Data :: struct {
 	slot: int,
 }
@@ -29,6 +47,46 @@ Scale_Race_Counter_Behaviour := actod.Actor_Behaviour(Scale_Race_Counter_Data) {
 		if m, is_test_msg := msg.(Integration_Test_Message); is_test_msg {
 			g_scale_race_counts[data.slot] += 1
 			if m.id >= 0 && m.id < SCALE_RACE_MAX_IDS do g_scale_race_seen[data.slot][m.id] += 1
+			if m.id <= g_scale_race_last_id[data.slot] {
+				if g_scale_race_order_violations[data.slot] == 0 {
+					g_scale_race_first_violation[data.slot] = {
+						g_scale_race_last_id[data.slot],
+						m.id,
+					}
+				}
+				g_scale_race_order_violations[data.slot] += 1
+			} else {
+				g_scale_race_last_id[data.slot] = m.id
+			}
+		}
+	},
+}
+
+Scale_Race_Burst :: struct {
+	dst:   int,
+	base:  int,
+	count: int,
+}
+
+Scale_Race_Sender_Data :: struct {
+	slot: int,
+}
+
+Scale_Race_Sender_Behaviour := actod.Actor_Behaviour(Scale_Race_Sender_Data) {
+	handle_message = proc(data: ^Scale_Race_Sender_Data, from: actod.PID, msg: any) {
+		if m, is_burst := msg.(Scale_Race_Burst); is_burst {
+			for k in 0 ..< m.count {
+				id := m.base + k
+				err := actod.send_remote_by_name(
+					g_scale_race_names[m.dst],
+					"scr",
+					Integration_Test_Message{id = id},
+				)
+				if err == .OK {
+					g_scale_race_sent[m.dst] += 1
+					if id < SCALE_RACE_MAX_IDS do g_scale_race_sent_ids[m.dst][id] = 1
+				}
+			}
 		}
 	},
 }
@@ -90,17 +148,35 @@ scale_race_ring_stranded :: proc(ring: ^actod.Connection_Ring) -> int {
 scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 	g_scale_race_counts = {}
 	g_scale_race_seen = {}
+	g_scale_race_sent = {}
+	g_scale_race_sent_ids = {}
+	g_scale_race_last_id = {-1, -1}
+	g_scale_race_order_violations = {}
+	g_scale_race_first_violation = {}
 
 	mesh := actod.sim_mesh_create(2, seed = seed, base_port = 29500, log_level = test_log_level())
 	defer actod.sim_mesh_destroy(mesh)
 
 	names := [2]string{"mesh0", "mesh1"}
+	g_scale_race_names = names
 
 	for i in 0 ..< 2 {
 		_ = actod.sim_mesh_bind(mesh, i)
-		if _, spawned := actod.spawn("scr", Scale_Race_Counter_Data{slot = i}, Scale_Race_Counter_Behaviour);
-		   !spawned {
+		if _, spawned := actod.spawn_sized(
+			"scr",
+			Scale_Race_Counter_Data{slot = i},
+			Scale_Race_Counter_Behaviour,
+			4096,
+		); !spawned {
 			return false, "counter spawn failed"
+		}
+		if _, spawned := actod.spawn_sized(
+			"scs",
+			Scale_Race_Sender_Data{slot = i},
+			Scale_Race_Sender_Behaviour,
+			256,
+		); !spawned {
+			return false, "sender spawn failed"
 		}
 	}
 
@@ -109,8 +185,9 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 	rng := seed ~ 0x9E3779B97F4A7C15
 	_ = scale_race_rand(&rng)
 
-	sent: [2]int
-	sent_ids: [2][SCALE_RACE_MAX_IDS]u8
+	actod.sim_set_recv_chunk(64 + scale_race_pick(&rng, 448))
+	defer actod.sim_set_recv_chunk(0)
+
 	next_id := 0
 	op_count := 40 + scale_race_pick(&rng, 21)
 
@@ -119,20 +196,13 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		case 0, 1:
 			src := scale_race_pick(&rng, 2)
 			dst := 1 - src
-			burst := 1 + scale_race_pick(&rng, 8)
+			burst := 1 + scale_race_pick(&rng, 32)
 			_ = actod.sim_mesh_bind(mesh, src)
-			for _ in 0 ..< burst {
-				err := actod.send_remote_by_name(
-					names[dst],
-					"scr",
-					Integration_Test_Message{id = next_id},
-				)
-				if err == .OK {
-					sent[dst] += 1
-					if next_id < SCALE_RACE_MAX_IDS do sent_ids[dst][next_id] = 1
-				}
-				next_id += 1
-			}
+			err := actod.send_message_name(
+				"scs",
+				Scale_Race_Burst{dst = dst, base = next_id, count = burst},
+			)
+			if err == .OK do next_id += burst
 		case 2:
 			n := scale_race_pick(&rng, 2)
 			_ = actod.sim_mesh_bind(mesh, n)
@@ -150,6 +220,7 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			)
 		case 5:
 			actod.sim_mesh_advance_clock(mesh, time.Duration(1 + scale_race_pick(&rng, 5)) * time.Second)
+			_ = actod.sim_mesh_run_until_idle(mesh, 2000)
 		}
 		extra := scale_race_pick(&rng, 4)
 		for _ in 0 ..< extra {
@@ -167,14 +238,14 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 	failures.allocator = context.temp_allocator
 
 	for i in 0 ..< 2 {
-		if g_scale_race_counts[i] == sent[i] do continue
+		if g_scale_race_counts[i] == g_scale_race_sent[i] do continue
 		missing: [dynamic]int
 		missing.allocator = context.temp_allocator
 		duplicated: [dynamic]int
 		duplicated.allocator = context.temp_allocator
 		for id in 0 ..< min(next_id, SCALE_RACE_MAX_IDS) {
-			if sent_ids[i][id] == 1 && g_scale_race_seen[i][id] == 0 do append(&missing, id)
-			if g_scale_race_seen[i][id] > sent_ids[i][id] do append(&duplicated, id)
+			if g_scale_race_sent_ids[i][id] == 1 && g_scale_race_seen[i][id] == 0 do append(&missing, id)
+			if g_scale_race_seen[i][id] > g_scale_race_sent_ids[i][id] do append(&duplicated, id)
 		}
 		append(
 			&failures,
@@ -182,9 +253,23 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 				"node %d counter saw %d messages, %d were sent with .OK (missing ids %v, duplicated ids %v)",
 				i,
 				g_scale_race_counts[i],
-				sent[i],
+				g_scale_race_sent[i],
 				missing[:],
 				duplicated[:],
+			),
+		)
+	}
+
+	for i in 0 ..< 2 {
+		if g_scale_race_order_violations[i] == 0 do continue
+		append(
+			&failures,
+			fmt.tprintf(
+				"node %d counter saw %d order violation(s), first: id %d after id %d",
+				i,
+				g_scale_race_order_violations[i],
+				g_scale_race_first_violation[i][1],
+				g_scale_race_first_violation[i][0],
 			),
 		)
 	}
@@ -208,6 +293,16 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		joined := ""
 		for f, i in failures do joined = i == 0 ? f : fmt.tprintf("%s; %s", joined, f)
 		return false, joined
+	}
+	if (os.lookup_env("ACTOD_SCALE_RACE_DEBUG", context.temp_allocator) or_else "") != "" {
+		fmt.eprintfln(
+			"seed %d: sent %v received %v violations %v next_id %d",
+			seed,
+			g_scale_race_sent,
+			g_scale_race_counts,
+			g_scale_race_order_violations,
+			next_id,
+		)
 	}
 	return true, ""
 }

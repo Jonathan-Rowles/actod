@@ -75,6 +75,7 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_sim_regression_idle_pool_ring_parks", test_proc = test_sim_regression_idle_pool_ring_parks, sim_mode = true, worker_count = 2},
 	{name = "test_sim_regression_publish_during_scale_down", test_proc = test_sim_regression_publish_during_scale_down, sim_mode = true, worker_count = 2},
 	{name = "test_sim_vopr", test_proc = test_sim_vopr, sim_mode = true, worker_count = 2},
+	{name = "test_sim_scale_up_race", test_proc = test_sim_scale_up_race, sim_mode = true, worker_count = 2},
 	{
 		name = "test_reclaim_churn_under_termination",
 		test_proc = test_reclaim_churn_under_termination,

@@ -18,7 +18,6 @@ TICK_IDLE_THRESHOLD :: 50
 IO_ATTACH_RETRIES :: 50_000
 IO_ATTACH_RETRY_DELAY :: 100 * time.Microsecond
 RING_RESET_WRITER_SPIN :: 1_000_000
-RESERVE_SPIN_TRIES :: 64
 
 Send_Slot_State :: enum u32 {
 	FREE      = 0,
@@ -709,15 +708,7 @@ batch_reserve :: proc(
 
 	if !sync.mutex_try_lock(&ring.batch_mutex) {
 		pool_note_contention(ring.pool)
-		acquired := false
-		for spin := 0; spin < RESERVE_SPIN_TRIES; spin += 1 {
-			intrinsics.cpu_relax()
-			if sync.mutex_try_lock(&ring.batch_mutex) {
-				acquired = true
-				break
-			}
-		}
-		if !acquired do sync.mutex_lock(&ring.batch_mutex)
+		sync.mutex_lock(&ring.batch_mutex)
 	}
 
 	batch_idx := ring.batch_slot_idx

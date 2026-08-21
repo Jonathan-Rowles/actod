@@ -107,6 +107,15 @@ sim_mesh_boot_node :: proc(mesh: ^Sim_Mesh, i: int) -> ^Node_State {
 		network = make_network_config(
 			auth_password = mesh.auth_password,
 			port = mesh.ports[i],
+			connection_ring = Connection_Ring_Config {
+				send_slot_count = DEFAULT_CONNECTION_RING_CONFIG.send_slot_count,
+				send_slot_size = DEFAULT_CONNECTION_RING_CONFIG.send_slot_size,
+				recv_buffer_size = DEFAULT_CONNECTION_RING_CONFIG.recv_buffer_size,
+				tcp_nodelay = DEFAULT_CONNECTION_RING_CONFIG.tcp_nodelay,
+				max_pool_rings = MAX_POOL_RINGS / 2,
+				scale_up_contention_threshold = DEFAULT_CONNECTION_RING_CONFIG.scale_up_contention_threshold,
+				scale_down_idle_seconds = DEFAULT_CONNECTION_RING_CONFIG.scale_down_idle_seconds,
+			},
 		),
 		actor_config = make_actor_config(logging = make_log_config(level = mesh.log_level)),
 	)

@@ -1671,7 +1671,14 @@ make_connection_pool :: proc(
 	pool := new(Connection_Pool, allocator)
 	if pool == nil do return nil
 	pool.node_id = node_id
-	pool.max_rings = clamp(config.max_pool_rings, 1, MAX_POOL_RINGS)
+	rings := config.max_pool_rings
+	if rings == 0 {
+		rings = DEFAULT_CONNECTION_RING_CONFIG.max_pool_rings
+		if workers := u32(NODE.worker_pool.worker_count); workers > 0 {
+			rings = min(rings, workers)
+		}
+	}
+	pool.max_rings = clamp(rings, 1, MAX_POOL_RINGS)
 	pool.contention_threshold = config.scale_up_contention_threshold
 	if pool.contention_threshold == 0 do pool.contention_threshold = 100
 	return pool

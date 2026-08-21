@@ -248,6 +248,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 				}
 				break
 			}
+			finalize_parked_rings(data, pool)
 		}
 
 	case Timer_Tick:

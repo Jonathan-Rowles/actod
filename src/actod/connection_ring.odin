@@ -1329,6 +1329,9 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 			}
 			if pr.park_half_closed {
 				if sync.atomic_load(&pr.recv_closed) != 0 {
+					if pr.pending_recv == nil && ring_recv_unconsumed(pr) > 0 {
+						process_recv_buffer(pr)
+					}
 					if pr.pending_recv != nil {
 						nbio.remove(pr.pending_recv)
 						pr.pending_recv = nil

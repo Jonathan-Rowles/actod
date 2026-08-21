@@ -12,16 +12,17 @@ SIM_SOCKET_BASE :: 1 << 30
 SIM_EPHEMERAL_PORT_BASE :: 40000
 
 Sim_Endpoint :: struct {
-	sock:        net.TCP_Socket,
-	peer:        ^Sim_Endpoint,
-	node:        ^Node_State,
-	inbound:     [dynamic]byte,
-	read_pos:    int,
-	closed:      bool,
-	ring:        ^Connection_Ring,
-	recv_buf:    []byte,
-	recv_op:     nbio.Operation,
-	recv_waiter: ^Pooled_Actor_Handle,
+	sock:         net.TCP_Socket,
+	peer:         ^Sim_Endpoint,
+	node:         ^Node_State,
+	inbound:      [dynamic]byte,
+	read_pos:     int,
+	closed:       bool,
+	write_closed: bool,
+	ring:         ^Connection_Ring,
+	recv_buf:     []byte,
+	recv_op:      nbio.Operation,
+	recv_waiter:  ^Pooled_Actor_Handle,
 }
 
 Sim_Pending_Accept :: struct {
@@ -337,9 +338,25 @@ sim_close_socket :: proc(sock: net.TCP_Socket) {
 	sim_free_endpoint(ep)
 }
 
+sim_drain_available :: proc(sock: net.TCP_Socket, dst: []byte) -> (n: int, eof: bool) {
+	ep := sim_endpoint_for(sock)
+	if ep == nil || ep.closed do return 0, true
+	if ep.peer != nil && sim_link_blocked(ep.node, ep.peer.node) do return 0, false
+	n = sim_inbound_take(ep, dst)
+	if n == 0 do eof = ep.peer == nil || ep.peer.closed || ep.peer.write_closed
+	return
+}
+
+sim_shutdown_write :: proc(sock: net.TCP_Socket) {
+	ep := sim_endpoint_for(sock)
+	if ep == nil || ep.closed || ep.write_closed do return
+	ep.write_closed = true
+	if ep.peer != nil && !ep.peer.closed do sim_wake_waiter(ep.peer)
+}
+
 sim_stream_write :: proc(sock: net.TCP_Socket, data: []byte) -> bool {
 	ep := sim_endpoint_for(sock)
-	if ep == nil || ep.closed || ep.peer == nil || ep.peer.closed do return false
+	if ep == nil || ep.closed || ep.write_closed || ep.peer == nil || ep.peer.closed do return false
 	append(&ep.peer.inbound, ..data)
 	sim_wake_waiter(ep.peer)
 	return true
@@ -433,7 +450,7 @@ sim_ring_send :: proc(ring: ^Connection_Ring, batch_count: u32) {
 	ep := sim_endpoint_for(ring.tcp_socket)
 	op: nbio.Operation
 	op.type = .Send
-	if ep == nil || ep.closed || ep.peer == nil || ep.peer.closed {
+	if ep == nil || ep.closed || ep.write_closed || ep.peer == nil || ep.peer.closed {
 		op.send.err = net.TCP_Send_Error.Connection_Closed
 	} else {
 		for buf in ring.send_bufs[:batch_count] {
@@ -463,7 +480,7 @@ sim_deliver_recv :: proc(ep: ^Sim_Endpoint) -> bool {
 		limit := len(ep.recv_buf)
 		if g_sim_recv_chunk > 0 && g_sim_recv_chunk < limit do limit = g_sim_recv_chunk
 		received = sim_inbound_take(ep, ep.recv_buf[:limit])
-	} else if ep.peer != nil && !ep.peer.closed {
+	} else if ep.peer != nil && !ep.peer.closed && !ep.peer.write_closed {
 		return false
 	}
 	ep.recv_buf = nil

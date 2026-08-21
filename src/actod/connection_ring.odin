@@ -80,6 +80,7 @@ Ring_Park_State :: enum u32 {
 	Active     = 0,
 	Park_Asked = 1,
 	Park_Acked = 2,
+	Draining   = 3,
 }
 
 Connection_Pool :: struct {
@@ -95,6 +96,8 @@ Connection_Pool :: struct {
 	node_id:              Node_ID,
 	parked:               [MAX_POOL_RINGS]^Connection_Ring,
 	parked_count:         u32,
+	draining:             [MAX_POOL_RINGS]^Connection_Ring,
+	draining_count:       u32,
 }
 
 // Owned by NODE (registered in NODE.connection_rings), never destroyed while
@@ -336,6 +339,74 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Buffering, .Release)
 
 	return dropped
+}
+
+// Caller must be the ring's only reader: the IO thread has acked the park and
+// released the ring, or has been stopped and joined. Returns true once the
+// peer's EOF has been observed, meaning no more bytes will ever arrive.
+ring_drain_socket :: proc(ring: ^Connection_Ring) -> bool {
+	if ring.tcp_socket == 0 do return true
+	if !sim_is_socket(ring.tcp_socket) do net.set_blocking(ring.tcp_socket, false)
+	eof := false
+	for {
+		write_pos := ring.recv_write_pos
+		available := ring.recv_buffer_size - write_pos
+		if available == 0 {
+			process_recv_buffer(ring)
+			if ring.recv_write_pos == write_pos do break
+			continue
+		}
+		dst := ring.recv_buffer[write_pos:write_pos + available]
+		n := 0
+		if sim_is_socket(ring.tcp_socket) {
+			sim_eof: bool
+			n, sim_eof = sim_drain_available(ring.tcp_socket, dst)
+			if n <= 0 {
+				eof = sim_eof
+				break
+			}
+		} else {
+			received, err := net.recv_tcp(ring.tcp_socket, dst)
+			if err != nil {
+				eof = err != .Would_Block && err != .Timeout
+				break
+			}
+			if received == 0 {
+				eof = true
+				break
+			}
+			n = received
+		}
+		ring.recv_write_pos += u32(n)
+		process_recv_buffer(ring)
+	}
+	if ring.recv_write_pos > 0 do process_recv_buffer(ring)
+	return eof
+}
+
+ring_shutdown_write :: proc(ring: ^Connection_Ring) {
+	if ring.tcp_socket == 0 do return
+	if sim_is_socket(ring.tcp_socket) {
+		sim_shutdown_write(ring.tcp_socket)
+		return
+	}
+	_ = net.shutdown(ring.tcp_socket, .Send)
+}
+
+pool_add_draining :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) {
+	if pool.draining_count >= MAX_POOL_RINGS {
+		log.error("Pool draining list full, leaking ring")
+		return
+	}
+	pool.draining[pool.draining_count] = ring
+	pool.draining_count += 1
+}
+
+pool_remove_draining_at :: proc(pool: ^Connection_Pool, idx: u32) {
+	last := pool.draining_count - 1
+	pool.draining[idx] = pool.draining[last]
+	pool.draining[last] = nil
+	pool.draining_count = last
 }
 
 @(private)

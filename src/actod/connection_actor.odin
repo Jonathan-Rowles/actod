@@ -910,31 +910,67 @@ pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
 }
 
 @(private)
-park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring, migrate: bool) {
+begin_park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> bool {
 	pool_remove_active(pool, ring)
-	if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
-	if migrate {
-		primary := get_pool_ring_at(pool, 0)
-		if primary != nil && primary != ring do _ = ring_migrate_slots(ring, primary)
+	primary := get_pool_ring_at(pool, 0)
+	if primary != nil && primary != ring do _ = ring_migrate_slots(ring, primary)
+	if ring.tcp_socket == 0 {
+		finish_park_pool_ring(pool, ring)
+		return true
 	}
+	ring_shutdown_write(ring)
+	sync.atomic_store(&ring.park_state, Ring_Park_State.Draining)
+	if ring_drain_socket(ring) {
+		finish_park_pool_ring(pool, ring)
+		return true
+	}
+	pool_add_draining(pool, ring)
+	return false
+}
+
+@(private)
+finish_park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) {
+	if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
 	ring_reset(ring)
 	pool_park(pool, ring)
 }
 
 @(private)
 finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Pool) {
-	count := pool_active_count(pool)
-	for i := count; i > 1; i -= 1 {
-		ring := get_pool_ring_at(pool, i - 1)
-		if ring == nil do continue
-		if sync.atomic_load(&ring.park_state) != .Park_Acked do continue
-		park_pool_ring(pool, ring, migrate = true)
+	i := pool.draining_count
+	for ; i > 0; i -= 1 {
+		ring := pool.draining[i - 1]
+		if ring == nil || !ring_drain_socket(ring) do continue
+		pool_remove_draining_at(pool, i - 1)
+		finish_park_pool_ring(pool, ring)
 		log.infof(
 			"Pool ring parked for node %s (id=%d): %d rings",
 			data.node_name,
 			data.node_id,
 			pool_active_count(pool),
 		)
+	}
+
+	count := pool_active_count(pool)
+	for j := count; j > 1; j -= 1 {
+		ring := get_pool_ring_at(pool, j - 1)
+		if ring == nil do continue
+		if sync.atomic_load(&ring.park_state) != .Park_Acked do continue
+		if begin_park_pool_ring(pool, ring) {
+			log.infof(
+				"Pool ring parked for node %s (id=%d): %d rings",
+				data.node_name,
+				data.node_id,
+				pool_active_count(pool),
+			)
+		} else {
+			log.infof(
+				"Pool ring draining for node %s (id=%d): %d rings",
+				data.node_name,
+				data.node_id,
+				pool_active_count(pool),
+			)
+		}
 	}
 }
 
@@ -963,7 +999,14 @@ teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 	for i := count; i > 1; i -= 1 {
 		ring := get_pool_ring_at(pool, i - 1)
 		if ring == nil do continue
-		park_pool_ring(pool, ring, migrate = false)
+		pool_remove_active(pool, ring)
+		finish_park_pool_ring(pool, ring)
+	}
+	for pool.draining_count > 0 {
+		ring := pool.draining[pool.draining_count - 1]
+		pool.draining[pool.draining_count - 1] = nil
+		pool.draining_count -= 1
+		if ring != nil do finish_park_pool_ring(pool, ring)
 	}
 
 	sync.atomic_store(&pool.contention_count, u32(0))

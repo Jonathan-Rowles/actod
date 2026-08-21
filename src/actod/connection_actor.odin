@@ -12,7 +12,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-WIRE_PROTOCOL_VERSION :: 5
+WIRE_PROTOCOL_VERSION :: 6
 HANDSHAKE_TIMEOUT_SECS :: 5
 HANDSHAKE_TIMEOUT :: HANDSHAKE_TIMEOUT_SECS * time.Second
 DUPLICATE_TAKEOVER_TIMEOUT :: 5 * time.Second
@@ -949,7 +949,7 @@ reject_pool_ring :: proc(
 	if data.encrypted do ring.transport_keys = keys
 	ring_shutdown_write(ring)
 	sync.atomic_store(&ring.park_state, Ring_Park_State.Draining)
-	if ring_drain_socket(ring) {
+	if ring_drain_socket(ring) && ring_recv_unconsumed(ring) == 0 {
 		finish_park_pool_ring(pool, ring)
 		return
 	}
@@ -967,7 +967,7 @@ begin_park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> 
 	}
 	ring_shutdown_write(ring)
 	sync.atomic_store(&ring.park_state, Ring_Park_State.Draining)
-	if ring_drain_socket(ring) {
+	if ring_drain_socket(ring) && ring_recv_unconsumed(ring) == 0 {
 		finish_park_pool_ring(pool, ring)
 		return true
 	}
@@ -988,6 +988,7 @@ finalize_parked_rings :: proc(data: ^Connection_Actor_Data, pool: ^Connection_Po
 	for ; i > 0; i -= 1 {
 		ring := pool.draining[i - 1]
 		if ring == nil || !ring_drain_socket(ring) do continue
+		if ring_recv_unconsumed(ring) > 0 do continue
 		pool_remove_draining_at(pool, i - 1)
 		finish_park_pool_ring(pool, ring)
 		log.infof(
@@ -1058,6 +1059,8 @@ teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 
 	sync.atomic_store(&pool.contention_count, u32(0))
 	sync.atomic_store(&pool.scale_up_requested, u32(0))
+	sync.atomic_store(&pool.epoch, u32(0))
+	sync.atomic_store(&pool.fence_dirty, u32(0))
 	sync.atomic_store(&pool.join_token, u64(0))
 }
 

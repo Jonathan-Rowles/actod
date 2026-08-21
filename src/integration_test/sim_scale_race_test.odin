@@ -290,6 +290,52 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 	}
 
 	if len(failures) > 0 {
+		for i in 0 ..< 2 {
+			_ = actod.sim_mesh_bind(mesh, i)
+			peer_id, known := actod.get_node_by_name(names[1 - i])
+			if !known do continue
+			pool := actod.get_connection_pool(peer_id)
+			if pool == nil do continue
+			fmt.eprintfln(
+				"node %d pool: count=%d parked=%d draining=%d epoch=%d min=%d",
+				i,
+				sync.atomic_load(&pool.ring_count),
+				pool.parked_count,
+				pool.draining_count,
+				sync.atomic_load(&pool.epoch),
+				actod.pool_recv_min_epoch(pool),
+			)
+			for j: u32 = 0; j < sync.atomic_load(&pool.ring_count); j += 1 {
+				r := actod.get_pool_ring_at(pool, j)
+				if r == nil do continue
+				fmt.eprintfln(
+					"  ring[%d] ptr=%p state=%v park=%v recv_epoch=%d recv_closed=%d recv_pos=%d sock=%d write=%d submit=%d",
+					j,
+					r,
+					sync.atomic_load(&r.state),
+					sync.atomic_load(&r.park_state),
+					sync.atomic_load(&r.recv_epoch),
+					sync.atomic_load(&r.recv_closed),
+					r.recv_write_pos,
+					r.tcp_socket,
+					sync.atomic_load(&r.send_write_idx),
+					r.send_submit_idx,
+				)
+			}
+			for j in 0 ..< pool.draining_count {
+				r := pool.draining[j]
+				if r == nil do continue
+				fmt.eprintfln(
+					"  draining[%d] ptr=%p recv_epoch=%d recv_closed=%d recv_pos=%d sock=%d",
+					j,
+					r,
+					sync.atomic_load(&r.recv_epoch),
+					sync.atomic_load(&r.recv_closed),
+					r.recv_write_pos,
+					r.tcp_socket,
+				)
+			}
+		}
 		joined := ""
 		for f, i in failures do joined = i == 0 ? f : fmt.tprintf("%s; %s", joined, f)
 		return false, joined

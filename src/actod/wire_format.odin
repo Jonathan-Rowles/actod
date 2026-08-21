@@ -17,6 +17,7 @@ Network_Message_Flag :: enum u16 {
 	BROADCAST       = 4,
 	SYSTEM          = 5,
 	ASK_TOKEN       = 6,
+	RING_FENCE      = 7,
 }
 
 Parsed_Network_Header :: struct {
@@ -108,12 +109,13 @@ Recv_Frame_Error :: enum {
 }
 
 // Parses [size:u32][body] frames without moving memory. Returns bytes
-// consumed; the caller owns compaction.
+// consumed; the caller owns compaction. process_msg returning false stops
+// consuming after that frame; unconsumed frames stay buffered.
 process_recv_frames :: proc(
 	buffer: []byte,
 	write_pos: u32,
 	ctx: ^$T,
-	process_msg: proc(ctx: ^T, msg_data: []byte),
+	process_msg: proc(ctx: ^T, msg_data: []byte) -> bool,
 ) -> (
 	consumed: u32,
 	err: Recv_Frame_Error,
@@ -128,11 +130,22 @@ process_recv_frames :: proc(
 		if msg_size > MAX_MESSAGE_SIZE do return read_pos, .Too_Large
 		if read_pos + 4 + msg_size > write_pos do break
 
-		process_msg(ctx, data[read_pos + 4:read_pos + 4 + msg_size])
+		keep_going := process_msg(ctx, data[read_pos + 4:read_pos + 4 + msg_size])
 		read_pos += 4 + msg_size
+		if !keep_going do break
 	}
 
 	return read_pos, .None
+}
+
+RING_FENCE_FRAME_SIZE :: 4 + NETWORK_HEADER_SIZE
+RING_FENCE_FINAL_BIT :: u64(1) << 32
+
+build_ring_fence_frame :: proc(buf: []byte, epoch: u32, final: bool) {
+	marker := u64(epoch)
+	if final do marker |= RING_FENCE_FINAL_BIT
+	endian.put_u32(buf[0:4], .Little, u32(NETWORK_HEADER_SIZE))
+	write_network_header(buf[4:], {.RING_FENCE}, marker, Handle{}, Handle{})
 }
 
 Ctrl_Writer :: struct {

@@ -76,10 +76,11 @@ Pool_Ring_Closed :: struct {
 }
 
 Ring_Park_State :: enum u32 {
-	Active     = 0,
-	Park_Asked = 1,
-	Park_Acked = 2,
-	Draining   = 3,
+	Active      = 0,
+	Park_Asked  = 1,
+	Park_Acked  = 2,
+	Draining    = 3,
+	Park_Fenced = 4,
 }
 
 Connection_Pool :: struct {
@@ -98,6 +99,7 @@ Connection_Pool :: struct {
 	draining:             [MAX_POOL_RINGS]^Connection_Ring,
 	draining_count:       u32,
 	epoch:                u32,
+	fence_dirty:          u32,
 }
 
 // Owned by NODE (registered in NODE.connection_rings), never destroyed while
@@ -145,6 +147,11 @@ Connection_Ring :: struct {
 	pending_recv:          ^nbio.Operation,
 	send_in_flight:        bool,
 	send_bufs:             [][]byte,
+	recv_epoch:            u32,
+	recv_closed:           u32,
+	recv_seen:             u32,
+	park_fenced:           bool,
+	park_half_closed:      bool,
 	ring_id:               u64,
 	recv_read_pos:         u32,
 }
@@ -347,6 +354,11 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	ring.tcp_socket = 0
 	sync.atomic_store(&ring.last_activity_time, i64(0))
 	sync.atomic_store(&ring.park_state, Ring_Park_State.Active)
+	sync.atomic_store(&ring.recv_epoch, u32(0))
+	sync.atomic_store(&ring.recv_closed, u32(0))
+	sync.atomic_store(&ring.recv_seen, u32(0))
+	ring.park_fenced = false
+	ring.park_half_closed = false
 	crypto.zero_explicit(&ring.transport_keys, size_of(Noise_Transport))
 	sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Buffering, .Release)
 
@@ -390,9 +402,14 @@ ring_drain_socket :: proc(ring: ^Connection_Ring) -> bool {
 			n = received
 		}
 		ring.recv_write_pos += u32(n)
+		sync.atomic_store(&ring.recv_seen, u32(1))
 		process_recv_buffer(ring)
 	}
 	if ring_recv_unconsumed(ring) > 0 do process_recv_buffer(ring)
+	if eof {
+		sync.atomic_store(&ring.recv_closed, u32(1))
+		if ring.pool != nil do sync.atomic_store(&ring.pool.fence_dirty, u32(1))
+	}
 	return eof
 }
 
@@ -507,6 +524,99 @@ pool_note_contention :: proc(pool: ^Connection_Pool) {
 			_ = send_message(conn_pid, Scale_Up_Request{})
 		}
 	}
+}
+
+@(private)
+append_ring_fence_locked :: proc(ring: ^Connection_Ring, epoch: u32, final: bool) -> bool {
+	frame: [RING_FENCE_FRAME_SIZE]byte
+	build_ring_fence_frame(frame[:], epoch, final)
+	size := u32(RING_FENCE_FRAME_SIZE)
+
+	batch_idx := ring.batch_slot_idx
+	if batch_idx >= 0 && size <= ring.usable_slot_size - ring.batch_write_pos {
+		offset := ring.batch_write_pos
+		ring.batch_write_pos += size
+		slot := &ring.send_slots[batch_idx]
+		sync.atomic_add(&slot.active_writers, 1)
+		data := slot_data(ring, u32(batch_idx))
+		copy(data[offset:offset + size], frame[:])
+		batch_seal_locked(ring, force = true)
+		batch_commit(ring, u32(batch_idx))
+		return true
+	}
+	if batch_idx >= 0 do batch_seal_locked(ring, force = true)
+
+	_, new_slot_idx, acquired := acquire_slot(ring)
+	if !acquired do return false
+	ring.batch_slot_idx = i32(new_slot_idx)
+	ring.batch_write_pos = size
+	slot := &ring.send_slots[new_slot_idx]
+	sync.atomic_add(&slot.active_writers, 1)
+	data := slot_data(ring, new_slot_idx)
+	copy(data[0:size], frame[:])
+	batch_seal_locked(ring, force = true)
+	batch_commit(ring, new_slot_idx)
+	return true
+}
+
+Pool_Flip_Kind :: enum {
+	Arm,
+	Park,
+}
+
+pool_flip_epoch :: proc(
+	pool: ^Connection_Pool,
+	extra: ^Connection_Ring,
+	kind: Pool_Flip_Kind,
+) -> bool {
+	targets: [MAX_POOL_RINGS]^Connection_Ring
+	target_count := 0
+	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
+	for i: u32 = 0; i < count; i += 1 {
+		r := atomic_load_ring_ptr(&pool.rings[i])
+		if r == nil do continue
+		if r != extra {
+			if sync.atomic_load(&r.state) != .Ready do continue
+			park := sync.atomic_load(&r.park_state)
+			if park != .Active && park != .Park_Asked do continue
+		}
+		targets[target_count] = r
+		target_count += 1
+	}
+	if extra != nil {
+		found := false
+		for i in 0 ..< target_count do if targets[i] == extra do found = true
+		if !found {
+			targets[target_count] = extra
+			target_count += 1
+		}
+	}
+	if target_count == 0 do return false
+
+	for i in 0 ..< target_count do sync.mutex_lock(&targets[i].batch_mutex)
+
+	next := pool.epoch + 1
+	fenced := 0
+	for i in 0 ..< target_count {
+		final := kind == .Park && targets[i] == extra
+		if !append_ring_fence_locked(targets[i], next, final) do break
+		fenced += 1
+	}
+	ok := fenced == target_count
+	if ok {
+		if extra != nil {
+			if kind == .Arm {
+				sync.atomic_store_explicit(&extra.state, Connection_Ring_State.Ready, .Release)
+			} else {
+				extra.park_fenced = true
+				sync.atomic_store(&extra.park_state, Ring_Park_State.Park_Fenced)
+			}
+		}
+		sync.atomic_store_explicit(&pool.epoch, next, .Release)
+	}
+
+	for i in 0 ..< target_count do sync.mutex_unlock(&targets[target_count - 1 - i].batch_mutex)
+	return ok
 }
 
 @(thread_local)
@@ -738,6 +848,25 @@ batch_append_routed :: proc(pool: ^Connection_Pool, key: u64, msg_data: []byte) 
 		batch_commit(ring, sid)
 		return true
 	}
+}
+
+batch_append_epoch :: proc(
+	ring: ^Connection_Ring,
+	msg_data: []byte,
+	pool: ^Connection_Pool,
+	epoch: u32,
+) -> (
+	ok: bool,
+	stale: bool,
+) {
+	msg_len := u32(len(msg_data))
+	if msg_len == 0 do return true, false
+	dst, sid, reserved, was_stale := batch_reserve(ring, msg_len, pool, epoch)
+	if was_stale do return false, true
+	if !reserved do return false, false
+	intrinsics.mem_copy_non_overlapping(raw_data(dst), raw_data(msg_data), int(msg_len))
+	batch_commit(ring, sid)
+	return true, false
 }
 
 batch_append_direct :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
@@ -1033,6 +1162,7 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	}
 
 	ring.recv_write_pos = new_write_pos
+	sync.atomic_store(&ring.recv_seen, u32(1))
 	sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
 	process_recv_buffer(ring)
 
@@ -1130,7 +1260,10 @@ nbio_io_loop :: proc(t: ^thread.Thread) {
 		if sync.atomic_exchange(&ring.batch_pending, 0) != 0 do batch_flush(ring)
 		submit_nbio_sends(ring)
 
-		if pool != nil do io_service_pool_rings(pool, ring, ctx.conn_pid)
+		if pool != nil {
+			io_service_pool_rings(pool, ring, ctx.conn_pid)
+			io_service_fence_holds(pool, ctx.conn_pid)
+		}
 
 		any_active := ring.send_in_flight
 		if !any_active && pool != nil do any_active = io_pool_any_in_flight(pool, ring)
@@ -1180,15 +1313,36 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 		owned := sync.atomic_load_explicit(&pr.io_owner, .Acquire) == u64(owner)
 
 		park := sync.atomic_load(&pr.park_state)
-		if park == .Park_Asked {
-			if owned {
-				if pr.pending_recv != nil {
-					nbio.remove(pr.pending_recv)
-					pr.pending_recv = nil
+		if park == .Park_Asked || park == .Park_Fenced {
+			if !owned do continue
+			if park == .Park_Asked {
+				if !pool_flip_epoch(pool, pr, .Park) do continue
+			}
+			if sync.atomic_exchange(&pr.batch_pending, 0) != 0 do batch_flush(pr)
+			submit_nbio_sends(pr)
+			outbound_empty :=
+				!pr.send_in_flight &&
+				pr.send_submit_idx >= sync.atomic_load(&pr.send_write_idx)
+			if outbound_empty && !pr.park_half_closed {
+				ring_shutdown_write(pr)
+				pr.park_half_closed = true
+			}
+			if pr.park_half_closed {
+				if sync.atomic_load(&pr.recv_closed) != 0 {
+					if pr.pending_recv != nil {
+						nbio.remove(pr.pending_recv)
+						pr.pending_recv = nil
+					}
+					sync.atomic_store_explicit(
+						&pr.state,
+						Connection_Ring_State.Buffering,
+						.Release,
+					)
+					ring_io_release(pr)
+					sync.atomic_store(&pr.park_state, Ring_Park_State.Park_Acked)
+				} else {
+					submit_nbio_recv(pr)
 				}
-				sync.atomic_store_explicit(&pr.state, Connection_Ring_State.Buffering, .Release)
-				ring_io_release(pr)
-				sync.atomic_store(&pr.park_state, Ring_Park_State.Park_Acked)
 			}
 			continue
 		}
@@ -1214,7 +1368,10 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 			pr.send_in_flight = false
 			pr.recv_write_pos = 0
 			pr.recv_read_pos = 0
-			sync.atomic_store_explicit(&pr.state, Connection_Ring_State.Ready, .Release)
+		}
+
+		if sync.atomic_load_explicit(&pr.state, .Acquire) != .Ready {
+			if !pool_flip_epoch(pool, pr, .Arm) do continue
 			submit_nbio_recv(pr)
 		}
 
@@ -1263,13 +1420,72 @@ io_release_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 	}
 }
 
+pool_recv_min_epoch :: proc(pool: ^Connection_Pool) -> u32 {
+	lowest := max(u32)
+	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
+	for i: u32 = 0; i < count; i += 1 {
+		r := atomic_load_ring_ptr(&pool.rings[i])
+		if r == nil || r.tcp_socket == 0 do continue
+		if sync.atomic_load(&r.recv_closed) != 0 do continue
+		if i > 0 &&
+		   sync.atomic_load(&r.recv_epoch) == 0 &&
+		   sync.atomic_load(&r.recv_seen) == 0 {
+			continue
+		}
+		lowest = min(lowest, sync.atomic_load(&r.recv_epoch))
+	}
+	for i in 0 ..< pool.draining_count {
+		r := pool.draining[i]
+		if r == nil || r.tcp_socket == 0 do continue
+		if sync.atomic_load(&r.recv_closed) != 0 do continue
+		lowest = min(lowest, sync.atomic_load(&r.recv_epoch))
+	}
+	return lowest
+}
+
 @(private)
-ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
+ring_recv_held :: proc(ring: ^Connection_Ring) -> bool {
+	pool := ring.pool
+	if pool == nil do return false
+	epoch := sync.atomic_load(&ring.recv_epoch)
+	if epoch == 0 do return false
+	return epoch > pool_recv_min_epoch(pool)
+}
+
+@(private)
+ring_note_fence :: proc(ring: ^Connection_Ring, marker: u64) -> bool {
+	epoch := u32(marker)
+	sync.atomic_store(&ring.recv_epoch, epoch)
+	if marker & RING_FENCE_FINAL_BIT != 0 do sync.atomic_store(&ring.recv_closed, u32(1))
+	pool := ring.pool
+	if pool == nil do return true
+	sync.atomic_store(&pool.fence_dirty, u32(1))
+	return epoch <= pool_recv_min_epoch(pool)
+}
+
+io_service_fence_holds :: proc(pool: ^Connection_Pool, owner: PID) {
+	if sync.atomic_exchange(&pool.fence_dirty, 0) == 0 do return
+	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
+	for i: u32 = 0; i < count; i += 1 {
+		r := atomic_load_ring_ptr(&pool.rings[i])
+		if r == nil || r.tcp_socket == 0 do continue
+		if i > 0 && sync.atomic_load_explicit(&r.io_owner, .Acquire) != u64(owner) do continue
+		if ring_recv_held(r) {
+			sync.atomic_store(&pool.fence_dirty, u32(1))
+			continue
+		}
+		if ring_recv_unconsumed(r) > 0 do process_recv_buffer(r)
+		if sync.atomic_load_explicit(&r.state, .Acquire) == .Ready do submit_nbio_recv(r)
+	}
+}
+
+@(private)
+ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) -> bool {
 	plaintext, ok := envelope_open(&ring.transport_keys, envelope, ring.open_scratch)
 	if !ok {
 		log.error("Failed to open sealed envelope")
 		notify_ring_error(ring, "decrypt failure")
-		return
+		return false
 	}
 
 	consumed, err := process_recv_frames(
@@ -1281,10 +1497,13 @@ ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
 	if err != .None || consumed != u32(len(plaintext)) {
 		log.error("Corrupt frame inside sealed envelope")
 		notify_ring_error(ring, "corrupt envelope")
+		return false
 	}
+	return !ring_recv_held(ring)
 }
 
 process_recv_buffer :: proc(ring: ^Connection_Ring) {
+	if ring_recv_held(ring) do return
 	dispatch := ring.encrypted ? ring_dispatch_envelope : process_complete_message
 	region := ring.recv_buffer[ring.recv_read_pos:ring.recv_write_pos]
 	consumed, err := process_recv_frames(region, u32(len(region)), ring, dispatch)
@@ -1325,29 +1544,31 @@ ring_recv_unconsumed :: #force_inline proc(ring: ^Connection_Ring) -> u32 {
 	return ring.recv_write_pos - ring.recv_read_pos
 }
 
-process_complete_message :: proc(ring: ^Connection_Ring, msg_data: []byte) {
+process_complete_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	when ODIN_TEST {
 		drop, dup, _ := frame_tap(.In, frame_tap_in_hash(msg_data), msg_data, ring.node_id)
-		if drop do return
-		if dup do process_complete_message_impl(ring, msg_data)
+		if drop do return true
+		if dup do _ = process_complete_message_impl(ring, msg_data)
 	}
-	process_complete_message_impl(ring, msg_data)
+	return process_complete_message_impl(ring, msg_data)
 }
 
 @(private = "file")
-process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) {
-	if sync.atomic_load(&ring.io_stop) != 0 do return
+process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
+	if sync.atomic_load(&ring.io_stop) != 0 do return false
 
 	header, ok := parse_network_header(msg_data)
 	if !ok {
 		log.warn("Failed to parse network header")
-		return
+		return true
 	}
+
+	if .RING_FENCE in header.flags do return ring_note_fence(ring, header.type_hash)
 
 	if .LIFECYCLE_EVENT in header.flags &&
 	   !sim_is_socket(ring.tcp_socket) &&
 	   handle_lifecycle_event_inline(ring.node_id, header.type_hash, header.payload) {
-		return
+		return true
 	}
 
 	if .CONTROL in header.flags || .LIFECYCLE_EVENT in header.flags {
@@ -1360,7 +1581,7 @@ process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) 
 		err := send_message(ring.conn_pid, remote_msg)
 		if err != .OK do log.warnf("Failed to send control/lifecycle message: %v", err)
 		delete(msg_copy)
-		return
+		return true
 	}
 
 	deliver_to_target(
@@ -1373,10 +1594,13 @@ process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) 
 		header.payload,
 		header.ask_token,
 	)
+	return true
 }
 
 notify_ring_error :: proc(ring: ^Connection_Ring, reason: string) {
+	sync.atomic_store(&ring.recv_closed, u32(1))
 	pool := ring.pool
+	if pool != nil do sync.atomic_store(&pool.fence_dirty, u32(1))
 	if pool != nil {
 		primary := atomic_load_ring_ptr(&pool.rings[0])
 		if primary != nil && ring != primary {

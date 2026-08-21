@@ -1482,6 +1482,18 @@ test_pool_pick_is_sticky_and_skips_fenced :: proc(t: ^testing.T) {
 	testing.expect(t, seen[0] && seen[1] && seen[2], "keys should spread across all rings")
 
 	testing.expect(t, pool_pick_ring(pool, 0) == rings[0], "keyless senders pin the primary")
+
+	sync.atomic_store(&rings[1].park_state, Ring_Park_State.Park_Asked)
+	picked_asked := false
+	for key: u64 = 1; key <= 64; key += 1 {
+		if pool_pick_ring(pool, key) == rings[1] do picked_asked = true
+	}
+	testing.expect(t, picked_asked, "Park_Asked stays pickable until the fence flip")
+
+	sync.atomic_store(&rings[1].park_state, Ring_Park_State.Park_Fenced)
+	for key: u64 = 1; key <= 64; key += 1 {
+		testing.expect(t, pool_pick_ring(pool, key) != rings[1], "fenced ring must be skipped")
+	}
 }
 
 @(test)

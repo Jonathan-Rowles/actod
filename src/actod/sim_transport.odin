@@ -521,15 +521,45 @@ sim_service_transport :: proc() -> bool {
 		if ep.node != NODE || ep.ring == nil || ep.closed do continue
 		ring := ep.ring
 		if sync.atomic_load(&ring.io_stop) != 0 do continue
-		if sync.atomic_load_explicit(&ring.state, .Acquire) != .Ready {
-			sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Ready, .Release)
+		pool := ring.pool
+		pooled_secondary :=
+			pool != nil &&
+			sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 &&
+			atomic_load_ring_ptr(&pool.rings[0]) != ring
+		park := sync.atomic_load(&ring.park_state)
+		if sync.atomic_load_explicit(&ring.state, .Acquire) != .Ready && park == .Active {
+			if pooled_secondary {
+				if !pool_flip_epoch(pool, ring, .Arm) do continue
+			} else {
+				sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Ready, .Release)
+			}
 			progress = true
 		}
-		park := sync.atomic_load(&ring.park_state)
-		if park == .Park_Asked {
-			sim_detach_ring(ring)
-			sync.atomic_store(&ring.park_state, Ring_Park_State.Park_Acked)
-			progress = true
+		if park == .Park_Asked || park == .Park_Fenced {
+			if park == .Park_Asked && pooled_secondary {
+				if !pool_flip_epoch(pool, ring, .Park) do continue
+				progress = true
+			}
+			if sync.atomic_exchange(&ring.batch_pending, 0) != 0 do batch_flush(ring)
+			submit_nbio_sends(ring)
+			outbound_empty :=
+				!ring.send_in_flight &&
+				ring.send_submit_idx >= sync.atomic_load(&ring.send_write_idx)
+			if outbound_empty && !ring.park_half_closed {
+				ring_shutdown_write(ring)
+				ring.park_half_closed = true
+				progress = true
+			}
+			if ring.park_half_closed {
+				if sync.atomic_load(&ring.recv_closed) != 0 {
+					sim_detach_ring(ring)
+					sync.atomic_store(&ring.park_state, Ring_Park_State.Park_Acked)
+					progress = true
+				} else {
+					if ring.pending_recv == nil do submit_nbio_recv(ring)
+					if sim_deliver_recv(ep) do progress = true
+				}
+			}
 			continue
 		}
 		if park != .Active do continue
@@ -539,7 +569,30 @@ sim_service_transport :: proc() -> bool {
 		if ring.send_submit_idx != submitted_before do progress = true
 		if ring.pending_recv == nil && ep.peer != nil && !ep.peer.closed do submit_nbio_recv(ring)
 		if sim_deliver_recv(ep) do progress = true
+		if pool != nil && sync.atomic_exchange(&pool.fence_dirty, 0) != 0 {
+			if sim_service_fence_holds(pool) do progress = true
+		}
 	}
 
+	return progress
+}
+
+@(private = "file")
+sim_service_fence_holds :: proc(pool: ^Connection_Pool) -> bool {
+	progress := false
+	count := sync.atomic_load_explicit(&pool.ring_count, .Acquire)
+	for i: u32 = 0; i < count; i += 1 {
+		r := atomic_load_ring_ptr(&pool.rings[i])
+		if r == nil || r.tcp_socket == 0 do continue
+		if ring_recv_held(r) {
+			sync.atomic_store(&pool.fence_dirty, u32(1))
+			continue
+		}
+		if ring_recv_unconsumed(r) > 0 {
+			before := ring_recv_unconsumed(r)
+			process_recv_buffer(r)
+			if ring_recv_unconsumed(r) != before do progress = true
+		}
+	}
 	return progress
 }

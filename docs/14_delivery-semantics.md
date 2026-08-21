@@ -5,7 +5,7 @@ What a send result promises, and what it never promises. Every send proc returns
 ## The Short Version
 
 - `.OK` means **accepted**, never processed. Locally: the message is in the receiver's mailbox. Remotely: the message is in this node's send buffer; the peer may not even be connected.
-- **Per-sender FIFO, always.** Messages from one sender to one receiver arrive in send order. Overload never reorders and never silently drops; a send either lands in order or returns an error.
+- **Per-sender FIFO, always.** Messages from one sender to one receiver arrive in send order. Overload never reorders and never silently drops; a send either lands in order or returns an error. This holds across connection-pool scaling too: a sender's stream rides one ring per epoch, ring-set changes are fenced, and the receiver dispatches nothing past a fence on any ring until every ring has caught up to it.
 - If you need to know a message was **processed**, have the receiver reply. Nothing else in the runtime tells you. The built-in [`ask`/`reply` pair](02_actor.md#ask--reply) does exactly this, with a correlation token and a timeout.
 
 ## Send_Error Reference

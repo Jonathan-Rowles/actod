@@ -314,7 +314,7 @@ seq_staged_writer_proc :: proc(data: rawptr) {
 					break
 				}
 			} else {
-				if dst, _, staged := staging_reserve(ctx.ring, u32(len(frame))); staged {
+				if dst, _, staged := staging_reserve(ctx.ring, u32(len(frame)), 0); staged {
 					copy(dst, frame)
 					ok = true
 					break

@@ -204,13 +204,16 @@ send_to_connection_ring_body :: proc(
 		target := ring
 		if pool != nil {
 			epoch = sync.atomic_load_explicit(&pool.epoch, .Acquire)
+			if current_worker != nil && !staging_flush_stale_node(ring.node_id, epoch) {
+				return .NETWORK_RING_FULL
+			}
 			target = pool_pick_ring(pool, key)
 			if target == nil do return .NETWORK_ERROR
 		}
 
 		if current_worker != nil {
 			if exact_size <= STAGE_FRAME_MAX {
-				staged_dst, staged_entry, staged := staging_reserve(target, exact_size)
+				staged_dst, staged_entry, staged := staging_reserve(target, exact_size, epoch)
 				if !staged do return .NETWORK_RING_FULL
 				staged_len := build_wire_format_into_buffer_impl(
 					staged_dst,
@@ -238,8 +241,8 @@ send_to_connection_ring_body :: proc(
 				}
 				return .OK
 			}
-			if !staging_flush_ring(target) do return .NETWORK_RING_FULL
 		}
+		if current_worker != nil && !staging_flush_ring(target) do return .NETWORK_RING_FULL
 
 		dst, sid, ok, stale := batch_reserve(target, exact_size, pool, epoch)
 		if stale do continue
@@ -374,6 +377,9 @@ send_to_connection_ring_by_name_body :: proc(
 		target := ring
 		if pool != nil {
 			epoch = sync.atomic_load_explicit(&pool.epoch, .Acquire)
+			if current_worker != nil && !staging_flush_stale_node(ring.node_id, epoch) {
+				return .NETWORK_RING_FULL
+			}
 			target = pool_pick_ring(pool, key)
 			if target == nil do return .NETWORK_ERROR
 		}

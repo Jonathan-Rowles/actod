@@ -144,6 +144,7 @@ Connection_Ring :: struct {
 	pending_recv:          ^nbio.Operation,
 	send_in_flight:        bool,
 	send_bufs:             [][]byte,
+	recv_read_pos:         u32,
 }
 
 IO_Context :: struct {
@@ -326,6 +327,7 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	ring.send_submit_idx = 0
 	ring.send_complete_idx = 0
 	ring.recv_write_pos = 0
+	ring.recv_read_pos = 0
 	ring.batch_slot_idx = -1
 	ring.batch_write_pos = 0
 	ring.batch_pending = 0
@@ -379,7 +381,7 @@ ring_drain_socket :: proc(ring: ^Connection_Ring) -> bool {
 		ring.recv_write_pos += u32(n)
 		process_recv_buffer(ring)
 	}
-	if ring.recv_write_pos > 0 do process_recv_buffer(ring)
+	if ring_recv_unconsumed(ring) > 0 do process_recv_buffer(ring)
 	return eof
 }
 
@@ -1125,6 +1127,7 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 			pr.pending_recv = nil
 			pr.send_in_flight = false
 			pr.recv_write_pos = 0
+			pr.recv_read_pos = 0
 			sync.atomic_store_explicit(&pr.state, Connection_Ring_State.Ready, .Release)
 			submit_nbio_recv(pr)
 		}
@@ -1183,13 +1186,13 @@ ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
 		return
 	}
 
-	remaining, err := process_recv_frames(
+	consumed, err := process_recv_frames(
 		ring.open_scratch,
 		u32(len(plaintext)),
 		ring,
 		process_complete_message,
 	)
-	if err != .None || remaining != 0 {
+	if err != .None || consumed != u32(len(plaintext)) {
 		log.error("Corrupt frame inside sealed envelope")
 		notify_ring_error(ring, "corrupt envelope")
 	}
@@ -1197,7 +1200,8 @@ ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) {
 
 process_recv_buffer :: proc(ring: ^Connection_Ring) {
 	dispatch := ring.encrypted ? ring_dispatch_envelope : process_complete_message
-	new_pos, err := process_recv_frames(ring.recv_buffer, ring.recv_write_pos, ring, dispatch)
+	region := ring.recv_buffer[ring.recv_read_pos:ring.recv_write_pos]
+	consumed, err := process_recv_frames(region, u32(len(region)), ring, dispatch)
 	if err != .None {
 		reason: string
 		switch err {
@@ -1211,9 +1215,28 @@ process_recv_buffer :: proc(ring: ^Connection_Ring) {
 		log.errorf("recv frame error: %s", reason)
 		notify_ring_error(ring, reason)
 		ring.recv_write_pos = 0
+		ring.recv_read_pos = 0
 		return
 	}
-	ring.recv_write_pos = new_pos
+	ring.recv_read_pos += consumed
+	if ring.pending_recv != nil do return
+	if ring.recv_read_pos == ring.recv_write_pos {
+		ring.recv_read_pos = 0
+		ring.recv_write_pos = 0
+	} else if ring.recv_read_pos > 0 {
+		remaining := ring.recv_write_pos - ring.recv_read_pos
+		intrinsics.mem_copy(
+			&ring.recv_buffer[0],
+			&ring.recv_buffer[ring.recv_read_pos],
+			int(remaining),
+		)
+		ring.recv_write_pos = remaining
+		ring.recv_read_pos = 0
+	}
+}
+
+ring_recv_unconsumed :: #force_inline proc(ring: ^Connection_Ring) -> u32 {
+	return ring.recv_write_pos - ring.recv_read_pos
 }
 
 process_complete_message :: proc(ring: ^Connection_Ring, msg_data: []byte) {

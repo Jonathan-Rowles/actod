@@ -1,6 +1,5 @@
 package actod
 
-import "base:runtime"
 import "core:encoding/endian"
 
 NETWORK_HEADER_SIZE :: 26
@@ -108,14 +107,15 @@ Recv_Frame_Error :: enum {
 	Too_Large,
 }
 
-// Parses [size:u32][body] frames, compacts remaining data. Returns new write position.
+// Parses [size:u32][body] frames without moving memory. Returns bytes
+// consumed; the caller owns compaction.
 process_recv_frames :: proc(
 	buffer: []byte,
 	write_pos: u32,
 	ctx: ^$T,
 	process_msg: proc(ctx: ^T, msg_data: []byte),
 ) -> (
-	new_write_pos: u32,
+	consumed: u32,
 	err: Recv_Frame_Error,
 ) {
 	read_pos: u32 = 0
@@ -124,19 +124,15 @@ process_recv_frames :: proc(
 	for read_pos + 4 <= write_pos {
 		msg_size := endian.unchecked_get_u32le(data[read_pos:])
 
-		if msg_size == 0 do return 0, .Zero_Size
-		if msg_size > MAX_MESSAGE_SIZE do return 0, .Too_Large
+		if msg_size == 0 do return read_pos, .Zero_Size
+		if msg_size > MAX_MESSAGE_SIZE do return read_pos, .Too_Large
 		if read_pos + 4 + msg_size > write_pos do break
 
 		process_msg(ctx, data[read_pos + 4:read_pos + 4 + msg_size])
 		read_pos += 4 + msg_size
 	}
 
-	remaining := write_pos - read_pos
-	if remaining > 0 && read_pos > 0 {
-		runtime.mem_copy(&buffer[0], &buffer[read_pos], int(remaining))
-	}
-	return remaining, .None
+	return read_pos, .None
 }
 
 Ctrl_Writer :: struct {

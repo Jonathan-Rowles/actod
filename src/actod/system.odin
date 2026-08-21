@@ -220,6 +220,7 @@ Node_State :: struct {
 	node_registry:            [MAX_NODES]Node_Info,
 	connection_rings:         [MAX_NODES]^Connection_Ring, // NODE-owned, see get_or_create_node_ring
 	connection_pools:         [MAX_NODES]^Connection_Pool, // NODE-owned, rings park instead of freeing
+	ring_id_counter:          u64,
 	node_name_to_id:          map[string]Node_ID,
 	node_registry_lock:       sync.RW_Mutex,
 	connection_actors:        [MAX_NODES]PID,

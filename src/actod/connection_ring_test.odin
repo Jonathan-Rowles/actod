@@ -516,7 +516,7 @@ test_sealed_by_nearly_full :: proc(t: ^testing.T) {
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
 
-	dst, sid, ok := batch_reserve(ring, 3200)
+	dst, sid, ok, _ := batch_reserve(ring, 3200, nil, 0)
 	testing.expect(t, ok, "Reserve should succeed")
 	testing.expect(t, len(dst) == 3200, "Dst should be 3200 bytes")
 
@@ -552,16 +552,16 @@ test_sealed_multiple_writers_last_promotes :: proc(t: ^testing.T) {
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
 
-	dst1, sid1, ok1 := batch_reserve(ring, 1500)
+	dst1, sid1, ok1, _ := batch_reserve(ring, 1500, nil, 0)
 	testing.expect(t, ok1, "Reserve 1 should succeed")
 	endian.put_u32(dst1[0:4], .Little, u32(1500 - 4))
 
-	dst2, sid2, ok2 := batch_reserve(ring, 1500)
+	dst2, sid2, ok2, _ := batch_reserve(ring, 1500, nil, 0)
 	testing.expect(t, ok2, "Reserve 2 should succeed")
 	testing.expect(t, sid2 == sid1, "Should be same slot")
 	endian.put_u32(dst2[0:4], .Little, u32(1500 - 4))
 
-	dst3, sid3, ok3 := batch_reserve(ring, 1000)
+	dst3, sid3, ok3, _ := batch_reserve(ring, 1000, nil, 0)
 	testing.expect(t, ok3, "Reserve 3 should succeed")
 	testing.expect(t, sid3 == sid1, "Should be same slot")
 	endian.put_u32(dst3[0:4], .Little, u32(1000 - 4))
@@ -587,7 +587,7 @@ test_lazy_seal_skips_active_writers :: proc(t: ^testing.T) {
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
 
-	dst, sid, ok := batch_reserve(ring, 100)
+	dst, sid, ok, _ := batch_reserve(ring, 100, nil, 0)
 	testing.expect(t, ok, "Reserve should succeed")
 	endian.put_u32(dst[0:4], .Little, u32(100 - 4))
 
@@ -647,7 +647,7 @@ test_batch_abort_preserves_stream :: proc(t: ^testing.T) {
 	defer delete(msg)
 	batch_append_message(ring, msg)
 
-	dst, sid, ok := batch_reserve(ring, 200)
+	dst, sid, ok, _ := batch_reserve(ring, 200, nil, 0)
 	testing.expect(t, ok, "Reserve should succeed")
 	batch_abort(ring, sid, dst)
 
@@ -1454,7 +1454,7 @@ test_pool_add_park_reuse :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_pool_round_robin_skips_parked :: proc(t: ^testing.T) {
+test_pool_pick_is_sticky_and_skips_fenced :: proc(t: ^testing.T) {
 	pool := make_connection_pool(6, pool_test_config)
 	defer free(pool)
 
@@ -1472,18 +1472,16 @@ test_pool_round_robin_skips_parked :: proc(t: ^testing.T) {
 	testing.expect(t, pool_add_ring(pool, rings[2]), "add ring 2")
 
 	seen: [3]bool
-	for _ in 0 ..< 12 {
-		r := get_pool_ring_ready(pool)
+	for key: u64 = 1; key <= 64; key += 1 {
+		r := pool_pick_ring(pool, key)
 		for i in 0 ..< 3 {
 			if r == rings[i] do seen[i] = true
 		}
+		testing.expect(t, pool_pick_ring(pool, key) == r, "same key must pick the same ring")
 	}
-	testing.expect(t, seen[0] && seen[1] && seen[2], "round robin should visit all rings")
+	testing.expect(t, seen[0] && seen[1] && seen[2], "keys should spread across all rings")
 
-	sync.atomic_store(&rings[1].park_state, Ring_Park_State.Park_Asked)
-	for _ in 0 ..< 12 {
-		testing.expect(t, get_pool_ring_ready(pool) != rings[1], "parked ring must be skipped")
-	}
+	testing.expect(t, pool_pick_ring(pool, 0) == rings[0], "keyless senders pin the primary")
 }
 
 @(test)
@@ -1507,7 +1505,7 @@ test_ring_reset_keeps_outstanding_writer_count :: proc(t: ^testing.T) {
 	}
 	defer destroy_connection_ring(ring)
 
-	dst, sid, ok := batch_reserve(ring, 128)
+	dst, sid, ok, _ := batch_reserve(ring, 128, nil, 0)
 	testing.expect(t, ok, "reserve failed")
 	if !ok {
 		return

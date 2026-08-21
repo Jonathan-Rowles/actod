@@ -1325,7 +1325,7 @@ ring_append_ctrl :: proc(ring: ^Connection_Ring, ctrl_body: []byte) -> bool {
 	if ring == nil do return false
 	total := u32(4 + NETWORK_HEADER_SIZE + len(ctrl_body))
 	if total > ring.usable_slot_size do return false
-	dst, sid, ok := batch_reserve(ring, total)
+	dst, sid, ok, _ := batch_reserve(ring, total, nil, 0)
 	if !ok do return false
 	_ = frame_control_message(ctrl_body, dst)
 	batch_commit(ring, sid)

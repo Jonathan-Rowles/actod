@@ -195,9 +195,23 @@ send_to_connection_ring_body :: proc(
 		return .MESSAGE_TOO_LARGE
 	}
 
-	if current_worker != nil {
-		if exact_size <= STAGE_FRAME_MAX {
-			if staged_dst, staged_entry, staged := staging_reserve(ring, exact_size); staged {
+	pool := ring.pool
+	key: u64
+	if pool != nil do key = pool_sender_key()
+
+	for {
+		epoch: u32
+		target := ring
+		if pool != nil {
+			epoch = sync.atomic_load_explicit(&pool.epoch, .Acquire)
+			target = pool_pick_ring(pool, key)
+			if target == nil do return .NETWORK_ERROR
+		}
+
+		if current_worker != nil {
+			if exact_size <= STAGE_FRAME_MAX {
+				staged_dst, staged_entry, staged := staging_reserve(target, exact_size)
+				if !staged do return .NETWORK_RING_FULL
 				staged_len := build_wire_format_into_buffer_impl(
 					staged_dst,
 					data,
@@ -214,7 +228,7 @@ send_to_connection_ring_body :: proc(
 						"Failed to serialize '%s' (%d bytes) for node %d; the message type may contain a field the wire format cannot encode",
 						info.name,
 						exact_size,
-						ring.node_id,
+						target.node_id,
 						location = loc,
 					)
 					return .NETWORK_ERROR
@@ -224,46 +238,46 @@ send_to_connection_ring_body :: proc(
 				}
 				return .OK
 			}
-			return .NETWORK_RING_FULL
+			if !staging_flush_ring(target) do return .NETWORK_RING_FULL
 		}
-		if !staging_flush_ring(ring) do return .NETWORK_RING_FULL
-	}
 
-	dst, sid, ok := batch_reserve(ring, exact_size)
-	if !ok do return .NETWORK_RING_FULL
+		dst, sid, ok, stale := batch_reserve(target, exact_size, pool, epoch)
+		if stale do continue
+		if !ok do return .NETWORK_RING_FULL
 
-	msg_len := build_wire_format_into_buffer_impl(
-		dst,
-		data,
-		info,
-		to_handle,
-		from_handle,
-		base_flags,
-		"",
-		token,
-	)
-	if msg_len == 0 {
-		batch_abort(ring, sid, dst)
-		log.errorf(
-			"Failed to serialize '%s' (%d bytes) for node %d; the message type may contain a field the wire format cannot encode",
-			info.name,
-			exact_size,
-			ring.node_id,
-			location = loc,
+		msg_len := build_wire_format_into_buffer_impl(
+			dst,
+			data,
+			info,
+			to_handle,
+			from_handle,
+			base_flags,
+			"",
+			token,
 		)
-		return .NETWORK_ERROR
-	}
+		if msg_len == 0 {
+			batch_abort(target, sid, dst)
+			log.errorf(
+				"Failed to serialize '%s' (%d bytes) for node %d; the message type may contain a field the wire format cannot encode",
+				info.name,
+				exact_size,
+				target.node_id,
+				location = loc,
+			)
+			return .NETWORK_ERROR
+		}
 
-	when ODIN_DEBUG {
-		assert(msg_len == exact_size, "wire format size mismatch in send_to_connection_ring_impl")
-	}
+		when ODIN_DEBUG {
+			assert(msg_len == exact_size, "wire format size mismatch in send_to_connection_ring_impl")
+		}
 
-	when ODIN_TEST {
-		if corrupt && len(dst) > 0 do dst[len(dst) - 1] ~= 0xFF
-	}
+		when ODIN_TEST {
+			if corrupt && len(dst) > 0 do dst[len(dst) - 1] ~= 0xFF
+		}
 
-	batch_commit(ring, sid)
-	return .OK
+		batch_commit(target, sid)
+		return .OK
+	}
 }
 
 send_to_connection_ring_by_name_impl :: proc(
@@ -351,45 +365,60 @@ send_to_connection_ring_by_name_body :: proc(
 		return .MESSAGE_TOO_LARGE
 	}
 
-	if current_worker != nil && !staging_flush_ring(ring) do return .NETWORK_RING_FULL
+	pool := ring.pool
+	key: u64
+	if pool != nil do key = pool_sender_key()
 
-	dst, sid, ok := batch_reserve(ring, exact_size)
-	if !ok do return .NETWORK_RING_FULL
+	for {
+		epoch: u32
+		target := ring
+		if pool != nil {
+			epoch = sync.atomic_load_explicit(&pool.epoch, .Acquire)
+			target = pool_pick_ring(pool, key)
+			if target == nil do return .NETWORK_ERROR
+		}
 
-	msg_len := build_wire_format_into_buffer_impl(
-		dst,
-		data,
-		info,
-		to_handle,
-		from_handle,
-		flags,
-		actor_name,
-	)
-	if msg_len == 0 {
-		batch_abort(ring, sid, dst)
-		log.errorf(
-			"Failed to serialize '%s' (%d bytes) addressed to '%s'; the message type may contain a field the wire format cannot encode",
-			info.name,
-			exact_size,
+		if current_worker != nil && !staging_flush_ring(target) do return .NETWORK_RING_FULL
+
+		dst, sid, ok, stale := batch_reserve(target, exact_size, pool, epoch)
+		if stale do continue
+		if !ok do return .NETWORK_RING_FULL
+
+		msg_len := build_wire_format_into_buffer_impl(
+			dst,
+			data,
+			info,
+			to_handle,
+			from_handle,
+			flags,
 			actor_name,
-			location = loc,
 		)
-		return .NETWORK_ERROR
-	}
+		if msg_len == 0 {
+			batch_abort(target, sid, dst)
+			log.errorf(
+				"Failed to serialize '%s' (%d bytes) addressed to '%s'; the message type may contain a field the wire format cannot encode",
+				info.name,
+				exact_size,
+				actor_name,
+				location = loc,
+			)
+			return .NETWORK_ERROR
+		}
 
-	when ODIN_DEBUG {
-		assert(
-			msg_len == exact_size,
-			"wire format size mismatch in send_to_connection_ring_by_name_impl",
-		)
-	}
+		when ODIN_DEBUG {
+			assert(
+				msg_len == exact_size,
+				"wire format size mismatch in send_to_connection_ring_by_name_impl",
+			)
+		}
 
-	when ODIN_TEST {
-		if corrupt && len(dst) > 0 do dst[len(dst) - 1] ~= 0xFF
-	}
+		when ODIN_TEST {
+			if corrupt && len(dst) > 0 do dst[len(dst) - 1] ~= 0xFF
+		}
 
-	batch_commit(ring, sid)
-	return .OK
+		batch_commit(target, sid)
+		return .OK
+	}
 }
 
 // The ring buffers while disconnected; ensure a connection actor exists to

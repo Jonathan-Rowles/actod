@@ -139,6 +139,10 @@ network_sender_worker :: proc($T: typeid) -> proc(_: rawptr) {
 				target_pid := global_pid_cache.pids[actor_id]
 
 				err := actod.send_message(target_pid, msg)
+				for err == .NETWORK_RING_FULL || err == .RECEIVER_BACKLOGGED {
+					sync.atomic_add(&global_send_state.retry_count, 1)
+					err = actod.send_message(target_pid, msg)
+				}
 				if err != .OK do shared.track_send_error(&global_send_state, err)
 			}
 
@@ -160,6 +164,10 @@ network_sender_worker :: proc($T: typeid) -> proc(_: rawptr) {
 				target_pid := global_pid_cache.pids[actor_id]
 
 				err := actod.send_message(target_pid, msg)
+				for err == .NETWORK_RING_FULL || err == .RECEIVER_BACKLOGGED {
+					sync.atomic_add(&global_send_state.retry_count, 1)
+					err = actod.send_message(target_pid, msg)
+				}
 				if err == .OK {
 					sync.atomic_add(&global_send_state.send_count, 1)
 				} else {

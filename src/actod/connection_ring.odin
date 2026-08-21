@@ -100,6 +100,8 @@ Connection_Pool :: struct {
 	draining_count:       u32,
 	epoch:                u32,
 	fence_dirty:          u32,
+	last_contender:       u64,
+	multi_sender:         u32,
 }
 
 // Owned by NODE (registered in NODE.connection_rings), never destroyed while
@@ -515,6 +517,16 @@ acquire_slot :: proc(ring: ^Connection_Ring) -> (slot: ^Send_Slot, idx: u32, ok:
 pool_note_contention :: proc(pool: ^Connection_Pool) {
 	if pool == nil || pool.max_rings <= 1 do return
 	if sync.atomic_load_explicit(&pool.scale_up_requested, .Relaxed) != 0 do return
+	if sync.atomic_load_explicit(&pool.multi_sender, .Relaxed) == 0 {
+		key := pool_sender_key()
+		last := sync.atomic_load_explicit(&pool.last_contender, .Relaxed)
+		if last == 0 {
+			sync.atomic_store_explicit(&pool.last_contender, key, .Relaxed)
+			return
+		}
+		if key == last do return
+		sync.atomic_store_explicit(&pool.multi_sender, u32(1), .Relaxed)
+	}
 	count := sync.atomic_add(&pool.contention_count, 1)
 	if count < pool.contention_threshold do return
 	if _, swapped := sync.atomic_compare_exchange_strong(&pool.scale_up_requested, 0, 1);

@@ -1059,6 +1059,8 @@ teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 	sync.atomic_store(&pool.scale_up_requested, u32(0))
 	sync.atomic_store(&pool.epoch, u32(0))
 	sync.atomic_store(&pool.fence_dirty, u32(0))
+	sync.atomic_store(&pool.last_contender, u64(0))
+	sync.atomic_store(&pool.multi_sender, u32(0))
 	sync.atomic_store(&pool.join_token, u64(0))
 }
 

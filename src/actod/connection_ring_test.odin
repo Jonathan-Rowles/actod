@@ -1501,8 +1501,20 @@ test_pool_contention_sets_scale_request :: proc(t: ^testing.T) {
 	pool := make_connection_pool(7, pool_test_config)
 	defer free(pool)
 
+	saved_key := g_thread_send_key
+	defer g_thread_send_key = saved_key
+
+	g_thread_send_key = 101
+	for _ in 0 ..< 8 do pool_note_contention(pool)
+	testing.expect(
+		t,
+		sync.atomic_load(&pool.scale_up_requested) == 0,
+		"one sender must never trigger scale-up",
+	)
+	g_thread_send_key = 202
 	pool_note_contention(pool)
 	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 0, "below threshold")
+	g_thread_send_key = 101
 	pool_note_contention(pool)
 	pool_note_contention(pool)
 	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 1, "threshold crossed")

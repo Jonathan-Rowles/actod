@@ -575,7 +575,11 @@ batch_append_message :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
 	return batch_append_raw(ring, msg_data)
 }
 
-batch_append_raw :: proc(ring: ^Connection_Ring, msg_data: []byte) -> bool {
+batch_append_raw :: proc(target: ^Connection_Ring, msg_data: []byte) -> bool {
+	ring := target
+	if ring.pool != nil && sync.atomic_load(&ring.park_state) != .Active {
+		if primary := atomic_load_ring_ptr(&ring.pool.rings[0]); primary != nil do ring = primary
+	}
 	msg_len := u32(len(msg_data))
 	if msg_len == 0 do return true
 

@@ -222,15 +222,12 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 		handle_incoming_data(data, m.data)
 
 	case Scale_Up_Request:
-		if data.state == .Connected {
-			pool := conn_pool(data)
-			if pool != nil {
-				sync.atomic_store(&pool.contention_count, u32(0))
-				if pool_active_count(pool) < pool.max_rings {
-					establish_pool_ring(data)
-					sync.atomic_store(&pool.scale_up_requested, u32(0))
-				}
+		if pool := conn_pool(data); pool != nil {
+			sync.atomic_store(&pool.contention_count, u32(0))
+			if data.state == .Connected && pool_active_count(pool) < pool.max_rings {
+				establish_pool_ring(data)
 			}
+			sync.atomic_store(&pool.scale_up_requested, u32(0))
 		}
 
 	case Adopt_Pool_Ring:

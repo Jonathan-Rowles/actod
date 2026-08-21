@@ -134,7 +134,7 @@ Connection_Ring :: struct {
 	nearly_full_threshold: u32,
 	send_write_idx:        u32,
 	batch_pending:         u32,
-	last_send_time:        i64,
+	last_activity_time:    i64,
 	_pad_consumer:         [CACHE_LINE_SIZE]byte,
 	send_submit_idx:       u32,
 	send_complete_idx:     u32,
@@ -330,7 +330,7 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	ring.pending_recv = nil
 	ring.send_in_flight = false
 	ring.tcp_socket = 0
-	sync.atomic_store(&ring.last_send_time, i64(0))
+	sync.atomic_store(&ring.last_activity_time, i64(0))
 	sync.atomic_store(&ring.park_state, Ring_Park_State.Active)
 	crypto.zero_explicit(&ring.transport_keys, size_of(Noise_Transport))
 	sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Buffering, .Release)
@@ -485,7 +485,7 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 		}
 		sync.atomic_store(&slot.state, .READY)
 		ring_signal_batch(ring)
-		sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
+		sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
 	} else {
 		sync.atomic_store(&slot.state, .SEALED)
 		if sync.atomic_load(&slot.active_writers) == 0 {
@@ -511,7 +511,7 @@ batch_promote_sealed :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 	_, swapped := sync.atomic_compare_exchange_strong(&slot.state, .SEALED, .READY)
 	if !swapped do return
 	ring_signal_batch(ring)
-	sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
+	sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
 }
 
 @(private)
@@ -879,6 +879,7 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	}
 
 	ring.recv_write_pos = new_write_pos
+	sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
 	process_recv_buffer(ring)
 
 	if sync.atomic_load(&ring.state) == .Ready do submit_nbio_recv(ring)

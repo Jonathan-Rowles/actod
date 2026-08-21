@@ -818,7 +818,7 @@ attach_pool_ring :: proc(
 	ring.node_id = data.node_id
 	ring.conn_pid = get_self_pid()
 	ring.tcp_socket = sock
-	sync.atomic_store(&ring.last_send_time, time.to_unix_nanoseconds(now()))
+	sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
 	if data.encrypted do ring.transport_keys = keys
 
 	if !set_tcp_nodelay(sock, ring.tcp_nodelay) {
@@ -896,7 +896,7 @@ pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
 		ring := get_pool_ring_at(pool, i)
 		if ring == nil do continue
 		if sync.atomic_load(&ring.park_state) != .Active do continue
-		last := sync.atomic_load(&ring.last_send_time)
+		last := sync.atomic_load(&ring.last_activity_time)
 		if last != 0 && (now_ns - last) > idle_ns {
 			sync.atomic_store(&ring.park_state, Ring_Park_State.Park_Asked)
 		}

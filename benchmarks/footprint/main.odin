@@ -200,6 +200,8 @@ main :: proc() {
 	)
 	run_concurrent_spawn(count, spawner_count(), baseline_live)
 
+	run_ring_footprint()
+
 	actod.shutdown_node()
 }
 

@@ -251,6 +251,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 	case Timer_Tick:
 		if data.state == .Connected {
 			if m.id == data.heartbeat_timer_id && data.heartbeat_interval > 0 {
+				trim_idle_primary_ring(data)
 				send_heartbeat(data)
 				check_heartbeat_timeout(data)
 				pool_check_scaling(data)
@@ -750,7 +751,7 @@ handle_incoming_pool_join :: proc(
 @(private)
 establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	pool := conn_pool(data)
-	if pool == nil || data.peer_join_token == 0 do return false
+	if pool == nil || data.peer_join_token == 0 || data.peer_listen_port == 0 do return false
 	if pool_active_count(pool) >= pool.max_rings do return false
 
 	dial_endpoint := net.Endpoint {
@@ -841,6 +842,7 @@ attach_pool_ring :: proc(
 
 	if !pool_add_ring(pool, ring) {
 		ring.tcp_socket = 0
+		_ = ring_decommit_buffers(ring)
 		pool_park(pool, ring)
 		return false
 	}
@@ -848,6 +850,7 @@ attach_pool_ring :: proc(
 	if NODE.config.sim_mode && !sim_attach_pool_ring(ring, get_self_pid()) {
 		pool_remove_active(pool, ring)
 		ring.tcp_socket = 0
+		_ = ring_decommit_buffers(ring)
 		pool_park(pool, ring)
 		return false
 	}
@@ -893,15 +896,30 @@ adopt_pool_ring :: proc(data: ^Connection_Actor_Data, msg: Adopt_Pool_Ring) {
 }
 
 @(private)
+scale_down_idle_ns :: proc(data: ^Connection_Actor_Data) -> i64 {
+	idle_secs := data.ring_config.scale_down_idle_seconds
+	if idle_secs == 0 do idle_secs = 10
+	return i64(idle_secs) * 1_000_000_000
+}
+
+@(private)
+trim_idle_primary_ring :: proc(data: ^Connection_Actor_Data) {
+	ring := data.ring
+	if ring == nil do return
+	last := sync.atomic_load(&ring.last_activity_time)
+	if last == 0 do return
+	if time.to_unix_nanoseconds(now()) - last < scale_down_idle_ns(data) do return
+	_ = ring_trim_send_buffer(ring)
+}
+
+@(private)
 pool_check_scaling :: proc(data: ^Connection_Actor_Data) {
 	pool := conn_pool(data)
 	if pool == nil do return
 
 	finalize_parked_rings(data, pool)
 
-	idle_secs := data.ring_config.scale_down_idle_seconds
-	if idle_secs == 0 do idle_secs = 10
-	idle_ns := i64(idle_secs) * 1_000_000_000
+	idle_ns := scale_down_idle_ns(data)
 	now_ns := time.to_unix_nanoseconds(now())
 
 	count := pool_active_count(pool)
@@ -977,6 +995,7 @@ begin_park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) -> 
 finish_park_pool_ring :: proc(pool: ^Connection_Pool, ring: ^Connection_Ring) {
 	if ring.tcp_socket != 0 do close_tcp(ring.tcp_socket)
 	ring_reset(ring)
+	_ = ring_decommit_buffers(ring)
 	pool_park(pool, ring)
 }
 
@@ -1876,20 +1895,30 @@ mirror_source_registered :: proc(source_node_id: Node_ID) -> bool {
 	return ok && info.origin == .Registered
 }
 
-handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID) {
-	source_name: string
-	if msg.source_node_name != "" {
-		source_name = msg.source_node_name
-	} else {
+@(private)
+resolve_broadcast_source :: proc(
+	source_node_name: string,
+	from_node: Node_ID,
+	label: string,
+) -> (
+	string,
+	bool,
+) {
+	source_name := source_node_name
+	if source_name == "" {
 		name_ok: bool
 		source_name, name_ok = get_node_name(from_node)
 		if !name_ok {
-			log.warnf("Unknown node %d in spawn broadcast", from_node)
-			return
+			log.warnf("Unknown node %d in %s broadcast", from_node, label)
+			return "", false
 		}
 	}
+	return source_name, source_name != NODE.name
+}
 
-	if source_name == NODE.name do return
+handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID) {
+	source_name, relevant := resolve_broadcast_source(msg.source_node_name, from_node, "spawn")
+	if !relevant do return
 
 	source_node_id, found := get_node_by_name(source_name)
 	if !found {
@@ -1930,19 +1959,12 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 }
 
 handle_terminate_broadcast :: proc(msg: Actor_Terminated_Broadcast, from_node: Node_ID) {
-	source_name: string
-	if msg.source_node_name != "" {
-		source_name = msg.source_node_name
-	} else {
-		name_ok: bool
-		source_name, name_ok = get_node_name(from_node)
-		if !name_ok {
-			log.warnf("Unknown node %d in terminate broadcast", from_node)
-			return
-		}
-	}
-
-	if source_name == NODE.name do return
+	source_name, relevant := resolve_broadcast_source(
+		msg.source_node_name,
+		from_node,
+		"terminate",
+	)
+	if !relevant do return
 
 	source_node_id, found := get_node_by_name(source_name)
 	if !found do return
@@ -1979,7 +2001,7 @@ send_disconnect_to_ring :: proc(ring: ^Connection_Ring, reason: string) {
 
 	frame_buf: [512]byte
 	n := frame_control_message(ctrl_buf[:w.pos], frame_buf[:])
-	if n > len(frame_buf) {return}
+	if n > len(frame_buf) do return
 
 	send_raw_via_ring(ring, frame_buf[:n])
 	batch_flush(ring)

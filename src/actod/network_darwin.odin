@@ -26,7 +26,11 @@ foreign libc {
 	libc_poll :: proc(fds: [^]Poll_Fd, nfds: u32, timeout: i32) -> i32 ---
 	@(link_name = "arc4random_buf")
 	libc_arc4random_buf :: proc(buf: rawptr, nbytes: uint) ---
+	@(link_name = "madvise")
+	libc_madvise :: proc(addr: rawptr, len: uint, advice: i32) -> i32 ---
 }
+
+MADV_DONTNEED :: 4
 
 platform_setsockopt :: #force_inline proc(sock: net.TCP_Socket, level: i32, optname: i32, optval: rawptr, optlen: i32) -> i32 {
 	return libc_setsockopt(i32(sock), level, optname, optval, u32(optlen))
@@ -39,6 +43,10 @@ platform_socket_fd :: #force_inline proc(sock: net.TCP_Socket) -> i32 {
 }
 platform_gen_random :: proc(buf: rawptr, len: uint) {
 	libc_arc4random_buf(buf, len)
+}
+
+platform_return_pages :: proc(data: rawptr, size: uint) {
+	_ = libc_madvise(data, size, MADV_DONTNEED)
 }
 
 Timeval :: struct {

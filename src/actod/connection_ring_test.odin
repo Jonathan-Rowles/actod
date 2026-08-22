@@ -65,6 +65,10 @@ drainer_drain_ready :: proc(ring: ^Connection_Ring) -> int {
 		if sync.atomic_load(&slot.state) != .READY {
 			break
 		}
+		assert(
+			sync.atomic_load(&slot.active_writers) == 0,
+			"drained a READY slot that still has an active writer",
+		)
 		slot.length = 0
 		sync.atomic_store(&slot.state, .FREE)
 		ring.send_submit_idx += 1
@@ -523,7 +527,7 @@ test_sealed_by_nearly_full :: proc(t: ^testing.T) {
 	slot := &ring.send_slots[sid]
 	testing.expect(
 		t,
-		sync.atomic_load(&slot.state) == .SEALED,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
 		"Slot should be SEALED (active writer prevents READY)",
 	)
 	testing.expect(t, sync.atomic_load(&slot.active_writers) == 1, "Should have 1 active writer")
@@ -567,14 +571,14 @@ test_sealed_multiple_writers_last_promotes :: proc(t: ^testing.T) {
 	endian.put_u32(dst3[0:4], .Little, u32(1000 - 4))
 
 	slot := &ring.send_slots[sid1]
-	testing.expect(t, sync.atomic_load(&slot.state) == .SEALED, "Should be SEALED")
+	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "Should be SEALED")
 	testing.expect(t, sync.atomic_load(&slot.active_writers) == 3, "Should have 3 writers")
 
 	batch_commit(ring, sid1)
-	testing.expect(t, sync.atomic_load(&slot.state) == .SEALED, "Still SEALED after 1st commit")
+	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "Still SEALED after 1st commit")
 
 	batch_commit(ring, sid2)
-	testing.expect(t, sync.atomic_load(&slot.state) == .SEALED, "Still SEALED after 2nd commit")
+	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "Still SEALED after 2nd commit")
 
 	batch_commit(ring, sid3)
 	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "READY after 3rd (last) commit")
@@ -1518,6 +1522,317 @@ test_pool_contention_sets_scale_request :: proc(t: ^testing.T) {
 	pool_note_contention(pool)
 	pool_note_contention(pool)
 	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 1, "threshold crossed")
+}
+
+@(test)
+test_park_decommit_and_reuse :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+
+	msg := make_test_msg(100)
+	defer delete(msg)
+	testing.expect(t, batch_append_message(ring, msg), "append before park should succeed")
+	batch_flush(ring)
+	testing.expect(t, drainer_drain_ready(ring) == 1, "slot should drain before park")
+
+	ring_reset(ring)
+	testing.expect(t, ring_decommit_buffers(ring), "an idle ring should decommit")
+	testing.expect(t, ring.buffers_decommitted, "decommit should be recorded")
+	testing.expect(t, !ring_decommit_buffers(ring), "a decommitted ring must not decommit again")
+
+	testing.expect(t, ring_commit_buffers(ring), "recommit should succeed")
+	testing.expect(t, !ring.buffers_decommitted, "recommit should be recorded")
+	testing.expect(t, ring_commit_buffers(ring), "recommit on a committed ring is a no-op")
+
+	testing.expect(t, batch_append_message(ring, msg), "append after recommit should succeed")
+	batch_flush(ring)
+	testing.expect(t, drainer_drain_ready(ring) == 1, "recommitted pages should carry traffic")
+}
+
+@(test)
+test_decommit_skips_discarded_writer :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+
+	dst, sid, ok, _ := batch_reserve(ring, 128, nil, 0)
+	testing.expect(t, ok, "reserve failed")
+	if !ok do return
+
+	ring_reset(ring)
+	testing.expect(
+		t,
+		sync.atomic_load(&ring.send_slots[sid].state) == .DISCARDED,
+		"the outstanding writer's slot should be discarded",
+	)
+	testing.expect(
+		t,
+		!ring_decommit_buffers(ring),
+		"must not decommit while a stranded writer holds a buffer pointer",
+	)
+
+	for i in 0 ..< len(dst) {
+		dst[i] = 0
+	}
+	batch_commit(ring, sid)
+
+	testing.expect(t, ring_decommit_buffers(ring), "decommit once the writer released")
+	testing.expect(t, ring_commit_buffers(ring), "recommit should succeed")
+}
+
+@(test)
+test_trim_idle_send_and_reuse :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+
+	msg := make_test_msg(100)
+	defer delete(msg)
+	testing.expect(t, batch_append_message(ring, msg), "append before trim should succeed")
+	batch_flush(ring)
+	testing.expect(t, drainer_drain_ready(ring) == 1, "slot should drain before trim")
+
+	testing.expect(t, ring_trim_send_buffer(ring), "an idle ring should trim its send buffer")
+	testing.expect(t, ring.batch_slot_idx == RING_BATCH_COLD, "trim should be recorded")
+	testing.expect(t, !ring_trim_send_buffer(ring), "a cold ring must not trim again")
+
+	testing.expect(t, batch_append_message(ring, msg), "append should rewarm a trimmed ring")
+	testing.expect(t, ring.batch_slot_idx != RING_BATCH_COLD, "reserve should have recommitted the send buffer")
+	batch_flush(ring)
+	testing.expect(t, drainer_drain_ready(ring) == 1, "rewarmed pages should carry traffic")
+}
+
+@(test)
+test_trim_skips_busy_ring :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+
+	msg := make_test_msg(100)
+	defer delete(msg)
+	testing.expect(t, batch_append_message(ring, msg), "append failed")
+	testing.expect(t, ring.batch_slot_idx >= 0, "batch should be open")
+	testing.expect(t, !ring_trim_send_buffer(ring), "must not trim under an open batch")
+
+	batch_flush(ring)
+	slot := &ring.send_slots[0]
+	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "slot should be READY")
+	testing.expect(t, !ring_trim_send_buffer(ring), "must not trim with an undrained READY slot")
+
+	dst, sid, ok, _ := batch_reserve(ring, 3200, nil, 0)
+	testing.expect(t, ok, "reserve failed")
+	if !ok do return
+	testing.expect(t, !ring_trim_send_buffer(ring), "must not trim under an outstanding writer")
+	endian.put_u32(dst[0:4], .Little, u32(3200 - 4))
+	batch_commit(ring, sid)
+	testing.expect(t, drainer_drain_ready(ring) == 2, "both slots should drain")
+
+	testing.expect(t, ring_trim_send_buffer(ring), "trim should succeed once quiet")
+}
+
+@(test)
+test_fence_rewarms_trimmed_ring :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+
+	testing.expect(t, ring_trim_send_buffer(ring), "fresh idle ring should trim")
+
+	sync.mutex_lock(&ring.batch_mutex)
+	appended := append_ring_fence_locked(ring, 1, false)
+	sync.mutex_unlock(&ring.batch_mutex)
+	testing.expect(t, appended, "fence append should rewarm and succeed on a trimmed ring")
+	testing.expect(t, ring.batch_slot_idx != RING_BATCH_COLD, "fence append should have recommitted")
+
+	slot := &ring.send_slots[0]
+	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "fence slot should be READY")
+	testing.expect(
+		t,
+		slot.length == u32(RING_FENCE_FRAME_SIZE),
+		"fence frame should be the slot's only content",
+	)
+}
+
+@(test)
+test_pool_scale_up_skips_portless_peer :: proc(t: ^testing.T) {
+	pool := make_connection_pool(11, pool_test_config)
+	defer free(pool)
+
+	ring := make_connection_ring(pool_test_config)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+	ring.pool = pool
+	atomic_store_ring_ptr(&pool.rings[0], ring)
+	sync.atomic_store(&pool.ring_count, u32(1))
+
+	data: Connection_Actor_Data
+	data.ring = ring
+	data.peer_join_token = 12345
+	data.peer_listen_port = 0
+
+	testing.expect(
+		t,
+		!establish_pool_ring(&data),
+		"scale-up toward a peer with no listen port must be refused",
+	)
+	testing.expect(t, pool_active_count(pool) == 1, "no ring should have been added")
+}
+
+@(test)
+test_pool_take_parked_recommits :: proc(t: ^testing.T) {
+	pool := make_connection_pool(9, pool_test_config)
+	defer free(pool)
+
+	ring := make_connection_ring(pool_test_config)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil do return
+	defer destroy_connection_ring(ring)
+
+	testing.expect(t, ring_decommit_buffers(ring), "fresh ring should decommit")
+	pool_park(pool, ring)
+
+	got := pool_take_parked(pool)
+	testing.expect(t, got == ring, "parked ring should be returned")
+	testing.expect(t, !ring.buffers_decommitted, "taking a parked ring must recommit its buffers")
+	ring.send_data_buffer[0] = 1
+	ring.recv_buffer[0] = 1
+}
+
+@(test)
+test_stale_promote_after_slot_lap_does_not_publish :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil {
+		return
+	}
+	defer destroy_connection_ring(ring)
+
+	dst, sid, ok, _ := batch_reserve(ring, 3200, nil, 0)
+	testing.expect(t, ok, "first lap reserve failed")
+	if !ok {
+		return
+	}
+	endian.put_u32(dst[0:4], .Little, u32(3200 - 4))
+	for i in 4 ..< len(dst) {
+		dst[i] = 0xAA
+	}
+
+	slot := &ring.send_slots[sid]
+	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "first lap should force-seal")
+	stale_sealed := sync.atomic_load(&slot.state)
+
+	batch_commit(ring, sid)
+	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "first lap last commit promotes")
+	testing.expect(t, drainer_drain_ready(ring) == 1, "first lap should drain")
+
+	for _ in 0 ..< 3 {
+		fill, fill_sid, fill_ok, _ := batch_reserve(ring, 3200, nil, 0)
+		testing.expect(t, fill_ok, "lap fill reserve failed")
+		if !fill_ok {
+			return
+		}
+		endian.put_u32(fill[0:4], .Little, u32(3200 - 4))
+		batch_commit(ring, fill_sid)
+		testing.expect(t, drainer_drain_ready(ring) == 1, "lap fill should drain")
+	}
+
+	dst2, sid2, ok2, _ := batch_reserve(ring, 3200, nil, 0)
+	testing.expect(t, ok2, "second lap reserve failed")
+	if !ok2 {
+		return
+	}
+	testing.expect(t, sid2 == sid, "second lap must land in the same physical slot")
+	endian.put_u32(dst2[0:4], .Little, u32(3200 - 4))
+	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "second lap should force-seal")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 1,
+		"second lap writer should be outstanding",
+	)
+
+	batch_promote_sealed(ring, sid, stale_sealed)
+
+	testing.expectf(
+		t,
+		!(sync.atomic_load(&slot.state) == .READY &&
+			sync.atomic_load(&slot.active_writers) > 0),
+		"a stale first-lap promote published a slot with an active writer, the consumer would drain the first lap's bytes again and free the slot under the writer: state=%v active_writers=%d",
+		sync.atomic_load(&slot.state),
+		sync.atomic_load(&slot.active_writers),
+	)
+
+	for i in 4 ..< len(dst2) {
+		dst2[i] = 0xBB
+	}
+	batch_commit(ring, sid2)
+	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "the real last commit publishes")
+	testing.expect(t, sync.atomic_load(&slot.active_writers) == 0, "no writers remain")
+	data := slot_data(ring, sid)
+	testing.expect(t, slot.length == 3200, "second lap length should be published")
+	testing.expect(t, data[3199] == 0xBB, "published bytes must be the second lap's")
+}
+
+@(test)
+test_commit_delayed_past_seal_does_not_publish :: proc(t: ^testing.T) {
+	ring := make_test_ring(4, 4096)
+	testing.expect(t, ring != nil, "could not create the ring")
+	if ring == nil {
+		return
+	}
+	defer destroy_connection_ring(ring)
+
+	dst_a, sid_a, ok_a, _ := batch_reserve(ring, 100, nil, 0)
+	testing.expect(t, ok_a, "first reserve failed")
+	if !ok_a {
+		return
+	}
+	endian.put_u32(dst_a[0:4], .Little, u32(100 - 4))
+	slot := &ring.send_slots[sid_a]
+	testing.expect(t, sync.atomic_load(&slot.state) == .WRITING, "batch should stay open")
+
+	old := sync.atomic_sub(&slot.active_writers, 1)
+	testing.expect(t, old == 1, "the first writer's decrement should see itself as last")
+
+	dst_b, sid_b, ok_b, _ := batch_reserve(ring, 3200, nil, 0)
+	testing.expect(t, ok_b, "second reserve failed")
+	if !ok_b {
+		return
+	}
+	testing.expect(t, sid_b == sid_a, "second reserve must extend the same batch slot")
+	testing.expect(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"second reserve should force-seal the batch",
+	)
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 1,
+		"the second writer should be outstanding",
+	)
+
+	batch_commit_finish(ring, sid_a)
+
+	testing.expectf(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"a commit delayed past the seal published the slot while the sealing writer is still copying: state_word=%d active_writers=%d",
+		u32(sync.atomic_load(&slot.state)),
+		sync.atomic_load(&slot.active_writers),
+	)
+
+	endian.put_u32(dst_b[0:4], .Little, u32(3200 - 4))
+	batch_commit(ring, sid_b)
+	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "the true last commit publishes")
+	testing.expect(t, sync.atomic_load(&slot.active_writers) == 0, "no writers remain")
+	testing.expect(t, slot.length == 3300, "both frames should be in the published slot")
+	testing.expect(t, drainer_drain_ready(ring) == 1, "the published slot drains")
 }
 
 @(test)

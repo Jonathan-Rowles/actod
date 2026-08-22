@@ -2,6 +2,7 @@
 package actod
 
 import "core:net"
+import "core:sys/linux"
 
 foreign import libc "system:c"
 
@@ -43,6 +44,10 @@ platform_poll :: #force_inline proc(fds: ^Poll_Fd, nfds: u32, timeout: i32) -> i
 platform_socket_fd :: #force_inline proc(sock: net.TCP_Socket) -> i32 {
 	return i32(sock)
 }
+platform_return_pages :: proc(data: rawptr, size: uint) {
+	_ = linux.madvise(data, size, .DONTNEED)
+}
+
 platform_gen_random :: proc(buf: rawptr, len: uint) {
 	filled: uint
 	for filled < len {

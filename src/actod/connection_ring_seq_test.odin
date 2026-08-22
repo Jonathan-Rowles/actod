@@ -123,6 +123,10 @@ seq_drain_ready :: proc(ctx: ^Seq_Drainer_Context) -> int {
 			ctx.sum_changed = true
 			ctx.mutated_ready += 1
 		}
+		assert(
+			sync.atomic_load(&slot.active_writers) == 0,
+			"drained a READY slot that still has an active writer",
+		)
 		slot.length = 0
 		sync.atomic_store(&slot.state, .FREE)
 		ring.send_submit_idx += 1

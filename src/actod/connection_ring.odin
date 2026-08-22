@@ -5,6 +5,8 @@ import "base:runtime"
 import "core:crypto"
 import "core:encoding/endian"
 import "core:log"
+import "core:mem"
+import vmem "core:mem/virtual"
 import "core:nbio"
 import "core:net"
 import "core:sync"
@@ -35,6 +37,19 @@ Send_Slot :: struct #align (CACHE_LINE_SIZE) {
 }
 
 g_seal_counter: u64
+
+SLOT_STATE_KIND_BITS :: 3
+SLOT_STATE_KIND_MASK :: u32(1 << SLOT_STATE_KIND_BITS) - 1
+
+@(private)
+slot_state_kind :: #force_inline proc(state: Send_Slot_State) -> Send_Slot_State {
+	return Send_Slot_State(u32(state) & SLOT_STATE_KIND_MASK)
+}
+
+@(private)
+slot_state_sealed_tagged :: #force_inline proc(seal_id: u64) -> Send_Slot_State {
+	return Send_Slot_State(u32(Send_Slot_State.SEALED) | (u32(seal_id) << SLOT_STATE_KIND_BITS))
+}
 
 @(private)
 slot_data :: #force_inline proc(ring: ^Connection_Ring, slot_idx: u32) -> []byte {
@@ -69,6 +84,8 @@ DEFAULT_CONNECTION_RING_CONFIG :: Connection_Ring_Config {
 
 MAX_POOL_RINGS :: 16
 
+RING_BATCH_COLD :: i32(-2)
+
 Scale_Up_Request :: struct {}
 
 Pool_Ring_Closed :: struct {
@@ -86,7 +103,6 @@ Ring_Park_State :: enum u32 {
 Connection_Pool :: struct {
 	rings:                [MAX_POOL_RINGS]^Connection_Ring,
 	ring_count:           u32,
-	next_ring:            u32,
 	contention_count:     u32,
 	scale_up_requested:   u32,
 	conn_pid:             u64,
@@ -156,6 +172,9 @@ Connection_Ring :: struct {
 	park_half_closed:      bool,
 	ring_id:               u64,
 	recv_read_pos:         u32,
+	buffer_reservation:    []byte,
+	buffers_decommitted:   bool,
+	send_trim_size:        u32,
 }
 
 IO_Context :: struct {
@@ -198,34 +217,49 @@ make_connection_ring :: proc(
 		return nil
 	}
 
-	send_data_size := int(config.send_slot_count) * int(config.send_slot_size)
-	ring.send_data_buffer = make([]byte, send_data_size, allocator)
-	if ring.send_data_buffer == nil {
-		destroy_connection_ring(ring, allocator)
-		return nil
-	}
-
-	ring.recv_buffer_size = config.recv_buffer_size
-	ring.recv_buffer = make([]byte, config.recv_buffer_size, allocator)
-	if ring.recv_buffer == nil {
-		destroy_connection_ring(ring, allocator)
-		return nil
-	}
-
 	ring.send_bufs = make([][]byte, MAX_SEND_BATCH, allocator)
 	if ring.send_bufs == nil {
 		destroy_connection_ring(ring, allocator)
 		return nil
 	}
 
+	send_data_size := int(config.send_slot_count) * int(config.send_slot_size)
+	seal_scratch_size: int
+	open_scratch_size: int
 	if encrypted {
 		seal_stride := int(ring.usable_slot_size) + ENVELOPE_OVERHEAD
-		ring.seal_scratch = make([]byte, MAX_SEND_BATCH * seal_stride, allocator)
-		ring.open_scratch = make([]byte, MAX_ENVELOPE_PLAINTEXT, allocator)
-		if ring.seal_scratch == nil || ring.open_scratch == nil {
-			destroy_connection_ring(ring, allocator)
-			return nil
-		}
+		seal_scratch_size = MAX_SEND_BATCH * seal_stride
+		open_scratch_size = MAX_ENVELOPE_PLAINTEXT
+	}
+	ring.recv_buffer_size = config.recv_buffer_size
+	total := send_data_size + int(config.recv_buffer_size) + seal_scratch_size + open_scratch_size
+
+	reservation, reserve_err := vmem.reserve(uint(total))
+	if reserve_err != nil {
+		log.errorf("Failed to reserve %d bytes of ring buffer space: %v", total, reserve_err)
+		destroy_connection_ring(ring, allocator)
+		return nil
+	}
+	if commit_err := vmem.commit(raw_data(reservation), uint(total)); commit_err != nil {
+		log.errorf("Failed to commit %d bytes of ring buffer space: %v", total, commit_err)
+		vmem.release(raw_data(reservation), uint(len(reservation)))
+		destroy_connection_ring(ring, allocator)
+		return nil
+	}
+	ring.buffer_reservation = reservation
+	slab_disable_transparent_hugepages(raw_data(reservation), uint(len(reservation)))
+	page_mask := uint(mem.PAGE_SIZE) - 1
+	ring.send_trim_size = u32(uint(send_data_size) & ~page_mask)
+
+	offset: int
+	ring.send_data_buffer = reservation[offset:offset + send_data_size]
+	offset += send_data_size
+	ring.recv_buffer = reservation[offset:offset + int(config.recv_buffer_size)]
+	offset += int(config.recv_buffer_size)
+	if encrypted {
+		ring.seal_scratch = reservation[offset:offset + seal_scratch_size]
+		offset += seal_scratch_size
+		ring.open_scratch = reservation[offset:offset + open_scratch_size]
 	}
 
 	ring.state = .Buffering
@@ -240,32 +274,34 @@ make_connection_ring :: proc(
 destroy_connection_ring :: proc(ring: ^Connection_Ring, allocator := context.allocator) {
 	if ring == nil do return
 
-	if ring.open_scratch != nil do delete(ring.open_scratch, allocator)
-	if ring.seal_scratch != nil do delete(ring.seal_scratch, allocator)
-	if ring.recv_buffer != nil do delete(ring.recv_buffer, allocator)
-	if ring.send_data_buffer != nil do delete(ring.send_data_buffer, allocator)
+	if ring.buffer_reservation != nil {
+		vmem.release(raw_data(ring.buffer_reservation), uint(len(ring.buffer_reservation)))
+	}
 	if ring.send_slots != nil do delete(ring.send_slots, allocator)
 	if ring.send_bufs != nil do delete(ring.send_bufs, allocator)
 	free(ring, allocator)
+}
+
+@(private)
+ring_wait_writers_idle :: proc(ring: ^Connection_Ring) {
+	for spin := 0; spin < RING_RESET_WRITER_SPIN; spin += 1 {
+		active := false
+		for i in 0 ..< ring.send_slot_count {
+			if sync.atomic_load(&ring.send_slots[i].active_writers) > 0 {
+				active = true
+				break
+			}
+		}
+		if !active do return
+		intrinsics.cpu_relax()
+	}
 }
 
 ring_migrate_slots :: proc(loser: ^Connection_Ring, survivor: ^Connection_Ring) -> int {
 	if loser == nil || survivor == nil || loser == survivor do return 0
 
 	sync.mutex_lock(&loser.batch_mutex)
-
-	for spin := 0; spin < RING_RESET_WRITER_SPIN; spin += 1 {
-		active := false
-		for i in 0 ..< loser.send_slot_count {
-			if sync.atomic_load(&loser.send_slots[i].active_writers) > 0 {
-				active = true
-				break
-			}
-		}
-		if !active do break
-		intrinsics.cpu_relax()
-	}
-
+	ring_wait_writers_idle(loser)
 	batch_seal_locked(loser, force = true)
 	sync.mutex_unlock(&loser.batch_mutex)
 
@@ -318,17 +354,8 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	sync.mutex_lock(&ring.batch_mutex)
 	defer sync.mutex_unlock(&ring.batch_mutex)
 
-	for spin := 0; spin < RING_RESET_WRITER_SPIN; spin += 1 {
-		active := false
-		for i in 0 ..< ring.send_slot_count {
-			if sync.atomic_load(&ring.send_slots[i].active_writers) > 0 {
-				active = true
-				break
-			}
-		}
-		if !active do break
-		intrinsics.cpu_relax()
-	}
+	was_cold := ring.batch_slot_idx == RING_BATCH_COLD
+	ring_wait_writers_idle(ring)
 
 	dropped := 0
 	for i in 0 ..< ring.send_slot_count {
@@ -348,7 +375,7 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	ring.send_complete_idx = 0
 	ring.recv_write_pos = 0
 	ring.recv_read_pos = 0
-	ring.batch_slot_idx = -1
+	ring.batch_slot_idx = was_cold ? RING_BATCH_COLD : -1
 	ring.batch_write_pos = 0
 	ring.batch_pending = 0
 	ring.pending_recv = nil
@@ -365,6 +392,69 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Buffering, .Release)
 
 	return dropped
+}
+
+@(private)
+ring_send_slots_quiet :: proc(ring: ^Connection_Ring) -> bool {
+	for i in 0 ..< ring.send_slot_count {
+		slot := &ring.send_slots[i]
+		if sync.atomic_load(&slot.state) != .FREE do return false
+		if sync.atomic_load(&slot.active_writers) != 0 do return false
+	}
+	return true
+}
+
+ring_decommit_buffers :: proc(ring: ^Connection_Ring) -> bool {
+	if ring.buffer_reservation == nil || ring.buffers_decommitted do return false
+	if !ring_send_slots_quiet(ring) do return false
+	vmem.decommit(raw_data(ring.buffer_reservation), uint(len(ring.buffer_reservation)))
+	platform_return_pages(raw_data(ring.buffer_reservation), uint(len(ring.buffer_reservation)))
+	ring.buffers_decommitted = true
+	ring.batch_slot_idx = RING_BATCH_COLD
+	return true
+}
+
+ring_commit_buffers :: proc(ring: ^Connection_Ring) -> bool {
+	if !ring.buffers_decommitted do return true
+	err := vmem.commit(raw_data(ring.buffer_reservation), uint(len(ring.buffer_reservation)))
+	if err != nil {
+		log.errorf(
+			"Failed to recommit %d bytes of parked ring buffer space: %v",
+			len(ring.buffer_reservation),
+			err,
+		)
+		return false
+	}
+	ring.buffers_decommitted = false
+	if ring.batch_slot_idx == RING_BATCH_COLD do ring.batch_slot_idx = -1
+	return true
+}
+
+ring_trim_send_buffer :: proc(ring: ^Connection_Ring) -> bool {
+	if ring.send_trim_size == 0 || ring.buffers_decommitted do return false
+	if !sync.mutex_try_lock(&ring.batch_mutex) do return false
+	defer sync.mutex_unlock(&ring.batch_mutex)
+	if ring.batch_slot_idx != -1 do return false
+	if !ring_send_slots_quiet(ring) do return false
+	vmem.decommit(raw_data(ring.buffer_reservation), uint(ring.send_trim_size))
+	platform_return_pages(raw_data(ring.buffer_reservation), uint(ring.send_trim_size))
+	ring.batch_slot_idx = RING_BATCH_COLD
+	return true
+}
+
+@(private)
+ring_warm_send_buffer :: #force_inline proc(ring: ^Connection_Ring) -> bool {
+	err := vmem.commit(raw_data(ring.buffer_reservation), uint(ring.send_trim_size))
+	if err != nil {
+		log.errorf(
+			"Failed to recommit %d bytes of trimmed send buffer: %v",
+			ring.send_trim_size,
+			err,
+		)
+		return false
+	}
+	ring.batch_slot_idx = -1
+	return true
 }
 
 // Caller must be the ring's only reader: the IO thread has acked the park and
@@ -502,6 +592,12 @@ acquire_slot :: proc(ring: ^Connection_Ring) -> (slot: ^Send_Slot, idx: u32, ok:
 
 	for spin := 0; spin < 256; spin += 1 {
 		if sync.atomic_load_explicit(&slot.state, .Acquire) == .FREE {
+			when ODIN_TEST {
+				assert(
+					sync.atomic_load(&slot.active_writers) == 0,
+					"acquired a FREE slot that still has an active writer",
+				)
+			}
 			slot.state = .WRITING
 			slot.active_writers = 0
 			return slot, slot_idx, true
@@ -545,6 +641,10 @@ append_ring_fence_locked :: proc(ring: ^Connection_Ring, epoch: u32, final: bool
 	size := u32(RING_FENCE_FRAME_SIZE)
 
 	batch_idx := ring.batch_slot_idx
+	if batch_idx == RING_BATCH_COLD {
+		if !ring_warm_send_buffer(ring) do return false
+		batch_idx = -1
+	}
 	if batch_idx >= 0 && size <= ring.usable_slot_size - ring.batch_write_pos {
 		offset := ring.batch_write_pos
 		ring.batch_write_pos += size
@@ -709,7 +809,8 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 	if !force && active > 0 do return
 
 	slot.length = write_pos
-	sync.atomic_store(&slot.seal_id, sync.atomic_add(&g_seal_counter, 1) + 1)
+	seal := sync.atomic_add(&g_seal_counter, 1) + 1
+	sync.atomic_store(&slot.seal_id, seal)
 	ring.batch_slot_idx = -1
 	ring.batch_write_pos = 0
 
@@ -729,15 +830,16 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 		ring_signal_batch(ring)
 		sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
 	} else {
-		sync.atomic_store(&slot.state, .SEALED)
+		sealed := slot_state_sealed_tagged(seal)
+		sync.atomic_store(&slot.state, sealed)
 		if sync.atomic_load(&slot.active_writers) == 0 {
-			batch_promote_sealed(ring, u32(slot_idx))
+			batch_promote_sealed(ring, u32(slot_idx), sealed)
 		}
 	}
 }
 
 @(private)
-batch_promote_sealed :: proc(ring: ^Connection_Ring, slot_idx: u32) {
+batch_promote_sealed :: proc(ring: ^Connection_Ring, slot_idx: u32, sealed: Send_Slot_State) {
 	slot := &ring.send_slots[slot_idx]
 	when ODIN_DEBUG {
 		data := slot_data(ring, slot_idx)
@@ -746,11 +848,11 @@ batch_promote_sealed :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 				"CRITICAL: Corrupted batch in slot %d on commit, releasing",
 				slot_idx,
 			)
-			_, _ = sync.atomic_compare_exchange_strong(&slot.state, .SEALED, .FREE)
+			_, _ = sync.atomic_compare_exchange_strong(&slot.state, sealed, .FREE)
 			return
 		}
 	}
-	_, swapped := sync.atomic_compare_exchange_strong(&slot.state, .SEALED, .READY)
+	_, swapped := sync.atomic_compare_exchange_strong(&slot.state, sealed, .READY)
 	if !swapped do return
 	ring_signal_batch(ring)
 	sync.atomic_store(&ring.last_activity_time, time.to_unix_nanoseconds(now()))
@@ -941,6 +1043,13 @@ batch_reserve :: proc(
 	}
 
 	batch_idx := ring.batch_slot_idx
+	if batch_idx == RING_BATCH_COLD {
+		if !ring_warm_send_buffer(ring) {
+			sync.mutex_unlock(&ring.batch_mutex)
+			return nil, 0, false, false
+		}
+		batch_idx = -1
+	}
 	if batch_idx >= 0 {
 		remaining := ring.usable_slot_size - ring.batch_write_pos
 		if exact_size <= remaining {
@@ -949,6 +1058,12 @@ batch_reserve :: proc(
 
 			slot := &ring.send_slots[batch_idx]
 			sync.atomic_add(&slot.active_writers, 1)
+			when ODIN_TEST {
+				assert(
+					slot_state_kind(sync.atomic_load(&slot.state)) == .WRITING,
+					"reserved into a non-WRITING batch slot on the fast path",
+				)
+			}
 
 			remaining_after := ring.usable_slot_size - ring.batch_write_pos
 			if remaining_after < ring.nearly_full_threshold {
@@ -976,6 +1091,12 @@ batch_reserve :: proc(
 
 	slot := &ring.send_slots[new_slot_idx]
 	sync.atomic_add(&slot.active_writers, 1)
+	when ODIN_TEST {
+		assert(
+			slot_state_kind(sync.atomic_load(&slot.state)) == .WRITING,
+			"reserved into a non-WRITING slot after acquire",
+		)
+	}
 
 	remaining_after := ring.usable_slot_size - exact_size
 	if remaining_after < ring.nearly_full_threshold {
@@ -996,18 +1117,27 @@ batch_commit :: proc(ring: ^Connection_Ring, slot_idx: u32) {
 	old := sync.atomic_sub(&slot.active_writers, 1)
 	assert(old >= 1, "batch_commit without a matching reserve, active_writers underflow")
 
-	if old == 1 {
-		state := sync.atomic_load(&slot.state)
-		if state == .DISCARDED {
+	if old == 1 do batch_commit_finish(ring, slot_idx)
+}
+
+@(private)
+batch_commit_finish :: proc(ring: ^Connection_Ring, slot_idx: u32) {
+	slot := &ring.send_slots[slot_idx]
+	state := sync.atomic_load(&slot.state)
+	kind := slot_state_kind(state)
+	if kind == .DISCARDED {
+		if sync.atomic_load(&slot.active_writers) == 0 {
 			slot.length = 0
 			sync.atomic_store(&slot.state, .FREE)
-			return
 		}
-		if state == .SEALED {
-			batch_promote_sealed(ring, slot_idx)
-		} else if state == .WRITING {
-			ring_signal_batch(ring)
+		return
+	}
+	if kind == .SEALED {
+		if sync.atomic_load(&slot.active_writers) == 0 {
+			batch_promote_sealed(ring, slot_idx, state)
 		}
+	} else if kind == .WRITING {
+		ring_signal_batch(ring)
 	}
 }
 
@@ -1326,39 +1456,7 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 
 		park := sync.atomic_load(&pr.park_state)
 		if park == .Park_Asked || park == .Park_Fenced {
-			if !owned do continue
-			if park == .Park_Asked {
-				if !pool_flip_epoch(pool, pr, .Park) do continue
-			}
-			if sync.atomic_exchange(&pr.batch_pending, 0) != 0 do batch_flush(pr)
-			submit_nbio_sends(pr)
-			outbound_empty :=
-				!pr.send_in_flight &&
-				pr.send_submit_idx >= sync.atomic_load(&pr.send_write_idx)
-			if outbound_empty && !pr.park_half_closed {
-				ring_shutdown_write(pr)
-				pr.park_half_closed = true
-			}
-			if pr.park_half_closed {
-				if sync.atomic_load(&pr.recv_closed) != 0 {
-					if pr.pending_recv == nil && ring_recv_unconsumed(pr) > 0 {
-						process_recv_buffer(pr)
-					}
-					if pr.pending_recv != nil {
-						nbio.remove(pr.pending_recv)
-						pr.pending_recv = nil
-					}
-					sync.atomic_store_explicit(
-						&pr.state,
-						Connection_Ring_State.Buffering,
-						.Release,
-					)
-					ring_io_release(pr)
-					sync.atomic_store(&pr.park_state, Ring_Park_State.Park_Acked)
-				} else {
-					submit_nbio_recv(pr)
-				}
-			}
+			if owned do io_service_parking_ring(pool, pr, park)
 			continue
 		}
 		if park != .Active do continue
@@ -1393,6 +1491,38 @@ io_service_pool_rings :: proc(pool: ^Connection_Pool, primary: ^Connection_Ring,
 		if sync.atomic_exchange(&pr.batch_pending, 0) != 0 do batch_flush(pr)
 		submit_nbio_sends(pr)
 	}
+}
+
+@(private)
+io_service_parking_ring :: proc(
+	pool: ^Connection_Pool,
+	pr: ^Connection_Ring,
+	park: Ring_Park_State,
+) {
+	if park == .Park_Asked {
+		if !pool_flip_epoch(pool, pr, .Park) do return
+	}
+	if sync.atomic_exchange(&pr.batch_pending, 0) != 0 do batch_flush(pr)
+	submit_nbio_sends(pr)
+	outbound_empty :=
+		!pr.send_in_flight && pr.send_submit_idx >= sync.atomic_load(&pr.send_write_idx)
+	if outbound_empty && !pr.park_half_closed {
+		ring_shutdown_write(pr)
+		pr.park_half_closed = true
+	}
+	if !pr.park_half_closed do return
+	if sync.atomic_load(&pr.recv_closed) == 0 {
+		submit_nbio_recv(pr)
+		return
+	}
+	if pr.pending_recv == nil && ring_recv_unconsumed(pr) > 0 do process_recv_buffer(pr)
+	if pr.pending_recv != nil {
+		nbio.remove(pr.pending_recv)
+		pr.pending_recv = nil
+	}
+	sync.atomic_store_explicit(&pr.state, Connection_Ring_State.Buffering, .Release)
+	ring_io_release(pr)
+	sync.atomic_store(&pr.park_state, Ring_Park_State.Park_Acked)
 }
 
 @(private)
@@ -1716,6 +1846,10 @@ pool_take_parked :: proc(pool: ^Connection_Pool) -> ^Connection_Ring {
 	pool.parked_count -= 1
 	ring := pool.parked[pool.parked_count]
 	pool.parked[pool.parked_count] = nil
+	if ring != nil && !ring_commit_buffers(ring) {
+		pool_park(pool, ring)
+		return nil
+	}
 	return ring
 }
 

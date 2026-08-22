@@ -42,6 +42,9 @@ platform_gen_random :: proc(buf: rawptr, len: uint) {
 	}
 }
 
+platform_return_pages :: proc(data: rawptr, size: uint) {
+}
+
 platform_set_recv_timeout :: proc(sock: net.TCP_Socket, seconds: i64) -> bool {
 	timeout_ms: u32 = u32(seconds * 1000)
 	return platform_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout_ms, size_of(u32)) == 0

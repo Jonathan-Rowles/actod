@@ -493,7 +493,7 @@ notify_termination :: proc(actor: ^Actor($T)) {
 			topic_remove_subscriber(sub.topic, sub.pid)
 		}
 
-		if NODE.timer_pid != 0 && actor.pid != NODE.timer_pid && len(current_actor_context.timers) > 0 {
+		if NODE.timer_pid != 0 && actor.pid != NODE.timer_pid && current_actor_context.used_timers {
 			if _, timer_active := get(&NODE.actor_registry, NODE.timer_pid); timer_active {
 				timer_actor, timer_ok := get_actor_from_pointer(
 					get(&NODE.actor_registry, NODE.timer_pid),

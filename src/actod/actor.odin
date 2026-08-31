@@ -169,7 +169,6 @@ Actor_Context :: struct {
 	panic_location:      runtime.Source_Code_Location,
 	subscriptions:       [dynamic]Subscription,
 	topic_subscriptions: [dynamic]Topic_Subscription,
-	timers:              [dynamic]Timer_Registration,
 	pending_asks:        map[u64]u32,
 	timer_asks:          map[u32]u64,
 	next_ask_token:      u64,
@@ -177,6 +176,7 @@ Actor_Context :: struct {
 	current_ask_from:    PID,
 	current_reply_token: u64,
 	ask_dirty:           bool,
+	used_timers:         bool,
 	stats:               struct {
 		received_list:     [dynamic]PID,
 		sent_list:         [dynamic]PID,

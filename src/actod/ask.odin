@@ -92,16 +92,6 @@ replying_to :: proc() -> (Ask_Token, bool) {
 }
 
 @(private)
-remove_ask_timer_registration :: proc(ctx: ^Actor_Context, timer_id: u32) {
-	for i := 0; i < len(ctx.timers); i += 1 {
-		if ctx.timers[i] == Timer_Registration(timer_id) {
-			unordered_remove(&ctx.timers, i)
-			break
-		}
-	}
-}
-
-@(private)
 deliver_user_message :: #force_inline proc(actor: ^Actor($T), msg: ^Message, data: any) {
 	ctx := current_actor_context
 	if ctx == nil {
@@ -110,9 +100,11 @@ deliver_user_message :: #force_inline proc(actor: ^Actor($T), msg: ^Message, dat
 	}
 
 	token, _ := message_ask_token(msg)
-	if token == 0 && !ctx.ask_dirty && len(ctx.timer_asks) == 0 {
-		actor.handle_message(actor.data, msg.from, data)
-		return
+	if token == 0 && !ctx.ask_dirty {
+		if data.id != typeid_of(Timer_Tick) || len(ctx.timer_asks) == 0 {
+			actor.handle_message(actor.data, msg.from, data)
+			return
+		}
 	}
 
 	deliver_user_message_ask(actor, msg, data, ctx)
@@ -139,7 +131,6 @@ deliver_user_message_ask :: #force_no_inline proc(
 			if ask_token, pending := ctx.timer_asks[tick.id]; pending {
 				delete_key(&ctx.timer_asks, tick.id)
 				delete_key(&ctx.pending_asks, ask_token)
-				remove_ask_timer_registration(ctx, tick.id)
 				timed_out := Ask_Timeout {
 					token = Ask_Token(ask_token),
 				}

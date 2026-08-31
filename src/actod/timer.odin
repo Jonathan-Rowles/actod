@@ -27,8 +27,6 @@ Timer_Tick :: struct {
 	id: u32,
 }
 
-Timer_Registration :: distinct u32
-
 MAX_FIRE_BATCH :: 64
 MAX_TIMERS :: 8192
 
@@ -348,7 +346,6 @@ set_timer :: proc(
 	when ODIN_TEST {if id, err, ok := ti.intercept_set_timer(interval, repeat); ok do return id, Send_Error(err)}
 
 	id := sync.atomic_add(&NODE.next_timer_id, 1) + 1
-	if current_actor_context != nil do append(&current_actor_context.timers, Timer_Registration(id))
 
 	if NODE.timer_pid == 0 {
 		log.errorf(
@@ -364,21 +361,21 @@ set_timer :: proc(
 		Start_Timer{id = id, interval = interval, repeat = repeat},
 		loc,
 	)
-	if err != .OK {
-		if err == .SYSTEM_SHUTTING_DOWN {
-			log.warnf(
-				"set_timer skipped during shutdown, timer id=%d will never fire",
-				id,
-				location = loc,
-			)
-		} else {
-			log.errorf(
-				"set_timer failed: could not reach the timer actor (%v), timer id=%d will never fire",
-				err,
-				id,
-				location = loc,
-			)
-		}
+	if err == .OK {
+		if current_actor_context != nil do current_actor_context.used_timers = true
+	} else if err == .SYSTEM_SHUTTING_DOWN {
+		log.warnf(
+			"set_timer skipped during shutdown, timer id=%d will never fire",
+			id,
+			location = loc,
+		)
+	} else {
+		log.errorf(
+			"set_timer failed: could not reach the timer actor (%v), timer id=%d will never fire",
+			err,
+			id,
+			location = loc,
+		)
 	}
 	return id, err
 }
@@ -392,15 +389,6 @@ cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {if err, ok := ti.intercept_cancel_timer(id); ok do return Send_Error(err)}
 
 	if id == 0 do return .OK
-
-	if current_actor_context != nil {
-		for i := 0; i < len(current_actor_context.timers); i += 1 {
-			if current_actor_context.timers[i] == Timer_Registration(id) {
-				unordered_remove(&current_actor_context.timers, i)
-				break
-			}
-		}
-	}
 
 	if NODE.timer_pid == 0 {
 		log.errorf(

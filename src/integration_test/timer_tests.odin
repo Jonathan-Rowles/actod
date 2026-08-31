@@ -221,7 +221,22 @@ Cleanup_Timer_Behaviour :: actod.Actor_Behaviour(Cleanup_Timer_Data) {
 cleanup_timer_init :: proc(data: ^Cleanup_Timer_Data) {
 	_, _ = actod.set_timer(10 * time.Millisecond, true)
 	_, _ = actod.set_timer(20 * time.Millisecond, true)
+	_, _ = actod.set_timer(5 * time.Millisecond, false)
 	data.started = true
+}
+
+live_timer_count :: proc() -> int {
+	sync.mutex_lock(&actod.NODE.timer_registry.lock)
+	defer sync.mutex_unlock(&actod.NODE.timer_registry.lock)
+	return len(actod.NODE.timer_registry.index_map)
+}
+
+wait_for_live_timer_count :: proc(expected: int) -> bool {
+	for _ in 0 ..< 200 {
+		if live_timer_count() == expected do return true
+		time.sleep(5 * time.Millisecond)
+	}
+	return false
 }
 
 cleanup_timer_handle :: proc(data: ^Cleanup_Timer_Data, from: actod.PID, msg: any) {
@@ -229,6 +244,8 @@ cleanup_timer_handle :: proc(data: ^Cleanup_Timer_Data, from: actod.PID, msg: an
 }
 
 test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
+	timers_before := live_timer_count()
+
 	pid, spawn_ok := actod.spawn(
 		"timer_cleanup_test",
 		Cleanup_Timer_Data{},
@@ -240,6 +257,12 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 
 	_ = actod.terminate_actor(pid)
 	actod.wait_for_pids([]actod.PID{pid})
+
+	expect(
+		t,
+		wait_for_live_timer_count(timers_before),
+		"Terminated actor timers should be removed from the registry",
+	)
 
 	done: sync.Sema
 	verify_pid, verify_ok := actod.spawn(

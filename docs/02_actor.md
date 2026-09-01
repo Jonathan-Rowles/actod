@@ -73,6 +73,8 @@ Actor_Behaviour :: struct($T: typeid) {
     handle_message: proc(data: ^T, from: PID, content: any),  // required
     init:           proc(data: ^T),                             // optional
     terminate:      proc(data: ^T),                             // optional
+    on_idle:        proc(data: ^T),                             // optional, dedicated thread only
+    on_wake:        proc "contextless" (data: ^T),              // optional, pairs with on_idle
     actor_type:     Actor_Type,                                 // 0 = untyped
 
     // supervisor callbacks (optional)
@@ -241,6 +243,50 @@ act.make_actor_config(
     stack_size_dedicated_os_thread = 128 * 1024,
 )
 ```
+
+### Foreign event loops: `on_idle` and `on_wake`
+
+A dedicated-thread actor normally sleeps on its mailbox semaphore when the mailbox is
+empty. An actor that owns something else to wait on (a window system, a socket, a pipe)
+cannot sleep in both, so `on_idle` replaces the semaphore wait: actod calls it with an
+empty mailbox, the actor sleeps in its own wait, and returns so the loop can drain. It is
+never reached by a pooled actor.
+
+On its own that sleep is deaf to the mailbox. `on_wake` is the other half: a callback
+actod invokes from the **sender's** thread whenever a message lands on the actor, so the
+foreign wait can be interrupted.
+
+```odin
+behaviour := act.Actor_Behaviour(App) {
+    init           = init,
+    handle_message = handle,
+    on_idle        = on_idle,
+    on_wake        = on_wake,
+}
+
+init :: proc(a: ^App) {
+    a.wake_fd = eventfd()
+}
+
+on_wake :: proc "contextless" (a: ^App) {
+    if a.wake_fd > 0 {          // a send can land before init has run
+        write_one(a.wake_fd)
+    }
+}
+
+on_idle :: proc(a: ^App) {
+    poll([a.wake_fd, a.socket_fd], timeout = -1)   // interrupted by any send, Terminate included
+    drain(a.wake_fd)
+    read_socket_if_ready(a)
+}
+```
+
+Rules: the callback runs on another thread, so it must be cheap, thread safe, and must
+not touch the actor's data beyond what it needs to signal. It can fire before `init` has
+finished, so guard on what `init` creates. It fires for every delivery, including actod's
+own `Terminate`, timer ticks and supervision messages, which is what makes the pairing
+sound. Pooled actors never call it. Without `on_wake`, an `on_idle` wait must use a
+timeout.
 
 ## Lifecycle States
 

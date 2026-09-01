@@ -34,6 +34,7 @@ Test_Entry :: struct {
 ALL_TESTS :: []Test_Entry {
 	// Core actor tests
 	{name = "test_actor_lifecycle", test_proc = test_actor_lifecycle},
+	{name = "test_on_wake_interrupts_foreign_wait", test_proc = test_on_wake_interrupts_foreign_wait},
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
 	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
 	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},

@@ -464,6 +464,9 @@ wake_actor :: #force_inline proc(actor: ^Actor(int)) {
 		wake_pooled_actor(actor.pool_handle)
 	} else {
 		sync.atomic_sema_post(&actor.wake_sema)
+		if actor.behaviour.on_wake != nil {
+			actor.behaviour.on_wake(actor.data)
+		}
 	}
 }
 

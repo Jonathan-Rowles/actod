@@ -16,6 +16,7 @@ Actor_Behaviour :: struct($T: typeid) {
 	init:                     proc(data: ^T),
 	terminate:                proc(data: ^T),
 	on_idle:                  proc(data: ^T),
+	on_wake:                  proc "contextless" (data: ^T),
 	actor_type:               Actor_Type,
 
 	on_child_started:         proc(data: ^T, child_pid: PID),

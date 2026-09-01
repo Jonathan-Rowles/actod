@@ -1950,3 +1950,65 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 		time.sleep(time.Millisecond)
 	}
 }
+
+Wake_Test_Actor :: struct {
+	gate:     sync.Sema,
+	handled:  ^u64,
+	timeouts: ^u64,
+}
+
+wake_test_wake :: proc "contextless" (a: ^Wake_Test_Actor) {
+	sync.sema_post(&a.gate)
+}
+
+wake_test_idle :: proc(a: ^Wake_Test_Actor) {
+	if !sync.sema_wait_with_timeout(&a.gate, 2 * time.Second) {
+		sync.atomic_add(a.timeouts, 1)
+	}
+}
+
+wake_test_handle :: proc(a: ^Wake_Test_Actor, from: actod.PID, msg: any) {
+	if _, ok := msg.(Integration_Test_Message); ok {
+		sync.atomic_add(a.handled, 1)
+	}
+}
+
+wake_test_behaviour := actod.Actor_Behaviour(Wake_Test_Actor) {
+	handle_message = wake_test_handle,
+	on_idle        = wake_test_idle,
+	on_wake        = wake_test_wake,
+}
+
+test_on_wake_interrupts_foreign_wait :: proc(t: ^testing.T) {
+	reset_test_state()
+
+	handled, timeouts: u64
+	pid, ok := actod.spawn(
+		"wake-test",
+		Wake_Test_Actor{handled = &handled, timeouts = &timeouts},
+		wake_test_behaviour,
+		actod.make_actor_config(use_dedicated_os_thread = true),
+	)
+	expect(t, ok, "spawn dedicated actor")
+
+	time.sleep(20 * time.Millisecond)
+
+	sent := time.tick_now()
+	expect(t, actod.send_message(pid, Integration_Test_Message{id = 1}) == .OK, "send")
+	arrived := poll_until(proc(state: rawptr) -> bool {
+		return sync.atomic_load(cast(^u64)state) == 1
+	}, &handled, 500 * time.Millisecond, 1 * time.Millisecond)
+	expect(t, arrived, "a send must interrupt the on_idle wait")
+	expectf(t, time.tick_since(sent) < 100 * time.Millisecond, "handled after %v, the wake did not fire", time.tick_since(sent))
+	expect(t, sync.atomic_load(&timeouts) == 0, "the foreign wait must not have hit its timeout")
+
+	stopped_at := time.tick_now()
+	expect(t, actod.terminate_actor(pid, .SHUTDOWN), "terminate")
+	gone := poll_until(proc(state: rawptr) -> bool {
+		_, alive := actod.get(&actod.NODE.actor_registry, (cast(^actod.PID)state)^)
+		return !alive
+	}, &pid, 500 * time.Millisecond, 1 * time.Millisecond)
+	expect(t, gone, "Terminate must interrupt the on_idle wait")
+	expectf(t, time.tick_since(stopped_at) < 200 * time.Millisecond, "termination took %v", time.tick_since(stopped_at))
+	expect(t, sync.atomic_load(&timeouts) == 0, "no foreign-wait timeout during shutdown")
+}

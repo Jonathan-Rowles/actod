@@ -76,7 +76,15 @@ Actor_Behaviour :: struct($T: typeid) {
 	handle_message:           proc(data: ^T, from: PID, content: any), // Required
 	init:                     proc(data: ^T), // this should be non blocking
 	terminate:                proc(data: ^T),
+	// Dedicated-thread actors only. Replaces the mailbox wait: called with an
+	// empty mailbox, the actor may sleep in a foreign wait here and must return
+	// so the loop can drain. Pair it with on_wake so that sleep is interruptible.
 	on_idle:                  proc(data: ^T),
+	// The other half of on_idle. Called on the sender's thread whenever a message
+	// lands on a dedicated-thread actor, so the foreign wait can be interrupted
+	// (write an eventfd, post a window event). Cheap, thread safe, and it may
+	// fire before init has finished, so guard on what init creates.
+	on_wake:                  proc "contextless" (data: ^T),
 	actor_type:               Actor_Type, // 0 = untyped (default), 1-255 = user-defined
 
 	// Supervisor callbacks (all optional)
@@ -794,6 +802,7 @@ self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_loca
 	pid := get_self_pid()
 	return terminate_actor(pid, reason, loc)
 }
+
 
 @(require_results)
 rename_actor :: proc(pid: PID, new_name: string, loc := #caller_location) -> bool {

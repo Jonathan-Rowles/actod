@@ -15,6 +15,7 @@ Actor_Behaviour :: struct($T: typeid) {
 	handle_message:           proc(data: ^T, from: PID, content: any),
 	init:                     proc(data: ^T),
 	terminate:                proc(data: ^T),
+	on_idle:                  proc(data: ^T),
 	actor_type:               Actor_Type,
 
 	on_child_started:         proc(data: ^T, child_pid: PID),
@@ -170,8 +171,14 @@ Node_Info :: struct {
 	node_name:   string,
 	address:     net.Endpoint,
 	transport:   Transport_Strategy,
+	origin:      Node_Origin,
 	incarnation: u64,
 	gossip:      Gossip_Window,
+}
+
+Node_Origin :: enum u8 {
+	Discovered = 0,
+	Registered = 1,
 }
 
 PID :: distinct u64

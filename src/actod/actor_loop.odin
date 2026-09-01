@@ -450,7 +450,11 @@ wait_for_messages_if_idle :: #force_inline proc(
 	if mpsc_size(&actor.mailbox) == 0 &&
 	   mpsc_size(&actor.system_mailbox) == 0 &&
 	   sync.atomic_load(&actor.stopped_head) == nil {
-		sync.atomic_sema_wait(&actor.wake_sema)
+		if actor.behaviour.on_idle != nil {
+			actor.behaviour.on_idle(actor.data)
+		} else {
+			sync.atomic_sema_wait(&actor.wake_sema)
+		}
 	}
 }
 

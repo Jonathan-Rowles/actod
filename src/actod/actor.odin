@@ -76,6 +76,7 @@ Actor_Behaviour :: struct($T: typeid) {
 	handle_message:           proc(data: ^T, from: PID, content: any), // Required
 	init:                     proc(data: ^T), // this should be non blocking
 	terminate:                proc(data: ^T),
+	on_idle:                  proc(data: ^T),
 	actor_type:               Actor_Type, // 0 = untyped (default), 1-255 = user-defined
 
 	// Supervisor callbacks (all optional)

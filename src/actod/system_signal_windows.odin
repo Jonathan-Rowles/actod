@@ -8,10 +8,18 @@ import "core:time"
 
 @(private)
 setup_signal_handler :: proc() {
+	if NODE.signal_handler_installed do return
+	NODE.signal_handler_installed = true
+
 	handler :: proc "system" (ctrl_type: win32.DWORD) -> win32.BOOL {
 		switch ctrl_type {
 		case win32.CTRL_C_EVENT, win32.CTRL_CLOSE_EVENT, win32.CTRL_SHUTDOWN_EVENT:
+			if sync.atomic_exchange(&NODE.stop_requested, true) {
+				win32.SetConsoleCtrlHandler(handler, false)
+				return false
+			}
 			sync.atomic_sema_post(&NODE.signal_wake)
+			sync.atomic_sema_post(&NODE.signal_relay_wake)
 			return true
 		}
 		return false

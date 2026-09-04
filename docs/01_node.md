@@ -43,6 +43,10 @@ main :: proc() {
 
 `shutdown_node` gracefully terminates all actors through the supervision hierarchy. `await_signal` blocks until an OS signal is received, then calls `shutdown_node` automatically.
 
+A node started with `blocking_child` cannot call `await_signal`, so `node_init` installs the signal handler itself: SIGINT or SIGTERM terminates the blocking child with `.SHUTDOWN`, `node_init` returns, and `main` calls `shutdown_node` as usual. The handler then resets to the default, so a second signal ends the process immediately if a shutdown ever hangs.
+
+Children declared in the node config are spawned under a root supervisor that carries the node's `actor_config`, so a crashed node child restarts under its `restart_policy`, and one that exhausts `max_restarts` shuts the node down. Inside such a child `get_parent_pid` returns the root supervisor, not the node, and a `send_parent` lands there (logged at debug and dropped).
+
 ## API
 
 ```odin

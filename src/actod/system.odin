@@ -2,10 +2,10 @@ package actod
 
 import "../pkgs/coro"
 import "../pkgs/threads_act"
-import "base:intrinsics"
 import "base:runtime"
 import "core:log"
 import "core:net"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -75,14 +75,14 @@ Actor_Spawned_Broadcast :: struct {
 }
 
 Actor_Terminated_Broadcast :: struct {
-	pid:                     PID,
-	name:                    string,
-	reason:                  Termination_Reason,
-	source_incarnation:      u64,
-	source_seq:              u64,
-	ttl:                     u8,
+	pid:                      PID,
+	name:                     string,
+	reason:                   Termination_Reason,
+	source_incarnation:       u64,
+	source_seq:               u64,
+	ttl:                      u8,
 	inferred_from_disconnect: bool,
-	source_node_name:        string,
+	source_node_name:         string,
 }
 
 Remote_Spawn_Request :: struct {
@@ -212,6 +212,15 @@ Node_State :: struct {
 	shutdown_deferred_frees:  [dynamic]rawptr,
 	shutdown_deferred_lock:   sync.Mutex,
 	signal_wake:              sync.Atomic_Sema,
+	stop_requested:           bool,
+	blocking_actor:           ^Actor(int),
+	awaiting_signal:          bool,
+	signal_handler_installed: bool,
+	signal_relay_wake:        sync.Atomic_Sema,
+	signal_relay_stop:        bool,
+	signal_relay_thread:      ^thread.Thread,
+	root_supervisor_pid:      PID,
+	root_supervisor_children: [dynamic]SPAWN,
 	reclaim:                  Reclaim_State,
 	cluster_psk:              Cluster_Psk_State,
 	incarnation:              u64,
@@ -356,7 +365,11 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 				slot_size,
 			)
 		}
-		if !slot_slab_init(&NODE.coro_slab, coro_slot_size(uint(opts.actor_config.coro_stack_size)), u64(opts.actor_slab_slots)) {
+		if !slot_slab_init(
+			&NODE.coro_slab,
+			coro_slot_size(uint(opts.actor_config.coro_stack_size)),
+			u64(opts.actor_slab_slots),
+		) {
 			log.warnf(
 				"node_init('%s'): could not reserve a coro slab of %d slots, falling back to a dedicated mapping per coroutine",
 				name,
@@ -375,24 +388,32 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	append(&system_children, spawn_timer_child)
 	if opts.enable_observer do append(&system_children, spawn_observer_child)
 	if opts.hot_reload_dev do append(&system_children, spawn_hot_reload_child)
-	if system_config.children != nil {
-		for child in system_config.children {
-			append(&system_children, child)
-		}
-		delete(system_config.children)
-	}
+	append(&system_children, spawn_root_supervisor_child)
+	NODE.root_supervisor_children = system_config.children
 	NODE.config.actor_config.children = nil
 	system_config.children = system_children
 
-	NODE.pid, NODE.started = spawn(name, Node_Actor_Data{name = NODE.name}, Node_Behaviour, system_config, 0, loc)
+	NODE.pid, NODE.started = spawn(
+		name,
+		Node_Actor_Data{name = NODE.name},
+		Node_Behaviour,
+		system_config,
+		0,
+		loc,
+	)
 	delete(system_children)
+	delete(NODE.root_supervisor_children)
+	NODE.root_supervisor_children = nil
 	if !NODE.started do panic_at(loc, "node_init('%s'): the node actor could not be spawned", name)
 
 	if opts.blocking_child != nil {
 		log.info("Starting blocking child on main thread")
+		setup_signal_handler()
+		start_signal_relay()
 		spawning_blocking_child = true
 		opts.blocking_child("", 0)
 		spawning_blocking_child = false
+		stop_signal_relay()
 	}
 
 }
@@ -459,12 +480,7 @@ send_to_node_mailbox :: #force_inline proc(
 
 	result := push_to_mailbox(actor, msg, NODE.pid, loc)
 	if result != .OK {
-		log.errorf(
-			"cannot deliver %v to the node actor: %v",
-			typeid_of(T),
-			result,
-			location = loc,
-		)
+		log.errorf("cannot deliver %v to the node actor: %v", typeid_of(T), result, location = loc)
 		if message_owns_page(msg.content) {
 			free_message(&actor.pool, msg.content)
 		}
@@ -635,6 +651,67 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 node_shutdown :: shutdown_node
 
+@(private)
+request_node_shutdown :: proc() {
+	sync.atomic_store(&NODE.shutting_down, true)
+	request_node_stop()
+}
+
+@(private)
+request_node_stop :: proc() {
+	sync.atomic_store(&NODE.stop_requested, true)
+	sync.atomic_sema_post(&NODE.signal_wake)
+	wake_blocking_actor()
+}
+
+@(private)
+wake_blocking_actor :: proc() {
+	reclaim_pin()
+	defer reclaim_unpin()
+	if blocking := sync.atomic_load(&NODE.blocking_actor); blocking != nil do wake_actor(blocking)
+}
+
+@(private)
+node_has_shutdown_host :: proc() -> bool {
+	return sync.atomic_load(&NODE.awaiting_signal) || sync.atomic_load(&NODE.blocking_actor) != nil
+}
+
+@(private)
+escalate_node_failure :: proc(what: string) {
+	if node_has_shutdown_host() {
+		log.errorf("%s, shutting the node down", what)
+		request_node_shutdown()
+		return
+	}
+	log.fatalf(
+		"%s and nothing is parked in await_signal or running as a blocking child to shut the node down, exiting",
+		what,
+	)
+	os.exit(1)
+}
+
+@(private)
+start_signal_relay :: proc() {
+	sync.atomic_store(&NODE.signal_relay_stop, false)
+	NODE.signal_relay_thread = thread.create_and_start(proc() {
+		for {
+			sync.atomic_sema_wait(&NODE.signal_relay_wake)
+			if sync.atomic_load(&NODE.signal_relay_stop) do return
+			wake_blocking_actor()
+		}
+	})
+}
+
+@(private)
+stop_signal_relay :: proc() {
+	if NODE.signal_relay_thread == nil do return
+	sync.atomic_store(&NODE.signal_relay_stop, true)
+	sync.atomic_sema_post(&NODE.signal_relay_wake)
+	thread.join(NODE.signal_relay_thread)
+	thread.destroy(NODE.signal_relay_thread)
+	NODE.signal_relay_thread = nil
+}
+
 shutdown_node :: proc(loc := #caller_location) {
 	context.logger = NODE.logger
 	if !NODE.started || NODE.pid == 0 {
@@ -652,8 +729,7 @@ shutdown_node :: proc(loc := #caller_location) {
 			"shutdown_node called from inside an actor: signalling shutdown and returning, the node will stop once this actor yields",
 			location = loc,
 		)
-		sync.atomic_store(&NODE.shutting_down, true)
-		sync.atomic_sema_post(&NODE.signal_wake)
+		request_node_shutdown()
 		return
 	}
 
@@ -793,6 +869,12 @@ reset_node_state :: proc() {
 	NODE.observer_pid = {}
 	NODE.timer_pid = 0
 	NODE.hot_reload_pid = 0
+	NODE.root_supervisor_pid = 0
+	sync.atomic_store(&NODE.stop_requested, false)
+	sync.atomic_store(&NODE.blocking_actor, nil)
+	sync.atomic_store(&NODE.awaiting_signal, false)
+	NODE.signal_wake = {}
+	NODE.signal_relay_wake = {}
 	reset_timer_registry()
 
 	if NODE.node_name_to_id != nil {
@@ -888,7 +970,8 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 	pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
 		offset_of(Actor(int), pool_handle))
 	if pool_handle_ptr^ != nil && pool_handle_ptr^.co != nil {
-		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot, true); res != .Success {
+		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot, true);
+		   res != .Success {
 			log.errorf(
 				"leaking the coroutine stack of a terminated actor: %s",
 				coro.result_description(res),
@@ -904,7 +987,9 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 
 await_signal :: proc() {
 	setup_signal_handler()
+	sync.atomic_store(&NODE.awaiting_signal, true)
 	sync.atomic_sema_wait(&NODE.signal_wake)
+	sync.atomic_store(&NODE.awaiting_signal, false)
 	if NODE.pid != 0 do shutdown_node()
 }
 
@@ -914,6 +999,6 @@ is_system_actod_pid :: proc(pid: PID) -> bool {
 		pid == NODE.pid ||
 		pid == NODE.observer_pid ||
 		pid == NODE.timer_pid ||
-		pid == NODE.hot_reload_pid
+		pid == NODE.hot_reload_pid \
 	)
 }

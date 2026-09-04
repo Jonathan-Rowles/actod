@@ -211,7 +211,11 @@ spawn_from_raw :: proc(
 		spawn_fail(actor, 0)
 		return 0, false
 	}
-	system_entries, system_alloc_err := make([]Entry(Message), SYSTEM_MAILBOX_SIZE, actor.allocator)
+	system_entries, system_alloc_err := make(
+		[]Entry(Message),
+		SYSTEM_MAILBOX_SIZE,
+		actor.allocator,
+	)
 	if system_alloc_err != nil {
 		log.errorf(
 			"spawn('%s') failed: could not allocate the system mailbox from the actor arena: %v",
@@ -224,7 +228,12 @@ spawn_from_raw :: proc(
 	}
 	mpsc_init_external(&actor.system_mailbox, system_entries, entries_zeroed = true)
 	mpsc_init_external(&actor.mailbox, mailbox_entries)
-	pool_init(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(DEFAULT_MAIL_BOX_SIZE))
+	pool_init(
+		&actor.pool,
+		actor.allocator,
+		actor.opts.page_size,
+		pool_max_pages(DEFAULT_MAIL_BOX_SIZE),
+	)
 
 	pid, ok := add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
 	if !ok {
@@ -299,7 +308,9 @@ spawn_from_raw :: proc(
 			if current_worker != nil &&
 			   &NODE.worker_pool.workers[idx] == current_worker &&
 			   NODE.worker_pool.worker_count > 1 {
-				idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
+				idx =
+					sync.atomic_add(&NODE.worker_pool.next_worker, 1) %
+					NODE.worker_pool.worker_count
 			}
 		}
 		handle.home_worker = &NODE.worker_pool.workers[idx]
@@ -926,7 +937,12 @@ prepare_build_dir :: proc(
 		dst_dir := join_path({build_root, dep.build_name})
 		os.make_directory(dst_dir)
 
-		if !copy_package_with_rewrites(dep.real_path, dst_dir, dep.build_name, build_name_by_path) {
+		if !copy_package_with_rewrites(
+			dep.real_path,
+			dst_dir,
+			dep.build_name,
+			build_name_by_path,
+		) {
 			return "", false
 		}
 	}
@@ -1256,7 +1272,14 @@ handle_file_changed :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) {
 }
 
 @(private)
-validate_actors :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) -> ([dynamic]string, string, bool) {
+validate_actors :: proc(
+	data: ^Hot_Reload_Actor_Data,
+	pkg_path: string,
+) -> (
+	[dynamic]string,
+	string,
+	bool,
+) {
 	actor_names, pkg_exists := data.package_actors[pkg_path]
 	if !pkg_exists || len(actor_names) == 0 {
 		log.warnf("hot reload: file changed in unregistered package '%s'", pkg_path)
@@ -1326,7 +1349,14 @@ validate_actors :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string) -> ([dyn
 }
 
 @(private)
-compile_package :: proc(data: ^Hot_Reload_Actor_Data, pkg_path: string, pkg_name: string) -> (string, bool) {
+compile_package :: proc(
+	data: ^Hot_Reload_Actor_Data,
+	pkg_path: string,
+	pkg_name: string,
+) -> (
+	string,
+	bool,
+) {
 	build_pkg_path, build_ok := prepare_build_dir(pkg_path, pkg_name)
 	if !build_ok {
 		log.errorf("hot reload: failed to prepare build dir for '%s'", pkg_path)
@@ -1437,7 +1467,7 @@ load_and_swap :: proc(data: ^Hot_Reload_Actor_Data, actor_names: []string, so_pa
 }
 
 register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
-	if !NODE.config.hot_reload_dev || is_system_actod_pid(pid) || name == get_local_node_name() do return
+	if !NODE.config.hot_reload_dev || is_system_actod_pid(pid) || pid == NODE.root_supervisor_pid || name == get_local_node_name() do return
 
 	msg: Register_Hot_Actor
 	msg.pid = pid
@@ -1452,7 +1482,10 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 				if field_name == "actor_type" do continue
 				if field_idx >= MAX_BEHAVIOUR_FIELDS do break
 
-				msg.field_name_lens[field_idx] = write_fixed(&msg.field_names[field_idx], field_name)
+				msg.field_name_lens[field_idx] = write_fixed(
+					&msg.field_names[field_idx],
+					field_name,
+				)
 				field_idx += 1
 			}
 			msg.field_count = field_idx

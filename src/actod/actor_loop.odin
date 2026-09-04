@@ -2,10 +2,10 @@ package actod
 
 import "../pkgs/coro"
 import "base:intrinsics"
+import "base:runtime"
 import "core:c/libc"
 import "core:log"
 import "core:mem"
-import "base:runtime"
 import "core:sync"
 
 @(private)
@@ -242,10 +242,7 @@ message_processing_context_init :: proc(
 }
 
 @(private)
-ensure_message_batch :: #force_inline proc(
-	actor: ^Actor($T),
-	ctx: ^Message_Processing_Context,
-) {
+ensure_message_batch :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processing_Context) {
 	if ctx.message_batch != nil do return
 	batch_raw, batch_err := mem.alloc_bytes_non_zeroed(
 		ctx.batch_size * size_of(Message),
@@ -290,6 +287,10 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 		if !process_user_mailboxes(actor, ctx) do return
 		if sync.atomic_load(&actor.state) != .RUNNING do return
 		if co == nil {
+			if actor.blocking && sync.atomic_load(&NODE.stop_requested) {
+				mark_stopping(actor, .SHUTDOWN)
+				return
+			}
 			wait_for_messages_if_idle(actor, ctx)
 			continue
 		}
@@ -315,6 +316,16 @@ run_message_loop :: #force_inline proc(actor: ^Actor($T), ctx: ^Message_Processi
 			}
 			coro.yield(co)
 		}
+	}
+}
+
+@(private)
+mark_stopping :: #force_inline proc(actor: ^Actor($T), reason: Termination_Reason) {
+	actor.termination_reason = reason
+	for {
+		current := sync.atomic_load(&actor.state)
+		if current == .STOPPING || current == .THREAD_STOPPED do break
+		if try_transition_state(&actor.state, current, .STOPPING) do break
 	}
 }
 
@@ -346,14 +357,7 @@ process_system_mailbox :: #force_no_inline proc(
 
 		switch v in ctx.data {
 		case Terminate:
-			actor.termination_reason = v.reason
-
-			for {
-				current := sync.atomic_load(&actor.state)
-				if current == .STOPPING || current == .THREAD_STOPPED do break
-				if try_transition_state(&actor.state, current, .STOPPING) do break
-			}
-
+			mark_stopping(actor, v.reason)
 			if message_owns_page(msg.content) do free_message(&actor.pool, msg.content)
 			return false
 
@@ -491,6 +495,7 @@ call_terminate_handler :: proc(actor: ^Actor($T)) {
 
 @(private)
 notify_termination :: proc(actor: ^Actor($T)) {
+	if actor.blocking do sync.atomic_store(&NODE.blocking_actor, nil)
 	if current_actor_context != nil {
 		for sub in current_actor_context.subscriptions {
 			remove_subscriber(sub.actor_type, sub.pid)
@@ -500,7 +505,9 @@ notify_termination :: proc(actor: ^Actor($T)) {
 			topic_remove_subscriber(sub.topic, sub.pid)
 		}
 
-		if NODE.timer_pid != 0 && actor.pid != NODE.timer_pid && current_actor_context.used_timers {
+		if NODE.timer_pid != 0 &&
+		   actor.pid != NODE.timer_pid &&
+		   current_actor_context.used_timers {
 			if _, timer_active := get(&NODE.actor_registry, NODE.timer_pid); timer_active {
 				timer_actor, timer_ok := get_actor_from_pointer(
 					get(&NODE.actor_registry, NODE.timer_pid),
@@ -553,7 +560,10 @@ notify_termination :: proc(actor: ^Actor($T)) {
 	response := Stats_Response {
 		stats = final_stats,
 	}
-	observer_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, NODE.observer_pid), true)
+	observer_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, NODE.observer_pid),
+		true,
+	)
 	if ok {
 		send(NODE.observer_pid, response, observer_actor)
 	} else {
@@ -567,11 +577,7 @@ push_stop_signal :: proc(target: ^Actor(int), child: ^Actor(int)) {
 	for {
 		old := sync.atomic_load(&target.stopped_head)
 		child.stop_signal.next = old
-		_, swapped := sync.atomic_compare_exchange_weak(
-			&target.stopped_head,
-			old,
-			rawptr(child),
-		)
+		_, swapped := sync.atomic_compare_exchange_weak(&target.stopped_head, old, rawptr(child))
 		if swapped do return
 	}
 }
@@ -585,7 +591,10 @@ take_stop_signals :: proc(actor: ^Actor($T)) -> ^Actor(int) {
 	links := 0
 	for chain != nil {
 		links += 1
-		assert(links <= STOP_SIGNAL_CHAIN_BOUND, "stop-signal chain exceeds any possible actor count, the intrusive list is cyclic")
+		assert(
+			links <= STOP_SIGNAL_CHAIN_BOUND,
+			"stop-signal chain exceeds any possible actor count, the intrusive list is cyclic",
+		)
 		child := cast(^Actor(int))chain
 		next := child.stop_signal.next
 		child.stop_signal.next = reversed
@@ -603,6 +612,7 @@ process_stop_signals :: proc(actor: ^Actor($T)) {
 
 		if actor.pid == NODE.pid {
 			if stop_signal_ready(child) {
+				if root_supervisor_died(child) do escalate_node_failure("the root supervisor died")
 				cleanup_terminated_actor(child.stop_signal.pid, rawptr(child))
 			} else {
 				push_stop_signal(cast(^Actor(int))rawptr(actor), child)
@@ -622,6 +632,13 @@ process_stop_signals :: proc(actor: ^Actor($T)) {
 
 		child = next
 	}
+}
+
+@(private)
+root_supervisor_died :: proc(child: ^Actor(int)) -> bool {
+	if child.stop_signal.pid != NODE.root_supervisor_pid do return false
+	if child.stop_signal.reason == .SHUTDOWN do return false
+	return !sync.atomic_load(&NODE.shutting_down)
 }
 
 @(private)
@@ -652,7 +669,10 @@ drain_stop_signals_to_node :: proc(actor: ^Actor(int)) {
 	links := 0
 	for chain != nil {
 		links += 1
-		assert(links <= STOP_SIGNAL_CHAIN_BOUND, "stop-signal chain exceeds any possible actor count, the intrusive list is cyclic")
+		assert(
+			links <= STOP_SIGNAL_CHAIN_BOUND,
+			"stop-signal chain exceeds any possible actor count, the intrusive list is cyclic",
+		)
 		child := cast(^Actor(int))chain
 		next := child.stop_signal.next
 		forward_stop_signal_to_node(child)

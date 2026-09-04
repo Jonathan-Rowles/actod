@@ -7,9 +7,9 @@ import "base:intrinsics"
 import "core:log"
 import "core:mem"
 _ :: mem
+import "../pkgs/threads_act"
 import "core:strings"
 import "core:sync"
-import "../pkgs/threads_act"
 
 @(private)
 spawn_fail :: proc(actor: ^Actor($T), pid: PID) {
@@ -50,7 +50,10 @@ spawn_sized :: proc(
 ) -> (
 	PID,
 	bool,
-) where MAILBOX_SIZE > 0, (MAILBOX_SIZE & (MAILBOX_SIZE - 1)) == 0 {
+) where MAILBOX_SIZE >
+	0,
+	(MAILBOX_SIZE & (MAILBOX_SIZE - 1)) ==
+	0 {
 	return spawn_impl(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
 }
 
@@ -71,7 +74,12 @@ spawn_alloc_actor :: proc(
 	actor = new(Actor(T), actor_system_allocator)
 
 	if actor.state != .ZERO {
-		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor(%v)", name, typeid_of(T))
+		panic_at(
+			loc,
+			"spawn('%s'): allocator returned non-zeroed memory for Actor(%v)",
+			name,
+			typeid_of(T),
+		)
 	}
 
 	arena_fresh, arena_ok := actor_arena_acquire(
@@ -257,7 +265,15 @@ spawn_impl :: proc(
 		)
 	}
 
-	actor, pid, allocated := spawn_alloc_actor(name, data, behaviour, mailbox_size, opts, parent_pid, loc)
+	actor, pid, allocated := spawn_alloc_actor(
+		name,
+		data,
+		behaviour,
+		mailbox_size,
+		opts,
+		parent_pid,
+		loc,
+	)
 	if !allocated {
 		spawn_fail(actor, 0)
 		return 0, false
@@ -297,6 +313,7 @@ spawn_impl :: proc(
 		actor.opts.use_dedicated_os_thread = true
 		actor.pool_handle = nil
 		spawning_blocking_child = false
+		sync.atomic_store(&NODE.blocking_actor, cast(^Actor(int))actor)
 		actor_loop(actor)
 		return actor.pid, true
 	}
@@ -338,7 +355,12 @@ spawn_impl :: proc(
 }
 
 @(private)
-spawn_schedule_pooled :: proc(actor: ^Actor($T), name: string, pid: PID, loc := #caller_location) -> bool {
+spawn_schedule_pooled :: proc(
+	actor: ^Actor($T),
+	name: string,
+	pid: PID,
+	loc := #caller_location,
+) -> bool {
 	handle := actor.pool_handle
 	if handle == nil do handle = new(Pooled_Actor_Handle, actor.allocator)
 	handle.actor_ptr = actor
@@ -384,8 +406,7 @@ spawn_schedule_pooled :: proc(actor: ^Actor($T), name: string, pid: PID, loc := 
 			)
 		}
 		idx = actor.opts.home_worker
-	} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity);
-	   affinity_ok {
+	} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity); affinity_ok {
 		affinity_actor := get(&NODE.actor_registry, affinity_pid)
 		if affinity_actor != nil {
 			affinity_handle := (cast(^Actor(int))affinity_actor).pool_handle
@@ -478,7 +499,10 @@ spawn_child_sized :: proc(
 ) -> (
 	PID,
 	bool,
-) where MAILBOX_SIZE > 0, (MAILBOX_SIZE & (MAILBOX_SIZE - 1)) == 0 {
+) where MAILBOX_SIZE >
+	0,
+	(MAILBOX_SIZE & (MAILBOX_SIZE - 1)) ==
+	0 {
 	when ODIN_TEST {
 		if pid, ok := ti.intercept_spawn_child(name, T); ok do return PID(pid), true
 	}

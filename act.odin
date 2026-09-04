@@ -233,7 +233,7 @@ spawn_default :: proc(
 	PID,
 	bool,
 ) {
-	return actod.spawn(name, data, behaviour, opts, parent_pid, loc)
+	return actod.spawn(name, data, behaviour, opts, actod.supervising_parent(parent_pid), loc)
 }
 
 // Like spawn, but with a compile-time mailbox capacity for this actor.
@@ -253,7 +253,15 @@ spawn_sized :: proc(
 	PID,
 	bool,
 ) {
-	return actod.spawn_sized(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
+	return actod.spawn_sized(
+		name,
+		data,
+		behaviour,
+		MAILBOX_SIZE,
+		opts,
+		actod.supervising_parent(parent_pid),
+		loc,
+	)
 }
 
 // One name for both variants:
@@ -520,10 +528,7 @@ set_timer :: proc(
 	return actod.set_timer(interval, repeat, loc)
 }
 
-cancel_timer :: proc(
-	id: u32,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
+cancel_timer :: proc(id: u32, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
 	return actod.cancel_timer(id, loc)
 }
 

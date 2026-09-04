@@ -45,7 +45,8 @@ ask_responder_handle :: proc(d: ^Ask_Responder_Data, from: actod.PID, msg: any) 
 			return
 		}
 		if d.delay > 0 {
-			time.sleep(d.delay)
+			started := time.tick_now()
+			for time.tick_since(started) < d.delay do actod.yield()
 		}
 		err := actod.reply(Ask_Answer{y = m.x * 2})
 		sync.atomic_store(d.reply_err, int(err))
@@ -103,7 +104,10 @@ int_left_sentinel :: proc(state: rawptr) -> bool {
 }
 
 wait_for_int :: proc(target: ^int, sentinel: int, budget: time.Duration) {
-	probe := Int_Probe{target = target, sentinel = sentinel}
+	probe := Int_Probe {
+		target   = target,
+		sentinel = sentinel,
+	}
 	_ = poll_until(int_left_sentinel, &probe, budget)
 }
 
@@ -242,7 +246,11 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 	for sync.atomic_load(&timeout_token) == 0 && time.diff(start, time.now()) < 3 * time.Second {
 		time.sleep(5 * time.Millisecond)
 	}
-	expect(t, sync.atomic_load(&timeout_token) != 0, "Ask_Timeout must fire for a silent responder")
+	expect(
+		t,
+		sync.atomic_load(&timeout_token) != 0,
+		"Ask_Timeout must fire for a silent responder",
+	)
 	expect(
 		t,
 		sync.atomic_load(&timeout_token) == sync.atomic_load(&asked_token),

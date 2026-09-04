@@ -612,11 +612,12 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> b
 		panic_at(loc, "add_child(parent=%v): child_spawn must not be nil", parent)
 	}
 
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
+	supervisor := supervising_parent(parent)
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervisor))
 	if !ok {
 		log.errorf(
-			"add_child failed: parent %v is not a live actor (never spawned, already terminated, or a stale PID)",
-			parent,
+			"add_child failed: supervisor %v is not a live actor (never spawned, already terminated, or a stale PID)",
+			supervisor,
 			location = loc,
 		)
 		return false
@@ -627,11 +628,11 @@ add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> b
 		spawn_func   = child_spawn,
 		existing_pid = 0,
 	}
-	err := send(parent, msg, parent_actor, loc)
+	err := send(supervisor, msg, parent_actor, loc)
 	if err != .OK {
 		log.errorf(
-			"add_child failed: could not deliver Add_Child to parent %s: %v",
-			actor_origin(parent),
+			"add_child failed: could not deliver Add_Child to supervisor %s: %v",
+			actor_origin(supervisor),
 			err,
 			location = loc,
 		)
@@ -662,11 +663,12 @@ add_child_existing :: proc(
 		)
 	}
 
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
+	supervisor := supervising_parent(parent)
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervisor))
 	if !ok {
 		log.errorf(
-			"add_child_existing failed: parent %v is not a live actor (never spawned, already terminated, or a stale PID)",
-			parent,
+			"add_child_existing failed: supervisor %v is not a live actor (never spawned, already terminated, or a stale PID)",
+			supervisor,
 			location = loc,
 		)
 		return false
@@ -677,12 +679,12 @@ add_child_existing :: proc(
 		existing_pid         = existing_child,
 		spawn_func_name_hash = spawn_func_name_hash,
 	}
-	err := send(parent, msg, parent_actor, loc)
+	err := send(supervisor, msg, parent_actor, loc)
 	if err != .OK {
 		log.errorf(
-			"add_child_existing(child=%v) failed: could not deliver Add_Child to parent %s: %v",
+			"add_child_existing(child=%v) failed: could not deliver Add_Child to supervisor %s: %v",
 			existing_child,
-			actor_origin(parent),
+			actor_origin(supervisor),
 			err,
 			location = loc,
 		)
@@ -696,12 +698,13 @@ add_child_existing :: proc(
 @(require_results)
 remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 	context.logger = diagnostic_logger(context.logger)
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
+	supervisor := supervising_parent(parent)
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervisor))
 	if !ok {
 		log.errorf(
-			"remove_child(child=%v) failed: parent %v is not a live actor",
+			"remove_child(child=%v) failed: supervisor %v is not a live actor",
 			child,
-			parent,
+			supervisor,
 			location = loc,
 		)
 		return false
@@ -711,12 +714,12 @@ remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 		child_pid = child,
 	}
 
-	err := send(parent, msg, parent_actor, loc)
+	err := send(supervisor, msg, parent_actor, loc)
 	if err != .OK {
 		log.errorf(
-			"remove_child(child=%v) failed: could not deliver Remove_Child to parent %s: %v",
+			"remove_child(child=%v) failed: could not deliver Remove_Child to supervisor %s: %v",
 			child,
-			actor_origin(parent),
+			actor_origin(supervisor),
 			err,
 			location = loc,
 		)
@@ -727,7 +730,7 @@ remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 
 // Get list of children for an actor
 get_children :: proc(parent: PID) -> []PID {
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, parent))
+	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervising_parent(parent)))
 	if !ok do return nil
 
 	// Return a copy to avoid external modifications

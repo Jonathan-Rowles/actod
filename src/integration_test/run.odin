@@ -34,7 +34,10 @@ Test_Entry :: struct {
 ALL_TESTS :: []Test_Entry {
 	// Core actor tests
 	{name = "test_actor_lifecycle", test_proc = test_actor_lifecycle},
-	{name = "test_on_wake_interrupts_foreign_wait", test_proc = test_on_wake_interrupts_foreign_wait},
+	{
+		name = "test_on_wake_interrupts_foreign_wait",
+		test_proc = test_on_wake_interrupts_foreign_wait,
+	},
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
 	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
 	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},
@@ -57,26 +60,121 @@ ALL_TESTS :: []Test_Entry {
 	},
 	{name = "test_registry_consistency", test_proc = test_registry_consistency},
 	{name = "test_worker_contention", test_proc = test_worker_contention, worker_count = 2},
-	{name = "test_sim_pump_basic", test_proc = test_sim_pump_basic, sim_mode = true, worker_count = 2},
-	{name = "test_sim_virtual_timer", test_proc = test_sim_virtual_timer, sim_mode = true, worker_count = 2},
-	{name = "test_sim_seeded_determinism", test_proc = test_sim_seeded_determinism, sim_mode = true, worker_count = 2},
-	{name = "test_sim_two_nodes", test_proc = test_sim_two_nodes, sim_mode = true, worker_count = 2},
-	{name = "test_sim_virtual_transport", test_proc = test_sim_virtual_transport, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_basic", test_proc = test_sim_mesh_basic, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_determinism", test_proc = test_sim_mesh_determinism, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_partition_heal", test_proc = test_sim_mesh_partition_heal, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_crash_restart", test_proc = test_sim_mesh_crash_restart, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_remote_spawn_supervision", test_proc = test_sim_mesh_remote_spawn_supervision, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_discovery", test_proc = test_sim_mesh_discovery, sim_mode = true, worker_count = 2},
-	{name = "test_sim_mesh_pool_scale_up", test_proc = test_sim_mesh_pool_scale_up, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_stale_gossip_after_restart", test_proc = test_sim_regression_stale_gossip_after_restart, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_relay_heals_lost_broadcast", test_proc = test_sim_regression_relay_heals_lost_broadcast, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_relay_cannot_resurrect", test_proc = test_sim_regression_relay_cannot_resurrect, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_pool_peer_crash", test_proc = test_sim_regression_pool_peer_crash, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_idle_pool_ring_parks", test_proc = test_sim_regression_idle_pool_ring_parks, sim_mode = true, worker_count = 2},
-	{name = "test_sim_regression_publish_during_scale_down", test_proc = test_sim_regression_publish_during_scale_down, sim_mode = true, worker_count = 2},
+	{
+		name = "test_sim_pump_basic",
+		test_proc = test_sim_pump_basic,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_virtual_timer",
+		test_proc = test_sim_virtual_timer,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_seeded_determinism",
+		test_proc = test_sim_seeded_determinism,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_two_nodes",
+		test_proc = test_sim_two_nodes,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_virtual_transport",
+		test_proc = test_sim_virtual_transport,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_basic",
+		test_proc = test_sim_mesh_basic,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_determinism",
+		test_proc = test_sim_mesh_determinism,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_partition_heal",
+		test_proc = test_sim_mesh_partition_heal,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_crash_restart",
+		test_proc = test_sim_mesh_crash_restart,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_remote_spawn_supervision",
+		test_proc = test_sim_mesh_remote_spawn_supervision,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_discovery",
+		test_proc = test_sim_mesh_discovery,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_mesh_pool_scale_up",
+		test_proc = test_sim_mesh_pool_scale_up,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_regression_stale_gossip_after_restart",
+		test_proc = test_sim_regression_stale_gossip_after_restart,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_regression_relay_heals_lost_broadcast",
+		test_proc = test_sim_regression_relay_heals_lost_broadcast,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_regression_relay_cannot_resurrect",
+		test_proc = test_sim_regression_relay_cannot_resurrect,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_regression_pool_peer_crash",
+		test_proc = test_sim_regression_pool_peer_crash,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_regression_idle_pool_ring_parks",
+		test_proc = test_sim_regression_idle_pool_ring_parks,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_regression_publish_during_scale_down",
+		test_proc = test_sim_regression_publish_during_scale_down,
+		sim_mode = true,
+		worker_count = 2,
+	},
 	{name = "test_sim_vopr", test_proc = test_sim_vopr, sim_mode = true, worker_count = 2},
-	{name = "test_sim_scale_up_race", test_proc = test_sim_scale_up_race, sim_mode = true, worker_count = 2},
+	{
+		name = "test_sim_scale_up_race",
+		test_proc = test_sim_scale_up_race,
+		sim_mode = true,
+		worker_count = 2,
+	},
 	{
 		name = "test_reclaim_churn_under_termination",
 		test_proc = test_reclaim_churn_under_termination,
@@ -114,11 +212,7 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 		expects_error_logs = true,
 	},
-	{
-		name = "test_spawn_sized_mailbox",
-		test_proc = test_spawn_sized_mailbox,
-		worker_count = 2,
-	},
+	{name = "test_spawn_sized_mailbox", test_proc = test_spawn_sized_mailbox, worker_count = 2},
 	{
 		name = "test_supervisor_survives_many_child_terminations",
 		test_proc = test_supervisor_survives_many_child_terminations,
@@ -148,10 +242,26 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_self_termination_reasons", test_proc = test_self_termination_reasons},
 	{name = "test_transient_restart_policy", test_proc = test_transient_restart_policy},
 	{name = "test_rest_for_one_strategy", test_proc = test_rest_for_one_strategy},
+	{name = "test_node_child_restarts", test_proc = test_node_child_restarts},
 	{
-		name = "test_remove_child_then_restart_all",
-		test_proc = test_remove_child_then_restart_all,
+		name = "test_node_child_max_restarts_shuts_down_node",
+		test_proc = test_node_child_max_restarts_shuts_down_node,
+		expects_error_logs = true,
 	},
+	{
+		name = "test_blocking_child_stops_on_signal",
+		test_proc = test_blocking_child_stops_on_signal,
+	},
+	{
+		name = "test_blocking_child_signal_interrupts_foreign_wait",
+		test_proc = test_blocking_child_signal_interrupts_foreign_wait,
+	},
+	{
+		name = "test_blocking_child_stops_on_escalation",
+		test_proc = test_blocking_child_stops_on_escalation,
+		expects_error_logs = true,
+	},
+	{name = "test_remove_child_then_restart_all", test_proc = test_remove_child_then_restart_all},
 	{name = "test_string_handling", test_proc = test_string_handling},
 	{name = "test_byte_slice_handling", test_proc = test_byte_slice_handling},
 	{name = "test_union_message_handling", test_proc = test_union_message_handling},
@@ -176,13 +286,21 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_timer_cleanup_on_termination", test_proc = test_timer_cleanup_on_termination},
 
 	// Panic recovery tests
-	{name = "test_actor_panic_recovery", test_proc = test_actor_panic_recovery, expects_error_logs = true},
+	{
+		name = "test_actor_panic_recovery",
+		test_proc = test_actor_panic_recovery,
+		expects_error_logs = true,
+	},
 	{
 		name = "test_actor_panic_supervisor_restart",
 		test_proc = test_actor_panic_supervisor_restart,
 		expects_error_logs = true,
 	},
-	{name = "test_actor_panic_in_init", test_proc = test_actor_panic_in_init, expects_error_logs = true},
+	{
+		name = "test_actor_panic_in_init",
+		test_proc = test_actor_panic_in_init,
+		expects_error_logs = true,
+	},
 	{
 		name = "test_crash_runs_terminate_and_reaps_children",
 		test_proc = test_crash_runs_terminate_and_reaps_children,
@@ -195,7 +313,11 @@ ALL_TESTS :: []Test_Entry {
 	},
 
 	// Slower tests
-	{name = "test_restart_limit_within_window", test_proc = test_restart_limit_within_window, expects_error_logs = true},
+	{
+		name = "test_restart_limit_within_window",
+		test_proc = test_restart_limit_within_window,
+		expects_error_logs = true,
+	},
 	{name = "test_restart_limit_window_reset", test_proc = test_restart_limit_window_reset},
 	{name = "test_one_for_all_strategy", test_proc = test_one_for_all_strategy},
 
@@ -681,11 +803,7 @@ run_tests_parallel :: proc(t: ^testing.T) {
 	when #config(ODIN_TEST_THREADS, 0) == 1 {
 		worker_budget = 1
 	}
-	fmt.printf(
-		"Running %d tests in parallel (worker budget %d)...\n",
-		len(tests),
-		worker_budget,
-	)
+	fmt.printf("Running %d tests in parallel (worker budget %d)...\n", len(tests), worker_budget)
 
 	for batch_start := 0; batch_start < len(tests); {
 		batch_end := batch_start

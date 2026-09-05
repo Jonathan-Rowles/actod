@@ -1341,8 +1341,8 @@ nbio_available :: proc() -> bool {
 	return g_nbio_available
 }
 
-nbio_io_loop :: proc(t: ^thread.Thread) {
-	ctx := cast(^IO_Context)t.user_args[0]
+nbio_io_loop :: proc(data: rawptr) {
+	ctx := cast(^IO_Context)data
 	if ctx == nil do return
 
 	ring := ctx.ring

@@ -1,6 +1,7 @@
 package actod
 
 import "../pkgs/coro"
+import "../pkgs/threads_act"
 import "base:intrinsics"
 import "core:crypto"
 import "core:crypto/hash"
@@ -1181,17 +1182,15 @@ start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	prev_allocator := context.allocator
 	context.allocator = get_system_allocator()
-	t := thread.create(nbio_io_loop)
+	t := threads_act.make_thread_with_stack_size(ctx, nbio_io_loop, SERVICE_THREAD_STACK_SIZE)
 	context.allocator = prev_allocator
 	if t == nil {
 		free(ctx)
 		log.error("Failed to create connection IO thread")
 		return false
 	}
-	t.user_args[0] = ctx
 	data.io_ctx = ctx
 	ring.io_thread = t
-	thread.start(t)
 	return true
 }
 

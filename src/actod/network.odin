@@ -1,6 +1,7 @@
 package actod
 
 import "../pkgs/coro"
+import "../pkgs/threads_act"
 import "base:intrinsics"
 import "base:runtime"
 import "core:encoding/endian"
@@ -157,8 +158,8 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	}
 
 
-	listener_proc :: proc(t: ^thread.Thread) {
-		listener_ctx := cast(^Listener_Context)t.user_args[0]
+	listener_proc :: proc(data: rawptr) {
+		listener_ctx := cast(^Listener_Context)data
 		context.logger = listener_ctx.logger
 		defer free(listener_ctx, get_system_allocator())
 
@@ -226,12 +227,13 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 
 	prev_allocator := context.allocator
 	context.allocator = get_system_allocator()
-	NODE.network_listener_thread = thread.create(listener_proc)
+	NODE.network_listener_thread = threads_act.make_thread_with_stack_size(
+		ctx,
+		listener_proc,
+		SERVICE_THREAD_STACK_SIZE,
+	)
 	context.allocator = prev_allocator
-	if NODE.network_listener_thread != nil {
-		NODE.network_listener_thread.user_args[0] = ctx
-		thread.start(NODE.network_listener_thread)
-	} else {
+	if NODE.network_listener_thread == nil {
 		free(ctx, get_system_allocator())
 		log.errorf(
 			"Failed to create the network listener thread for port %d; this node will not accept incoming connections",

@@ -129,6 +129,14 @@ worker_pool_init :: proc(count: int) {
 			w.thread = threads_act.make_thread_with_stack_size(w, proc(data: rawptr) {
 					worker_loop(cast(^Worker)data)
 				}, 128 * 1024)
+			if w.thread == nil {
+				panic_at(
+					NODE.config.loc,
+					"node startup failed: could not create worker thread %d of %d, the node cannot run without its worker pool",
+					i,
+					count,
+				)
+			}
 			threads_act.set_thread_affinity(w.thread, i)
 		}
 	}

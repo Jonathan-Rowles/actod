@@ -2,6 +2,7 @@ package actod
 
 import ti "../../test_harness/ti"
 _ :: ti
+import "../pkgs/threads_act"
 import "base:runtime"
 import pq "core:container/priority_queue"
 import "core:log"
@@ -170,8 +171,8 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 	ctx.logger = context.logger
 	data.thread_ctx = ctx
 
-	timer_thread_proc :: proc(t: ^thread.Thread) {
-		ctx := cast(^Timer_Thread_Context)t.user_args[0]
+	timer_thread_proc :: proc(data: rawptr) {
+		ctx := cast(^Timer_Thread_Context)data
 		if ctx == nil do return
 		context.allocator = ctx.allocator
 		context.logger = ctx.logger
@@ -204,11 +205,9 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 
 	prev_allocator := context.allocator
 	context.allocator = get_system_allocator()
-	t := thread.create(timer_thread_proc)
+	t := threads_act.make_thread_with_stack_size(ctx, timer_thread_proc, SERVICE_THREAD_STACK_SIZE)
 	context.allocator = prev_allocator
 	if t != nil {
-		t.user_args[0] = ctx
-		thread.start(t)
 		data.timer_thread = t
 	} else {
 		log.error(

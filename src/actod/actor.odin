@@ -83,7 +83,8 @@ Actor_Behaviour :: struct($T: typeid) {
 	// The other half of on_idle. Called on the sender's thread whenever a message
 	// lands on a dedicated-thread actor, so the foreign wait can be interrupted
 	// (write an eventfd, post a window event). Cheap, thread safe, and it may
-	// fire before init has finished, so guard on what init creates.
+	// fire before init has finished, so guard on what init creates. It also runs
+	// on runtime threads with a fixed 128 KB stack, so keep it to the wake itself.
 	on_wake:                  proc "contextless" (data: ^T),
 	actor_type:               Actor_Type, // 0 = untyped (default), 1-255 = user-defined
 

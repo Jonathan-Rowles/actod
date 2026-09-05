@@ -1,6 +1,7 @@
 package actod
 
 import "base:intrinsics"
+import "../pkgs/threads_act"
 import "base:runtime"
 import "core:encoding/endian"
 import "core:log"
@@ -41,6 +42,8 @@ Udp_State :: struct {
 Udp_Recv_Context :: struct {
 	allocator: runtime.Allocator,
 	logger:    runtime.Logger,
+	recv_buf:  [65536]byte,
+	open_buf:  [65536]byte,
 }
 
 udp_local_enabled :: #force_inline proc() -> bool {
@@ -103,9 +106,15 @@ init_udp :: proc(loc := #caller_location) -> bool {
 	ctx.allocator = get_system_allocator()
 	ctx.logger = context.logger
 
+	NODE.udp.recv_socket = recv_sock
+	NODE.udp.send_socket = send_sock
+	NODE.udp.recv_ctx = ctx
+	sync.atomic_store(&NODE.udp.running, 1)
+	NODE.udp.enabled = true
+
 	prev_allocator := context.allocator
 	context.allocator = get_system_allocator()
-	t := thread.create(udp_recv_loop)
+	t := threads_act.make_thread_with_stack_size(ctx, udp_recv_loop, SERVICE_THREAD_STACK_SIZE)
 	context.allocator = prev_allocator
 	if t == nil {
 		log.errorf(
@@ -113,21 +122,17 @@ init_udp :: proc(loc := #caller_location) -> bool {
 			port,
 			location = loc,
 		)
+		NODE.udp.enabled = false
+		sync.atomic_store(&NODE.udp.running, 0)
+		NODE.udp.recv_ctx = nil
+		NODE.udp.recv_socket = {}
+		NODE.udp.send_socket = {}
 		free(ctx, get_system_allocator())
 		net.close(recv_sock)
 		net.close(send_sock)
 		return false
 	}
-
-	NODE.udp.recv_socket = recv_sock
-	NODE.udp.send_socket = send_sock
-	NODE.udp.recv_ctx = ctx
-	sync.atomic_store(&NODE.udp.running, 1)
-	NODE.udp.enabled = true
-
-	t.user_args[0] = ctx
 	NODE.udp.recv_thread = t
-	thread.start(t)
 
 	log.infof("UDP lane listening on port %d", port)
 	return true
@@ -321,27 +326,25 @@ udp_dispatch_frames :: proc(node_id: Node_ID, frames: []byte) {
 	}
 }
 
-udp_recv_loop :: proc(t: ^thread.Thread) {
-	ctx := cast(^Udp_Recv_Context)t.user_args[0]
+udp_recv_loop :: proc(data: rawptr) {
+	ctx := cast(^Udp_Recv_Context)data
 	if ctx == nil do return
 
 	context.allocator = ctx.allocator
 	context.logger = ctx.logger
 
-	recv_buf: [65536]byte
-	open_buf: [65536]byte
 	replay_windows: [MAX_NODES]Replay_Window
 	replay_gens: [MAX_NODES]u32
 
 	for sync.atomic_load(&NODE.udp.running) != 0 {
-		n, _, err := net.recv_udp(NODE.udp.recv_socket, recv_buf[:])
+		n, _, err := net.recv_udp(NODE.udp.recv_socket, ctx.recv_buf[:])
 		if err != nil {
 			if sync.atomic_load(&NODE.udp.running) == 0 do break
 			continue
 		}
 		if n < UDP_HEADER_PLAIN + 1 do continue
 
-		datagram := recv_buf[:n]
+		datagram := ctx.recv_buf[:n]
 		token := endian.unchecked_get_u32le(datagram)
 
 		node_id, generation, encrypted, recv_key, found := udp_snapshot_for_recv(token)
@@ -368,7 +371,7 @@ udp_recv_loop :: proc(t: ^thread.Thread) {
 			seq,
 			datagram[:UDP_HEADER_SEALED],
 			datagram[UDP_HEADER_SEALED:],
-			open_buf[:],
+			ctx.open_buf[:],
 		)
 		if !opened do continue
 

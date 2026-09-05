@@ -52,7 +52,10 @@ make_thread_with_stack_size :: proc(
 	if stack_size > 0 do posix.pthread_attr_setstacksize(&attrs, stack_size)
 
 	posix.pthread_attr_setdetachstate(&attrs, .CREATE_JOINABLE)
-	posix.pthread_create(&t.unix_thread, &attrs, actor_thread_entry, t)
+	if posix.pthread_create(&t.unix_thread, &attrs, actor_thread_entry, t) != nil {
+		free(t)
+		return nil
+	}
 
 	intrinsics.atomic_or(&t.flags, {.Started})
 	sync.post(&t.start_ok)

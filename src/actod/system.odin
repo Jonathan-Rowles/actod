@@ -690,16 +690,25 @@ escalate_node_failure :: proc(what: string) {
 	os.exit(1)
 }
 
+SERVICE_THREAD_STACK_SIZE :: 128 * 1024
+SERVICE_THREAD_MIN_USABLE_STACK :: 64 * 1024
+#assert(SERVICE_THREAD_STACK_SIZE - size_of(Net_Staging) >= SERVICE_THREAD_MIN_USABLE_STACK)
+
 @(private)
 start_signal_relay :: proc() {
 	sync.atomic_store(&NODE.signal_relay_stop, false)
-	NODE.signal_relay_thread = thread.create_and_start(proc() {
+	NODE.signal_relay_thread = threads_act.make_thread_with_stack_size(nil, proc(_: rawptr) {
 		for {
 			sync.atomic_sema_wait(&NODE.signal_relay_wake)
 			if sync.atomic_load(&NODE.signal_relay_stop) do return
 			wake_blocking_actor()
 		}
-	})
+	}, SERVICE_THREAD_STACK_SIZE)
+	if NODE.signal_relay_thread == nil {
+		log.error(
+			"could not create the signal relay thread, SIGINT and SIGTERM will not stop the blocking child gracefully",
+		)
+	}
 }
 
 @(private)

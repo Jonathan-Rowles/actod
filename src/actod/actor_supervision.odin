@@ -245,9 +245,11 @@ handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
 
 	if restart_info.count > actor.opts.max_restarts {
 		log.errorf(
-			"Child %s exceeded max restarts (%d) in window",
+			"Child %s (PID %v) failed more than max_restarts (%d) times within %v, giving up on it",
 			msg.child_name,
+			msg.child_pid,
 			actor.opts.max_restarts,
+			actor.opts.restart_window,
 		)
 		if actor.behaviour.on_max_restarts_exceeded != nil {
 			actor.behaviour.on_max_restarts_exceeded(actor.data, msg.child_pid)

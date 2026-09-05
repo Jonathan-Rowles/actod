@@ -1,5 +1,6 @@
 package actod
 
+import "core:fmt"
 import "core:log"
 
 ROOT_SUPERVISOR_NAME :: "root_supervisor"
@@ -24,7 +25,12 @@ root_supervisor_handle_message :: proc(data: ^Root_Supervisor_Data, from: PID, m
 
 @(private)
 root_supervisor_escalate :: proc(data: ^Root_Supervisor_Data, child_pid: PID) {
-	escalate_node_failure("a node child exceeded max_restarts")
+	escalate_node_failure(
+		fmt.tprintf(
+			"node child PID %v used up its restart budget and the node cannot run without it. Raise max_restarts or restart_window in the node's actor_config, or give it a supervisor of your own to keep the node up",
+			child_pid,
+		),
+	)
 }
 
 @(private)

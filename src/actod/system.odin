@@ -676,12 +676,12 @@ node_has_shutdown_host :: proc() -> bool {
 @(private)
 escalate_node_failure :: proc(what: string) {
 	if node_has_shutdown_host() {
-		log.errorf("%s, shutting the node down", what)
+		log.errorf("shutting the node down: %s", what)
 		request_node_shutdown()
 		return
 	}
 	log.fatalf(
-		"%s and nothing is parked in await_signal or running as a blocking child to shut the node down, exiting",
+		"exiting: %s. Nothing is parked in await_signal or running as a blocking child, so the node cannot shut down gracefully",
 		what,
 	)
 	os.exit(1)

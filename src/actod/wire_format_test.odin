@@ -132,7 +132,6 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	version: u32 = WIRE_PROTOCOL_VERSION
 	flags: u8 = HELLO_FLAG_ENCRYPTED | HELLO_FLAG_POOL_JOIN
 	listen_port: u16 = 4242
-	udp_port: u16 = 4243
 	nonce: u64 = 0x123456789ABCDEF0
 	join_token: u64 = 0x0FEDCBA987654321
 	incarnation: u64 = 0x1122334455667788
@@ -148,7 +147,6 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	ctrl_put_u32(&w, version)
 	ctrl_put_u8(&w, flags)
 	ctrl_put_u16(&w, listen_port)
-	ctrl_put_u16(&w, udp_port)
 	ctrl_put_str(&w, node_name)
 	ctrl_put_u64(&w, nonce)
 	ctrl_put_u64(&w, join_token)
@@ -160,7 +158,6 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	testing.expect(t, info.version == version, "Version mismatch")
 	testing.expect(t, info.node_name == node_name, "Node name mismatch")
 	testing.expect(t, info.listen_port == listen_port, "Listen port mismatch")
-	testing.expect(t, info.udp_port == udp_port, "UDP port mismatch")
 	testing.expect(t, info.nonce == nonce, "Nonce mismatch")
 	testing.expect(t, info.join_token == join_token, "Join token mismatch")
 	testing.expect(t, info.incarnation == incarnation, "Incarnation mismatch")

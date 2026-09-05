@@ -16,8 +16,6 @@ Network_Config :: struct {
 	auth_password:           string,
 	bind_address:            string,
 	port:                    int,
-	udp_port:                int,
-	udp_max_datagram:        int,
 	enable_encryption:       bool,
 	heartbeat_interval:      time.Duration,
 	heartbeat_timeout:       time.Duration,
@@ -30,8 +28,6 @@ DEFAULT_NETWORK_CONFIG := Network_Config {
 	auth_password           = "",
 	bind_address            = "127.0.0.1",
 	port                    = 0,
-	udp_port                = 0,
-	udp_max_datagram        = 1400,
 	enable_encryption       = false,
 	heartbeat_interval      = 30 * time.Second,
 	heartbeat_timeout       = 90 * time.Second,
@@ -45,8 +41,6 @@ make_network_config :: proc(
 	bind_address: string = NODE.config.network.bind_address,
 	auth_password: string = NODE.config.network.auth_password,
 	enable_encryption: bool = NODE.config.network.enable_encryption,
-	udp_port: int = NODE.config.network.udp_port,
-	udp_max_datagram: int = NODE.config.network.udp_max_datagram,
 	heartbeat_interval: time.Duration = NODE.config.network.heartbeat_interval,
 	heartbeat_timeout: time.Duration = NODE.config.network.heartbeat_timeout,
 	reconnect_initial_delay: time.Duration = NODE.config.network.reconnect_initial_delay,
@@ -62,16 +56,6 @@ make_network_config :: proc(
 			loc,
 			"make_network_config: bind_address must be an IP address (e.g. \"127.0.0.1\", \"0.0.0.0\", \"::\"), got %q",
 			bind_address,
-		)
-	}
-	if udp_port < 0 || udp_port > 65535 {
-		panic_at(loc, "make_network_config: udp_port must be 0-65535, got %d", udp_port)
-	}
-	if udp_max_datagram <= 0 {
-		panic_at(
-			loc,
-			"make_network_config: udp_max_datagram must be > 0, got %d",
-			udp_max_datagram,
 		)
 	}
 	if connection_ring.send_slot_count != 0 && !is_power_of_two(connection_ring.send_slot_count) {
@@ -93,8 +77,6 @@ make_network_config :: proc(
 		auth_password = auth_password,
 		bind_address = bind_address,
 		port = port,
-		udp_port = udp_port,
-		udp_max_datagram = udp_max_datagram,
 		enable_encryption = enable_encryption,
 		heartbeat_interval = heartbeat_interval,
 		heartbeat_timeout = heartbeat_timeout,

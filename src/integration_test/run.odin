@@ -26,7 +26,6 @@ Test_Entry :: struct {
 	hot_reload_dev:        bool,
 	hot_reload_watch_path: string,
 	enable_encryption:     bool,
-	udp_port:              int,
 	expects_error_logs:    bool,
 	sim_mode:              bool,
 }
@@ -394,22 +393,6 @@ ALL_TESTS :: []Test_Entry {
 		node_name = "TestNode1",
 		is_networked = true,
 	},
-	{
-		name = "test_udp_send_unreliable",
-		test_proc = test_udp_send_unreliable,
-		port = 17220,
-		node_name = "TestNode1",
-		is_networked = true,
-		enable_encryption = true,
-		udp_port = 17223,
-	},
-	{
-		name = "test_udp_fallback_to_tcp",
-		test_proc = test_udp_fallback_to_tcp,
-		port = 17230,
-		node_name = "TestNode1",
-		is_networked = true,
-	},
 	// Cross-node supervision tests
 	{
 		name = "test_remote_spawn_basic",
@@ -600,7 +583,6 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	network_config := actod.make_network_config(
 		auth_password = "test_dist_password",
 		port = port,
-		udp_port = entry.udp_port,
 		enable_encryption = entry.enable_encryption,
 		heartbeat_interval = 100 * time.Millisecond,
 		heartbeat_timeout = scaled_timeout(300 * time.Millisecond),

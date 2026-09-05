@@ -144,8 +144,6 @@ make_network_config :: proc(
 	bind_address: string = actod.NODE.config.network.bind_address,
 	auth_password: string = actod.NODE.config.network.auth_password,
 	enable_encryption: bool = actod.NODE.config.network.enable_encryption,
-	udp_port: int = actod.NODE.config.network.udp_port,
-	udp_max_datagram: int = actod.NODE.config.network.udp_max_datagram,
 	heartbeat_interval: time.Duration = actod.NODE.config.network.heartbeat_interval,
 	heartbeat_timeout: time.Duration = actod.NODE.config.network.heartbeat_timeout,
 	reconnect_initial_delay: time.Duration = actod.NODE.config.network.reconnect_initial_delay,
@@ -158,8 +156,6 @@ make_network_config :: proc(
 		bind_address = bind_address,
 		auth_password = auth_password,
 		enable_encryption = enable_encryption,
-		udp_port = udp_port,
-		udp_max_datagram = udp_max_datagram,
 		heartbeat_interval = heartbeat_interval,
 		heartbeat_timeout = heartbeat_timeout,
 		reconnect_initial_delay = reconnect_initial_delay,
@@ -441,18 +437,6 @@ send_message_name :: proc(
 send :: proc {
 	send_message,
 	send_message_name,
-}
-
-// Fire-and-forget send over the UDP lane when the target node has one:
-// at-most-once, unordered, silently lossy. Falls back to the reliable TCP
-// path for local PIDs, oversized messages, or peers without a UDP lane.
-@(require_results)
-send_unreliable :: proc(
-	to: PID,
-	content: $T,
-	loc: runtime.Source_Code_Location = #caller_location,
-) -> Send_Error {
-	return actod.send_unreliable(to, content, loc)
 }
 
 // Send a message to a remote actor with explicit node and actor names.

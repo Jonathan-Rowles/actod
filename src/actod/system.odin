@@ -160,12 +160,10 @@ Node_Behaviour :: Actor_Behaviour(Node_Actor_Data) {
 system_actor_init :: proc(data: ^Node_Actor_Data) {
 	NODE.node_id = 1
 	init_network(NODE.node_id, data.name, NODE.config.loc)
-	init_udp(NODE.config.loc)
 }
 
 @(private)
 terminate_system :: proc(data: ^Node_Actor_Data) {
-	shutdown_udp()
 	destroy_all_connection_rings()
 
 	for i in 0 ..< MAX_NODES {
@@ -204,7 +202,6 @@ Node_State :: struct {
 	timer_registry:           Timer_Registry,
 	next_timer_id:            u32,
 	timer_pid:                PID,
-	udp:                      Udp_State,
 	observer_pid:             PID,
 	hot_reload_pid:           PID,
 	logger:                   runtime.Logger,
@@ -748,7 +745,6 @@ shutdown_node :: proc(loc := #caller_location) {
 	send_terminate_to_active_actors_and_wait()
 
 	stop_network_listener()
-	shutdown_udp()
 	broadcast_graceful_disconnect("shutdown")
 	terminate_connection_actors_and_wait()
 	staging_drop_node_rings()

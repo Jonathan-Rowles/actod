@@ -39,8 +39,6 @@ act.make_network_config(
     bind_address            = "127.0.0.1",   // loopback by default; see Trust boundary
     auth_password           = "",            // empty = no auth
     enable_encryption       = false,         // Noise NNpsk0 over the TCP link
-    udp_port                = 0,             // 0 = no UDP lane
-    udp_max_datagram        = 1400,          // requested cap (see UDP Lane)
     heartbeat_interval      = 30 * time.Second,
     heartbeat_timeout       = 90 * time.Second,
     reconnect_initial_delay = 2 * time.Second,
@@ -52,7 +50,7 @@ act.make_network_config(
 
 ## Trust boundary
 
-The listener binds `bind_address` (TCP and, when enabled, the UDP lane). The default is `127.0.0.1`, so out of the box only processes on the same host can connect. To accept nodes from other machines, set `bind_address = "0.0.0.0"` (or a specific interface IP) explicitly.
+The listener binds `bind_address`. The default is `127.0.0.1`, so out of the box only processes on the same host can connect. To accept nodes from other machines, set `bind_address = "0.0.0.0"` (or a specific interface IP) explicitly.
 
 Two rules are enforced at `node_init`:
 
@@ -80,31 +78,6 @@ Rules:
 - **A password is required with encryption.** `enable_encryption` needs a non-empty `auth_password` (or the `ACTOD_AUTH_PASSWORD` env var); an empty password would derive a fixed, world-known key, so `node_init` rejects that combination at startup.
 
 Without `enable_encryption`, a non-empty `auth_password` still gives you challenge-response authentication on the link (peers prove they know the password), but the traffic itself is sent in the clear.
-
-## UDP Lane
-
-Setting `udp_port` opens a node-wide UDP socket alongside the TCP listener. Once it is enabled, `send_unreliable(pid, msg)` delivers over UDP: **at-most-once, unordered, and silently lossy**. Use it only for data where dropping a message is acceptable (telemetry, position updates, and similar).
-
-```odin
-act.node_init("nodeA", opts = act.make_node_config(
-    network = act.make_network_config(
-        port              = 5000,
-        udp_port          = 6000,
-        enable_encryption = true,
-        auth_password     = "shared-cluster-secret",
-    ),
-))
-
-// elsewhere, from within an actor
-_ = act.send_unreliable(remote_pid, Telemetry{...})
-```
-
-`send_unreliable` transparently falls back to the reliable TCP path when UDP cannot be used: for local PIDs, for messages too large for a single datagram, or for peers that have no UDP lane. A UDP send that is attempted but lost in the network is *not* retried and reports `.OK`.
-
-Notes:
-
-- **Small size cap.** The effective per-message size limit is about 2 KB (`UDP_FRAME_BUFFER` in `network_udp.odin`), regardless of the `udp_max_datagram` you request. Larger messages fall back to TCP.
-- **Pair it with encryption.** UDP datagrams are authenticated and encrypted using keys established during the (encrypted) TCP handshake. Plaintext UDP (UDP lane on, encryption off) is unauthenticated and is not a recommended mode; run the UDP lane together with `enable_encryption`.
 
 ## Sending to Remote Actors
 
@@ -239,7 +212,6 @@ spawn_remote :: proc(
 
 // Transparent messaging
 send_message :: proc(to: PID, content: $T) -> Send_Error // routes automatically
-send_unreliable :: proc(to: PID, content: $T) -> Send_Error // UDP lane, falls back to TCP
 send_message_name :: proc(to: string, content: $T) -> Send_Error // "actor@node" format
 send_to :: proc(actor_name: string, node_name: string, content: $T) -> Send_Error
 

@@ -1,11 +1,9 @@
 package actod
 
 import "core:crypto"
-import "core:crypto/aead"
 import "core:crypto/argon2id"
 import "core:crypto/ecdh"
 import "core:crypto/hash"
-import "core:crypto/hkdf"
 import "core:crypto/noise"
 import "core:encoding/endian"
 import "core:log"
@@ -132,121 +130,4 @@ envelope_open :: proc(keys: ^Noise_Transport, ciphertext: []byte, dst: []byte) -
 	if pt_len > len(dst) do return nil, false
 	_, status := noise.open_message(keys, nil, ciphertext, dst[:pt_len])
 	return dst[:pt_len], status == .Ok
-}
-
-UDP_SEED_SIZE :: 32
-UDP_KEY_SIZE :: 32
-UDP_TAG_SIZE :: 16
-UDP_NONCE_SIZE :: 12
-
-Udp_Keys :: struct {
-	send_key: [UDP_KEY_SIZE]byte,
-	recv_key: [UDP_KEY_SIZE]byte,
-}
-
-derive_udp_keys :: proc(seed: []byte, initiator: bool) -> (keys: Udp_Keys) {
-	salt := transmute([]byte)string("actod-udp-v2")
-	info_i2r := transmute([]byte)string("initiator-to-responder")
-	info_r2i := transmute([]byte)string("responder-to-initiator")
-	i2r, r2i: [UDP_KEY_SIZE]byte
-	hkdf.extract_and_expand(.SHA256, salt, seed, info_i2r, i2r[:])
-	hkdf.extract_and_expand(.SHA256, salt, seed, info_r2i, r2i[:])
-	if initiator {
-		keys.send_key = i2r
-		keys.recv_key = r2i
-	} else {
-		keys.send_key = r2i
-		keys.recv_key = i2r
-	}
-	return keys
-}
-
-udp_nonce :: #force_inline proc(seq: u64) -> [UDP_NONCE_SIZE]byte {
-	iv: [UDP_NONCE_SIZE]byte
-	endian.put_u64(iv[4:12], .Little, seq)
-	return iv
-}
-
-udp_seal :: proc(key: []byte, seq: u64, aad: []byte, plaintext: []byte, dst: []byte) -> (int, bool) {
-	total := len(plaintext) + UDP_TAG_SIZE
-	if len(plaintext) == 0 || total > len(dst) do return 0, false
-	iv := udp_nonce(seq)
-	aead.seal_oneshot(
-		.CHACHA20POLY1305,
-		dst[:len(plaintext)],
-		dst[len(plaintext):total],
-		key,
-		iv[:],
-		aad,
-		plaintext,
-	)
-	return total, true
-}
-
-udp_open :: proc(key: []byte, seq: u64, aad: []byte, sealed: []byte, dst: []byte) -> ([]byte, bool) {
-	if len(sealed) <= UDP_TAG_SIZE do return nil, false
-	pt_len := len(sealed) - UDP_TAG_SIZE
-	if pt_len > len(dst) do return nil, false
-	iv := udp_nonce(seq)
-	ok := aead.open_oneshot(
-		.CHACHA20POLY1305,
-		dst[:pt_len],
-		key,
-		iv[:],
-		aad,
-		sealed[:pt_len],
-		sealed[pt_len:],
-	)
-	return dst[:pt_len], ok
-}
-
-UDP_REPLAY_WINDOW :: 64
-
-// Sequence numbers start at 1; seq 0 is never valid.
-Replay_Window :: struct {
-	max_seq: u64,
-	mask:    u64,
-}
-
-// Check before authenticating; commit only after the datagram authenticates,
-// so forged sequence numbers cannot advance the window.
-replay_check :: proc(w: ^Replay_Window, seq: u64) -> bool {
-	if seq == 0 do return false
-	if seq > w.max_seq do return true
-	offset := w.max_seq - seq
-	if offset >= UDP_REPLAY_WINDOW do return false
-	return w.mask & (u64(1) << offset) == 0
-}
-
-replay_commit :: proc(w: ^Replay_Window, seq: u64) {
-	if seq > w.max_seq {
-		shift := seq - w.max_seq
-		w.mask = shift >= UDP_REPLAY_WINDOW ? 0 : w.mask << shift
-		w.mask |= 1
-		w.max_seq = seq
-		return
-	}
-	w.mask |= u64(1) << (w.max_seq - seq)
-}
-
-replay_accept :: proc(w: ^Replay_Window, seq: u64) -> bool {
-	if !replay_check(w, seq) do return false
-	replay_commit(w, seq)
-	return true
-}
-
-generate_udp_seed :: proc() -> [UDP_SEED_SIZE]byte {
-	seed: [UDP_SEED_SIZE]byte
-	actod_rand_bytes(seed[:])
-	return seed
-}
-
-generate_udp_token :: proc() -> u32 {
-	buf: [4]byte
-	token: u32
-	for token == 0 {
-		actod_rand_bytes(buf[:])
-		token = endian.unchecked_get_u32le(buf[:])
-	}
-	return token
 }

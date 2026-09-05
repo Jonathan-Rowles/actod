@@ -114,8 +114,6 @@ run_send_burst :: proc() {
 	message_count_str := os.lookup_env("MESSAGE_COUNT", context.temp_allocator) or_else "1000"
 	enable_encryption :=
 		(os.lookup_env("ENABLE_ENCRYPTION", context.temp_allocator) or_else "0") == "1"
-	udp_port_str := os.lookup_env("UDP_PORT", context.temp_allocator) or_else "0"
-	use_udp := (os.lookup_env("USE_UDP", context.temp_allocator) or_else "0") == "1"
 	scale_threshold_str :=
 		os.lookup_env("RING_SCALE_THRESHOLD", context.temp_allocator) or_else "0"
 
@@ -127,11 +125,6 @@ run_send_burst :: proc() {
 	message_count := 1000
 	if count_val, ok := strconv.parse_int(message_count_str); ok {
 		message_count = count_val
-	}
-
-	udp_port := 0
-	if port_val, ok := strconv.parse_int(udp_port_str); ok {
-		udp_port = port_val
 	}
 
 	ring_config := actod.DEFAULT_CONNECTION_RING_CONFIG
@@ -149,7 +142,6 @@ run_send_burst :: proc() {
 				port = 0,
 				auth_password = auth_password,
 				enable_encryption = enable_encryption,
-				udp_port = udp_port,
 				connection_ring = ring_config,
 				heartbeat_interval = 100 * time.Millisecond,
 				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
@@ -174,54 +166,20 @@ run_send_burst :: proc() {
 		target_node:   string,
 		target_actor:  string,
 		message_count: int,
-		use_udp:       bool,
 		done:          ^sync.Sema,
 		queued:        ^int,
 	}
 
 	Burst_Sender_Behaviour :: actod.Actor_Behaviour(Burst_Sender_Data) {
 		init = proc(data: ^Burst_Sender_Data) {
-			start := 0
-			target_pid: actod.PID
-
-			if data.use_udp {
-				msg := shared.make_two_node_message(0, "udp warmup", "BurstSenderNode")
-				if actod.send_to(data.target_actor, data.target_node, msg) != .OK {
-					fmt.println("Failed to send UDP warmup message")
-					if data.done != nil do sync.sema_post(data.done)
-					return
-				}
-				start = 1
-
-				qualified := fmt.tprintf("%s@%s", data.target_actor, data.target_node)
-				for _ in 0 ..< 250 {
-					if pid, found := actod.get_actor_pid(qualified); found {
-						target_pid = pid
-						break
-					}
-					time.sleep(20 * time.Millisecond)
-				}
-				if target_pid == 0 {
-					fmt.println("Failed to resolve remote actor pid for UDP sends")
-					if data.done != nil do sync.sema_post(data.done)
-					return
-				}
-				time.sleep(200 * time.Millisecond)
-			}
-
-			for i in start ..< data.message_count {
+			for i in 0 ..< data.message_count {
 				msg_content := fmt.tprintf("Burst msg %d", i)
 				msg := shared.make_two_node_message(i, msg_content, "BurstSenderNode")
 				delete(msg_content)
 
 				sent := false
 				for _ in 0 ..< 500 {
-					err: actod.Send_Error
-					if data.use_udp {
-						err = actod.send_unreliable(target_pid, msg)
-					} else {
-						err = actod.send_to(data.target_actor, data.target_node, msg)
-					}
+					err := actod.send_to(data.target_actor, data.target_node, msg)
 					if err == .OK {
 						sent = true
 						break
@@ -290,7 +248,6 @@ run_send_burst :: proc() {
 			target_node   = target_node,
 			target_actor  = target_actor,
 			message_count = count,
-			use_udp       = use_udp,
 			done          = &done_sema,
 			queued        = &queued_total,
 		}

@@ -39,7 +39,6 @@ Local termination signals are lossless. A dying actor does not send `Actor_Stopp
 
 - A remote send to a dead actor still returns `.OK`. The peer drops it there.
 - A message whose type the receiving node never registered is dropped on the receiver with a warning in the **receiver's** log; the sender saw `.OK`. Register message types on every node ([Message Registration](03_message-registration.md#cross-node-messages)).
-- `send_unreliable` is at-most-once: a datagram lost in flight already returned `.OK`.
 
 Local and remote failure modes differ: local sends can return `ACTOR_NOT_FOUND` and `RECEIVER_BACKLOGGED`; remote sends return the `NODE_*`/`NETWORK_*` errors and never the local pair.
 

@@ -13,7 +13,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-WIRE_PROTOCOL_VERSION :: 6
+WIRE_PROTOCOL_VERSION :: 7
 HANDSHAKE_TIMEOUT_SECS :: 5
 HANDSHAKE_TIMEOUT :: HANDSHAKE_TIMEOUT_SECS * time.Second
 DUPLICATE_TAKEOVER_TIMEOUT :: 5 * time.Second
@@ -24,7 +24,6 @@ CTRL_MSG_DISCONNECT :: 4
 CTRL_MSG_HELLO :: 6
 CTRL_MSG_NOISE_1 :: 7
 CTRL_MSG_NOISE_2 :: 8
-CTRL_MSG_UDP_INFO :: 9
 CTRL_MSG_AUTH :: 10
 CTRL_MSG_LIFECYCLE_STREAM :: 11
 
@@ -86,14 +85,8 @@ Connection_Actor_Data :: struct {
 	heartbeat_timer_id:        u32,
 	reconnect_timer_id:        u32,
 	peer_listen_port:          u16,
-	peer_udp_port:             u16,
 	my_join_token:             u64,
 	peer_join_token:           u64,
-	my_udp_token:              u32,
-	peer_udp_token:            u32,
-	udp_seed:                  [UDP_SEED_SIZE]byte,
-	udp_seed_set:              bool,
-	udp_activated:             bool,
 }
 
 Connection_Actor_Behaviour :: Actor_Behaviour(Connection_Actor_Data) {
@@ -134,7 +127,6 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 	if data.node_id != 0 && is_active {
 		stop_connection_io(data)
 
-		udp_clear_peer(data.node_id)
 		if data.ring != nil {
 			drain_pool_rings_into_primary(data)
 			teardown_pool_rings(data)
@@ -310,7 +302,6 @@ Hello_Info :: struct {
 	encrypted:   bool,
 	pool_join:   bool,
 	listen_port: u16,
-	udp_port:    u16,
 	node_name:   string,
 	nonce:       u64,
 	join_token:  u64,
@@ -338,7 +329,6 @@ build_hello_body :: proc(
 	ctrl_put_u32(&w, WIRE_PROTOCOL_VERSION)
 	ctrl_put_u8(&w, flags)
 	ctrl_put_u16(&w, u16(NODE.config.network.port))
-	ctrl_put_u16(&w, u16(NODE.config.network.udp_port))
 	ctrl_put_str(&w, NODE.name)
 	ctrl_put_u64(&w, nonce)
 	ctrl_put_u64(&w, join_token)
@@ -357,7 +347,6 @@ parse_hello :: proc(payload: []byte) -> (info: Hello_Info, ok: bool) {
 	info.version = ctrl_get_u32(&r)
 	flags := ctrl_get_u8(&r)
 	info.listen_port = ctrl_get_u16(&r)
-	info.udp_port = ctrl_get_u16(&r)
 	info.node_name = ctrl_get_str(&r)
 	info.nonce = ctrl_get_u64(&r)
 	info.join_token = ctrl_get_u64(&r)
@@ -662,7 +651,6 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	registry_name, _ := get_node_name(data.node_id)
 	data.node_name = registry_name
 	data.peer_listen_port = info.listen_port
-	data.peer_udp_port = info.udp_port
 	data.peer_join_token = info.join_token
 	set_node_incarnation(data.node_id, info.incarnation)
 	gossip_seq_reset(data.node_id, info.gossip_seq)
@@ -685,10 +673,16 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 		data.encrypted,
 	)
 
+	if !data.encrypted && !address_is_loopback(data.address.address) {
+		log.warnf(
+			"Plaintext session with node %s at %v: frames carry no integrity protection, set enable_encryption = true on both nodes unless the network is trusted",
+			data.node_name,
+			data.address,
+		)
+	}
+
 	announce_subscriptions_to_node(data.node_id)
 	send_node_directory(data)
-	send_udp_info(data)
-	try_activate_udp(data)
 	request_lifecycle_stream(data)
 
 	if data.heartbeat_interval > 0 {
@@ -1228,7 +1222,6 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 		clear_subscriptions_for_node(data.node_id)
 		broadcast_disconnect_terminations(data.node_id)
 		handle_node_disconnect(data.node_id)
-		udp_clear_peer(data.node_id)
 	}
 
 	if data.ring != nil do sync.atomic_store(&data.ring.io_stop, 1)
@@ -1248,9 +1241,6 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 	}
 
 	data.state = .Disconnected
-	data.udp_activated = false
-	data.peer_udp_token = 0
-	data.udp_seed_set = false
 	cancel_timer(data.heartbeat_timer_id)
 
 	if data.is_incoming {
@@ -1327,9 +1317,6 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 		data.peer_initiated_disconnect = true
 		close_connection(data)
 
-	case CTRL_MSG_UDP_INFO:
-		handle_udp_info(data, ctrl_data)
-
 	case CTRL_MSG_LIFECYCLE_STREAM:
 		if data.node_id != 0 && data.node_id < MAX_NODES {
 			sync.atomic_store(&NODE.lifecycle_stream_peers[data.node_id], true)
@@ -1383,88 +1370,6 @@ check_heartbeat_timeout :: proc(data: ^Connection_Actor_Data) {
 			close_connection(data)
 		}
 	}
-}
-
-@(private)
-send_udp_info :: proc(data: ^Connection_Actor_Data) {
-	if NODE.config.network.udp_port <= 0 do return
-
-	data.my_udp_token = generate_udp_token()
-
-	include_seed := data.encrypted && !data.is_incoming
-	if include_seed && !data.udp_seed_set {
-		data.udp_seed = generate_udp_seed()
-		data.udp_seed_set = true
-	}
-
-	seed_len := include_seed ? UDP_SEED_SIZE : 0
-	body: [1 + 2 + 4 + 1 + UDP_SEED_SIZE]byte
-	w := Ctrl_Writer {
-		buf = body[:],
-	}
-	ctrl_put_u8(&w, CTRL_MSG_UDP_INFO)
-	ctrl_put_u16(&w, u16(NODE.config.network.udp_port))
-	ctrl_put_u32(&w, data.my_udp_token)
-	ctrl_put_u8(&w, u8(seed_len))
-	if include_seed do ctrl_put_bytes(&w, data.udp_seed[:])
-
-	if !ring_append_ctrl_retry(data.ring, body[:w.pos]) do log.warn("Failed to send UDP lane info")
-}
-
-@(private)
-handle_udp_info :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) {
-	r := Ctrl_Reader {
-		data = ctrl_data,
-		pos  = 1,
-		ok   = true,
-	}
-	port := ctrl_get_u16(&r)
-	token := ctrl_get_u32(&r)
-	seed_len := int(ctrl_get_u8(&r))
-	if !r.ok {
-		log.warn("Malformed UDP info message")
-		return
-	}
-	if seed_len > 0 {
-		if seed_len != UDP_SEED_SIZE {
-			log.warnf("Unexpected UDP seed length %d", seed_len)
-			return
-		}
-		seed_bytes := ctrl_get_bytes(&r, seed_len)
-		if !r.ok do return
-		copy(data.udp_seed[:], seed_bytes)
-		data.udp_seed_set = true
-	}
-
-	data.peer_udp_port = port
-	data.peer_udp_token = token
-	try_activate_udp(data)
-}
-
-@(private)
-try_activate_udp :: proc(data: ^Connection_Actor_Data) {
-	if data.udp_activated || data.state != .Connected do return
-	if !udp_local_enabled() do return
-	if data.peer_udp_port == 0 || data.peer_udp_token == 0 || data.my_udp_token == 0 do return
-	if data.encrypted && !data.udp_seed_set do return
-
-	keys: Udp_Keys
-	if data.encrypted do keys = derive_udp_keys(data.udp_seed[:], !data.is_incoming)
-
-	endpoint := net.Endpoint {
-		address = data.address.address,
-		port    = int(data.peer_udp_port),
-	}
-	udp_register_peer(
-		data.node_id,
-		endpoint,
-		data.peer_udp_token,
-		data.my_udp_token,
-		keys,
-		data.encrypted,
-	)
-	data.udp_activated = true
-	log.infof("UDP lane active for node %s (id=%d)", data.node_name, data.node_id)
 }
 
 broadcast_disconnect_terminations :: proc(disconnected_node_id: Node_ID) {

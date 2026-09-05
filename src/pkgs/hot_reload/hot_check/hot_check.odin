@@ -48,7 +48,6 @@ probe_handle_message :: proc(d: ^Probe, from: act.PID, msg: any) {
 		_ = act.send("probe-child", m)
 		_ = act.send_message(from, d.n)
 		_ = act.send_message_name("probe-child", d.n)
-		_ = act.send_unreliable(from, d.n)
 		_ = act.send_self(d.n)
 		_ = act.send_parent(d.n)
 		_ = act.send_children(d.n)

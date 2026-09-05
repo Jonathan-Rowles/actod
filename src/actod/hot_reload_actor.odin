@@ -24,15 +24,6 @@ send_message_any :: proc(to: PID, content: any, loc := #caller_location) -> Send
 }
 
 @(private)
-send_unreliable_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
-	if is_local_pid(to) do return send_message_any(to, content, loc)
-	@(static) sentinel: Message_Type_Info
-	info, ok := get_type_info_ptr(content.id, loc)
-	if !ok do info = &sentinel
-	return send_unreliable_remote_impl(to, content.data, info, loc)
-}
-
-@(private)
 broadcast_any :: proc(content: any, loc := #caller_location) {
 	self_pid := get_self_pid()
 	actor_type := get_pid_actor_type(self_pid)

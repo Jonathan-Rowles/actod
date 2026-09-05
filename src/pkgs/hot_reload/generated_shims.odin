@@ -156,8 +156,6 @@ Network_Config :: struct {
 	auth_password:           string,
 	bind_address:            string,
 	port:                    int,
-	udp_port:                int,
-	udp_max_datagram:        int,
 	enable_encryption:       bool,
 	heartbeat_interval:      time.Duration,
 	heartbeat_timeout:       time.Duration,
@@ -327,8 +325,6 @@ Hot_API :: struct {
 		bind_address: string,
 		auth_password: string,
 		enable_encryption: bool,
-		udp_port: int,
-		udp_max_datagram: int,
 		heartbeat_interval: time.Duration,
 		heartbeat_timeout: time.Duration,
 		reconnect_initial_delay: time.Duration,
@@ -365,7 +361,6 @@ Hot_API :: struct {
 		loc: runtime.Source_Code_Location,
 	) -> (PID, bool),
 	send_message:              proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
-	send_unreliable:           proc(to: PID, content: any, loc: runtime.Source_Code_Location) -> Send_Error,
 	replying_to:               proc() -> (Ask_Token, bool),
 	get_self_pid:              proc() -> PID,
 	get_self_name:             proc() -> string,
@@ -453,8 +448,8 @@ make_actor_config :: proc(logging: Log_Config = {}, restart_policy: Restart_Poli
 	return hot_api.make_actor_config(logging, restart_policy, max_restarts, restart_window, supervision_strategy, children, page_size, arena_headroom, coro_stack_size, home_worker, affinity, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 }
 
-make_network_config :: proc(port: int = 0, bind_address: string = "", auth_password: string = "", enable_encryption: bool = false, udp_port: int = 0, udp_max_datagram: int = 0, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
-	return hot_api.make_network_config(port, bind_address, auth_password, enable_encryption, udp_port, udp_max_datagram, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
+make_network_config :: proc(port: int = 0, bind_address: string = "", auth_password: string = "", enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
+	return hot_api.make_network_config(port, bind_address, auth_password, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, loc)
 }
 
 make_log_config :: proc(level: log.Level = {}, ident: string = "", enable_file: bool = false, log_path: string = "", console_opts: log.Options = {}, file_opts: log.Options = {}, custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {
@@ -543,10 +538,6 @@ send_message_name :: proc(to: string, content: $T, loc: runtime.Source_Code_Loca
 	pid, found := hot_api.get_actor_pid(to)
 	if !found do return .ACTOR_NOT_FOUND
 	return hot_api.send_message(pid, content, loc)
-}
-
-send_unreliable :: proc(to: PID, content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
-	return hot_api.send_unreliable(to, content, loc)
 }
 
 send_self :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {

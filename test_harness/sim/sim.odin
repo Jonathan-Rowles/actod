@@ -12,6 +12,7 @@ MAX_SIM_TIMERS :: 128
 MAX_SIM_TOPICS :: 64
 MAX_SIM_TOPIC_SUBS :: 16
 MAX_SIM_FAULTS :: 16
+#assert(MAX_SIM_FAULTS <= 16, "Sim_Message.faults_applied is a u16, one bit per fault rule")
 
 EXTERNAL_PID :: u64(999)
 
@@ -70,12 +71,13 @@ Sim_Actor :: struct {
 }
 
 Sim_Message :: struct {
-	to:        u64,
-	from:      u64,
-	data:      rawptr,
-	type_id:   typeid,
-	ask_token: u64,
-	is_reply:  bool,
+	to:             u64,
+	from:           u64,
+	data:           rawptr,
+	type_id:        typeid,
+	ask_token:      u64,
+	faults_applied: u16,
+	is_reply:       bool,
 }
 
 Sim_Timer :: struct {
@@ -109,7 +111,7 @@ Fault_Rule :: struct {
 	match:       Fault_Match,
 	action:      Fault_Action,
 	delay_steps: int,
-	remaining:   int, // -1 = forever
+	count:       int,
 	fired:       int,
 	probability: f64, // 0 = always fire (default), 0.0-1.0 = probabilistic
 }
@@ -272,6 +274,14 @@ enqueue_ask :: proc(
 	s.queue_count += 1
 }
 
+@(private)
+requeue :: proc(s: ^Sim, msg: Sim_Message) {
+	assert(s.queue_count < MAX_SIM_QUEUE, "sim: message queue full")
+	s.queue[s.queue_tail] = msg
+	s.queue_tail = (s.queue_tail + 1) % MAX_SIM_QUEUE
+	s.queue_count += 1
+}
+
 register_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64, timeout: time.Duration) {
 	append(
 		&s.pending_asks,
@@ -325,9 +335,9 @@ step :: proc(s: ^Sim) -> bool {
 	msg, ok := dequeue(s)
 	if !ok do return false
 
-	if rule := match_fault(s, msg); rule != nil {
+	if rule, rule_index := match_fault(s, msg); rule != nil {
 		rule.fired += 1
-		if rule.remaining > 0 do rule.remaining -= 1
+		msg.faults_applied |= 1 << u16(rule_index)
 
 		switch rule.action {
 		case .Drop:
@@ -337,8 +347,9 @@ step :: proc(s: ^Sim) -> bool {
 			append(&s.delayed, Delayed_Message{msg = msg, steps_remaining = rule.delay_steps})
 			return true
 		case .Duplicate:
-			clone_data := clone_msg(msg.data, msg.type_id)
-			enqueue(s, msg.to, msg.from, clone_data, msg.type_id)
+			clone := msg
+			clone.data = clone_msg(msg.data, msg.type_id)
+			requeue(s, clone)
 		}
 	}
 
@@ -674,17 +685,18 @@ clear_faults :: proc(s: ^Sim) {
 	clear(&s.delayed)
 }
 
-match_fault :: proc(s: ^Sim, msg: Sim_Message) -> ^Fault_Rule {
+match_fault :: proc(s: ^Sim, msg: Sim_Message) -> (^Fault_Rule, int) {
 	for i in 0 ..< s.fault_count {
 		rule := &s.faults[i]
-		if rule.remaining == 0 do continue
+		if msg.faults_applied & (1 << u16(i)) != 0 do continue
+		if rule.count > 0 && rule.fired >= rule.count do continue
 		if !fault_matches(s, rule.match, msg) do continue
 		if rule.probability > 0 {
 			if rng_f64(s) >= rule.probability do continue
 		}
-		return rule
+		return rule, i
 	}
-	return nil
+	return nil, -1
 }
 
 fault_matches :: proc(s: ^Sim, m: Fault_Match, msg: Sim_Message) -> bool {
@@ -707,8 +719,7 @@ tick_delayed :: proc(s: ^Sim) {
 	for i < len(s.delayed) {
 		s.delayed[i].steps_remaining -= 1
 		if s.delayed[i].steps_remaining <= 0 {
-			d := s.delayed[i]
-			enqueue(s, d.msg.to, d.msg.from, d.msg.data, d.msg.type_id)
+			requeue(s, s.delayed[i].msg)
 			ordered_remove(&s.delayed, i)
 		} else {
 			i += 1

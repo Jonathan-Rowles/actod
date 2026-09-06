@@ -66,15 +66,16 @@ supervisor_behaviour := act.Actor_Behaviour(Data){
         // child spawned or restarted
     },
 
-    on_child_terminated = proc(d: ^Data, child_pid: act.PID, reason: act.Termination_Reason, will_restart: bool) {
+    on_child_terminated = proc(d: ^Data, child_pid: act.PID, child_name: string, reason: act.Termination_Reason, will_restart: bool) {
         // child stopped, will_restart indicates if supervisor will respawn
+        // child_name is borrowed for this call only, copy it if you keep it
     },
 
     on_child_restarted = proc(d: ^Data, old_pid: act.PID, new_pid: act.PID, restart_count: int) {
         // child was restarted, old PID is invalid, use new_pid
     },
 
-    on_max_restarts_exceeded = proc(d: ^Data, child_pid: act.PID) {
+    on_max_restarts_exceeded = proc(d: ^Data, child_pid: act.PID, child_name: string) {
         // restart limit hit, child will not be restarted
     },
 }

@@ -92,10 +92,11 @@ advance_time :: proc(h: ^Test_Harness($T), d: time.Duration) {
 simulate_child_terminated :: proc(
 	h: ^Test_Harness($T),
 	child_pid: actod.PID,
+	child_name: string,
 	reason: actod.Termination_Reason,
 	will_restart: bool = false,
 ) {
-	unit.simulate_child_terminated(h, child_pid, reason, will_restart)
+	unit.simulate_child_terminated(h, child_pid, child_name, reason, will_restart)
 }
 
 // Invoke on_child_started callback.
@@ -114,8 +115,8 @@ simulate_child_restarted :: proc(
 }
 
 // Invoke on_max_restarts_exceeded callback.
-simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID) {
-	unit.simulate_max_restarts(h, child_pid)
+simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID, child_name: string) {
+	unit.simulate_max_restarts(h, child_pid, child_name)
 }
 
 // Send Assertions

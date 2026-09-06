@@ -917,6 +917,7 @@ test_remote_child_crash_notification :: proc(t: ^testing.T) {
 		on_child_terminated = proc(
 			data: ^Observer_Data,
 			child_pid: actod.PID,
+			child_name: string,
 			reason: actod.Termination_Reason,
 			will_restart: bool,
 		) {
@@ -1996,6 +1997,7 @@ test_remote_spawn_parent_link :: proc(t: ^testing.T) {
 		on_child_terminated = proc(
 			data: ^Remote_Parent_Data,
 			child_pid: actod.PID,
+			child_name: string,
 			reason: actod.Termination_Reason,
 			will_restart: bool,
 		) {

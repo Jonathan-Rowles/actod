@@ -52,6 +52,7 @@ leak_supervisor_handle_message :: proc(data: ^Leak_Supervisor_Data, from: actod.
 leak_supervisor_on_child_terminated :: proc(
 	data: ^Leak_Supervisor_Data,
 	child_pid: actod.PID,
+	child_name: string,
 	reason: actod.Termination_Reason,
 	will_restart: bool,
 ) {

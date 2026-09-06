@@ -204,7 +204,13 @@ handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
 			msg.child_pid,
 		)
 		if actor.behaviour.on_child_terminated != nil {
-			actor.behaviour.on_child_terminated(actor.data, msg.child_pid, msg.reason, false)
+			actor.behaviour.on_child_terminated(
+				actor.data,
+				msg.child_pid,
+				msg.child_name,
+				msg.reason,
+				false,
+			)
 		}
 		remove_child_from_supervisor(actor, msg.child_pid, child_index)
 		return
@@ -228,7 +234,13 @@ handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
 			msg.reason,
 		)
 		if actor.behaviour.on_child_terminated != nil {
-			actor.behaviour.on_child_terminated(actor.data, msg.child_pid, msg.reason, false)
+			actor.behaviour.on_child_terminated(
+				actor.data,
+				msg.child_pid,
+				msg.child_name,
+				msg.reason,
+				false,
+			)
 		}
 		remove_child_from_supervisor(actor, msg.child_pid, child_index)
 		return
@@ -252,14 +264,20 @@ handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
 			actor.opts.restart_window,
 		)
 		if actor.behaviour.on_max_restarts_exceeded != nil {
-			actor.behaviour.on_max_restarts_exceeded(actor.data, msg.child_pid)
+			actor.behaviour.on_max_restarts_exceeded(actor.data, msg.child_pid, msg.child_name)
 		}
 		remove_child_from_supervisor(actor, msg.child_pid, child_index)
 		return
 	}
 
 	if actor.behaviour.on_child_terminated != nil {
-		actor.behaviour.on_child_terminated(actor.data, msg.child_pid, msg.reason, true)
+		actor.behaviour.on_child_terminated(
+			actor.data,
+			msg.child_pid,
+			msg.child_name,
+			msg.reason,
+			true,
+		)
 	}
 
 	// Execute restart strategy

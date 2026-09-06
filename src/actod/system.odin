@@ -295,6 +295,19 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	node_own_config_strings(NODE, opts)
 	if NODE.config.loc.file_path == "" do NODE.config.loc = loc
 
+	if largest_name, largest_bytes := largest_registered_message();
+	   largest_bytes > NODE.config.actor_config.page_size {
+		panic_at(
+			loc,
+			"node_init('%s'): actor_config.page_size is %d B but the registered message type %s needs %d B of page%s, so every send of it would fail. Raise page_size, or shrink the type",
+			name,
+			NODE.config.actor_config.page_size,
+			largest_name,
+			largest_bytes,
+			config_origin(opts.loc),
+		)
+	}
+
 	bind_addr, bind_ok := parse_bind_address(NODE.config.network.bind_address)
 	if !bind_ok {
 		panic_at(

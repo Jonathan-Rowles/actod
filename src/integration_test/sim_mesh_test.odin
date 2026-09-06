@@ -179,6 +179,7 @@ Sup_Parent_Behaviour :: actod.Actor_Behaviour(Sup_Parent_Data) {
 	on_child_terminated = proc(
 		data: ^Sup_Parent_Data,
 		child_pid: actod.PID,
+		child_name: string,
 		reason: actod.Termination_Reason,
 		will_restart: bool,
 	) {

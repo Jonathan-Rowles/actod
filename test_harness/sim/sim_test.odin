@@ -382,7 +382,6 @@ test_fault_drop_prevents_delivery :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "echo", msg_type = typeid_of(Ping)},
 			action = .Drop,
-			remaining = -1,
 		},
 	)
 
@@ -394,7 +393,68 @@ test_fault_drop_prevents_delivery :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_fault_drop_remaining_limit :: proc(t: ^testing.T) {
+test_fault_without_count_fires_forever :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
+	init_all(&s)
+
+	add_fault(
+		&s,
+		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop},
+	)
+
+	for _ in 0 ..< 5 {
+		send(&s, "counter", Increment{})
+	}
+	run_until_idle(&s)
+
+	c := get_state(&s, "counter", counter_state)
+	testing.expect_value(t, c.count, 0)
+}
+
+@(test)
+test_uncapped_duplicate_drains :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
+	init_all(&s)
+
+	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Duplicate})
+
+	send(&s, "counter", Increment{})
+	run_until_idle(&s)
+
+	c := get_state(&s, "counter", counter_state)
+	testing.expect_value(t, c.count, 2)
+	testing.expect_value(t, pending_messages(&s), 0)
+}
+
+@(test)
+test_uncapped_delay_still_delivers :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
+	init_all(&s)
+
+	add_fault(
+		&s,
+		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Delay, delay_steps = 2},
+	)
+
+	send(&s, "counter", Increment{})
+	for _ in 0 ..< 10 do step(&s)
+
+	c := get_state(&s, "counter", counter_state)
+	testing.expect_value(t, c.count, 1)
+	testing.expect_value(t, delayed_count(&s), 0)
+}
+
+@(test)
+test_fault_drop_count_limit :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
@@ -406,7 +466,7 @@ test_fault_drop_remaining_limit :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Drop,
-			remaining = 2, // drop first 2, allow rest
+			count = 2, // drop first 2, allow rest
 		},
 	)
 
@@ -433,7 +493,7 @@ test_fault_delay_holds_message :: proc(t: ^testing.T) {
 			match = Fault_Match{to_name = "echo", msg_type = typeid_of(Ping)},
 			action = .Delay,
 			delay_steps = 3,
-			remaining = 1,
+			count = 1,
 		},
 	)
 
@@ -472,7 +532,7 @@ test_fault_duplicate_delivers_twice :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Duplicate,
-			remaining = 1,
+			count = 1,
 		},
 	)
 
@@ -496,7 +556,6 @@ test_fault_first_match_wins :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Drop,
-			remaining = -1,
 		},
 	)
 	add_fault(
@@ -504,7 +563,6 @@ test_fault_first_match_wins :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Duplicate,
-			remaining = -1,
 		},
 	)
 
@@ -528,7 +586,7 @@ test_fault_wildcard_match :: proc(t: ^testing.T) {
 
 	add_fault(
 		&s,
-		Fault_Rule{match = Fault_Match{to_name = "echo"}, action = .Drop, remaining = -1},
+		Fault_Rule{match = Fault_Match{to_name = "echo"}, action = .Drop},
 	)
 
 	send(&s, "echo", Ping{value = 1})
@@ -548,7 +606,7 @@ test_fault_clear_removes_all :: proc(t: ^testing.T) {
 
 	add_fault(
 		&s,
-		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop, remaining = -1},
+		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop},
 	)
 
 	send(&s, "counter", Increment{})
@@ -579,7 +637,6 @@ test_probabilistic_fault_zero_always_fires :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Drop,
-			remaining = -1,
 			probability = 0,
 		},
 	)
@@ -607,7 +664,6 @@ test_probabilistic_fault_drops_some :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Drop,
-			remaining = -1,
 			probability = 0.5,
 		},
 	)
@@ -640,7 +696,6 @@ test_same_seed_reproduces :: proc(t: ^testing.T) {
 			Fault_Rule {
 				match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 				action = .Drop,
-				remaining = -1,
 				probability = 0.5,
 			},
 		)
@@ -671,7 +726,6 @@ test_different_seed_diverges :: proc(t: ^testing.T) {
 			Fault_Rule {
 				match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 				action = .Drop,
-				remaining = -1,
 				probability = 0.5,
 			},
 		)
@@ -689,7 +743,7 @@ test_different_seed_diverges :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_probability_with_remaining :: proc(t: ^testing.T) {
+test_probability_with_count :: proc(t: ^testing.T) {
 	s := create_seeded(42)
 	defer destroy(&s)
 
@@ -701,7 +755,7 @@ test_probability_with_remaining :: proc(t: ^testing.T) {
 		Fault_Rule {
 			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
 			action = .Drop,
-			remaining = 3,
+			count = 3,
 			probability = 0.5,
 		},
 	)
@@ -827,7 +881,7 @@ test_late_reply_is_dropped_after_timeout :: proc(t: ^testing.T) {
 			match = Fault_Match{to_name = "pricer", msg_type = typeid_of(Quote)},
 			action = .Delay,
 			delay_steps = 4,
-			remaining = 1,
+			count = 1,
 		},
 	)
 

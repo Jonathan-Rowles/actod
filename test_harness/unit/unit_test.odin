@@ -99,14 +99,16 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 }
 
 supervisor_state :: struct {
-	child_started_pid:    actod.PID,
-	child_terminated_pid: actod.PID,
-	term_reason:          actod.Termination_Reason,
-	will_restart:         bool,
-	restarted_old:        actod.PID,
-	restarted_new:        actod.PID,
-	restart_count:        int,
-	max_restarts_pid:     actod.PID,
+	child_started_pid:     actod.PID,
+	child_terminated_pid:  actod.PID,
+	child_terminated_name: string,
+	term_reason:           actod.Termination_Reason,
+	will_restart:          bool,
+	restarted_old:         actod.PID,
+	restarted_new:         actod.PID,
+	restart_count:         int,
+	max_restarts_pid:      actod.PID,
+	max_restarts_name:     string,
 }
 
 supervisor_behaviour := actod.Actor_Behaviour(supervisor_state) {
@@ -117,10 +119,12 @@ supervisor_behaviour := actod.Actor_Behaviour(supervisor_state) {
 	on_child_terminated = proc(
 		s: ^supervisor_state,
 		pid: actod.PID,
+		name: string,
 		reason: actod.Termination_Reason,
 		will_restart: bool,
 	) {
 		s.child_terminated_pid = pid
+		s.child_terminated_name = name
 		s.term_reason = reason
 		s.will_restart = will_restart
 	},
@@ -134,8 +138,9 @@ supervisor_behaviour := actod.Actor_Behaviour(supervisor_state) {
 		s.restarted_new = new_pid
 		s.restart_count = restart_count
 	},
-	on_max_restarts_exceeded = proc(s: ^supervisor_state, pid: actod.PID) {
+	on_max_restarts_exceeded = proc(s: ^supervisor_state, pid: actod.PID, name: string) {
 		s.max_restarts_pid = pid
+		s.max_restarts_name = name
 	},
 }
 
@@ -395,9 +400,10 @@ test_fire_timer_delivers_tick :: proc(t: ^testing.T) {
 test_simulate_child_terminated :: proc(t: ^testing.T) {
 	h := create(supervisor_state{}, supervisor_behaviour)
 	defer destroy(&h)
-	simulate_child_terminated(&h, actod.PID(10), .ABNORMAL, true)
+	simulate_child_terminated(&h, actod.PID(10), "worker-10", .ABNORMAL, true)
 	s := get_state(&h)
 	testing.expect_value(t, s.child_terminated_pid, actod.PID(10))
+	testing.expect_value(t, s.child_terminated_name, "worker-10")
 	testing.expect_value(t, s.term_reason, actod.Termination_Reason.ABNORMAL)
 	testing.expect(t, s.will_restart, "will_restart should be true")
 }
@@ -426,9 +432,10 @@ test_simulate_child_restarted :: proc(t: ^testing.T) {
 test_simulate_max_restarts :: proc(t: ^testing.T) {
 	h := create(supervisor_state{}, supervisor_behaviour)
 	defer destroy(&h)
-	simulate_max_restarts(&h, actod.PID(40))
+	simulate_max_restarts(&h, actod.PID(40), "worker-40")
 	s := get_state(&h)
 	testing.expect_value(t, s.max_restarts_pid, actod.PID(40))
+	testing.expect_value(t, s.max_restarts_name, "worker-40")
 }
 
 @(test)

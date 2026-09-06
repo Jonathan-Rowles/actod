@@ -49,12 +49,17 @@ Type_Header :: struct {
 TYPE_HEADER_SIZE :: size_of(Type_Header)
 #assert(TYPE_HEADER_SIZE == 16, "Type_Header must stay 16 bytes, the inline message path packs around it")
 
+@(private)
+message_page_bytes :: #force_inline proc "contextless" (size: int) -> int {
+	return ((TYPE_HEADER_SIZE + size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE
+}
+
 assert_message_fits_page :: #force_inline proc "contextless" ($T: typeid) {
 	#assert(
 		((TYPE_HEADER_SIZE + size_of(T) + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) *
 			CACHE_LINE_SIZE <=
 		MAX_STATIC_MESSAGE_SIZE,
-		"message type is larger than a message pool page can ever hold, shrink it or raise -define:ACTOD_MAX_MESSAGE_SIZE and actor_config.page_size to match",
+		"message type is larger than ACTOD_MAX_MESSAGE_SIZE, the absolute ceiling on a message pool page. Shrink the type, or raise -define:ACTOD_MAX_MESSAGE_SIZE and actor_config.page_size together. node_init separately refuses to start when the node default page_size cannot hold every registered type",
 	)
 }
 

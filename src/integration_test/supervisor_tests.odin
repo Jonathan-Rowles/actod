@@ -72,9 +72,11 @@ Supervisor_Test_Behaviour :: actod.Actor_Behaviour(Supervisor_Test_Data) {
 supervisor_test_on_child_terminated :: proc(
 	data: ^Supervisor_Test_Data,
 	child_pid: actod.PID,
+	child_name: string,
 	reason: actod.Termination_Reason,
 	will_restart: bool,
 ) {
+	g_last_stop_name_len = copy(g_last_stop_name[:], child_name)
 	sync.atomic_store(&g_last_stop_reason, i32(reason))
 	sync.atomic_add(&g_stops_observed, 1)
 }
@@ -87,6 +89,10 @@ supervisor_test_init :: proc(data: ^Supervisor_Test_Data) {
 g_stops_observed: u64
 @(private = "file")
 g_last_stop_reason: i32
+@(private = "file")
+g_last_stop_name: [64]u8
+@(private = "file")
+g_last_stop_name_len: int
 
 supervisor_test_handle_message :: proc(data: ^Supervisor_Test_Data, from: actod.PID, msg: any) {
 	switch m in msg {
@@ -1008,6 +1014,10 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 		child_pid := children[0]
 		delete(children)
 
+		name_buf: [64]u8
+		name_len := copy(name_buf[:], actod.get_actor_name(child_pid))
+		expected_name := string(name_buf[:name_len])
+
 		stops_before := sync.atomic_load(&g_stops_observed)
 		send_err := actod.send_message(child_pid, "terminate_self")
 		expect_value(t, send_err, actod.Send_Error.OK)
@@ -1024,6 +1034,13 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 		if observed {
 			got := actod.Termination_Reason(sync.atomic_load(&g_last_stop_reason))
 			expect_value(t, got, test_reason)
+			expectf(
+				t,
+				string(g_last_stop_name[:g_last_stop_name_len]) == expected_name,
+				"on_child_terminated got child_name %q, expected %q",
+				string(g_last_stop_name[:g_last_stop_name_len]),
+				expected_name,
+			)
 		}
 
 		expect(

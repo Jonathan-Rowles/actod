@@ -41,6 +41,7 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 		on_child_terminated = proc(
 			data: ^Dup_Parent_Data,
 			child_pid: actod.PID,
+			child_name: string,
 			reason: actod.Termination_Reason,
 			will_restart: bool,
 		) {

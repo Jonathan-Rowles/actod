@@ -138,13 +138,14 @@ advance_time :: proc(h: ^Test_Harness($T), d: time.Duration) {
 simulate_child_terminated :: proc(
 	h: ^Test_Harness($T),
 	child_pid: actod.PID,
+	child_name: string,
 	reason: actod.Termination_Reason,
 	will_restart: bool = false,
 ) {
 	if h.behaviour.on_child_terminated == nil do return
 	install_intercept(h)
 	defer uninstall_intercept()
-	h.behaviour.on_child_terminated(h.data, child_pid, reason, will_restart)
+	h.behaviour.on_child_terminated(h.data, child_pid, child_name, reason, will_restart)
 }
 
 simulate_child_started :: proc(h: ^Test_Harness($T), child_pid: actod.PID) {
@@ -166,11 +167,11 @@ simulate_child_restarted :: proc(
 	h.behaviour.on_child_restarted(h.data, old_pid, new_pid, restart_count)
 }
 
-simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID) {
+simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID, child_name: string) {
 	if h.behaviour.on_max_restarts_exceeded == nil do return
 	install_intercept(h)
 	defer uninstall_intercept()
-	h.behaviour.on_max_restarts_exceeded(h.data, child_pid)
+	h.behaviour.on_max_restarts_exceeded(h.data, child_pid, child_name)
 }
 
 

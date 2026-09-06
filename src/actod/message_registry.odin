@@ -3,7 +3,6 @@ package actod
 import "base:runtime"
 import "core:fmt"
 import "core:log"
-import "core:strings"
 
 Var_Field_Info :: struct {
 	offset: uintptr,
@@ -363,20 +362,21 @@ get_validated_message_info_ptr :: #force_inline proc(
 	return _cached
 }
 
-get_type_name :: proc(ti: ^runtime.Type_Info, allocator := context.allocator) -> string {
-	if ti == nil do return ""
-
-	base := runtime.type_info_base(ti)
-
-	#partial switch info in base.variant {
-	case runtime.Type_Info_Named:
-		if info.pkg != "" && info.name != "" {
-			return fmt.aprintf("%s.%s", info.pkg, info.name, allocator = allocator)
-		} else if info.name != "" {
-			return strings.clone(info.name, allocator)
+@(private)
+largest_registered_message :: proc() -> (name: string, page_bytes: int) {
+	for i in 0 ..< g_message_registry.count {
+		info := &g_message_registry.entries[i].value
+		bytes := message_page_bytes(info.size)
+		if bytes > page_bytes {
+			name = info.name
+			page_bytes = bytes
 		}
 	}
+	return
+}
 
+get_type_name :: proc(ti: ^runtime.Type_Info, allocator := context.allocator) -> string {
+	if ti == nil do return ""
 	return fmt.aprintf("%v", ti.id, allocator = allocator)
 }
 

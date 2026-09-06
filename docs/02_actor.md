@@ -79,13 +79,15 @@ Actor_Behaviour :: struct($T: typeid) {
 
     // supervisor callbacks (optional)
     on_child_started:         proc(data: ^T, child_pid: PID),
-    on_child_terminated:      proc(data: ^T, child_pid: PID, reason: Termination_Reason, will_restart: bool),
+    on_child_terminated:      proc(data: ^T, child_pid: PID, child_name: string, reason: Termination_Reason, will_restart: bool),
     on_child_restarted:       proc(data: ^T, old_pid: PID, new_pid: PID, restart_count: int),
-    on_max_restarts_exceeded: proc(data: ^T, child_pid: PID),
+    on_max_restarts_exceeded: proc(data: ^T, child_pid: PID, child_name: string),
 }
 ```
 
 Only `handle_message` is required. All callbacks receive a pointer to the actor's typed state.
+
+The two termination callbacks carry `child_name` because the child is already dead when they fire and the node reaps its registry entry asynchronously, so `get_actor_name(child_pid)` there is a race: sometimes the name, sometimes `"<unknown>"`. The parameter is the only reliable answer. It is borrowed for the duration of the call, exactly like `content: any`: copy it if you keep it. A local child's name arrives truncated to 64 bytes (`STOP_SIGNAL_NAME_CAP`), while a remote child's arrives in full, so do not key a supervisor off `child_name` for names that long. `on_child_started` and `on_child_restarted` take no name because the child is live at that point and `get_actor_name` resolves.
 
 ## Sending Messages
 

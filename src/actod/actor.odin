@@ -93,11 +93,12 @@ Actor_Behaviour :: struct($T: typeid) {
 	on_child_terminated:      proc(
 		data: ^T,
 		child_pid: PID,
+		child_name: string,
 		reason: Termination_Reason,
 		will_restart: bool,
 	),
 	on_child_restarted:       proc(data: ^T, old_pid: PID, new_pid: PID, restart_count: int),
-	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID),
+	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID, child_name: string),
 }
 
 ACTOR_MAILBOX :: MPSC_Queue(Message, 0)

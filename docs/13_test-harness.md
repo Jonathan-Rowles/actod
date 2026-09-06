@@ -10,7 +10,7 @@ The first two test *your actor logic* against a model of the runtime. DST tests 
 odin test .
 ```
 
-The test harness doesn't start a real node or worker pool. Actors run synchronously: `send` captures messages, `step` processes one at a time. No threads, no timing, fully deterministic.
+Neither harness starts a real node or worker pool, and both are fully deterministic: no threads, no timing. The unit harness delivers `th.send` straight into `handle_message` and captures what the actor sends out. The sim queues messages instead and delivers one per `sim.step`.
 
 ## Unit Testing
 
@@ -54,24 +54,51 @@ send :: proc(h: ^Test_Harness($T), msg: $M, from: PID = EXTERNAL_PID)
 
 // Setup
 register_pid :: proc(h: ^Test_Harness($T), name: string, pid: PID)
+kill_pid :: proc(h: ^Test_Harness($T), pid: PID)      // make a registered PID dead, so sends to it fail
 add_child :: proc(h: ^Test_Harness($T), pid: PID)
 set_parent :: proc(h: ^Test_Harness($T), pid: PID)
+EXTERNAL_PID :: PID(999)                              // the default `from` for th.send
+
+// Intercept, for non-actor code that calls actod APIs (a WS callback, a timer thread)
+install :: proc(h: ^Test_Harness($T))
+uninstall :: proc(h: ^Test_Harness($T))
 
 // Time
 set_virtual_now :: proc(h: ^Test_Harness($T), t: time.Time)
 advance_time :: proc(h: ^Test_Harness($T), d: time.Duration)
 
 // Supervision simulation
-simulate_child_terminated :: proc(h: ^Test_Harness($T), child_pid: PID, reason: Termination_Reason, will_restart: bool)
+simulate_child_terminated :: proc(h: ^Test_Harness($T), child_pid: PID, child_name: string, reason: Termination_Reason, will_restart: bool = false)
 simulate_child_started :: proc(h: ^Test_Harness($T), child_pid: PID)
 simulate_child_restarted :: proc(h: ^Test_Harness($T), old_pid: PID, new_pid: PID, restart_count: int)
-simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: PID)
+simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: PID, child_name: string)
+
+// Timers
+expect_timer :: proc(h: ^Test_Harness($T), t: ^testing.T) -> Captured_Timer
+fire_timer :: proc(h: ^Test_Harness($T), id: u32)
 
 // Assertions
 expect_sent :: proc(h: ^Test_Harness($T), t: ^testing.T, $M: typeid) -> M
 expect_sent_to :: proc(h: ^Test_Harness($T), t: ^testing.T, to: PID, $M: typeid) -> M
 expect_sent_where :: proc(h: ^Test_Harness($T), t: ^testing.T, $M: typeid, pred: proc(_: M) -> bool) -> M
+expect_no_sends :: proc(h: ^Test_Harness($T), t: ^testing.T)
+sent_count :: proc(h: ^Test_Harness($T)) -> int
+clear_sent :: proc(h: ^Test_Harness($T))
+find_sent :: proc(h: ^Test_Harness($T), $M: typeid) -> (M, int, bool)
+expect_published :: proc(h: ^Test_Harness($T), t: ^testing.T, $M: typeid) -> M
+expect_published_to :: proc(h: ^Test_Harness($T), t: ^testing.T, topic: rawptr, $M: typeid) -> M
+expect_no_publishes :: proc(h: ^Test_Harness($T), t: ^testing.T)
+expect_spawned :: proc(h: ^Test_Harness($T), t: ^testing.T, $M: typeid) -> Captured_Spawn
+expect_terminated :: proc(h: ^Test_Harness($T), t: ^testing.T) -> Captured_Terminate
+expect_terminated_pid :: proc(h: ^Test_Harness($T), t: ^testing.T, pid: PID) -> Captured_Terminate
+expect_broadcast :: proc(h: ^Test_Harness($T), t: ^testing.T, $M: typeid) -> M
+expect_renamed :: proc(h: ^Test_Harness($T), t: ^testing.T) -> Captured_Rename
+expect_subscribed_type :: proc(h: ^Test_Harness($T), t: ^testing.T) -> Captured_Subscribe
+expect_subscribed_topic :: proc(h: ^Test_Harness($T), t: ^testing.T, topic: rawptr) -> Captured_Topic_Subscribe
 ```
+
+`fire_timer` delivers a `Timer_Tick` for the given id. Get the id from `expect_timer`
+rather than assuming it, and prefer both to constructing an `act.Timer_Tick` by hand.
 
 ## Simulation Testing
 
@@ -86,20 +113,40 @@ test_ping_pong :: proc(t: ^testing.T) {
     defer sim.destroy(&s)
 
     ponger_pid := sim.spawn(&s, "ponger", Ponger{}, ponger_behaviour)
-    pinger_pid := sim.spawn(&s, "pinger", Pinger{target = ponger_pid}, pinger_behaviour)
+    sim.spawn(&s, "pinger", Pinger{target = ponger_pid}, pinger_behaviour)
+    sim.init_all(&s)
 
-    sim.deliver(&s, "pinger", "external", Start{})
+    sim.send(&s, "pinger", Start{})
+    sim.run_until_idle(&s)
 
-    // Step through message processing
-    for i in 0 ..< 10 {
-        sim.step(&s)
-    }
-
-    // Check results
-    reply, ok := sim.expect_sent(&s, "ponger", "pinger", Pong)
-    testing.expect(t, ok)
+    ponger := sim.get_state(&s, "ponger", Ponger)
+    testing.expect_value(t, ponger.pings, 1)
 }
 ```
+
+Two things to know before writing a sim test:
+
+- **`sim.spawn` does not run `init`.** Call `sim.init_all(&s)` once after spawning every
+  actor, or no actor's `init` ever runs and anything it sets up (timers, subscriptions,
+  sibling lookups) is missing.
+- **Sim has no send assertions.** Unlike the unit harness there is no `expect_sent`.
+  Assert on the receiver's state through `sim.get_state(&s, name, T)`, which is what the
+  sim's own tests do.
+
+There is also no external kill, so `sim.expect_dead` is only reachable after an actor
+terminates itself or you clear the flag by hand, which is what the sim's own tests do:
+
+```odin
+sim.find_actor_by_pid(&s, u64(pid)).alive = false
+```
+
+The sim models ask and reply in full, including timeout expiry on `sim.advance_time` and
+the dropping of a late reply, so a handler built on `act.ask` / `act.reply` /
+`act.replying_to` can be tested here. The unit harness does not.
+
+Every sim capacity is a fixed array and overflowing one is an `assert`, not a soft
+failure: 32 actors, a 1024-message queue, 128 timers, 64 topics, 16 subscribers per
+topic, 16 fault rules.
 
 ### Sim API
 
@@ -110,26 +157,37 @@ create_seeded :: proc(seed: u64) -> Sim
 destroy :: proc(s: ^Sim)
 
 // Actors
-spawn :: proc(s: ^Sim, name: string, data: $T, behaviour: Actor_Behaviour(T)) -> u64
+spawn :: proc(s: ^Sim, name: string, data: $T, behaviour: Actor_Behaviour(T)) -> PID
+init_all :: proc(s: ^Sim)
 
 // Message delivery
-send :: proc(s: ^Sim, actor_name: string, content: $T)          // external -> actor
-send_to :: proc(s: ^Sim, pid: PID, content: $T)                 // external -> actor by PID
-deliver :: proc(s: ^Sim, to_name: string, from_name: string, msg: $T) -> bool
-deliver_to :: proc(s: ^Sim, to_pid: u64, from_pid: u64, msg: $T) -> bool
-step :: proc(s: ^Sim) -> bool  // process one queued message
+send :: proc(s: ^Sim, actor_name: string, content: $T)              // external -> actor by name
+send_to :: proc(s: ^Sim, pid: PID, content: $T)                     // external -> actor by PID
+send_from :: proc(s: ^Sim, to, from: PID, content: $T)              // actor -> actor
+publish :: proc(s: ^Sim, topic: rawptr, content: $T)
+step :: proc(s: ^Sim) -> bool          // process one queued message, false if none
+run_until_idle :: proc(s: ^Sim)        // drain the queue
 
 // Time
 advance_time :: proc(s: ^Sim, d: time.Duration)
-set_clock :: proc(s: ^Sim, t: time.Time)
 
-// Assertions
-expect_sent :: proc(s: ^Sim, to_name, from_name: string, $M: typeid) -> (M, bool)
-expect_not_sent :: proc(s: ^Sim, to_name, from_name: string, $M: typeid) -> bool
+// State and assertions
+get_state :: proc(s: ^Sim, name: string, $T: typeid) -> ^T
+expect_alive :: proc(s: ^Sim, t: ^testing.T, name: string)
 expect_dead :: proc(s: ^Sim, t: ^testing.T, name: string)
+expect_idle :: proc(s: ^Sim, t: ^testing.T)
+expect_spawned :: proc(s: ^Sim, t: ^testing.T, $T: typeid) -> Captured_Spawn
+find_spawn :: proc(s: ^Sim, $T: typeid) -> (Captured_Spawn, bool)
+
+// Timers
+cancel_timer :: proc(s: ^Sim, id: u32)
 
 // Inspection
 pending_messages :: proc(s: ^Sim) -> int
+delayed_count :: proc(s: ^Sim) -> int
+find_actor_by_name :: proc(s: ^Sim, name: string) -> ^Sim_Actor
+find_actor_by_pid :: proc(s: ^Sim, pid: u64) -> ^Sim_Actor
+EXTERNAL_PID :: u64(999)               // the `from` pid stamped by send, send_to and publish
 
 // Fault injection
 add_fault :: proc(s: ^Sim, rule: Fault_Rule)
@@ -141,36 +199,45 @@ clear_faults :: proc(s: ^Sim)
 Inject faults into the simulation to test error handling:
 
 ```odin
-// Drop all messages to "receiver" from "sender"
+// Drop every message to "receiver" from "sender", for the whole test
 sim.add_fault(&s, {
-    match     = { to_name = "receiver", from_name = "sender" },
-    action    = .Drop,
-    remaining = -1,  // -1 = forever
+    match  = { to_name = "receiver", from_name = "sender" },
+    action = .Drop,
 })
 
 // Delay delivery by 3 steps
 sim.add_fault(&s, {
-    match       = { to_name = "receiver", msg_type = MyMessage },
+    match       = { to_name = "receiver", msg_type = typeid_of(MyMessage) },
     action      = .Delay,
     delay_steps = 3,
-    remaining   = -1,
 })
 
 // Duplicate messages
 sim.add_fault(&s, {
-    match     = { to_name = "receiver" },
-    action    = .Duplicate,
-    remaining = -1,
+    match  = { to_name = "receiver" },
+    action = .Duplicate,
 })
 
 // Probabilistic fault (30% chance, fire 5 times then stop)
 sim.add_fault(&s, {
-    match       = { to_name = "receiver", msg_type = MyMessage },
+    match       = { to_name = "receiver", msg_type = typeid_of(MyMessage) },
     action      = .Drop,
-    remaining   = 5,
+    count       = 5,
     probability = 0.3,
 })
 ```
+
+`count` caps how many times a rule fires. Its zero value means no cap, so a rule written
+without it injects on every matching message, which is what a fault written to prove a
+handler survives a drop should do. A negative count is also uncapped.
+
+`probability` works the same way: zero means the rule always fires.
+
+A rule acts on any given message at most once. That is what makes an uncapped rule safe
+for every action: an uncapped `.Duplicate` copies each original once rather than
+duplicating its own clones forever, and an uncapped `.Delay` holds each message for
+`delay_steps` and then delivers it rather than re-delaying it forever. A different rule
+can still act on the same message.
 
 ### Fault Actions
 
@@ -191,8 +258,7 @@ Both the unit harness and sim support virtual time for deterministic testing:
 th.set_virtual_now(&h, some_time)
 th.advance_time(&h, 5 * time.Second)
 
-// Sim
-sim.set_clock(&s, some_time)
+// Sim (no absolute setter, advance from the epoch the sim starts at)
 sim.advance_time(&s, 5 * time.Second)
 ```
 

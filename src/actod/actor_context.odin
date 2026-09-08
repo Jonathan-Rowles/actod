@@ -81,6 +81,9 @@ get_system_allocator :: #force_inline proc() -> runtime.Allocator {
 @(thread_local)
 spawning_blocking_child: bool
 
+@(thread_local)
+spawning_node_actor: bool
+
 @(private)
 make_logger :: proc(config: Log_Config) -> log.Logger {
 	actor_system_allocator = runtime.heap_allocator()

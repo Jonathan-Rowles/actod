@@ -260,6 +260,16 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_blocking_child_stops_on_escalation,
 		expects_error_logs = true,
 	},
+	{
+		name = "test_init_death_does_not_wedge_name_dedicated",
+		test_proc = test_init_death_does_not_wedge_name_dedicated,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_init_death_does_not_wedge_name_pooled",
+		test_proc = test_init_death_does_not_wedge_name_pooled,
+		expects_error_logs = true,
+	},
 	{name = "test_remove_child_then_restart_all", test_proc = test_remove_child_then_restart_all},
 	{name = "test_string_handling", test_proc = test_string_handling},
 	{name = "test_byte_slice_handling", test_proc = test_byte_slice_handling},

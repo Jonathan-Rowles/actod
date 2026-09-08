@@ -278,6 +278,10 @@ spawn_impl :: proc(
 		spawn_fail(actor, 0)
 		return 0, false
 	}
+	if spawning_node_actor {
+		spawning_node_actor = false
+		NODE.pid = pid
+	}
 	context.allocator = actor.allocator
 
 	if parent_pid > 0 && is_local_pid(parent_pid) {

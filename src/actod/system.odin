@@ -403,6 +403,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	NODE.config.actor_config.children = nil
 	system_config.children = system_children
 
+	spawning_node_actor = true
 	NODE.pid, NODE.started = spawn(
 		name,
 		Node_Actor_Data{name = NODE.name},
@@ -411,6 +412,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 		0,
 		loc,
 	)
+	spawning_node_actor = false
 	delete(system_children)
 	delete(NODE.root_supervisor_children)
 	NODE.root_supervisor_children = nil

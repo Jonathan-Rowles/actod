@@ -47,9 +47,9 @@ get_subscriber_count :: proc(actor_type: Actor_Type) -> u32
 
 ## Details
 
-- Max 16384 subscribers per type
+- Max 16384 subscribers per type by default, set with `-define:ACTOD_MAX_SUBSCRIBERS_PER_TYPE=N`
 - Subscriptions are cleaned up on actor termination
-- Cross-node: remote nodes track subscriptions and receive broadcasts over the network
+- Cross-node: remote nodes track subscriptions and receive broadcasts over the network. One message goes to each remote node that has subscribers, and that node fans it out to its own subscribers, so wire traffic scales with node count, not subscriber count
 
 ---
 [< Timer](05_timer.md) | [Topic Pub/Sub >](07_topic-pubsub.md)

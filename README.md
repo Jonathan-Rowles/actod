@@ -2,225 +2,113 @@
 
 [![CI](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Jonathan-Rowles/actod/actions/workflows/ci.yml)
 
-**High-performance actor runtime for the [Odin programming language](https://odin-lang.org/).**
+Actor runtime for [Odin](https://odin-lang.org/). Coroutines on a fixed worker pool (not one thread per actor). Sends copy the message into the receiver's mailbox over lock-free MPSC queues. Receiver owns it; no alloc/free on the hot path.
 
-Actors run as coroutines on a fixed worker pool: no thread-per-actor overhead. Messages are copied into the receiver's memory buffer via lock-free MPSC queues. The receiver owns the message.
+`sim_mode = true` means zero OS threads: you step the node from the calling thread under a seeded scheduler, so a failed run replays from that seed. The suite uses that for real multi-node setups on one thread (handshakes, wire format, virtual transport) plus a seed-driven fuzzer in the FoundationDB/TigerBeetle VOPR style: partitions, crashes, restarts, clock jumps, per-link frame faults, then checks delivery and convergence.
 
-See [docs](docs/00_getting-started.md) for the full reference.
+> **v0.4**, API may still move before v1. Linux x86_64, macOS Apple Silicon, Windows x86_64.
 
-> **v0.3**, API may change before v1. Tested on Linux x86_64, macOS Apple Silicon, and Windows x86_64.
-
-## Performance
-
-| Test | Category | Apple M4 Air (10c) | Linux x86 (16c) |
-|------|----------|---------------|-----------------|
-| 1:1 32B | Base | 84M msgs/sec | 63M msgs/sec |
-| 1:1 1KB | Base | 20M msgs/sec | 18M msgs/sec |
-| 1:1 32B cross-worker | Base | - | 38M msgs/sec |
-| 4x 32B parallel | Parallel | 236M msgs/sec | 249M msgs/sec |
-| 4:1 32KB fan-in | Fan-in | 2.3M msgs/sec (70 GB/s) | 2.6M msgs/sec (79 GB/s) |
-| 2:2 Ping-Pong | Contention | 42M msgs/sec | 72M msgs/sec |
-
-### Round-Trip Latency (Ping-Pong)
-
-| Size | p50 (M4 / x86) | p99 (M4 / x86) |
-|------|-----------------|-----------------|
-| 32B | 167ns / 238ns | 292ns / 598ns |
-| 4KB | 542ns / 356ns | 917ns / 1.2µs |
-
-x86 p99 varies 0.5-2µs between runs; p50 is stable within ±1%.
-
-### Network (TCP loopback)
-
-| Test | Apple M4 Air (10c) | Linux x86 (16c) |
-|------|---------------|-----------------|
-| 1:1 32B | 18.87M msgs/sec | 10.06M msgs/sec |
-| 1:1 256B | 12.35M msgs/sec | 5.01M msgs/sec |
-| 1:1 1KB | 4.81M msgs/sec | 2.22M msgs/sec |
-
-## Usage
-
-### Requirements
-
-Odin `dev-2026-07a` or newer (the version CI builds and tests against; see the
-`release:` pin in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), which
-is the source of truth if this paragraph rots).
-
-### Installation
-
-Vendor actod into your project, pinned to a release tag. Submodule recommended:
-
-```bash
-git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod
-cd vendor/actod && git checkout v0.3.0 && cd -
-git commit -am "Vendor actod v0.3.0"
-```
-
-Build with a collection flag pointing at the vendored repo:
-
-```bash
-odin build . -collection:actod=vendor/actod
-```
-
-Then import the public interface (`act.odin`) from anywhere in your project:
+## A first actor
 
 ```odin
-import act "actod"
-```
+Counter :: struct { total: int }
 
-### Minimal Application
-
-```odin
-import act "actod"
-
-Worker :: struct { count: int }
-
-worker_behaviour := act.Actor_Behaviour(Worker){
-    handle_message = proc(d: ^Worker, from: act.PID, msg: any) {
+counter_behaviour := act.Actor_Behaviour(Counter) {
+    init = proc(d: ^Counter) {
+        _ = act.send_self(Add{amount = 42})
+    },
+    handle_message = proc(d: ^Counter, from: act.PID, msg: any) {
         switch m in msg {
-        case string:
-            d.count += 1
-            act.send_message(from, d.count)
+        case Add:
+            d.total += m.amount
+            log.infof("total: %d", d.total)
         }
     },
 }
 
-spawn_worker :: proc(_name: string, _parent: act.PID) -> (act.PID, bool) {
-    return act.spawn("worker", Worker{}, worker_behaviour)
-}
-
 main :: proc() {
-    act.node_init("myapp", act.make_node_config(
+    act.node_init("hello", act.make_node_config(
         actor_config = act.make_actor_config(
-            children = act.make_children(spawn_worker),
+            children = act.make_children(spawn_counter),
         ),
     ))
-
-    act.await_signal() // block until SIGINT/SIGTERM
+    act.await_signal()
 }
 ```
+
+`node_init` takes a config and blocks on `await_signal`. Node children get a supervisor without extra setup. Bigger apps mostly mean more spawn fns in `make_children`.
+
+[`docs/comedy_club.odin`](docs/comedy_club.odin) is a small runnable pair of actors. `cd docs && odin run .`
+
+Walkthrough and reference: [Getting Started](docs/00_getting-started.md).
+
+## Performance
+
+| Test | Apple M4 Air (10c) | Linux x86 (16c) |
+|------|--------------------|-----------------|
+| 1:1 32B | 84M msgs/sec | 63M msgs/sec |
+| 1:1 1KB | 20M msgs/sec | 18M msgs/sec |
+| 4x 32B parallel | 236M msgs/sec | 249M msgs/sec |
+| 4:1 32KB fan-in | 2.3M msgs/sec (70 GB/s) | 2.6M msgs/sec (79 GB/s) |
+| 2:2 ping-pong | 42M msgs/sec | 72M msgs/sec |
+
+Ping-pong RTT, 32B: p50 167ns / 238ns, p99 292ns / 598ns (M4 / x86). At 4KB: p50 542ns / 356ns, p99 917ns / 1.2µs. x86 p99 wanders 0.5-2µs run to run; p50 stays within about ±1%.
+
+TCP loopback 1:1: 18.9M / 19.0M msgs/sec at 32B, 12.4M / 7.7M at 256B, 4.8M / 5.5M at 1KB.
+
+Bench sources live under [`benchmarks/`](benchmarks/). `make bench-single`, `make bench-network`, `make bench-footprint`.
 
 ## What's included
 
-**Supervision.** Any actor with children is a supervisor. Three restart strategies (one-for-one, one-for-all, rest-for-one), configurable restart limits and windows, and callbacks for every lifecycle transition.
+**Supervision.** Actor with children is a supervisor. one-for-one, one-for-all, rest-for-one; restart limits/windows; lifecycle callbacks.
 
-```odin
-act.make_actor_config(
-    children             = act.make_children(spawn_worker1, spawn_worker2),
-    supervision_strategy = .ONE_FOR_ONE,
-    restart_policy       = .PERMANENT,
-    max_restarts         = 3,
-    restart_window       = 5 * time.Second,
-)
-```
+**Distributed actors.** Local and remote `send_message` look the same. PID carries the node id; routing is internal. Lifecycle gossip keeps proxy registries filled on every node. `.OK` only means the target node's send buffer took the message (including while that node is offline and buffering for reconnect). It is not "delivered" and not "reachable". [Networking](docs/10_network.md), [Delivery Semantics](docs/14_delivery-semantics.md).
 
-**Distributed actors.** Remote and local sends use the same API. PIDs encode the node ID. `send_message` routes transparently. Actor lifecycle events gossip across the mesh so every node maintains a proxy registry.
+**Mailboxes.** Per actor, plus a system mailbox that runs first. Size is compile-time (default 32; `-define:ACTOD_MAILBOX_SIZE=N` or `act.spawn_sized(...)`). No runtime resize. Same-sender order is preserved. Full mailbox stalls the sender while the receiver drains; `RECEIVER_BACKLOGGED` only if the receiver is stuck. No silent drops, no reordering.
 
-```odin
-// Every node must register each message type it sends or receives.
-@(init)
-register_types :: proc "contextless" () {
-    act.register_message_type(Work_Item)
-}
+**Pub/sub.** Type-based (global, default cap 16384 subscribers, `-define:ACTOD_MAX_SUBSCRIBERS_PER_TYPE=N`) and topic-based (a `Topic` var/field, cap 64). Type pub/sub crosses nodes: one send per remote node that cares, then local fan-out there. Topics stay on-node.
 
-// Node A
-act.node_init("nodeA", act.make_node_config(
-    network = act.make_network_config(port = 5000),
-))
-act.register_spawn_func("worker", spawn_worker)
+**Timers.** One-shot and repeating, owned by a system actor. `act.now()` is virtual under sim, wall clock otherwise.
 
-// Node B, same send API as local
-remote_pid, ok := act.spawn_remote("worker", "w1", "nodeA")
-act.send_message(remote_pid, Work_Item{})
-```
+**Hot reload.** Replace `handle_message` (and other behaviour procs) on a live actor; state stays. `docs/hot_reload_example/`.
 
-`send_message` returns `.OK` once the message is accepted into the target node's send buffer, which can happen even while that node is disconnected (it buffers and delivers on reconnect). `.OK` does not mean "delivered" or "peer reachable." See [Networking](docs/10_network.md).
+**Observer.** Interval stats per actor (counts, depths, uptime, per-sender/recipient), pushed to subscribers.
 
-**Mailboxes.** One mailbox per actor plus a dedicated system mailbox processed first. Capacity is a compile-time constant (32 by default, `-define:ACTOD_MAILBOX_SIZE=N` globally or `act.spawn_sized("name", data, behaviour, N)` per actor) and never changes at runtime. Messages from the same sender arrive in send order; a full mailbox blocks the sender while the receiver drains and returns `RECEIVER_BACKLOGGED` only when the receiver makes no progress. Never reorders, never silently drops.
+**Execution.** Default is pooled coroutines. `use_dedicated_os_thread` for blocking I/O or heavy CPU. `affinity` pins chatty actors onto the same worker (often up to ~2x on small messages).
 
-**Pub/sub.** Type-based (global, up to 16384 subscribers) and topic-based (scoped to a struct field, up to 64 subscribers). Cross-node for type-based.
-
-**Timers.** One-shot and repeating, managed by a dedicated system actor. `act.now()` returns virtual time in tests, real time in production.
-
-**Hot reload.** Swap `handle_message` and other behaviour callbacks on live actors without restarting the node. State is preserved.
-See `docs/hot_reload_example/` for a working example you can run and edit live.
-
-**Observer.** Per-actor stats (message counts, mailbox depths, uptime, per-sender/recipient breakdowns) collected on a configurable interval and broadcast to subscribers.
-
-**Test harness.** Two layers: a unit harness for single actors (synchronous, no threads, virtual time) and a simulation framework for multi-actor scenarios with deterministic message delivery, fault injection, and virtual time.
+**Test harness.** Single-actor unit harness (sync, no threads, virtual time) and multi-actor sim with deterministic delivery, faults, and a virtual clock that squishes timer races into microseconds. [Test Harness](docs/13_test-harness.md).
 
 ```odin
 // Drop 30% of messages to "receiver", 5 times
 sim.add_fault(&s, {
     match       = { to_name = "receiver", msg_type = MyMessage },
     action      = .Drop,
-    remaining   = 5,
+    count       = 5,
     probability = 0.3,
 })
 ```
 
-**Deterministic simulation testing.** A node started with `sim_mode = true` runs with zero OS threads and is stepped from the calling thread; a seeded scheduler makes every interleaving replayable from its seed. The runtime itself is tested this way: multiple real nodes on one thread, real handshakes and wire format over a virtual transport, a virtual clock that compresses timer races into microseconds, and a seed-driven scenario fuzzer (the VOPR, in the FoundationDB/TigerBeetle tradition) that generates partitions, crashes, restarts, clock jumps, and per-link frame faults, checking delivery and convergence invariants as it runs. Any failure replays deterministically from its printed seed under the same binary and profile. See [Test Harness](docs/13_test-harness.md).
-
----
-
 ## Memory model
 
-- **Sending**: `send_message(pid, my_struct)` copies the struct into the receiver's memory. You don't allocate. You don't free. The sender's copy is untouched.
-- **Receiving**: `content: any` in `handle_message` is valid for the duration of the callback. Don't store the pointer: memory is recycled when the callback returns.
-- **Actor state**: Lives in a per-actor arena. Allocated on `spawn`, freed on termination.
+- **Sending**: `send_message(pid, my_struct)` copies into receiver memory. You neither allocate nor free; your local copy is left alone.
+- **Receiving**: the `any` in `handle_message` lives for that call only. Do not stash the pointer; that slot is reused when you return.
+- **Actor state**: per-actor arena, alloc on spawn, free on terminate.
 
-Maps and dynamic arrays are excluded from messages intentionally. Every send has predictable cost regardless of payload.
+Maps and dynamic arrays are not valid message payloads. That keeps send cost predictable.
 
----
+## Install
 
-## Configuration
+Odin `dev-2026-07a` or newer (whatever CI pins under `release:` in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) wins). Pin actod to a tag:
 
-Three config builders, all with sensible defaults:
-
-```odin
-act.node_init("myapp", act.make_node_config(
-    worker_count = 0,              // 0 = auto (CPU count)
-    actor_config = act.make_actor_config(
-        message_batch = 64,
-        restart_policy = .PERMANENT,
-    ),
-    network = act.make_network_config(
-        port = 5000,
-        auth_password = "secret",
-    ),
-    enable_observer = true,
-    observer_interval = 5 * time.Second,
-    hot_reload_dev = true,
-))
+```bash
+git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod
+cd vendor/actod && git checkout v0.4.0 && cd -
+odin build . -collection:actod=vendor/actod
 ```
 
-The `actor_config` on the node is the default for every actor. Individual actors override by passing their own config to `spawn`.
+`import act "actod"` after that. Node knobs: [Node](docs/01_node.md).
 
----
+## Roadmap
 
-## Execution models
-
-**Pooled (default).** Actor runs as a coroutine on a worker thread. Shares CPU with other actors on the same worker. Yields cooperatively.
-
-**Dedicated thread.** Actor gets its own OS thread. Use for blocking I/O or CPU-intensive work.
-
-```odin
-act.make_actor_config(
-    use_dedicated_os_thread = true,
-)
-```
-
-**Worker affinity.** Actors on the same worker communicate up to ~2x faster for small messages. Use `affinity` to co-locate actors that talk to each other:
-
-```odin
-receiver, _ := act.spawn("receiver", Receiver{}, receiver_behaviour)
-sender, _   := act.spawn("sender", Sender{}, sender_behaviour,
-    act.make_actor_config(affinity = act.Actor_Ref(receiver)),
-)
-```
-
----
-
-## TODO
 - Cross-node topics
 - Cross-node config changes (system msgs)

@@ -1122,3 +1122,33 @@ gossip_window_bounded_after_dropped_seq_test :: proc(t: ^testing.T) {
 	testing.expect(t, gossip_seq_covered(node, 150), "sequences past the hole must count as covered")
 	gossip_seq_reset(node, 0)
 }
+
+@(test)
+terminate_actor_during_shutdown_reports_success_test :: proc(t: ^testing.T) {
+	sync.lock(&global_registry_swap_mutex)
+	defer sync.unlock(&global_registry_swap_mutex)
+
+	test_registry := make_test_registry()
+	defer free(test_registry)
+	clear(test_registry)
+
+	saved := NODE.actor_registry
+	NODE.actor_registry = test_registry^
+	defer {
+		NODE.actor_registry = saved
+	}
+
+	victim := new(Actor(int))
+	defer free(victim)
+	victim.state = .RUNNING
+
+	pid, added := add(&NODE.actor_registry, rawptr(victim), "shutdown_victim")
+	testing.expect(t, added, "test actor should register")
+
+	was_shutting_down := sync.atomic_load(&NODE.shutting_down)
+	sync.atomic_store(&NODE.shutting_down, true)
+	ok := terminate_actor(pid, .NORMAL)
+	sync.atomic_store(&NODE.shutting_down, was_shutting_down)
+
+	testing.expect(t, ok, "terminate_actor during shutdown should succeed, not report a stale PID")
+}

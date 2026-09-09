@@ -583,6 +583,8 @@ terminate_actor :: proc(
 	state := sync.atomic_load(state_ptr)
 	if state == .STOPPING || state == .THREAD_STOPPED || state == .TERMINATED do return true
 
+	if sync.atomic_load(&NODE.shutting_down) && !is_system_op && get_self_pid() != NODE.pid do return true
+
 	actor, ok := get_actor_from_pointer(actor_ptr, is_system_op)
 	if !ok {
 		log.errorf(

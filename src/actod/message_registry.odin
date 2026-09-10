@@ -128,24 +128,31 @@ Temp_Variant_Info :: struct {
 	var_fields: [dynamic]Var_Field_Info,
 }
 
-register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location) {
+register_message_type :: #force_inline proc "contextless" ($T: typeid, loc := #caller_location) {
 	assert_message_fits_page(T)
+	register_message_type_info(T, size_of(T), type_info_of(T), loc)
+}
 
+@(private)
+register_message_type_info :: proc "contextless" (
+	type_id: typeid,
+	size: int,
+	ti: ^runtime.Type_Info,
+	loc: runtime.Source_Code_Location,
+) {
 	context = runtime.default_context()
 	registry_ensure_init(&g_message_registry, loc)
 
 	for i in 0 ..< g_message_registry.count {
-		if g_message_registry.entries[i].value.type_id == T do return
+		if g_message_registry.entries[i].value.type_id == type_id do return
 	}
-
-	ti := type_info_of(T)
 
 	type_name := get_type_name(ti, allocator = g_message_registry.allocator)
 	if type_name == "" {
 		panic_at(
 			loc,
 			"register_message_type: could not derive a name for type %v, message types must be named types, not anonymous ones",
-			typeid_of(T),
+			type_id,
 		)
 	}
 
@@ -155,9 +162,9 @@ register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location
 	temp_union_fields := make([dynamic]Temp_Union_Info)
 
 	info := Message_Type_Info {
-		type_id          = T,
-		size             = size_of(T),
-		wire_header_size = 4 + NETWORK_HEADER_SIZE + size_of(T),
+		type_id          = type_id,
+		size             = size,
+		wire_header_size = 4 + NETWORK_HEADER_SIZE + size,
 		type_info        = ti,
 		flags            = {},
 	}
@@ -181,7 +188,7 @@ register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location
 			"  Unsafe field: %s\n" +
 			"  Use fixed-size arrays [N]T instead of slices []T.\n" +
 			"  Remove pointers, maps, and dynamic arrays from message types.\n\n",
-			typeid_of(T),
+			type_id,
 			unsafe_field,
 		)
 	}
@@ -231,12 +238,12 @@ register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location
 
 	when ODIN_DEBUG {
 		existing, found := get_type_info_by_hash(type_hash, loc)
-		if found && existing.type_id != T {
+		if found && existing.type_id != type_id {
 			panic_at(
 				loc,
 				"message type hash collision: '%v' and '%v' both hash to %x. Rename one of them.",
 				existing.type_id,
-				typeid_of(T),
+				type_id,
 				type_hash,
 			)
 		}

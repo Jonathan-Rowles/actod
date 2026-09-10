@@ -92,7 +92,7 @@ replying_to :: proc() -> (Ask_Token, bool) {
 }
 
 @(private)
-deliver_user_message :: #force_inline proc(actor: ^Actor($T), msg: ^Message, data: any) {
+deliver_user_message :: #force_inline proc(actor: ^Actor, msg: ^Message, data: any) {
 	ctx := current_actor_context
 	if ctx == nil {
 		actor.handle_message(actor.data, msg.from, data)
@@ -112,7 +112,7 @@ deliver_user_message :: #force_inline proc(actor: ^Actor($T), msg: ^Message, dat
 
 @(private)
 deliver_user_message_ask :: #force_no_inline proc(
-	actor: ^Actor($T),
+	actor: ^Actor,
 	msg: ^Message,
 	data: any,
 	ctx: ^Actor_Context,

@@ -58,7 +58,7 @@ hr_read_count :: proc(pid: actod.PID) -> (i32, bool) {
 		return 0, false
 	}
 
-	data_ptr := cast(^rawptr)(uintptr(actor_ptr) + offset_of(actod.Actor(int), data))
+	data_ptr := cast(^rawptr)(uintptr(actor_ptr) + offset_of(actod.Actor, data))
 	if data_ptr^ == nil {
 		return 0, false
 	}
@@ -215,7 +215,7 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 	expect(t, active, "actor should be active")
 	if !active do return
 
-	behaviour_offset := offset_of(actod.Actor(int), behaviour)
+	behaviour_offset := offset_of(actod.Actor, behaviour)
 	handle_msg_ptr_before := (cast(^rawptr)(uintptr(actor_ptr) + behaviour_offset))^
 
 	v2_path, tmp, built := hr_build_test_module("counter_v2")

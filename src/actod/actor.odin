@@ -101,6 +101,41 @@ Actor_Behaviour :: struct($T: typeid) {
 	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID, child_name: string),
 }
 
+Erased_Behaviour :: struct {
+	handle_message:           proc(data: rawptr, from: PID, content: any),
+	init:                     proc(data: rawptr),
+	terminate:                proc(data: rawptr),
+	on_idle:                  proc(data: rawptr),
+	on_wake:                  proc "contextless" (data: rawptr),
+	actor_type:               Actor_Type,
+	on_child_started:         proc(data: rawptr, child_pid: PID),
+	on_child_terminated:      proc(
+		data: rawptr,
+		child_pid: PID,
+		child_name: string,
+		reason: Termination_Reason,
+		will_restart: bool,
+	),
+	on_child_restarted:       proc(data: rawptr, old_pid: PID, new_pid: PID, restart_count: int),
+	on_max_restarts_exceeded: proc(data: rawptr, child_pid: PID, child_name: string),
+}
+
+@(private)
+erase_behaviour :: proc(behaviour: Actor_Behaviour($T)) -> Erased_Behaviour {
+	return Erased_Behaviour {
+		handle_message = auto_cast behaviour.handle_message,
+		init = auto_cast behaviour.init,
+		terminate = auto_cast behaviour.terminate,
+		on_idle = auto_cast behaviour.on_idle,
+		on_wake = auto_cast behaviour.on_wake,
+		actor_type = behaviour.actor_type,
+		on_child_started = auto_cast behaviour.on_child_started,
+		on_child_terminated = auto_cast behaviour.on_child_terminated,
+		on_child_restarted = auto_cast behaviour.on_child_restarted,
+		on_max_restarts_exceeded = auto_cast behaviour.on_max_restarts_exceeded,
+	}
+}
+
 ACTOR_MAILBOX :: MPSC_Queue(Message, 0)
 
 Restart_Info :: struct {
@@ -126,7 +161,7 @@ Stop_Signal :: struct {
 	name_buf: [STOP_SIGNAL_NAME_CAP]u8,
 }
 
-Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
+Actor :: struct #align (CACHE_LINE_SIZE) {
 	state:              Actor_State,
 	local_write:        u64,
 	local_read:         u64,
@@ -134,14 +169,14 @@ Actor :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 	pool_handle:        ^Pooled_Actor_Handle,
 	msg_ctx:            ^Message_Processing_Context,
 	actor_ctx:          ^Actor_Context,
-	data:               ^T,
-	handle_message:     proc(data: ^T, from: PID, content: any),
+	data:               rawptr,
+	handle_message:     proc(data: rawptr, from: PID, content: any),
 	pid:                PID,
 	pool:               Pool,
 	mailbox:            ACTOR_MAILBOX,
 	system_mailbox:     ACTOR_MAILBOX,
 	wake_sema:          sync.Atomic_Sema,
-	behaviour:          Actor_Behaviour(T),
+	behaviour:          Erased_Behaviour,
 	opts:               Actor_Config,
 	allocator:          mem.Allocator,
 	arena:              Actor_Arena,
@@ -362,7 +397,7 @@ send_message_to_parent :: #force_inline proc(content: $T, loc := #caller_locatio
 
 @(private)
 retry_local_send :: #force_no_inline proc(
-	actor: ^Actor(int),
+	actor: ^Actor,
 	msg: Message,
 	to: PID,
 	loc := #caller_location,
@@ -403,7 +438,7 @@ retry_local_send_loop :: proc(
 			reclaim_unpin()
 			return .ACTOR_NOT_FOUND
 		}
-		target := cast(^Actor(int))fresh
+		target := cast(^Actor)fresh
 		state := sync.atomic_load(&target.state)
 		if state != .RUNNING && state != .IDLE && state != .INIT {
 			release_undelivered(target, &msg, true)
@@ -445,7 +480,7 @@ retry_local_send_loop :: proc(
 }
 
 @(private)
-ensure_local_buf :: #force_inline proc(actor: ^Actor(int)) {
+ensure_local_buf :: #force_inline proc(actor: ^Actor) {
 	if actor.local_buf == nil {
 		raw, err := mem.alloc_bytes_non_zeroed(
 			size_of([LOCAL_MAILBOX_SIZE]Message),
@@ -458,7 +493,7 @@ ensure_local_buf :: #force_inline proc(actor: ^Actor(int)) {
 
 @(private)
 push_to_mailbox :: #force_inline proc(
-	actor: ^Actor(int),
+	actor: ^Actor,
 	msg: Message,
 	to: PID,
 	loc := #caller_location,
@@ -550,7 +585,7 @@ report_alloc_error :: #force_no_inline proc(
 send :: #force_inline proc(
 	to: PID,
 	content: $T,
-	actor: ^Actor(int),
+	actor: ^Actor,
 	loc := #caller_location,
 ) -> Send_Error {
 	v := content
@@ -579,7 +614,7 @@ terminate_actor :: proc(
 
 	if actor_ptr == nil do return true
 
-	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
+	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
 	state := sync.atomic_load(state_ptr)
 	if state == .STOPPING || state == .THREAD_STOPPED || state == .TERMINATED do return true
 
@@ -753,7 +788,7 @@ get_actor_name :: #force_inline proc(pid: PID) -> string {
 	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return "<unknown>"
 
-	name_offset := offset_of(Actor(int), name)
+	name_offset := offset_of(Actor, name)
 	name_ptr := cast(^string)(uintptr(actor_ptr) + name_offset)
 	return name_ptr^
 }
@@ -768,14 +803,14 @@ get_actor_pid :: #force_inline proc(name: string) -> (PID, bool) {
 get_actor_parent :: #force_inline proc(pid: PID) -> PID {
 	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return 0
-	parent_offset := offset_of(Actor(int), parent)
+	parent_offset := offset_of(Actor, parent)
 	parent_ptr := cast(^PID)(uintptr(actor_ptr) + parent_offset)
 	return parent_ptr^
 }
 
 // Scary: Raw pointer to the live Actor struct for a PID, or nil if the PID is not
 // active on this node. The returned pointer is only valid while the actor is
-// alive; callers doing field reads via offset_of(Actor(T), ...) must not
+// alive; callers doing field reads via offset_of(Actor, ...) must not
 // retain it past the operation. Returns nil for remote PIDs.
 get_actor_ptr :: #force_inline proc(pid: PID) -> rawptr {
 	ptr, _ := get(&NODE.actor_registry, pid)
@@ -975,7 +1010,7 @@ build_pid_histogram :: proc(list: []PID) -> map[PID]u64 {
 }
 
 @(private)
-collect_actor_stats :: proc(actor: ^Actor($T)) -> Actor_Stats {
+collect_actor_stats :: proc(actor: ^Actor) -> Actor_Stats {
 	stats := Actor_Stats {
 		pid        = actor.pid,
 		name       = actor.name,
@@ -1020,7 +1055,7 @@ handle_set_message_stats :: #force_inline proc(from: PID, to: PID) {
 }
 
 @(private)
-handle_get_stats_request :: proc(actor: ^Actor($T), request: Get_Stats) {
+handle_get_stats_request :: proc(actor: ^Actor, request: Get_Stats) {
 	current_state := sync.atomic_load(&actor.state)
 	if current_state == .STOPPING ||
 	   current_state == .THREAD_STOPPED ||
@@ -1043,7 +1078,7 @@ handle_get_stats_request :: proc(actor: ^Actor($T), request: Get_Stats) {
 }
 
 @(private)
-handle_rename_actor :: proc(actor: ^Actor($T), msg: Rename_Actor) {
+handle_rename_actor :: proc(actor: ^Actor, msg: Rename_Actor) {
 	old_name := strings.clone(actor.name)
 	defer delete(old_name)
 
@@ -1059,7 +1094,7 @@ handle_rename_actor :: proc(actor: ^Actor($T), msg: Rename_Actor) {
 }
 
 cleanup_actor_thread :: proc(actor_ptr: rawptr) {
-	thread_offset := offset_of(Actor(int), thread)
+	thread_offset := offset_of(Actor, thread)
 	thread_ptr_ptr := cast(^^thread.Thread)(uintptr(actor_ptr) + thread_offset)
 
 	if thread_ptr_ptr^ != nil {
@@ -1077,7 +1112,7 @@ get_actor_from_pointer :: #force_inline proc(
 	actor_ptr: rawptr,
 	system_operation := false,
 ) -> (
-	^Actor(int),
+	^Actor,
 	bool,
 ) {
 	if actor_ptr == nil {
@@ -1091,6 +1126,6 @@ get_actor_from_pointer :: #force_inline proc(
 		}
 	}
 
-	actor_ptr_typed := cast(^Actor(int))actor_ptr
+	actor_ptr_typed := cast(^Actor)actor_ptr
 	return actor_ptr_typed, true
 }

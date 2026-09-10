@@ -713,7 +713,7 @@ get_valid_actor :: proc(
 	expected_states: Actor_State_Set = {},
 	system_operation := false,
 ) -> (
-	actor: ^Actor(int),
+	actor: ^Actor,
 	ptr: rawptr,
 	valid: bool,
 ) {

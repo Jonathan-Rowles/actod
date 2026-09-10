@@ -335,7 +335,7 @@ worker_flush_staging :: #force_inline proc() {
 
 @(private)
 has_pending_messages :: #force_inline proc(handle: ^Pooled_Actor_Handle) -> bool {
-	actor := cast(^Actor(int))handle.actor_ptr
+	actor := cast(^Actor)handle.actor_ptr
 	if actor.local_read != actor.local_write do return true
 	if sync.atomic_load_explicit(&actor.stopped_head, .Relaxed) != nil do return true
 	if !mpsc_is_empty_relaxed(handle.mailbox) do return true

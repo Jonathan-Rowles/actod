@@ -36,7 +36,7 @@ actor_origin :: proc(pid: PID) -> string {
 	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return fmt.tprintf("PID %v (no longer registered)", pid)
 
-	actor := cast(^Actor(int))actor_ptr
+	actor := cast(^Actor)actor_ptr
 	if actor.spawn_loc.file_path == "" do return fmt.tprintf("'%s' (PID %v)", actor.name, pid)
 	return fmt.tprintf(
 		"'%s' (PID %v, spawned at %s:%d)",

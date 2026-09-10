@@ -1138,7 +1138,7 @@ terminate_actor_during_shutdown_reports_success_test :: proc(t: ^testing.T) {
 		NODE.actor_registry = saved
 	}
 
-	victim := new(Actor(int))
+	victim := new(Actor)
 	defer free(victim)
 	victim.state = .RUNNING
 

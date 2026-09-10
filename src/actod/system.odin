@@ -210,7 +210,7 @@ Node_State :: struct {
 	shutdown_deferred_lock:   sync.Mutex,
 	signal_wake:              sync.Atomic_Sema,
 	stop_requested:           bool,
-	blocking_actor:           ^Actor(int),
+	blocking_actor:           ^Actor,
 	awaiting_signal:          bool,
 	signal_handler_installed: bool,
 	signal_relay_wake:        sync.Atomic_Sema,
@@ -465,7 +465,7 @@ send_node_msg :: proc(content: SYSTEM_MSG, loc := #caller_location) -> bool {
 
 @(private)
 send_to_node_mailbox :: #force_inline proc(
-	actor: ^Actor(int),
+	actor: ^Actor,
 	content: $T,
 	loc := #caller_location,
 ) -> bool {
@@ -524,7 +524,7 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 			return
 		}
 
-		state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
+		state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
 		current_state := sync.atomic_load(state_ptr)
 
 		if current_state == .THREAD_STOPPED || current_state == .STOPPING {
@@ -578,7 +578,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 	remove(&NODE.actor_registry, pid)
 
-	actor_typed := cast(^Actor(int))actor_ptr
+	actor_typed := cast(^Actor)actor_ptr
 	sync.atomic_store(&actor_typed.stopped_closed, true)
 	if pid != NODE.pid do drain_stop_signals_to_node(actor_typed)
 
@@ -590,14 +590,14 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		return
 	}
 
-	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor(int), state))
+	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
 	current := sync.atomic_load(state_ptr)
 
 	if current == .TERMINATED do return
 
 	if current == .STOPPING || current == .THREAD_STOPPED {
 		pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
-			offset_of(Actor(int), pool_handle))
+			offset_of(Actor, pool_handle))
 		if pool_handle_ptr^ != nil {
 			for i := 0; i < 10000; i += 1 {
 				if sync.atomic_load_explicit(&pool_handle_ptr^.terminated, .Acquire) do break
@@ -618,7 +618,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	} else if current == .RUNNING || current == .IDLE {
 		sync.atomic_store(state_ptr, .STOPPING)
 		pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
-			offset_of(Actor(int), pool_handle))
+			offset_of(Actor, pool_handle))
 		if pool_handle_ptr^ != nil {
 			wake_pooled_actor(pool_handle_ptr^)
 			for i := 0; i < 10000; i += 1 {
@@ -627,7 +627,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			}
 		} else {
 			sync.atomic_sema_post(
-				cast(^sync.Atomic_Sema)(uintptr(actor_ptr) + offset_of(Actor(int), wake_sema)),
+				cast(^sync.Atomic_Sema)(uintptr(actor_ptr) + offset_of(Actor, wake_sema)),
 			)
 			cleanup_actor_thread(actor_ptr)
 		}
@@ -637,7 +637,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 	if !try_transition_state(state_ptr, .THREAD_STOPPED, .TERMINATED) do return
 
-	children_ptr := cast(^[dynamic]PID)(uintptr(actor_ptr) + offset_of(Actor(int), children))
+	children_ptr := cast(^[dynamic]PID)(uintptr(actor_ptr) + offset_of(Actor, children))
 
 	if children_ptr != nil && len(children_ptr^) > 0 {
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
@@ -818,7 +818,7 @@ send_terminate_to_active_actors_and_wait :: proc() {
 
 		actor_ptr, _, valid := get_valid_actor(pid, active_states, system_operation = true)
 		if valid {
-			parent_ptr := cast(^PID)(uintptr(actor_ptr) + offset_of(Actor(int), parent))
+			parent_ptr := cast(^PID)(uintptr(actor_ptr) + offset_of(Actor, parent))
 			parent := parent_ptr^
 			if parent != 0 && parent != NODE.pid do continue
 			if terminate_actor(pid) do append(&actors_to_wait, pid)
@@ -988,7 +988,7 @@ wait_for_pids :: proc(
 
 cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 	pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
-		offset_of(Actor(int), pool_handle))
+		offset_of(Actor, pool_handle))
 	if pool_handle_ptr^ != nil && pool_handle_ptr^.co != nil {
 		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot, true);
 		   res != .Success {
@@ -1000,8 +1000,8 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 		pool_handle_ptr^.co = nil
 	}
 
-	arena_ptr := cast(^Actor_Arena)(uintptr(actor_ptr) + offset_of(Actor(int), arena))
-	slot_ptr := cast(^u32)(uintptr(actor_ptr) + offset_of(Actor(int), arena_slot))
+	arena_ptr := cast(^Actor_Arena)(uintptr(actor_ptr) + offset_of(Actor, arena))
+	slot_ptr := cast(^u32)(uintptr(actor_ptr) + offset_of(Actor, arena_slot))
 	actor_arena_release(arena_ptr, slot_ptr)
 }
 

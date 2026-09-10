@@ -4,7 +4,7 @@ import "core:log"
 import "core:time"
 
 @(private)
-remove_child_from_supervisor :: proc(actor: ^Actor($T), child_pid: PID, child_index: int) {
+remove_child_from_supervisor :: proc(actor: ^Actor, child_pid: PID, child_index: int) {
 	actual_index := child_index
 	if actual_index == -1 {
 		for pid, idx in actor.children {
@@ -29,7 +29,7 @@ remove_child_from_supervisor :: proc(actor: ^Actor($T), child_pid: PID, child_in
 }
 
 @(private)
-handle_remove_child :: proc(actor: ^Actor($T), msg: Remove_Child) {
+handle_remove_child :: proc(actor: ^Actor, msg: Remove_Child) {
 	for child_pid, idx in actor.children {
 		if child_pid == msg.child_pid {
 			remove_child_from_supervisor(actor, child_pid, idx)
@@ -51,7 +51,7 @@ handle_remove_child :: proc(actor: ^Actor($T), msg: Remove_Child) {
 }
 
 @(private)
-handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
+handle_add_child :: proc(actor: ^Actor, msg: Add_Child) {
 	child_pid: PID
 	ok: bool
 
@@ -126,7 +126,7 @@ handle_add_child :: proc(actor: ^Actor($T), msg: Add_Child) {
 }
 
 @(private)
-handle_set_parent :: proc(actor: ^Actor($T), msg: Set_Parent) {
+handle_set_parent :: proc(actor: ^Actor, msg: Set_Parent) {
 	old_parent := actor.parent
 
 	// If we had an old parent, notify it to remove us
@@ -172,7 +172,7 @@ handle_set_parent :: proc(actor: ^Actor($T), msg: Set_Parent) {
 }
 
 @(private)
-handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
+handle_child_termination :: proc(actor: ^Actor, msg: Actor_Stopped) {
 	if NODE.shutting_down {
 		log.infof(
 			"System is shutting down, not restarting child %s (PID %d)",
@@ -320,7 +320,7 @@ handle_child_termination :: proc(actor: ^Actor($T), msg: Actor_Stopped) {
 }
 
 @(private)
-restart_child :: proc(actor: ^Actor($T), child_index: int, old_pid: PID) {
+restart_child :: proc(actor: ^Actor, child_index: int, old_pid: PID) {
 	if child_index >= len(actor.opts.children) {
 		log.errorf("Invalid child index %d", child_index)
 		return

@@ -1,8 +1,6 @@
 package actod
 
-import "../pkgs/coro"
 import "../pkgs/hot_reload"
-import "../pkgs/threads_act"
 import "base:intrinsics"
 import "base:runtime"
 import "core:dynlib"
@@ -87,259 +85,22 @@ spawn_from_raw :: proc(
 	PID,
 	bool,
 ) {
-	if !NODE.started {
-		panic_at(loc, "spawn('%s'): node_init() must be called before spawning any actor", name)
+	state := Erased_State {
+		ptr   = data_ptr,
+		size  = data_size,
+		align = align_of(int),
 	}
-
-	if behaviour.handle_message == nil {
-		panic_at(loc, "spawn('%s'): Actor_Behaviour.handle_message must not be nil", name)
+	erased := Erased_Behaviour {
+		handle_message           = auto_cast behaviour.handle_message,
+		init                     = auto_cast behaviour.init_proc,
+		terminate                = auto_cast behaviour.terminate_proc,
+		actor_type               = behaviour.actor_type,
+		on_child_started         = auto_cast behaviour.on_child_started,
+		on_child_terminated      = auto_cast behaviour.on_child_terminated,
+		on_child_restarted       = auto_cast behaviour.on_child_restarted,
+		on_max_restarts_exceeded = auto_cast behaviour.on_max_restarts_exceeded,
 	}
-
-	actor := new(Actor(int), actor_system_allocator)
-
-	if actor.state != .ZERO {
-		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
-	}
-
-	if _, arena_ok := actor_arena_acquire(
-		&actor.arena,
-		&actor.arena_slot,
-		data_size,
-		DEFAULT_MAIL_BOX_SIZE,
-		opts,
-	); !arena_ok {
-		panic_at(loc, "spawn('%s'): failed to reserve actor arena", name)
-	}
-	actor.allocator = actor_arena_allocator(&actor.arena)
-	context.allocator = actor.allocator
-
-	actor.name = strings.clone(name, context.allocator)
-	actor.spawn_loc = loc
-
-	if data_size > 0 {
-		ptr, alloc_err := mem.alloc(data_size, align_of(int), actor.allocator)
-		if alloc_err != nil {
-			log.errorf(
-				"spawn('%s') failed: could not allocate %d B of actor data: %v",
-				name,
-				data_size,
-				alloc_err,
-				location = loc,
-			)
-			spawn_fail(actor, 0)
-			return 0, false
-		}
-		actor.data = cast(^int)ptr
-		intrinsics.mem_copy_non_overlapping(ptr, data_ptr, data_size)
-	} else {
-		ptr, alloc_err := mem.alloc(1, align_of(int), actor.allocator)
-		if alloc_err != nil {
-			log.errorf(
-				"spawn('%s') failed: could not allocate actor data: %v",
-				name,
-				alloc_err,
-				location = loc,
-			)
-			spawn_fail(actor, 0)
-			return 0, false
-		}
-		actor.data = cast(^int)ptr
-	}
-
-	actor.handle_message = auto_cast behaviour.handle_message
-	actor.behaviour.handle_message = auto_cast behaviour.handle_message
-	actor.behaviour.init = auto_cast behaviour.init_proc
-	actor.behaviour.terminate = auto_cast behaviour.terminate_proc
-	actor.behaviour.actor_type = behaviour.actor_type
-	actor.behaviour.on_child_started = auto_cast behaviour.on_child_started
-	actor.behaviour.on_child_terminated = auto_cast behaviour.on_child_terminated
-	actor.behaviour.on_child_restarted = auto_cast behaviour.on_child_restarted
-	actor.behaviour.on_max_restarts_exceeded = auto_cast behaviour.on_max_restarts_exceeded
-
-	actor.opts = opts
-	if opts.children != nil {
-		actor.opts.children = make([dynamic]SPAWN, 0, len(opts.children), actor.allocator)
-		for child in opts.children {
-			append(&actor.opts.children, child)
-		}
-	}
-	if actor.opts.page_size <= 0 {
-		panic_at(
-			loc,
-			"spawn('%s'): opts.page_size is %d. Build the config with make_actor_config() rather than a raw Actor_Config{{}}%s",
-			name,
-			actor.opts.page_size,
-			config_origin(actor.opts.loc),
-		)
-	}
-
-	if parent_pid > 0 {
-		_, ok := get(&NODE.actor_registry, parent_pid)
-		if !ok {
-			panic_at(
-				loc,
-				"spawn('%s'): parent_pid %v is not a live actor (never spawned, or already terminated)",
-				name,
-				parent_pid,
-			)
-		}
-		actor.parent = parent_pid
-	}
-
-	mailbox_entries, mailbox_alloc_err := make(
-		[]Entry(Message),
-		DEFAULT_MAIL_BOX_SIZE,
-		actor.allocator,
-	)
-	if mailbox_alloc_err != nil {
-		log.errorf(
-			"spawn('%s') failed: could not allocate a %d-slot mailbox from the actor arena: %v",
-			name,
-			DEFAULT_MAIL_BOX_SIZE,
-			mailbox_alloc_err,
-			location = loc,
-		)
-		spawn_fail(actor, 0)
-		return 0, false
-	}
-	system_entries, system_alloc_err := make(
-		[]Entry(Message),
-		SYSTEM_MAILBOX_SIZE,
-		actor.allocator,
-	)
-	if system_alloc_err != nil {
-		log.errorf(
-			"spawn('%s') failed: could not allocate the system mailbox from the actor arena: %v",
-			name,
-			system_alloc_err,
-			location = loc,
-		)
-		spawn_fail(actor, 0)
-		return 0, false
-	}
-	mpsc_init_external(&actor.system_mailbox, system_entries, entries_zeroed = true)
-	mpsc_init_external(&actor.mailbox, mailbox_entries)
-	pool_init(
-		&actor.pool,
-		actor.allocator,
-		actor.opts.page_size,
-		pool_max_pages(DEFAULT_MAIL_BOX_SIZE),
-	)
-
-	pid, ok := add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
-	if !ok {
-		log.errorf(
-			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size in make_node_config()",
-			name,
-			NODE.actor_registry.num_items,
-			location = loc,
-		)
-		spawn_fail(actor, 0)
-		return 0, false
-	}
-
-	actor.pid = pid
-	actor.state = .INIT
-	actor.termination_reason = .NORMAL
-	actor.child_restarts = make(map[PID]Restart_Info, actor.allocator)
-
-	broadcast_actor_spawned(pid, name, behaviour.actor_type, parent_pid)
-
-	started: bool
-	actor.started = &started
-
-	if !opts.use_dedicated_os_thread && NODE.worker_pool.initialized {
-		handle := new(Pooled_Actor_Handle, actor.allocator)
-		handle.actor_ptr = actor
-		handle.mailbox = &actor.mailbox
-		handle.system_mailbox = &actor.system_mailbox
-		handle.main_fn = proc(ptr: rawptr) {
-			actor_loop(cast(^Actor(int))ptr)
-		}
-		handle.resume_fn = proc(ptr: rawptr) {
-			actor_resume(cast(^Actor(int))ptr)
-		}
-
-		coro_stack := uint(actor.opts.coro_stack_size)
-		if coro_stack < coro.MIN_STACK_SIZE do coro_stack = coro.MIN_STACK_SIZE
-		handle.coro_stack = coro_stack
-		desc := coro.desc_init(coro_entry, coro_stack)
-		desc.user_data = handle
-		co, co_res := coro_acquire(&desc, &handle.coro_slot, coro_stack)
-		if co_res != .Success {
-			log.errorf(
-				"spawn('%s') failed: could not create coroutine with a %d B stack: %v",
-				name,
-				coro_stack,
-				co_res,
-				location = loc,
-			)
-			spawn_fail(actor, pid)
-			return 0, false
-		}
-		handle.co = co
-		actor.pool_handle = handle
-
-		idx: int
-		if actor.opts.home_worker >= 0 {
-			if actor.opts.home_worker >= NODE.worker_pool.worker_count {
-				panic_at(
-					loc,
-					"spawn('%s'): home_worker=%d but this node has only %d workers (valid indices 0-%d)%s",
-					name,
-					actor.opts.home_worker,
-					NODE.worker_pool.worker_count,
-					NODE.worker_pool.worker_count - 1,
-					config_origin(actor.opts.loc),
-				)
-			}
-			idx = actor.opts.home_worker
-		} else {
-			idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
-			if current_worker != nil &&
-			   &NODE.worker_pool.workers[idx] == current_worker &&
-			   NODE.worker_pool.worker_count > 1 {
-				idx =
-					sync.atomic_add(&NODE.worker_pool.next_worker, 1) %
-					NODE.worker_pool.worker_count
-			}
-		}
-		handle.home_worker = &NODE.worker_pool.workers[idx]
-		set_entry_home_worker(&NODE.actor_registry, actor.pid, idx)
-		sync.atomic_store(&handle.in_ready_queue, true)
-		ready_push(handle.home_worker, handle)
-		sync.atomic_sema_post(&handle.home_worker.wake_sema)
-	} else {
-		actor.thread = threads_act.make_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
-				actor_loop(cast(^Actor(int))actor_ptr)
-			}, uint(actor.opts.stack_size_dedicated_os_thread))
-		if actor.thread == nil {
-			log.errorf(
-				"spawn('%s') failed: could not create a dedicated OS thread with a %d B stack (PID %v)",
-				name,
-				actor.opts.stack_size_dedicated_os_thread,
-				pid,
-				location = loc,
-			)
-			spawn_fail(actor, pid)
-			return 0, false
-		}
-	}
-
-	co := coro.running()
-	if co != nil {
-		for !sync.atomic_load_explicit(&started, .Acquire) {
-			co_handle := cast(^Pooled_Actor_Handle)coro.get_user_data(co)
-			co_handle.wants_reschedule = true
-			coro.yield(co)
-		}
-	} else {
-		for !sync.atomic_load_explicit(&started, .Acquire) {
-			intrinsics.cpu_relax()
-		}
-	}
-
-	return actor.pid, true
+	return spawn_erased(name, state, erased, DEFAULT_MAIL_BOX_SIZE, opts, parent_pid, loc)
 }
 
 spawn_child_from_raw :: proc(
@@ -367,7 +128,7 @@ spawn_child_from_raw :: proc(
 hot_module_table: map[u32]^hot_reload.Hot_Module
 hot_module_table_mu: sync.RW_Mutex
 
-swap_behaviour :: proc(actor: ^Actor($T), generation: u32) {
+swap_behaviour :: proc(actor: ^Actor, generation: u32) {
 	sync.rw_mutex_shared_lock(&hot_module_table_mu)
 	module := hot_module_table[generation]
 	sync.rw_mutex_shared_unlock(&hot_module_table_mu)
@@ -1457,7 +1218,8 @@ load_and_swap :: proc(data: ^Hot_Reload_Actor_Data, actor_names: []string, so_pa
 	}
 }
 
-register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
+register_for_hot_reload :: proc(state: Erased_State, pid: PID, name: string) {
+	if state.type_info == nil do return
 	if !NODE.config.hot_reload_dev || is_system_actod_pid(pid) || pid == NODE.root_supervisor_pid || name == get_local_node_name() do return
 
 	msg: Register_Hot_Actor
@@ -1465,7 +1227,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 
 	msg.actor_name_len = write_fixed(&msg.actor_name, name)
 
-	behaviour_ti := type_info_of(Actor_Behaviour(T))
+	behaviour_ti := type_info_of(Erased_Behaviour)
 	if named, ok := behaviour_ti.variant.(runtime.Type_Info_Named); ok {
 		if st, sok := named.base.variant.(runtime.Type_Info_Struct); sok {
 			field_idx := 0
@@ -1483,7 +1245,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 		}
 	}
 
-	state_ti := type_info_of(T)
+	state_ti := state.type_info
 	if named, ok := state_ti.variant.(runtime.Type_Info_Named); ok {
 		sname := named.name
 		msg.state_type_len = write_fixed(&msg.state_type_name, sname)
@@ -1504,7 +1266,7 @@ register_for_hot_reload :: proc($T: typeid, pid: PID, name: string) {
 		}
 	}
 
-	msg.state_size = size_of(T)
+	msg.state_size = state.size
 
 	_ = send_message(NODE.hot_reload_pid, msg)
 }

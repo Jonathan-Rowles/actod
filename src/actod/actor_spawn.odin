@@ -4,6 +4,7 @@ import "../../test_harness/ti"
 _ :: ti
 import "../pkgs/coro"
 import "base:intrinsics"
+import "base:runtime"
 import "core:log"
 import "core:mem"
 _ :: mem
@@ -12,7 +13,7 @@ import "core:strings"
 import "core:sync"
 
 @(private)
-spawn_fail :: proc(actor: ^Actor($T), pid: PID) {
+spawn_fail :: proc(actor: ^Actor, pid: PID) {
 	if pid != 0 do remove(&NODE.actor_registry, pid)
 	actor_arena_release(&actor.arena, &actor.arena_slot)
 	free(actor, actor_system_allocator)
@@ -57,35 +58,37 @@ spawn_sized :: proc(
 	return spawn_impl(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
 }
 
+Erased_State :: struct {
+	ptr:       rawptr,
+	size:      int,
+	align:     int,
+	type_info: ^runtime.Type_Info,
+}
+
 @(private)
 spawn_alloc_actor :: proc(
 	name: string,
-	data: $T,
-	behaviour: Actor_Behaviour(T),
+	state: Erased_State,
+	behaviour: Erased_Behaviour,
 	mailbox_size: int,
 	opts: Actor_Config,
 	parent_pid: PID,
 	loc := #caller_location,
 ) -> (
-	actor: ^Actor(T),
+	actor: ^Actor,
 	pid: PID,
 	ok: bool,
 ) {
-	actor = new(Actor(T), actor_system_allocator)
+	actor = new(Actor, actor_system_allocator)
 
 	if actor.state != .ZERO {
-		panic_at(
-			loc,
-			"spawn('%s'): allocator returned non-zeroed memory for Actor(%v)",
-			name,
-			typeid_of(T),
-		)
+		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
 	}
 
 	arena_fresh, arena_ok := actor_arena_acquire(
 		&actor.arena,
 		&actor.arena_slot,
-		size_of(T),
+		state.size,
 		mailbox_size,
 		opts,
 	)
@@ -98,33 +101,20 @@ spawn_alloc_actor :: proc(
 	actor.name = strings.clone(name, context.allocator)
 	actor.spawn_loc = loc
 
-	when size_of(T) > 0 {
-		actor.data = new(T, actor.allocator)
-		if actor.data == nil {
-			log.errorf(
-				"spawn('%s') failed: could not allocate %d B of actor data for %v",
-				name,
-				size_of(T),
-				typeid_of(T),
-				location = loc,
-			)
-			return actor, 0, false
-		}
-		actor.data^ = data
-	} else {
-		ptr, err := mem.alloc(1, align_of(T), actor.allocator)
-		if err != nil {
-			log.errorf(
-				"spawn('%s') failed: could not allocate actor data for %v: %v",
-				name,
-				typeid_of(T),
-				err,
-				location = loc,
-			)
-			return actor, 0, false
-		}
-		actor.data = cast(^T)ptr
+	data_ptr, data_err := mem.alloc(max(state.size, 1), state.align, actor.allocator)
+	if data_err != nil {
+		log.errorf(
+			"spawn('%s') failed: could not allocate %d B of actor data for %v: %v",
+			name,
+			state.size,
+			state.type_info.id,
+			data_err,
+			location = loc,
+		)
+		return actor, 0, false
 	}
+	if state.size > 0 do intrinsics.mem_copy_non_overlapping(data_ptr, state.ptr, state.size)
+	actor.data = data_ptr
 
 	actor.behaviour = behaviour
 	actor.handle_message = behaviour.handle_message
@@ -247,10 +237,33 @@ spawn_impl :: proc(
 	PID,
 	bool,
 ) {
-	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {
 		if pid, ok := ti.intercept_spawn(name, T); ok do return PID(pid), true
 	}
+	data := data
+	state := Erased_State {
+		ptr       = &data,
+		size      = size_of(T),
+		align     = align_of(T),
+		type_info = type_info_of(T),
+	}
+	return spawn_erased(name, state, erase_behaviour(behaviour), mailbox_size, opts, parent_pid, loc)
+}
+
+@(private)
+spawn_erased :: proc(
+	name: string,
+	state: Erased_State,
+	behaviour: Erased_Behaviour,
+	mailbox_size: int,
+	opts: Actor_Config,
+	parent_pid: PID,
+	loc := #caller_location,
+) -> (
+	PID,
+	bool,
+) {
+	context.logger = diagnostic_logger(context.logger)
 
 	if !NODE.started {
 		panic_at(loc, "spawn('%s'): node_init() must be called before spawning any actor", name)
@@ -261,13 +274,13 @@ spawn_impl :: proc(
 			loc,
 			"spawn('%s'): Actor_Behaviour(%v).handle_message must not be nil",
 			name,
-			typeid_of(T),
+			state.type_info.id,
 		)
 	}
 
 	actor, pid, allocated := spawn_alloc_actor(
 		name,
-		data,
+		state,
 		behaviour,
 		mailbox_size,
 		opts,
@@ -287,7 +300,7 @@ spawn_impl :: proc(
 	if parent_pid > 0 && is_local_pid(parent_pid) {
 		parent_ptr := get(&NODE.actor_registry, parent_pid)
 		if parent_ptr != nil {
-			parent_actor := cast(^Actor(int))parent_ptr
+			parent_actor := cast(^Actor)parent_ptr
 			if parent_actor.children == nil {
 				parent_actor.children = make([dynamic]PID, parent_actor.allocator)
 			}
@@ -317,7 +330,7 @@ spawn_impl :: proc(
 		actor.opts.use_dedicated_os_thread = true
 		actor.pool_handle = nil
 		spawning_blocking_child = false
-		sync.atomic_store(&NODE.blocking_actor, cast(^Actor(int))actor)
+		sync.atomic_store(&NODE.blocking_actor, actor)
 		actor_loop(actor)
 		return actor.pid, true
 	}
@@ -336,7 +349,7 @@ spawn_impl :: proc(
 	} else {
 		actor.pool_handle = nil
 		actor.thread = threads_act.make_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
-				actor_loop(cast(^Actor(T))actor_ptr)
+				actor_loop(cast(^Actor)actor_ptr)
 			}, uint(actor.opts.stack_size_dedicated_os_thread))
 		if actor.thread == nil {
 			log.errorf(
@@ -353,14 +366,14 @@ spawn_impl :: proc(
 
 	if needs_first_run_wait do spawn_wait_started(&started)
 
-	register_for_hot_reload(T, actor.pid, name)
+	register_for_hot_reload(state, actor.pid, name)
 
 	return actor.pid, true
 }
 
 @(private)
 spawn_schedule_pooled :: proc(
-	actor: ^Actor($T),
+	actor: ^Actor,
 	name: string,
 	pid: PID,
 	loc := #caller_location,
@@ -371,10 +384,10 @@ spawn_schedule_pooled :: proc(
 	handle.mailbox = &actor.mailbox
 	handle.system_mailbox = &actor.system_mailbox
 	handle.main_fn = proc(ptr: rawptr) {
-		actor_loop(cast(^Actor(T))ptr)
+		actor_loop(cast(^Actor)ptr)
 	}
 	handle.resume_fn = proc(ptr: rawptr) {
-		actor_resume(cast(^Actor(T))ptr)
+		actor_resume(cast(^Actor)ptr)
 	}
 
 	coro_stack := uint(actor.opts.coro_stack_size)
@@ -413,7 +426,7 @@ spawn_schedule_pooled :: proc(
 	} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity); affinity_ok {
 		affinity_actor := get(&NODE.actor_registry, affinity_pid)
 		if affinity_actor != nil {
-			affinity_handle := (cast(^Actor(int))affinity_actor).pool_handle
+			affinity_handle := (cast(^Actor)affinity_actor).pool_handle
 			if affinity_handle != nil && affinity_handle.home_worker != nil {
 				for i in 0 ..< NODE.worker_pool.worker_count {
 					if &NODE.worker_pool.workers[i] == affinity_handle.home_worker {

@@ -132,5 +132,5 @@ main :: proc() {
 
 	time.sleep(1 * time.Second)
 
-	act.shutdown_node()
+	act.node_shutdown()
 }

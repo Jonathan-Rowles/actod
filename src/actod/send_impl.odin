@@ -82,7 +82,7 @@ make_message_impl :: proc(
 }
 
 @(private)
-release_undelivered :: #force_inline proc(target: ^Actor(int), msg: ^Message, msg_ready: bool) {
+release_undelivered :: #force_inline proc(target: ^Actor, msg: ^Message, msg_ready: bool) {
 	if msg_ready && message_owns_page(msg.content) {
 		free_message(&target.pool, msg.content)
 	}
@@ -145,7 +145,7 @@ send_user_backpressure_loop :: proc(
 			reclaim_unpin()
 			return .ACTOR_NOT_FOUND
 		}
-		target := cast(^Actor(int))fresh
+		target := cast(^Actor)fresh
 		state := sync.atomic_load(&target.state)
 		if state != .RUNNING && state != .IDLE && state != .INIT {
 			release_undelivered(target, msg, msg_ready)
@@ -242,7 +242,7 @@ send_user_backpressure_loop :: proc(
 @(private)
 send_to_actor_impl :: proc(
 	to: PID,
-	actor: ^Actor(int),
+	actor: ^Actor,
 	data: rawptr,
 	size: int,
 	tid: typeid,
@@ -343,12 +343,12 @@ send_message_impl :: proc(
 	if !ok || actor_ptr == nil do return .ACTOR_NOT_FOUND
 
 	if current_worker != nil && home_worker == i32(current_worker.id) + 1 {
-		return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc, token)
+		return send_to_actor_impl(to, cast(^Actor)actor_ptr, data, size, tid, info, class, loc, token)
 	}
 
 	reclaim_pin()
 	defer reclaim_unpin()
-	return send_to_actor_impl(to, cast(^Actor(int))actor_ptr, data, size, tid, info, class, loc, token)
+	return send_to_actor_impl(to, cast(^Actor)actor_ptr, data, size, tid, info, class, loc, token)
 }
 
 @(private)

@@ -397,7 +397,16 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	system_children: [dynamic]SPAWN
 	append(&system_children, spawn_timer_child)
 	if opts.enable_observer do append(&system_children, spawn_observer_child)
-	if opts.hot_reload_dev do append(&system_children, spawn_hot_reload_child)
+	if opts.hot_reload_dev {
+		if hot_reload_hooks.spawn_child == nil {
+			panic_at(
+				loc,
+				"node_init('%s'): hot_reload_dev = true but the hot reload package is not linked, add `import _ \"actod/hot_reload_dev\"` to the program",
+				name,
+			)
+		}
+		append(&system_children, hot_reload_hooks.spawn_child)
+	}
 	append(&system_children, spawn_root_supervisor_child)
 	NODE.root_supervisor_children = system_config.children
 	NODE.config.actor_config.children = nil
@@ -768,7 +777,7 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	if NODE.observer_pid != {} do stop_observer()
 
-	if NODE.hot_reload_pid != 0 do stop_hot_reload_actor()
+	if NODE.hot_reload_pid != 0 do hot_reload_hooks.stop()
 
 	system_actors := 1
 	if NODE.timer_pid != 0 do system_actors += 1

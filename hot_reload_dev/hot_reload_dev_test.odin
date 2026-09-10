@@ -1,4 +1,4 @@
-package actod
+package hot_reload_dev
 
 import "core:testing"
 

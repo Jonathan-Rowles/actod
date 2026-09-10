@@ -376,7 +376,7 @@ process_system_mailbox :: #force_no_inline proc(
 		case Rename_Actor:
 			handle_rename_actor(actor, v)
 		case Reload_Behaviour:
-			swap_behaviour(actor, v.generation)
+			if hot_reload_hooks.swap_behaviour != nil do hot_reload_hooks.swap_behaviour(actor, v.generation)
 		}
 
 		if message_owns_page(msg.content) do free_message(&actor.pool, msg.content)

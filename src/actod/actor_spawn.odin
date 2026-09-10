@@ -366,7 +366,7 @@ spawn_erased :: proc(
 
 	if needs_first_run_wait do spawn_wait_started(&started)
 
-	register_for_hot_reload(state, actor.pid, name)
+	if NODE.config.hot_reload_dev do hot_reload_hooks.register_actor(state, actor.pid, name)
 
 	return actor.pid, true
 }

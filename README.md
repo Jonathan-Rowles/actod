@@ -70,7 +70,7 @@ Bench sources live under [`benchmarks/`](benchmarks/). `make bench-single`, `mak
 
 **Timers.** One-shot and repeating, owned by a system actor. `act.now()` is virtual under sim, wall clock otherwise.
 
-**Hot reload.** Replace `handle_message` (and other behaviour procs) on a live actor; state stays. `docs/hot_reload_example/`.
+**Hot reload.** Replace `handle_message` (and other behaviour procs) on a live actor; state stays. Opt in with `import _ "actod/hot_reload_dev"`, so programs that never use it do not link it. `docs/hot_reload_example/`.
 
 **Observer.** Interval stats per actor (counts, depths, uptime, per-sender/recipient), pushed to subscribers.
 

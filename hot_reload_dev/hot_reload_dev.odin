@@ -1,6 +1,7 @@
-package actod
+package hot_reload_dev
 
-import "../pkgs/hot_reload"
+import actod "../src/actod"
+import "../src/pkgs/hot_reload"
 import "base:intrinsics"
 import "base:runtime"
 import "core:dynlib"
@@ -12,123 +13,20 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 
-@(private)
-send_message_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
-	@(static) sentinel: Message_Type_Info
-	info, ok := get_type_info_ptr(content.id, loc)
-	if !ok do info = &sentinel
-	size := type_info_of(content.id).size
-	return send_message_impl(to, content.data, size, content.id, info, .User, loc)
-}
-
-@(private)
-broadcast_any :: proc(content: any, loc := #caller_location) {
-	self_pid := get_self_pid()
-	actor_type := get_pid_actor_type(self_pid)
-
-	if actor_type == ACTOR_TYPE_UNTYPED {
-		log.errorf(
-			"broadcast(%v) dropped: actor %s is untyped. Set actor_type on its Actor_Behaviour to broadcast",
-			content.id,
-			actor_origin(self_pid),
-			location = loc,
-		)
-		return
-	}
-
-	list := &NODE.type_subscribers[actor_type]
-	block := load_subscriber_block(list)
-	if block == nil do return
-	n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
-
-	for i in 0 ..< n {
-		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
-		if pid != 0 && pid != self_pid do send_message_any(pid, content, loc)
-	}
-}
-
-@(private)
-publish_any :: proc(topic: ^Topic, content: any, loc := #caller_location) {
-	if topic == nil {
-		log.errorf("publish(%v) dropped: topic is nil", content.id, location = loc)
-		return
-	}
-	self_pid := get_self_pid()
-	n := sync.atomic_load_explicit(&topic.count, .Acquire)
-
-	for i in 0 ..< n {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
-		if pid != 0 && pid != self_pid do send_message_any(pid, content, loc)
-	}
-}
-
-Raw_Spawn_Behaviour :: struct {
-	handle_message:           rawptr,
-	init_proc:                rawptr,
-	terminate_proc:           rawptr,
-	actor_type:               Actor_Type,
-	on_child_started:         rawptr,
-	on_child_terminated:      rawptr,
-	on_child_restarted:       rawptr,
-	on_max_restarts_exceeded: rawptr,
-}
-
-spawn_from_raw :: proc(
-	name: string,
-	data_ptr: rawptr,
-	data_size: int,
-	behaviour: Raw_Spawn_Behaviour,
-	opts: Actor_Config,
-	parent_pid: PID,
-	loc := #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	state := Erased_State {
-		ptr   = data_ptr,
-		size  = data_size,
-		align = align_of(int),
-	}
-	erased := Erased_Behaviour {
-		handle_message           = auto_cast behaviour.handle_message,
-		init                     = auto_cast behaviour.init_proc,
-		terminate                = auto_cast behaviour.terminate_proc,
-		actor_type               = behaviour.actor_type,
-		on_child_started         = auto_cast behaviour.on_child_started,
-		on_child_terminated      = auto_cast behaviour.on_child_terminated,
-		on_child_restarted       = auto_cast behaviour.on_child_restarted,
-		on_max_restarts_exceeded = auto_cast behaviour.on_max_restarts_exceeded,
-	}
-	return spawn_erased(name, state, erased, DEFAULT_MAIL_BOX_SIZE, opts, parent_pid, loc)
-}
-
-spawn_child_from_raw :: proc(
-	name: string,
-	data_ptr: rawptr,
-	data_size: int,
-	behaviour: Raw_Spawn_Behaviour,
-	opts: Actor_Config,
-	loc := #caller_location,
-) -> (
-	PID,
-	bool,
-) {
-	self_pid := get_self_pid()
-	if self_pid == 0 {
-		panic_at(
-			loc,
-			"spawn_child('%s'): must be called from inside an actor. Use spawn() with an explicit parent_pid outside one",
-			name,
-		)
-	}
-	return spawn_from_raw(name, data_ptr, data_size, behaviour, opts, self_pid, loc)
-}
-
 hot_module_table: map[u32]^hot_reload.Hot_Module
 hot_module_table_mu: sync.RW_Mutex
 
-swap_behaviour :: proc(actor: ^Actor, generation: u32) {
+@(init)
+install_hooks :: proc "contextless" () {
+	actod.hot_reload_hooks = actod.Hot_Reload_Hooks {
+		spawn_child    = spawn_hot_reload_child,
+		stop           = stop_hot_reload_actor,
+		register_actor = register_for_hot_reload,
+		swap_behaviour = swap_behaviour,
+	}
+}
+
+swap_behaviour :: proc(actor: ^actod.Actor, generation: u32) {
 	sync.rw_mutex_shared_lock(&hot_module_table_mu)
 	module := hot_module_table[generation]
 	sync.rw_mutex_shared_unlock(&hot_module_table_mu)
@@ -161,8 +59,8 @@ swap_behaviour :: proc(actor: ^Actor, generation: u32) {
 	log.debugf("hot reload: swapped behaviour for actor %v (generation %d)", actor.pid, generation)
 }
 
-send_reload_behaviour :: proc(target: PID, generation: u32) -> Send_Error {
-	return send_message(target, Reload_Behaviour{generation = generation})
+send_reload_behaviour :: proc(target: actod.PID, generation: u32) -> actod.Send_Error {
+	return actod.send_message(target, actod.Reload_Behaviour{generation = generation})
 }
 
 
@@ -172,7 +70,7 @@ MAX_STATE_FIELDS :: 16
 Register_Hot_Actor :: struct {
 	actor_name:            [64]u8,
 	actor_name_len:        int,
-	pid:                   PID,
+	pid:                   actod.PID,
 	field_names:           [MAX_BEHAVIOUR_FIELDS][64]u8,
 	field_name_lens:       [MAX_BEHAVIOUR_FIELDS]int,
 	field_count:           int,
@@ -195,8 +93,8 @@ File_Changed :: struct {
 
 @(init)
 init_hot_reload_messages :: proc "contextless" () {
-	register_message_type(Register_Hot_Actor)
-	register_message_type(File_Changed)
+	actod.register_message_type(Register_Hot_Actor)
+	actod.register_message_type(File_Changed)
 }
 
 Actor_Type_Meta :: struct {
@@ -207,7 +105,7 @@ Actor_Type_Meta :: struct {
 	state_field_types:     [dynamic]string,
 	package_path:          string,
 	package_name:          string,
-	actor_pids:            [dynamic]PID,
+	actor_pids:            [dynamic]actod.PID,
 }
 
 Hot_Reload_Actor_Data :: struct {
@@ -225,45 +123,45 @@ Hot_Reload_Actor_Data :: struct {
 
 
 @(private)
-spawn_hot_reload_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
+spawn_hot_reload_child :: proc(_name: string, parent_pid: actod.PID) -> (actod.PID, bool) {
 	pid, ok := start_hot_reload_actor(parent_pid)
 	if !ok do log.panic("hot reload actor failed to start")
 	return pid, ok
 }
 
-start_hot_reload_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
-	pid, ok := spawn(
+start_hot_reload_actor :: proc(parent_pid: actod.PID = 0) -> (actod.PID, bool) {
+	pid, ok := actod.spawn(
 		"hot_reload",
 		Hot_Reload_Actor_Data{},
-		Actor_Behaviour(Hot_Reload_Actor_Data) {
+		actod.Actor_Behaviour(Hot_Reload_Actor_Data) {
 			handle_message = hot_reload_handle_message,
 			init = hot_reload_init,
 			terminate = hot_reload_terminate,
 		},
-		make_actor_config(
+		actod.make_actor_config(
 			restart_policy = .PERMANENT,
 			use_dedicated_os_thread = true,
 			page_size = mem.Kilobyte * 64,
 		),
 		parent_pid = parent_pid,
 	)
-	if ok do NODE.hot_reload_pid = pid
+	if ok do actod.NODE.hot_reload_pid = pid
 	return pid, ok
 }
 
 stop_hot_reload_actor :: proc() {
-	if NODE.hot_reload_pid != 0 {
-		_ = terminate_actor(NODE.hot_reload_pid)
-		wait_for_pids([]PID{NODE.hot_reload_pid})
-		NODE.hot_reload_pid = 0
+	if actod.NODE.hot_reload_pid != 0 {
+		_ = actod.terminate_actor(actod.NODE.hot_reload_pid)
+		actod.wait_for_pids([]actod.PID{actod.NODE.hot_reload_pid})
+		actod.NODE.hot_reload_pid = 0
 	}
 }
 
 @(private)
 hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 	watch_path: string
-	if NODE.config.hot_reload_watch_path != "" {
-		watch_path = NODE.config.hot_reload_watch_path
+	if actod.NODE.config.hot_reload_watch_path != "" {
+		watch_path = actod.NODE.config.hot_reload_watch_path
 	} else {
 		found: bool
 		watch_path, found = hot_reload.discover_actors_dir(".")
@@ -303,7 +201,7 @@ hot_reload_init :: proc(data: ^Hot_Reload_Actor_Data) {
 		}
 		msg.package_path = path_buf
 
-		_ = send_message(NODE.hot_reload_pid, msg)
+		_ = actod.send_message(actod.NODE.hot_reload_pid, msg)
 	}
 
 	w, ok := hot_reload.make_watcher(watcher_callback, nil)
@@ -326,7 +224,7 @@ populate_hot_api :: proc(lib: dynlib.Library) {
 		)
 		return
 	}
-	(cast(^^Hot_API)api_sym)^ = &g_hot_api
+	(cast(^^actod.Hot_API)api_sym)^ = &g_hot_api
 }
 
 @(private)
@@ -370,7 +268,7 @@ hot_reload_terminate :: proc(data: ^Hot_Reload_Actor_Data) {
 }
 
 @(private)
-hot_reload_handle_message :: proc(data: ^Hot_Reload_Actor_Data, from: PID, msg: any) {
+hot_reload_handle_message :: proc(data: ^Hot_Reload_Actor_Data, from: actod.PID, msg: any) {
 	switch v in msg {
 	case Register_Hot_Actor:
 		handle_register(data, v)
@@ -430,7 +328,7 @@ handle_register :: proc(data: ^Hot_Reload_Actor_Data, reg: Register_Hot_Actor) {
 	if actor_name in data.actor_meta {
 		meta := &data.actor_meta[actor_name]
 		append(&meta.actor_pids, reg.pid)
-		log.infof("hot reload: registered additional PID %v for '%s'", reg.pid, actor_name)
+		log.infof("hot reload: registered additional actod.PID %v for '%s'", reg.pid, actor_name)
 		delete(actor_name)
 		return
 	}
@@ -1185,9 +1083,9 @@ load_and_swap :: proc(data: ^Hot_Reload_Actor_Data, actor_names: []string, so_pa
 		}
 		data.modules[name] = mod
 
-		live_pids: [dynamic]PID
+		live_pids: [dynamic]actod.PID
 		for pid in meta.actor_pids {
-			if _, active := get(&NODE.actor_registry, pid); active {
+			if _, active := actod.get(&actod.NODE.actor_registry, pid); active {
 				err := send_reload_behaviour(pid, actor_gen)
 				if err == .OK {
 					append(&live_pids, pid)
@@ -1218,16 +1116,16 @@ load_and_swap :: proc(data: ^Hot_Reload_Actor_Data, actor_names: []string, so_pa
 	}
 }
 
-register_for_hot_reload :: proc(state: Erased_State, pid: PID, name: string) {
+register_for_hot_reload :: proc(state: actod.Erased_State, pid: actod.PID, name: string) {
 	if state.type_info == nil do return
-	if !NODE.config.hot_reload_dev || is_system_actod_pid(pid) || pid == NODE.root_supervisor_pid || name == get_local_node_name() do return
+	if !actod.NODE.config.hot_reload_dev || actod.is_system_actod_pid(pid) || pid == actod.NODE.root_supervisor_pid || name == actod.get_local_node_name() do return
 
 	msg: Register_Hot_Actor
 	msg.pid = pid
 
 	msg.actor_name_len = write_fixed(&msg.actor_name, name)
 
-	behaviour_ti := type_info_of(Erased_Behaviour)
+	behaviour_ti := type_info_of(actod.Erased_Behaviour)
 	if named, ok := behaviour_ti.variant.(runtime.Type_Info_Named); ok {
 		if st, sok := named.base.variant.(runtime.Type_Info_Struct); sok {
 			field_idx := 0
@@ -1268,7 +1166,7 @@ register_for_hot_reload :: proc(state: Erased_State, pid: PID, name: string) {
 
 	msg.state_size = state.size
 
-	_ = send_message(NODE.hot_reload_pid, msg)
+	_ = actod.send_message(actod.NODE.hot_reload_pid, msg)
 }
 
 @(private)

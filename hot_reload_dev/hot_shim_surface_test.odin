@@ -1,13 +1,13 @@
-package actod
+package hot_reload_dev
 
-import hot_reload "../pkgs/hot_reload"
+import hot_reload "../src/pkgs/hot_reload"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
 
-HOT_CHECK_DIR :: #directory + "../pkgs/hot_reload/hot_check"
-HOT_EXAMPLE_DIR :: #directory + "../../docs/hot_reload_example/hot_reload_actors"
+HOT_CHECK_DIR :: #directory + "../src/pkgs/hot_reload/hot_check"
+HOT_EXAMPLE_DIR :: #directory + "../docs/hot_reload_example/hot_reload_actors"
 
 @(test)
 test_hot_shim_exercises_every_exported_proc :: proc(t: ^testing.T) {

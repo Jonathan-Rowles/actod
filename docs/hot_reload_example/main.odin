@@ -1,6 +1,7 @@
 package main
 
 import act "../.."
+import _ "../../hot_reload_dev"
 import "hot_reload_actors/responder"
 import "hot_reload_actors/sender"
 

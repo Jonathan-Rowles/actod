@@ -22,14 +22,24 @@ This means hot reload is safe for logic changes (fixing a bug in `handle_message
 
 ## Enabling
 
+Hot reload lives in its own package so that programs which never use it do not link
+the watcher, the recompiler or the Odin parser they need. Import it for its side effect,
+then turn it on in the node config:
+
 ```odin
+import act "actod"
+import _ "actod/hot_reload_dev"
+
 act.node_init("myapp", act.make_node_config(
     hot_reload_dev        = true,
     hot_reload_watch_path = "",   // empty = auto-discover actors directory
 ))
 ```
 
-This spawns an internal `Hot_Reload_Actor` that watches for file changes.
+The import installs the hot reload hooks at program start. `node_init` refuses to start
+with `hot_reload_dev = true` when the package is not imported, so a forgotten import is a
+panic at startup rather than a silent no-op. This spawns an internal `Hot_Reload_Actor`
+that watches for file changes.
 
 ## How It Works
 

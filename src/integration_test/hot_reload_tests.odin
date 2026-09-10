@@ -1,5 +1,6 @@
 package integration
 
+import "../../hot_reload_dev"
 import "../actod"
 import "../pkgs/hot_reload"
 import "core:fmt"
@@ -92,7 +93,7 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
-			delete_key(&actod.hot_module_table, 1)
+			delete_key(&hot_reload_dev.hot_module_table, 1)
 			hot_reload.unload_module(mod)
 		}
 	}
@@ -122,9 +123,9 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
 	if mod == nil do return
-	actod.hot_module_table[1] = mod
+	hot_reload_dev.hot_module_table[1] = mod
 
-	reload_err := actod.send_reload_behaviour(pid, 1)
+	reload_err := hot_reload_dev.send_reload_behaviour(pid, 1)
 	expect(t, reload_err == .OK, "Failed to send reload")
 
 	time.sleep(20 * time.Millisecond)
@@ -151,7 +152,7 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
-			delete_key(&actod.hot_module_table, 2)
+			delete_key(&hot_reload_dev.hot_module_table, 2)
 			hot_reload.unload_module(mod)
 		}
 	}
@@ -181,9 +182,9 @@ test_hot_reload_state_preserved :: proc(t: ^testing.T) {
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
 	if mod == nil do return
-	actod.hot_module_table[2] = mod
+	hot_reload_dev.hot_module_table[2] = mod
 
-	actod.send_reload_behaviour(pid, 2)
+	hot_reload_dev.send_reload_behaviour(pid, 2)
 	time.sleep(20 * time.Millisecond)
 
 	count_before, ok := hr_read_count(pid)
@@ -204,7 +205,7 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
-			delete_key(&actod.hot_module_table, 3)
+			delete_key(&hot_reload_dev.hot_module_table, 3)
 			hot_reload.unload_module(mod)
 		}
 	}
@@ -236,9 +237,9 @@ test_reload_behaviour_system_msg :: proc(t: ^testing.T) {
 	)
 	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
 	if mod == nil do return
-	actod.hot_module_table[3] = mod
+	hot_reload_dev.hot_module_table[3] = mod
 
-	actod.send_reload_behaviour(pid, 3)
+	hot_reload_dev.send_reload_behaviour(pid, 3)
 	time.sleep(20 * time.Millisecond)
 
 	handle_msg_ptr_after := (cast(^rawptr)(uintptr(actor_ptr) + behaviour_offset))^
@@ -260,11 +261,11 @@ test_rollback :: proc(t: ^testing.T) {
 		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if v2_mod != nil {
-			delete_key(&actod.hot_module_table, 5)
+			delete_key(&hot_reload_dev.hot_module_table, 5)
 			hot_reload.unload_module(v2_mod)
 		}
 		if v1_mod != nil {
-			delete_key(&actod.hot_module_table, 4)
+			delete_key(&hot_reload_dev.hot_module_table, 4)
 			hot_reload.unload_module(v1_mod)
 		}
 	}
@@ -309,21 +310,21 @@ test_rollback :: proc(t: ^testing.T) {
 	expect_value(t, v2_err.kind, hot_reload.Load_Error_Kind.None)
 	if v2_mod == nil do return
 
-	actod.hot_module_table[4] = v1_mod
-	actod.hot_module_table[5] = v2_mod
+	hot_reload_dev.hot_module_table[4] = v1_mod
+	hot_reload_dev.hot_module_table[5] = v2_mod
 
 	for _ in 0 ..< 2 {
 		_ = actod.send_message(pid, "tick")
 	}
 	expect(t, hr_wait_for_count(pid, 2), "should reach 2")
 
-	actod.send_reload_behaviour(pid, 5)
+	hot_reload_dev.send_reload_behaviour(pid, 5)
 	time.sleep(20 * time.Millisecond)
 
 	_ = actod.send_message(pid, "tick")
 	expect(t, hr_wait_for_count(pid, 12), "v2 should reach 12")
 
-	actod.send_reload_behaviour(pid, 4)
+	hot_reload_dev.send_reload_behaviour(pid, 4)
 	time.sleep(20 * time.Millisecond)
 
 	_ = actod.send_message(pid, "tick")
@@ -450,7 +451,7 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 		_ = actod.terminate_actor(pid)
 		actod.wait_for_pids([]actod.PID{pid})
 		if mod != nil {
-			delete_key(&actod.hot_module_table, 100)
+			delete_key(&hot_reload_dev.hot_module_table, 100)
 			hot_reload.unload_module(mod)
 		}
 	}
@@ -516,9 +517,9 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 		expect(t, false, "Failed to load module")
 		return
 	}
-	actod.hot_module_table[100] = mod
+	hot_reload_dev.hot_module_table[100] = mod
 
-	actod.send_reload_behaviour(pid, 100)
+	hot_reload_dev.send_reload_behaviour(pid, 100)
 	time.sleep(50 * time.Millisecond)
 
 	sync.atomic_store_explicit(&done, true, .Release)

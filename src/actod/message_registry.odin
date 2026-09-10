@@ -26,8 +26,6 @@ Message_Type_Flags :: enum u32 {
 
 Message_Type_Flags_Set :: bit_set[Message_Type_Flags;u32]
 
-Message_Deliver_Proc :: proc(to_pid: PID, from_pid: PID, payload: []byte) -> Send_Error
-
 Message_Type_Info :: struct {
 	type_id:          typeid,
 	name:             string,
@@ -38,7 +36,6 @@ Message_Type_Info :: struct {
 	flags:            Message_Type_Flags_Set,
 	var_fields:       []Var_Field_Info,
 	union_fields:     []Union_Field_Info,
-	deliver:          Message_Deliver_Proc,
 }
 
 MAX_MESSAGE_TYPES :: 256
@@ -226,72 +223,6 @@ register_message_type :: proc "contextless" ($T: typeid, loc := #caller_location
 				}
 			}
 		}
-	}
-
-	info.deliver = proc(to_pid: PID, from_pid: PID, payload: []byte) -> Send_Error {
-		if len(payload) < size_of(T) {
-			log.errorf(
-				"Payload too small for %v: expected >= %d, got %d",
-				typeid_of(T),
-				size_of(T),
-				len(payload),
-			)
-			return .NETWORK_ERROR
-		}
-
-		value := (cast(^T)raw_data(payload))^
-
-		type_info := get_validated_message_info_ptr(T)
-		data_offset := size_of(T)
-		payload_len := len(payload)
-
-		if .Has_Var_Fields in type_info.flags {
-			for field in type_info.var_fields {
-				field_ptr := cast(^[]byte)(uintptr(&value) + field.offset)
-				field_len := len(field_ptr^)
-				if field_len > 0 {
-					if data_offset + field_len > payload_len {
-						log.errorf(
-							"Payload too small for variable field in %v: need %d, have %d",
-							typeid_of(T),
-							data_offset + field_len,
-							payload_len,
-						)
-						return .NETWORK_ERROR
-					}
-					field_ptr^ = payload[data_offset:data_offset + field_len]
-					data_offset += field_len
-				}
-			}
-		}
-
-		if .Has_Unions in type_info.flags {
-			for uf in type_info.union_fields {
-				variant, ok := get_active_union_variant(&value, uf)
-				if !ok do continue
-				for field in variant.var_fields {
-					field_ptr := cast(^[]byte)(uintptr(&value) + field.offset)
-					field_len := len(field_ptr^)
-					if field_len > 0 {
-						if data_offset + field_len > payload_len {
-							log.errorf(
-								"Payload too small for union variable field in %v: need %d, have %d",
-								typeid_of(T),
-								data_offset + field_len,
-								payload_len,
-							)
-							return .NETWORK_ERROR
-						}
-						field_ptr^ = payload[data_offset:data_offset + field_len]
-						data_offset += field_len
-					}
-				}
-			}
-		}
-
-		result := send_message(to_pid, value)
-
-		return result
 	}
 
 	type_hash := fnv1a_hash(type_name)

@@ -65,7 +65,6 @@ test_message_registration :: proc(t: ^testing.T) {
 	info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 	testing.expect(t, ok, "Test_Simple_Message should be registered")
 	testing.expect(t, info.type_id == typeid_of(Test_Simple_Message), "Type ID mismatch")
-	testing.expect(t, info.deliver != nil, "Deliver proc should be set")
 }
 
 @(test)
@@ -80,7 +79,6 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 
 		info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 		testing.expect(t, ok, "Type info should exist")
-		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 		testing.expect(
 			t,
 			.Has_Var_Fields not_in info.flags,
@@ -112,7 +110,6 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 
 		info, ok := get_type_info_ptr(typeid_of(Test_Complex_Message))
 		testing.expect(t, ok, "Type info should exist")
-		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 		testing.expect(
 			t,
 			.Has_Var_Fields not_in info.flags,
@@ -146,7 +143,6 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 		testing.expect(t, ok, "Type info should exist")
 		testing.expect(t, .Has_Var_Fields in info.flags, "Should detect strings in message type")
 		testing.expect(t, len(info.var_fields) == 2, "Should detect 2 variable fields")
-		testing.expect(t, info.deliver != nil, "Deliver function should be set")
 	}
 }
 

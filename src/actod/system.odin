@@ -219,7 +219,6 @@ Node_State :: struct {
 	root_supervisor_pid:      PID,
 	root_supervisor_children: [dynamic]SPAWN,
 	reclaim:                  Reclaim_State,
-	cluster_psk:              Cluster_Psk_State,
 	incarnation:              u64,
 	gossip_seq:               u64,
 	gossip_relay_rotation:    u64,
@@ -319,6 +318,13 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 		)
 	}
 
+	if opts.network.enable_encryption && encryption_hooks.handshake == nil {
+		panic_at(
+			loc,
+			"node_init('%s'): network.enable_encryption is set but the encryption package is not linked, add `import _ \"actod/encryption\"` to the program",
+			name,
+		)
+	}
 	if opts.network.enable_encryption && get_auth_password() == "" {
 		panic_at(
 			loc,

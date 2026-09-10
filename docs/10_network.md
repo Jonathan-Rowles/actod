@@ -61,15 +61,27 @@ Know what the password grants: an authenticated peer is **fully trusted**. It ca
 
 ## Encryption
 
-Set `enable_encryption = true` with a shared `auth_password` to encrypt every node-to-node TCP link. The link is secured with a Noise `NNpsk0` handshake (`Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s`); the password is the cluster key, derived into the pre-shared key.
+Encryption lives in its own package so that programs which never use it do not link the
+Noise handshake, the ciphers or the elliptic-curve tables behind them. Import it for its
+side effect, then set `enable_encryption = true` with a shared `auth_password` to encrypt
+every node-to-node TCP link. The link is secured with a Noise `NNpsk0` handshake
+(`Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s`); the password is the cluster key, derived into the
+pre-shared key.
 
 ```odin
+import act "actod"
+import _ "actod/encryption"
+
 act.make_network_config(
     port              = 5000,
     enable_encryption = true,
     auth_password     = "shared-cluster-secret",
 )
 ```
+
+The import installs the encryption hooks at program start. `node_init` refuses to start
+with `enable_encryption = true` when the package is not imported, so a forgotten import is a
+panic at startup rather than a plaintext link.
 
 Rules:
 

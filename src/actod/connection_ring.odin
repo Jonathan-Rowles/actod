@@ -2,7 +2,6 @@ package actod
 
 import "base:intrinsics"
 import "base:runtime"
-import "core:crypto"
 import "core:encoding/endian"
 import "core:log"
 import "core:mem"
@@ -388,7 +387,7 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	sync.atomic_store(&ring.recv_seen, u32(0))
 	ring.park_fenced = false
 	ring.park_half_closed = false
-	crypto.zero_explicit(&ring.transport_keys, size_of(Noise_Transport))
+	mem.zero_explicit(&ring.transport_keys, size_of(Noise_Transport))
 	sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Buffering, .Release)
 
 	return dropped
@@ -1178,7 +1177,7 @@ submit_nbio_sends :: proc(ring: ^Connection_Ring) {
 		if ring.encrypted {
 			stride := int(ring.usable_slot_size) + ENVELOPE_OVERHEAD
 			region := ring.seal_scratch[int(batch_count) * stride:int(batch_count + 1) * stride]
-			sealed_len, sealed := envelope_seal(
+			sealed_len, sealed := encryption_hooks.seal(
 				&ring.transport_keys,
 				slot_data(ring, slot_idx)[:slot.length],
 				region,
@@ -1626,7 +1625,7 @@ io_service_fence_holds :: proc(pool: ^Connection_Pool, owner: PID) {
 
 @(private)
 ring_dispatch_envelope :: proc(ring: ^Connection_Ring, envelope: []byte) -> bool {
-	plaintext, ok := envelope_open(&ring.transport_keys, envelope, ring.open_scratch)
+	plaintext, ok := encryption_hooks.open(&ring.transport_keys, envelope, ring.open_scratch)
 	if !ok {
 		log.error("Failed to open sealed envelope")
 		notify_ring_error(ring, "decrypt failure")

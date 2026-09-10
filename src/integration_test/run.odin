@@ -1,5 +1,6 @@
 package integration
 
+import _ "../../encryption"
 import "../actod"
 import "../pkgs/threads_act"
 import "core:fmt"

@@ -1,5 +1,8 @@
-package actod
+package encryption
 
+import actod "../src/actod"
+import "../test_harness/ti"
+import "core:bytes"
 import "core:testing"
 
 @(test)
@@ -31,7 +34,7 @@ test_noise_handshake_and_envelope :: proc(t: ^testing.T) {
 	out3, done3, ok3 := noise_handshake_step(&dialer, msg2)
 	testing.expect(t, ok3 && done3 && out3 == nil, "dialer step 2 should complete with no output")
 
-	dialer_keys, listener_keys: Noise_Transport
+	dialer_keys, listener_keys: actod.Noise_Transport
 	testing.expect(t, noise_handshake_finish(&dialer, &dialer_keys), "dialer split")
 	testing.expect(t, noise_handshake_finish(&listener, &listener_keys), "listener split")
 
@@ -98,7 +101,7 @@ test_envelope_tamper_fails :: proc(t: ^testing.T) {
 	msg2, _, _ := noise_handshake_step(&listener, msg1)
 	defer delete(msg2)
 	_, _, _ = noise_handshake_step(&dialer, msg2)
-	dialer_keys, listener_keys: Noise_Transport
+	dialer_keys, listener_keys: actod.Noise_Transport
 	_ = noise_handshake_finish(&dialer, &dialer_keys)
 	_ = noise_handshake_finish(&listener, &listener_keys)
 
@@ -110,4 +113,32 @@ test_envelope_tamper_fails :: proc(t: ^testing.T) {
 	opened: [128]byte
 	_, open_ok := envelope_open(&listener_keys, sealed[4:n], opened[:])
 	testing.expect(t, !open_ok, "tampered envelope must not open")
+}
+
+@(test)
+seeded_noise_handshake_is_deterministic :: proc(t: ^testing.T) {
+	first_message :: proc(seed: u64) -> []byte {
+		ic: ti.Det_State
+		ic.rng_state = seed
+		ti.det = &ic
+		defer ti.det = nil
+
+		psk: [CLUSTER_PSK_SIZE]byte
+		for &b, i in psk do b = u8(i)
+
+		hs: Noise_Handshake
+		if !noise_handshake_begin(&hs, true, transmute([]byte)string("dst-test"), psk[:]) {
+			return nil
+		}
+		msg, _, ok := noise_handshake_step(&hs, nil, context.temp_allocator)
+		if !ok do return nil
+		return msg
+	}
+
+	a := first_message(7)
+	b := first_message(7)
+	c := first_message(8)
+	testing.expect(t, a != nil && len(a) > 0)
+	testing.expect(t, bytes.equal(a, b))
+	testing.expect(t, !bytes.equal(a, c))
 }

@@ -72,7 +72,6 @@ current_actor_file_logger: ^Actor_File_Logger
 @(private)
 actor_system_allocator: runtime.Allocator
 
-@(private)
 get_system_allocator :: #force_inline proc() -> runtime.Allocator {
 	if actor_system_allocator.procedure == nil do actor_system_allocator = runtime.heap_allocator()
 	return actor_system_allocator

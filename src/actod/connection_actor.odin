@@ -7,6 +7,7 @@ import "core:crypto"
 import "core:crypto/hash"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:net"
 import "core:strings"
 import "core:sync"
@@ -409,7 +410,6 @@ perform_plaintext_auth :: proc(
 	return true
 }
 
-@(private)
 handshake_send_ctrl :: proc(sock: net.TCP_Socket, ctrl_body: []byte) -> bool {
 	frame := make([]byte, 4 + NETWORK_HEADER_SIZE + len(ctrl_body))
 	defer delete(frame)
@@ -422,7 +422,6 @@ handshake_send_ctrl :: proc(sock: net.TCP_Socket, ctrl_body: []byte) -> bool {
 	return tcp_send_all(sock, frame[:n])
 }
 
-@(private)
 handshake_recv_ctrl :: proc(
 	sock: net.TCP_Socket,
 	expected_type: u8,
@@ -449,85 +448,6 @@ handshake_recv_ctrl :: proc(
 		return nil, nil
 	}
 	return raw, header.payload
-}
-
-@(private)
-run_noise_handshake :: proc(
-	data: ^Connection_Actor_Data,
-	sock: net.TCP_Socket,
-	initiator: bool,
-	my_hello: []byte,
-	peer_hello: []byte,
-	keys: ^Noise_Transport,
-	deadline: time.Time,
-) -> bool {
-	psk, psk_ok := derive_cluster_psk(data.auth_password)
-	if !psk_ok {
-		log.error("Refusing encrypted handshake: cluster PSK derivation failed")
-		return false
-	}
-
-	dialer_body := my_hello if initiator else peer_hello
-	responder_body := peer_hello if initiator else my_hello
-	prologue := make([]byte, len(dialer_body) + len(responder_body))
-	defer delete(prologue)
-	copy(prologue, dialer_body)
-	copy(prologue[len(dialer_body):], responder_body)
-
-	hs: Noise_Handshake
-	if !noise_handshake_begin(&hs, initiator, prologue, psk[:]) {
-		log.error("Failed to initialize noise handshake")
-		return false
-	}
-
-	if initiator {
-		msg1, _, ok1 := noise_handshake_step(&hs, nil)
-		if !ok1 || msg1 == nil do return false
-		sent1 := send_noise_ctrl(sock, CTRL_MSG_NOISE_1, msg1)
-		delete(msg1)
-		if !sent1 do return false
-
-		raw2, payload2 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_2, deadline)
-		if raw2 == nil {
-			log.warn("Did not receive noise response from peer")
-			return false
-		}
-		defer delete(raw2, actor_system_allocator)
-
-		out, done, ok2 := noise_handshake_step(&hs, payload2[1:])
-		if out != nil do delete(out)
-		if !ok2 || !done {
-			log.error("Noise handshake failed (wrong cluster password?)")
-			return false
-		}
-	} else {
-		raw1, payload1 := handshake_recv_ctrl(sock, CTRL_MSG_NOISE_1, deadline)
-		if raw1 == nil {
-			log.warn("Did not receive noise initiation from peer")
-			return false
-		}
-		defer delete(raw1, actor_system_allocator)
-
-		msg2, done, ok2 := noise_handshake_step(&hs, payload1[1:])
-		if !ok2 || !done || msg2 == nil {
-			log.error("Noise handshake failed (wrong cluster password?)")
-			return false
-		}
-		sent2 := send_noise_ctrl(sock, CTRL_MSG_NOISE_2, msg2)
-		delete(msg2)
-		if !sent2 do return false
-	}
-
-	return noise_handshake_finish(&hs, keys)
-}
-
-@(private)
-send_noise_ctrl :: proc(sock: net.TCP_Socket, ctrl_type: u8, msg: []byte) -> bool {
-	body := make([]byte, 1 + len(msg))
-	defer delete(body)
-	body[0] = ctrl_type
-	copy(body[1:], msg)
-	return handshake_send_ctrl(sock, body)
 }
 
 @(private)
@@ -610,7 +530,7 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !run_noise_handshake(data, sock, !data.is_incoming, my_hello, peer_payload, &keys, deadline) {
+		if !encryption_hooks.handshake(data.auth_password, sock, !data.is_incoming, my_hello, peer_payload, &keys, deadline) {
 			return .Failed
 		}
 	}
@@ -705,7 +625,7 @@ handle_incoming_pool_join :: proc(
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !run_noise_handshake(data, sock, false, my_hello, peer_hello, &keys, deadline) {
+		if !encryption_hooks.handshake(data.auth_password, sock, false, my_hello, peer_hello, &keys, deadline) {
 			return .Failed
 		}
 	}
@@ -727,7 +647,7 @@ handle_incoming_pool_join :: proc(
 	if data.encrypted {
 		keys_box := new(Noise_Transport, get_system_allocator())
 		keys_box^ = keys
-		crypto.zero_explicit(&keys, size_of(Noise_Transport))
+		mem.zero_explicit(&keys, size_of(Noise_Transport))
 		keys_ptr = u64(uintptr(keys_box))
 	}
 
@@ -786,7 +706,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !run_noise_handshake(data, sock, true, my_hello, peer_payload, &keys, deadline) {
+		if !encryption_hooks.handshake(data.auth_password, sock, true, my_hello, peer_payload, &keys, deadline) {
 			return false
 		}
 	}
@@ -856,7 +776,7 @@ attach_pool_ring :: proc(
 free_boxed_keys :: proc(keys_ptr: u64) {
 	if keys_ptr == 0 do return
 	keys_box := cast(^Noise_Transport)rawptr(uintptr(keys_ptr))
-	crypto.zero_explicit(keys_box, size_of(Noise_Transport))
+	mem.zero_explicit(keys_box, size_of(Noise_Transport))
 	free(keys_box, get_system_allocator())
 }
 

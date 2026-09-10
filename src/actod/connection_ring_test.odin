@@ -162,7 +162,6 @@ Test_XLarge :: struct {
 	data: [4096]byte,
 }
 
-@(init)
 register_ring_test_types :: proc "contextless" () {
 	register_message_type(Test_Empty)
 	register_message_type(Test_Inline)
@@ -747,6 +746,7 @@ test_build_wire_format_with_name :: proc(t: ^testing.T) {
 
 @(test)
 test_wire_format_exact_size_matches_build :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	buf: [8192]byte
 	to := Handle {
 		idx = 1,
@@ -802,6 +802,7 @@ test_wire_format_exact_size_matches_build :: proc(t: ^testing.T) {
 
 @(test)
 test_send_to_ring_all_sizes :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -997,6 +998,7 @@ test_stress_with_drainer_large :: proc(t: ^testing.T) {
 
 @(test)
 test_stress_send_ring_empty :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -1042,6 +1044,7 @@ test_stress_send_ring_empty :: proc(t: ^testing.T) {
 
 @(test)
 test_stress_send_ring_medium :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -1087,6 +1090,7 @@ test_stress_send_ring_medium :: proc(t: ^testing.T) {
 
 @(test)
 test_stress_send_ring_large :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -1132,6 +1136,7 @@ test_stress_send_ring_large :: proc(t: ^testing.T) {
 
 @(test)
 test_stress_send_ring_1m_baseline :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -1160,6 +1165,7 @@ test_stress_send_ring_1m_baseline :: proc(t: ^testing.T) {
 
 @(test)
 test_ring_full_rate_medium_messages :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(64, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -1238,6 +1244,7 @@ test_ring_full_rate_medium_messages :: proc(t: ^testing.T) {
 
 @(test)
 test_ring_full_rate_large_messages :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(64, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)
@@ -1316,6 +1323,7 @@ test_ring_full_rate_large_messages :: proc(t: ^testing.T) {
 
 @(test)
 test_drainer_flush_not_starved :: proc(t: ^testing.T) {
+	register_ring_test_types()
 	ring := make_test_ring(16, 64 * 1024)
 	testing.expect(t, ring != nil, "Ring should be created")
 	defer destroy_connection_ring(ring)

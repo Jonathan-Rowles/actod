@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:reflect"
+import "core:sync"
 import "core:testing"
 import "core:time"
 
@@ -21,6 +22,10 @@ poll_until :: proc(
 		if time.tick_since(start) >= scaled_budget do return false
 		time.sleep(interval)
 	}
+}
+
+atomic_flag_raised :: proc(state: rawptr) -> bool {
+	return sync.atomic_load(cast(^bool)state)
 }
 
 @(private = "file")

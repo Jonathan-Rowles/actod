@@ -269,7 +269,6 @@ test_file_watcher_detection :: proc(t: ^testing.T) {
 
 	expect(t, hot_reload.add_watch(w, dir, "test_actor"), "should add watch")
 	hot_reload.start_watcher(w)
-	time.sleep(300 * time.Millisecond)
 
 	detected := false
 	for attempt in 0 ..< 100 {

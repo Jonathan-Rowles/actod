@@ -34,6 +34,21 @@ topic_sub_handle :: proc(data: ^Topic_Sub_Data, from: actod.PID, msg: any) {
 
 shared_topic: actod.Topic
 
+Topic_Count_Probe :: struct {
+	topic:    ^actod.Topic,
+	expected: u32,
+}
+
+topic_count_is :: proc(state: rawptr) -> bool {
+	probe := cast(^Topic_Count_Probe)state
+	return sync.atomic_load_explicit(&probe.topic.count, .Acquire) == probe.expected
+}
+
+wait_for_topic_count :: proc(topic: ^actod.Topic, expected: u32) {
+	probe := Topic_Count_Probe{topic = topic, expected = expected}
+	_ = poll_until(topic_count_is, &probe, 2 * time.Second)
+}
+
 test_topic_publish :: proc(t: ^testing.T) {
 	shared_topic = {}
 
@@ -51,7 +66,7 @@ test_topic_publish :: proc(t: ^testing.T) {
 		sub_pids[i] = pid
 	}
 
-	time.sleep(50 * time.Millisecond)
+	wait_for_topic_count(&shared_topic, SUBSCRIBER_COUNT)
 
 	expectf(
 		t,
@@ -80,8 +95,6 @@ test_topic_publish :: proc(t: ^testing.T) {
 		Pub_Behaviour,
 	)
 	expect(t, pub_ok, "Should spawn publisher")
-
-	time.sleep(20 * time.Millisecond)
 
 	_ = actod.send_message(pub_pid, "go")
 
@@ -119,7 +132,7 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 	sub_pid, sub_ok := actod.spawn("topic_cleanup_sub", sub_data, Topic_Sub_Behaviour)
 	expect(t, sub_ok, "Should spawn subscriber")
 
-	time.sleep(50 * time.Millisecond)
+	wait_for_topic_count(&shared_topic, 1)
 
 	expect(
 		t,
@@ -156,8 +169,6 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 		Pub_Behaviour,
 	)
 	expect(t, pub_ok, "Should spawn publisher")
-
-	time.sleep(20 * time.Millisecond)
 
 	_ = actod.send_message(pub_pid, "go")
 	time.sleep(50 * time.Millisecond)
@@ -208,7 +219,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	)
 	expect(t, sub_ok, "Should spawn subscriber")
 
-	time.sleep(50 * time.Millisecond)
+	wait_for_topic_count(&shared_topic, 1)
 	expect(
 		t,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == 1,
@@ -234,7 +245,6 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		Pub_Behaviour,
 	)
 	expect(t, pub_ok, "Should spawn publisher")
-	time.sleep(20 * time.Millisecond)
 
 	_ = actod.send_message(pub_pid, "go")
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
@@ -246,7 +256,7 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	expect(t, sync.atomic_load(&received_count) == 1, "Should receive first publish")
 
 	_ = actod.send_message(sub_pid, "unsub")
-	time.sleep(50 * time.Millisecond)
+	wait_for_topic_count(&shared_topic, 0)
 
 	expectf(
 		t,

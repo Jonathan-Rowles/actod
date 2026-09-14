@@ -107,6 +107,7 @@ Cancel_Timer_Data :: struct {
 	tick_count: int,
 	first_tick: ^sync.Sema,
 	timer_id:   u32,
+	cancelled:  bool,
 }
 
 Cancel_Timer_Behaviour :: actod.Actor_Behaviour(Cancel_Timer_Data) {
@@ -130,6 +131,7 @@ cancel_timer_handle :: proc(data: ^Cancel_Timer_Data, from: actod.PID, msg: any)
 	case string:
 		if v == "cancel" {
 			actod.cancel_timer(data.timer_id)
+			sync.atomic_store(&data.cancelled, true)
 		}
 	}
 }
@@ -152,14 +154,18 @@ test_timer_cancel :: proc(t: ^testing.T) {
 
 	_ = actod.send_message(pid, "cancel")
 
-	time.sleep(30 * time.Millisecond)
-
 	actor, got := actod.get_actor_from_pointer(actod.get(&actod.NODE.actor_registry, pid))
 	expect(t, got, "timer actor must still be alive")
 	if got {
-		count_after := (cast(^Cancel_Timer_Data)actor.data).tick_count
+		data := cast(^Cancel_Timer_Data)actor.data
+		expect(
+			t,
+			poll_until(atomic_flag_raised, &data.cancelled, 2 * time.Second),
+			"cancel was never handled",
+		)
+		count_after := data.tick_count
 		time.sleep(100 * time.Millisecond)
-		count_later := (cast(^Cancel_Timer_Data)actor.data).tick_count
+		count_later := data.tick_count
 		expect(t, count_later - count_after <= 1, "Timer should stop firing after cancel")
 	}
 }
@@ -231,6 +237,10 @@ live_timer_count :: proc() -> int {
 	return len(actod.NODE.timer_registry.index_map)
 }
 
+live_timer_count_at_least :: proc(state: rawptr) -> bool {
+	return live_timer_count() >= (cast(^int)state)^
+}
+
 wait_for_live_timer_count :: proc(expected: int) -> bool {
 	for _ in 0 ..< 200 {
 		if live_timer_count() == expected do return true
@@ -253,7 +263,12 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 	)
 	expect(t, spawn_ok, "Failed to spawn test actor")
 
-	time.sleep(50 * time.Millisecond)
+	repeating_timers_registered := timers_before + 2
+	expect(
+		t,
+		poll_until(live_timer_count_at_least, &repeating_timers_registered, 2 * time.Second),
+		"actor timers should be registered",
+	)
 
 	_ = actod.terminate_actor(pid)
 	actod.wait_for_pids([]actod.PID{pid})

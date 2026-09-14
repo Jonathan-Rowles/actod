@@ -126,6 +126,14 @@ slab_markers: [SLAB_NEIGHBOUR_COUNT]u64
 slab_greedy_hit_limit: bool
 slab_greedy_blocks: int
 
+slab_markers_match :: proc(state: rawptr) -> bool {
+	base := (cast(^u64)state)^
+	for i in 0 ..< SLAB_NEIGHBOUR_COUNT {
+		if sync.atomic_load(&slab_markers[i]) != base + u64(i) do return false
+	}
+	return true
+}
+
 Slab_Neighbour :: struct {
 	index: int,
 }
@@ -229,7 +237,8 @@ test_slab_neighbours_survive_arena_exhaustion :: proc(t: ^testing.T) {
 			i,
 		)
 	}
-	time.sleep(200 * time.Millisecond)
+	second_marker_base := u64(0x2000)
+	_ = poll_until(slab_markers_match, &second_marker_base, 2 * time.Second)
 
 	for i in 0 ..< SLAB_NEIGHBOUR_COUNT {
 		expectf(

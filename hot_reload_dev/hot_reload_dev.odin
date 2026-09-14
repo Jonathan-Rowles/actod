@@ -45,6 +45,10 @@ swap_behaviour :: proc(actor: ^actod.Actor, generation: u32) {
 			actor.behaviour.init = auto_cast sym.ptr
 		case "terminate":
 			actor.behaviour.terminate = auto_cast sym.ptr
+		case "on_idle":
+			actor.behaviour.on_idle = auto_cast sym.ptr
+		case "on_wake":
+			actor.behaviour.on_wake = auto_cast sym.ptr
 		case "on_child_started":
 			actor.behaviour.on_child_started = auto_cast sym.ptr
 		case "on_child_terminated":
@@ -64,7 +68,8 @@ send_reload_behaviour :: proc(target: actod.PID, generation: u32) -> actod.Send_
 }
 
 
-MAX_BEHAVIOUR_FIELDS :: 8
+MAX_BEHAVIOUR_FIELDS :: 9
+#assert(MAX_BEHAVIOUR_FIELDS == intrinsics.type_struct_field_count(actod.Erased_Behaviour) - 1)
 MAX_STATE_FIELDS :: 16
 
 Register_Hot_Actor :: struct {

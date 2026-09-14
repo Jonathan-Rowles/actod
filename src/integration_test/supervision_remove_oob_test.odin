@@ -1,8 +1,31 @@
 package integration
 
 import "../actod"
+import "core:strings"
+import "core:sync"
 import "core:testing"
 import "core:time"
+
+Survival_Probe_Data :: struct {
+	target:  actod.PID,
+	replied: ^bool,
+}
+
+Survival_Probe_Behaviour :: actod.Actor_Behaviour(Survival_Probe_Data) {
+	init           = survival_probe_init,
+	handle_message = survival_probe_handle_message,
+}
+
+survival_probe_init :: proc(data: ^Survival_Probe_Data) {
+	_ = actod.send_message(data.target, "get_stats")
+}
+
+survival_probe_handle_message :: proc(data: ^Survival_Probe_Data, from: actod.PID, msg: any) {
+	switch reply in msg {
+	case string:
+		if from == data.target && strings.has_prefix(reply, "restarts=") do sync.atomic_store(data.replied, true)
+	}
+}
 
 test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 	reset_test_state()
@@ -48,7 +71,12 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 	err := actod.send_message(initial_children[0], "crash")
 	expect(t, err == .OK, "Failed to crash remaining child")
 
-	time.sleep(500 * time.Millisecond)
+	remaining := []actod.PID{initial_children[0], initial_children[2]}
+	expect(
+		t,
+		wait_for_children_replaced(supervisor_pid, remaining, 0, 1000),
+		"ONE_FOR_ALL should restart both remaining children",
+	)
 
 	_, supervisor_alive := actod.get_actor_pid("remove-oob-supervisor")
 	expect(
@@ -56,6 +84,21 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 		supervisor_alive,
 		"Supervisor must survive ONE_FOR_ALL restart after a prior child removal",
 	)
+
+	supervisor_replied: bool
+	probe_pid, probe_ok := actod.spawn(
+		"remove-oob-survival-probe",
+		Survival_Probe_Data{target = supervisor_pid, replied = &supervisor_replied},
+		Survival_Probe_Behaviour,
+	)
+	expect(t, probe_ok, "Failed to spawn survival probe")
+	expect(
+		t,
+		poll_until(atomic_flag_raised, &supervisor_replied, 1 * time.Second),
+		"Supervisor must handle a message after the ONE_FOR_ALL restart",
+	)
+	_ = actod.terminate_actor(probe_pid)
+	actod.wait_for_pids([]actod.PID{probe_pid})
 
 	survivors := actod.get_children(supervisor_pid)
 	defer delete(survivors)

@@ -8,6 +8,7 @@ import "core:net"
 import "core:os"
 import "core:sync"
 import "core:testing"
+import "core:thread"
 import "core:time"
 
 Distributed_Receiver_Data :: struct {
@@ -150,59 +151,42 @@ test_distributed_network_message_routing :: proc(t: ^testing.T) {
 	_, ok := actod.spawn("origin_actor", origin_data, Origin_Behaviour)
 	expect(t, ok, "Failed to spawn origin actor")
 
-	node2_desc := os.Process_Desc {
-		command = []string{INTEGRATION_TEST_BIN},
-		stderr  = os.stderr,
-		env     = make_test_env(
-			[]string {
-				"ACTOD_TEST_NODE=relay_node",
-				"NODE_NAME=RelayNode2",
-				fmt.tprintf("NODE_PORT=%d", test_base_port + 1),
-				"TARGET_NODE=RelayNode3",
-				fmt.tprintf("TARGET_PORT=%d", test_base_port + 2),
-				"AUTH_PASSWORD=test_dist_password",
-				"ORIGIN_NODE=TestNode1",
-				fmt.tprintf("ORIGIN_PORT=%d", test_base_port),
-				"ORIGIN_ACTOR=origin_actor",
-			},
-		),
-	}
+	relay_node: Node_Role_Process
+	relay_ok := start_node_role(
+		&relay_node,
+		[]string {
+			"ACTOD_TEST_NODE=relay_node",
+			"NODE_NAME=RelayNode2",
+			fmt.tprintf("NODE_PORT=%d", test_base_port + 1),
+			"TARGET_NODE=RelayNode3",
+			fmt.tprintf("TARGET_PORT=%d", test_base_port + 2),
+			"AUTH_PASSWORD=test_dist_password",
+			"ORIGIN_NODE=TestNode1",
+			fmt.tprintf("ORIGIN_PORT=%d", test_base_port),
+			"ORIGIN_ACTOR=origin_actor",
+		},
+	)
+	if !relay_ok do panic("failed to start node2")
+	defer stop_node_role(&relay_node)
 
-	remote_process, remote_err := os.process_start(node2_desc)
-	if remote_err != nil {
-		panic("failed to start node2")
-	}
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
+	echo_node: Node_Role_Process
+	echo_ok := start_node_role(
+		&echo_node,
+		[]string {
+			"ACTOD_TEST_NODE=echo_back",
+			"NODE_NAME=RelayNode3",
+			fmt.tprintf("NODE_PORT=%d", test_base_port + 2),
+			"AUTH_PASSWORD=test_dist_password",
+			"ECHO_TO_NODE=TestNode1",
+			fmt.tprintf("ECHO_TO_PORT=%d", test_base_port),
+			"ECHO_TO_ACTOR=origin_actor",
+		},
+	)
+	if !echo_ok do panic("failed to start node3")
+	defer stop_node_role(&echo_node)
 
-	node3_desc := os.Process_Desc {
-		command = []string{INTEGRATION_TEST_BIN},
-		stderr  = os.stderr,
-		env     = make_test_env(
-			[]string {
-				"ACTOD_TEST_NODE=echo_back",
-				"NODE_NAME=RelayNode3",
-				fmt.tprintf("NODE_PORT=%d", test_base_port + 2),
-				"AUTH_PASSWORD=test_dist_password",
-				"ECHO_TO_NODE=TestNode1",
-				fmt.tprintf("ECHO_TO_PORT=%d", test_base_port),
-				"ECHO_TO_ACTOR=origin_actor",
-			},
-		),
-	}
-
-	node3_process, node3_err := os.process_start(node3_desc)
-	if node3_err != nil {
-		panic("failed to start node3")
-	}
-	defer {
-		_ = os.process_kill(node3_process)
-		_, _ = os.process_wait(node3_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	expect(t, wait_for_node_role_ready(&relay_node), "RelayNode2 never reported READY")
+	expect(t, wait_for_node_role_ready(&echo_node), "RelayNode3 never reported READY")
 
 	node2_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -444,8 +428,6 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	expect(t, spawn_ok, "spawn_by_name should succeed")
 	expect(t, pid != 0, "PID should not be zero")
 
-	time.sleep(50 * time.Millisecond)
-
 	pid_type := actod.get_pid_actor_type(pid)
 	expect(
 		t,
@@ -477,8 +459,6 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	)
 	expect(t, col_ok, "Should spawn collector")
 
-	time.sleep(50 * time.Millisecond)
-
 	req := shared.Network_Test_Request {
 		id      = 42,
 		message = "hello from spawn test",
@@ -495,8 +475,6 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 		parent_pid,
 	)
 	expect(t, child_ok, "spawn_by_name with parent should succeed")
-
-	time.sleep(50 * time.Millisecond)
 
 	actual_parent := actod.get_actor_parent(child_pid)
 	expect(
@@ -524,7 +502,7 @@ test_spawn_by_name :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(child_pid)
 	_ = actod.terminate_actor(pid)
 	_ = actod.terminate_actor(collector_pid)
-	time.sleep(100 * time.Millisecond)
+	actod.wait_for_pids([]actod.PID{hash_pid, child_pid, pid, collector_pid})
 }
 
 test_connection_reconnection :: proc(t: ^testing.T) {
@@ -567,37 +545,29 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	reconnect_port := test_base_port + 1
 	reconnect_base := test_base_port
 
-	start_remote :: proc(node_port: int, reply_port: int) -> (os.Process, bool) {
-		desc := os.Process_Desc {
-			command = []string{INTEGRATION_TEST_BIN},
-			stderr  = os.stderr,
-			env     = make_test_env(
-				[]string {
-					"ACTOD_TEST_NODE=lifecycle_server",
-					"NODE_NAME=ReconnectNode",
-					fmt.tprintf("NODE_PORT=%d", node_port),
-					"AUTH_PASSWORD=test_dist_password",
-					"HEARTBEAT_INTERVAL_MS=100",
-					"HEARTBEAT_TIMEOUT_MS=300",
-					"RECONNECT_INITIAL_MS=200",
-					"RECONNECT_RETRY_MS=300",
-					"REPLY_TO_ACTOR=reconnect_test_actor",
-					"REPLY_TO_NODE=TestNode1",
-					fmt.tprintf("REPLY_TO_PORT=%d", reply_port),
-				},
-			),
-		}
-		proc_handle, err := os.process_start(desc)
-		if err != nil {
-			return {}, false
-		}
-		return proc_handle, true
+	start_remote :: proc(role: ^Node_Role_Process, node_port: int, reply_port: int) -> bool {
+		return start_node_role(
+			role,
+			[]string {
+				"ACTOD_TEST_NODE=lifecycle_server",
+				"NODE_NAME=ReconnectNode",
+				fmt.tprintf("NODE_PORT=%d", node_port),
+				"AUTH_PASSWORD=test_dist_password",
+				"HEARTBEAT_INTERVAL_MS=100",
+				"HEARTBEAT_TIMEOUT_MS=300",
+				"RECONNECT_INITIAL_MS=200",
+				"RECONNECT_RETRY_MS=300",
+				"REPLY_TO_ACTOR=reconnect_test_actor",
+				"REPLY_TO_NODE=TestNode1",
+				fmt.tprintf("REPLY_TO_PORT=%d", reply_port),
+			},
+		)
 	}
 
-	remote_process, start_ok := start_remote(reconnect_port, reconnect_base)
+	first_node: Node_Role_Process
+	start_ok := start_remote(&first_node, reconnect_port, reconnect_base)
 	expect(t, start_ok, "Failed to start remote node")
-
-	time.sleep(200 * time.Millisecond)
+	expect(t, wait_for_node_role_ready(&first_node), "Remote node never reported READY")
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -605,8 +575,6 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	}
 	_, reg_ok := actod.register_node("ReconnectNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-
-	time.sleep(200 * time.Millisecond)
 
 	for i in 0 ..< 2 {
 		msg := shared.Network_Test_Request {
@@ -621,19 +589,29 @@ test_connection_reconnection :: proc(t: ^testing.T) {
 	phase1_success := sync.sema_wait_with_timeout(&phase1_done, scaled_timeout(3 * time.Second))
 	expect(t, phase1_success, "Failed to complete phase 1")
 
-	_ = os.process_kill(remote_process)
-	_, _ = os.process_wait(remote_process)
+	stop_node_role(&first_node)
 
-	time.sleep(200 * time.Millisecond)
+	killed_node := "ReconnectNode"
+	expect(
+		t,
+		poll_until(connection_lost, &killed_node, 5 * time.Second),
+		"The connection to the killed node should be seen as lost",
+	)
 
-	remote_process2, restart_ok := start_remote(reconnect_port, reconnect_base)
+	restarted_node: Node_Role_Process
+	restart_ok := start_remote(&restarted_node, reconnect_port, reconnect_base)
 	expect(t, restart_ok, "Failed to restart remote node")
-	defer {
-		_ = os.process_kill(remote_process2)
-		_, _ = os.process_wait(remote_process2)
-	}
-
-	time.sleep(500 * time.Millisecond)
+	defer stop_node_role(&restarted_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&restarted_node),
+		"Restarted remote node never reported READY",
+	)
+	expect(
+		t,
+		wait_for_connection_ready("ReconnectNode"),
+		"The connection to the restarted node should become Ready again",
+	)
 
 	for i in 0 ..< 2 {
 		msg := shared.Network_Test_Request {
@@ -677,26 +655,118 @@ create_remote_crash_child :: proc() -> actod.SPAWN {
 		}
 }
 
-start_supervision_server :: proc(node_port: int, base_port: int) -> (os.Process, bool) {
+Node_Role_Process :: struct {
+	process: os.Process,
+	stdout:  ^os.File,
+	reader:  ^thread.Thread,
+	ready:   sync.Sema,
+}
+
+NODE_ROLE_READY_LINE :: "READY\n"
+
+start_node_role :: proc(role: ^Node_Role_Process, vars: []string) -> bool {
+	stdout_read, stdout_write, pipe_err := os.pipe()
+	if pipe_err != nil do return false
 	desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
+		stdout  = stdout_write,
 		stderr  = os.stderr,
-		env     = make_test_env(
-			[]string {
-				"ACTOD_TEST_NODE=supervision_server",
-				"NODE_NAME=SupervisionNode",
-				fmt.tprintf("NODE_PORT=%d", node_port),
-				"AUTH_PASSWORD=test_dist_password",
-				"TARGET_NODE=TestNode1",
-				fmt.tprintf("TARGET_PORT=%d", base_port),
-			},
-		),
+		env     = make_test_env(vars),
 	}
-	proc_handle, err := os.process_start(desc)
-	if err != nil {
-		return {}, false
+	process, start_err := os.process_start(desc)
+	os.close(stdout_write)
+	if start_err != nil {
+		os.close(stdout_read)
+		return false
 	}
-	return proc_handle, true
+	role.process = process
+	role.stdout = stdout_read
+	role.reader = thread.create_and_start_with_data(role, scan_node_role_stdout)
+	return true
+}
+
+scan_node_role_stdout :: proc(data: rawptr) {
+	role := cast(^Node_Role_Process)data
+	ready_line := NODE_ROLE_READY_LINE
+	matched := 0
+	buf: [512]byte
+	for {
+		n, err := os.read(role.stdout, buf[:])
+		if n <= 0 do return
+		for b in buf[:n] {
+			if matched == len(ready_line) do break
+			if b == ready_line[matched] {
+				matched += 1
+				if matched == len(ready_line) do sync.sema_post(&role.ready)
+			} else {
+				matched = 1 if b == ready_line[0] else 0
+			}
+		}
+		if err != nil do return
+	}
+}
+
+wait_for_node_role_ready :: proc(role: ^Node_Role_Process) -> bool {
+	return sync.sema_wait_with_timeout(&role.ready, scaled_timeout(5 * time.Second))
+}
+
+stop_node_role :: proc(role: ^Node_Role_Process) {
+	if role.reader == nil do return
+	_ = os.process_kill(role.process)
+	_, _ = os.process_wait(role.process)
+	thread.join(role.reader)
+	thread.destroy(role.reader)
+	os.close(role.stdout)
+	role.reader = nil
+}
+
+connection_lost :: proc(state: rawptr) -> bool {
+	return !connection_ready(state)
+}
+
+start_supervision_server :: proc(role: ^Node_Role_Process, node_port: int, base_port: int) -> bool {
+	return start_node_role(
+		role,
+		[]string {
+			"ACTOD_TEST_NODE=supervision_server",
+			"NODE_NAME=SupervisionNode",
+			fmt.tprintf("NODE_PORT=%d", node_port),
+			"AUTH_PASSWORD=test_dist_password",
+			"TARGET_NODE=TestNode1",
+			fmt.tprintf("TARGET_PORT=%d", base_port),
+		},
+	)
+}
+
+@(private = "file")
+Child_Restart_Probe :: struct {
+	parent:  actod.PID,
+	initial: []actod.PID,
+	from:    int,
+}
+
+@(private = "file")
+children_restarted_from :: proc(state: rawptr) -> bool {
+	probe := cast(^Child_Restart_Probe)state
+	children := actod.get_children(probe.parent)
+	defer delete(children)
+	if len(children) != len(probe.initial) do return false
+	for i in probe.from ..< len(children) {
+		if children[i] == 0 || children[i] == probe.initial[i] do return false
+	}
+	return true
+}
+
+@(private = "file")
+Subscriber_Count_Probe :: struct {
+	actor_type: actod.Actor_Type,
+	expected:   u32,
+}
+
+@(private = "file")
+subscriber_count_reached :: proc(state: rawptr) -> bool {
+	probe := cast(^Subscriber_Count_Probe)state
+	return actod.get_subscriber_count(probe.actor_type) >= probe.expected
 }
 
 test_remote_one_for_one_restart :: proc(t: ^testing.T) {
@@ -705,14 +775,15 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 	g_supervision_target_node = "SupervisionNode"
 	sync.atomic_store(&g_remote_child_counter, 0)
 
-	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
+	supervision_node: Node_Role_Process
+	start_ok := start_supervision_server(&supervision_node, test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -720,8 +791,6 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-
-	time.sleep(300 * time.Millisecond)
 
 	supervisor_data := Supervisor_Test_Data {
 		id = 200,
@@ -738,8 +807,6 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 	)
 	expect(t, sup_ok, "Failed to spawn supervisor")
 
-	time.sleep(100 * time.Millisecond)
-
 	add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
 	expect(t, add_ok, "Should add remote child")
 
@@ -754,7 +821,6 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 	expect(t, child_pid != 0, "Child PID should not be zero")
 	expect(t, !actod.is_local_pid(child_pid), "Child should be remote")
 
-	time.sleep(200 * time.Millisecond)
 	crash_cmd := shared.Supervision_Crash_Command {
 		reason = .INTERNAL_ERROR,
 	}
@@ -778,14 +844,15 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 	g_supervision_target_node = "SupervisionNode"
 	sync.atomic_store(&g_remote_child_counter, 0)
 
-	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
+	supervision_node: Node_Role_Process
+	start_ok := start_supervision_server(&supervision_node, test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -793,8 +860,6 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-
-	time.sleep(300 * time.Millisecond)
 
 	supervisor_data := Supervisor_Test_Data {
 		id = 202,
@@ -810,8 +875,6 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 		),
 	)
 	expect(t, sup_ok, "Failed to spawn supervisor")
-
-	time.sleep(100 * time.Millisecond)
 
 	for _ in 0 ..< 4 {
 		add_ok := actod.add_child(supervisor_pid, create_remote_crash_child())
@@ -831,7 +894,16 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 		err := actod.send_message(initial_children[1], crash_cmd)
 		expect(t, err == .OK, "Should crash second child")
 
-		time.sleep(1 * time.Second)
+		restart_probe := Child_Restart_Probe {
+			parent  = supervisor_pid,
+			initial = initial_children,
+			from    = 1,
+		}
+		expect(
+			t,
+			poll_until(children_restarted_from, &restart_probe, 5 * time.Second),
+			"Children after the crashed one should all be restarted with new PIDs",
+		)
 
 		new_children := actod.get_children(supervisor_pid)
 		defer delete(new_children)
@@ -861,14 +933,15 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
-	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
+	supervision_node: Node_Role_Process
+	start_ok := start_supervision_server(&supervision_node, test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -876,8 +949,6 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-
-	time.sleep(300 * time.Millisecond)
 
 	supervisor_data := Supervisor_Test_Data {
 		id = 203,
@@ -893,8 +964,6 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		),
 	)
 	expect(t, sup_ok, "Failed to spawn supervisor")
-
-	time.sleep(100 * time.Millisecond)
 
 	remote_pid, spawn_ok := actod.spawn_remote(
 		"supervision_worker",
@@ -925,7 +994,6 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		expect_value(t, children[0], remote_pid)
 	}
 
-	time.sleep(200 * time.Millisecond)
 	crash_cmd := shared.Supervision_Crash_Command {
 		reason = .INTERNAL_ERROR,
 	}
@@ -946,14 +1014,15 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {
 	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
-	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
+	supervision_node: Node_Role_Process
+	start_ok := start_supervision_server(&supervision_node, test_base_port + 1, test_base_port)
 	expect(t, start_ok, "Failed to start supervision server")
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -961,8 +1030,6 @@ test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-
-	time.sleep(300 * time.Millisecond)
 
 	pid, spawn_ok := actod.spawn_remote(
 		"nonexistent_worker_type",
@@ -993,58 +1060,45 @@ test_remote_spawn_timeout :: proc(t: ^testing.T) {
 
 test_mesh_discovery :: proc(t: ^testing.T) {
 	node_b_port := test_base_port + 1
-	node_b_desc := os.Process_Desc {
-		command = []string{INTEGRATION_TEST_BIN},
-		stderr  = os.stderr,
-		env     = make_test_env(
-			[]string {
-				"ACTOD_TEST_NODE=mesh_middle",
-				"NODE_NAME=MeshNodeB",
-				fmt.tprintf("NODE_PORT=%d", node_b_port),
-				"AUTH_PASSWORD=test_dist_password",
-				"TARGET_NODE=TestNode1",
-				fmt.tprintf("TARGET_PORT=%d", test_base_port),
-			},
-		),
-	}
-
-	node_b_process, node_b_err := os.process_start(node_b_desc)
-	if node_b_err != nil {
+	node_b: Node_Role_Process
+	node_b_ok := start_node_role(
+		&node_b,
+		[]string {
+			"ACTOD_TEST_NODE=mesh_middle",
+			"NODE_NAME=MeshNodeB",
+			fmt.tprintf("NODE_PORT=%d", node_b_port),
+			"AUTH_PASSWORD=test_dist_password",
+			"TARGET_NODE=TestNode1",
+			fmt.tprintf("TARGET_PORT=%d", test_base_port),
+		},
+	)
+	if !node_b_ok {
 		expect(t, false, "Failed to start MeshNodeB")
 		return
 	}
-	defer {
-		_ = os.process_kill(node_b_process)
-		_, _ = os.process_wait(node_b_process)
-	}
+	defer stop_node_role(&node_b)
 
 	node_c_port := test_base_port + 2
-	node_c_desc := os.Process_Desc {
-		command = []string{INTEGRATION_TEST_BIN},
-		stderr  = os.stderr,
-		env     = make_test_env(
-			[]string {
-				"ACTOD_TEST_NODE=mesh_leaf",
-				"NODE_NAME=MeshNodeC",
-				fmt.tprintf("NODE_PORT=%d", node_c_port),
-				"AUTH_PASSWORD=test_dist_password",
-				"TARGET_NODE=MeshNodeB",
-				fmt.tprintf("TARGET_PORT=%d", node_b_port),
-			},
-		),
-	}
-
-	node_c_process, node_c_err := os.process_start(node_c_desc)
-	if node_c_err != nil {
+	node_c: Node_Role_Process
+	node_c_ok := start_node_role(
+		&node_c,
+		[]string {
+			"ACTOD_TEST_NODE=mesh_leaf",
+			"NODE_NAME=MeshNodeC",
+			fmt.tprintf("NODE_PORT=%d", node_c_port),
+			"AUTH_PASSWORD=test_dist_password",
+			"TARGET_NODE=MeshNodeB",
+			fmt.tprintf("TARGET_PORT=%d", node_b_port),
+		},
+	)
+	if !node_c_ok {
 		expect(t, false, "Failed to start MeshNodeC")
 		return
 	}
-	defer {
-		_ = os.process_kill(node_c_process)
-		_, _ = os.process_wait(node_c_process)
-	}
+	defer stop_node_role(&node_c)
 
-	time.sleep(200 * time.Millisecond)
+	expect(t, wait_for_node_role_ready(&node_b), "MeshNodeB never reported READY")
+	expect(t, wait_for_node_role_ready(&node_c), "MeshNodeC never reported READY")
 
 	node_b_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -1138,8 +1192,6 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	)
 	expect(t, col_ok, "Should spawn mesh collector")
 
-	time.sleep(50 * time.Millisecond)
-
 	req := shared.Network_Test_Request {
 		id      = 99,
 		message = "hello from mesh test",
@@ -1157,8 +1209,7 @@ test_mesh_discovery :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(collector_pid)
 	time.sleep(50 * time.Millisecond)
 
-	_ = os.process_kill(node_c_process)
-	_, _ = os.process_wait(node_c_process)
+	stop_node_role(&node_c)
 
 	removed := false
 	for _ in 0 ..< scaled_attempts(30) {
@@ -1656,17 +1707,17 @@ test_remote_spawn_parent_link :: proc(t: ^testing.T) {
 	)
 	expect(t, parent_ok, "Should spawn the local parent")
 
-	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	if !start_ok {
+	supervision_node: Node_Role_Process
+	if !start_supervision_server(&supervision_node, test_base_port + 1, test_base_port) {
 		expect(t, false, "Failed to start the supervision server")
 		return
 	}
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
 
 	remote_addr := net.Endpoint {
 		address = net.IP4_Loopback,
@@ -1674,8 +1725,6 @@ test_remote_spawn_parent_link :: proc(t: ^testing.T) {
 	}
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-
-	time.sleep(300 * time.Millisecond)
 
 	_ = actod.send_message(parent_pid, "go")
 
@@ -1717,7 +1766,15 @@ test_pubsub_subscribe_before_connect :: proc(t: ^testing.T) {
 	)
 	expect(t, sub_ok, "Should spawn the subscriber")
 
-	time.sleep(200 * time.Millisecond)
+	subscribed := Subscriber_Count_Probe {
+		actor_type = publisher_type,
+		expected   = 1,
+	}
+	expect(
+		t,
+		poll_until(subscriber_count_reached, &subscribed, 2 * time.Second),
+		"The local subscriber should be registered before the publisher connects",
+	)
 
 	remote_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},

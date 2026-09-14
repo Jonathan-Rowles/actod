@@ -67,21 +67,20 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 		},
 	)
 
-	remote_process, start_ok := start_supervision_server(test_base_port + 1, test_base_port)
-	if !start_ok {
+	supervision_node: Node_Role_Process
+	if !start_supervision_server(&supervision_node, test_base_port + 1, test_base_port) {
 		expect(t, false, "Failed to start the supervision server")
 		return
 	}
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
-
-	time.sleep(200 * time.Millisecond)
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
 	remote_addr := loopback_endpoint(test_base_port + 1)
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
-	time.sleep(300 * time.Millisecond)
 
 	_ = actod.send_message(parent_pid, "go")
 
@@ -186,39 +185,32 @@ test_frame_tap_drops_outbound_user_message :: proc(t: ^testing.T) {
 	)
 	expect(t, watcher_ok, "Should spawn the watcher")
 
-	remote_desc := os.Process_Desc {
-		command = []string{INTEGRATION_TEST_BIN},
-		stderr  = os.stderr,
-		env     = make_test_env(
-			[]string {
-				"ACTOD_TEST_NODE=echo_back",
-				"NODE_NAME=TapEchoNode",
-				fmt.tprintf("NODE_PORT=%d", test_base_port + 1),
-				"ECHO_TO_NODE=TestNode1",
-				fmt.tprintf("ECHO_TO_PORT=%d", test_base_port),
-				"ECHO_TO_ACTOR=tap_echo_watcher",
-				"AUTH_PASSWORD=test_dist_password",
-			},
-		),
-	}
-	remote_process, remote_err := os.process_start(remote_desc)
-	if remote_err != nil {
+	echo_node: Node_Role_Process
+	echo_ok := start_node_role(
+		&echo_node,
+		[]string {
+			"ACTOD_TEST_NODE=echo_back",
+			"NODE_NAME=TapEchoNode",
+			fmt.tprintf("NODE_PORT=%d", test_base_port + 1),
+			"ECHO_TO_NODE=TestNode1",
+			fmt.tprintf("ECHO_TO_PORT=%d", test_base_port),
+			"ECHO_TO_ACTOR=tap_echo_watcher",
+			"AUTH_PASSWORD=test_dist_password",
+		},
+	)
+	if !echo_ok {
 		expect(t, false, "Failed to start the echo node")
 		return
 	}
-	defer {
-		_ = os.process_kill(remote_process)
-		_, _ = os.process_wait(remote_process)
-	}
+	defer stop_node_role(&echo_node)
+	expect(t, wait_for_node_role_ready(&echo_node), "The echo node never reported READY")
 
-	time.sleep(300 * time.Millisecond)
 	echo_addr := net.Endpoint {
 		address = net.IP4_Loopback,
 		port    = test_base_port + 1,
 	}
 	_, reg_ok := actod.register_node("TapEchoNode", echo_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Should register the echo node")
-	time.sleep(300 * time.Millisecond)
 
 	actod.frame_tap_add(
 		actod.Frame_Fault_Rule {

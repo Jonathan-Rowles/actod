@@ -18,6 +18,9 @@ BLOCKED_SUPERVISOR_CHILDREN :: 24
 reaped_by_supervisor: int
 
 @(private = "file")
+supervisor_blocking: bool
+
+@(private = "file")
 fail_hard :: proc(format: string, args: ..any) -> ! {
 	fmt.eprintf(format, ..args)
 	fmt.eprintln()
@@ -40,6 +43,7 @@ Leak_Supervisor_Behaviour :: actod.Actor_Behaviour(Leak_Supervisor_Data) {
 
 leak_supervisor_handle_message :: proc(data: ^Leak_Supervisor_Data, from: actod.PID, msg: any) {
 	if cmd, ok := msg.(Leak_Supervisor_Cmd); ok {
+		sync.atomic_store(&supervisor_blocking, true)
 		switch cmd {
 		case .Block:
 			time.sleep(400 * time.Millisecond)
@@ -62,6 +66,7 @@ leak_supervisor_on_child_terminated :: proc(
 test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 	reset_test_state()
 	sync.atomic_store(&reaped_by_supervisor, 0)
+	sync.atomic_store(&supervisor_blocking, false)
 
 	supervisor_pid, ok := actod.spawn(
 		"leak-probe-supervisor",
@@ -118,6 +123,7 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 	reset_test_state()
 	sync.atomic_store(&reaped_by_supervisor, 0)
+	sync.atomic_store(&supervisor_blocking, false)
 
 	supervisor_pid, ok := actod.spawn(
 		"mass-death-supervisor",
@@ -161,7 +167,11 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 	}
 
 	_ = actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block)
-	time.sleep(50 * time.Millisecond)
+	expect(
+		t,
+		poll_until(atomic_flag_raised, &supervisor_blocking, 2 * time.Second),
+		"supervisor never entered its blocking handler",
+	)
 
 	for child in children {
 		_ = actod.send_message(child, actod.Terminate{reason = .NORMAL})
@@ -191,6 +201,7 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 	reset_test_state()
 	sync.atomic_store(&reaped_by_supervisor, 0)
+	sync.atomic_store(&supervisor_blocking, false)
 
 	supervisor_pid, ok := actod.spawn(
 		"blocked-supervisor",
@@ -225,7 +236,11 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 	defer delete(children)
 
 	_ = actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block_Long)
-	time.sleep(50 * time.Millisecond)
+	expect(
+		t,
+		poll_until(atomic_flag_raised, &supervisor_blocking, 2 * time.Second),
+		"supervisor never entered its blocking handler",
+	)
 
 	for child in children {
 		_ = actod.send_message(child, actod.Terminate{reason = .NORMAL})

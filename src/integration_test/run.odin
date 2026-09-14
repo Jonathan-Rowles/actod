@@ -609,23 +609,17 @@ Test_Thread_Context :: struct {
 TEST_TIMEOUT_SECONDS :: 30
 
 Watchdog_Data :: struct {
-	process:   os.Process,
-	cancelled: bool,
-	fired:     bool,
+	process: os.Process,
+	exited:  sync.Sema,
+	fired:   bool,
 }
 
 test_watchdog_proc :: proc(data: rawptr) {
 	wd := cast(^Watchdog_Data)data
-	for _ in 0 ..< scaled_attempts(TEST_TIMEOUT_SECONDS * 4) {
-		if sync.atomic_load_explicit(&wd.cancelled, .Acquire) {
-			return
-		}
-		time.sleep(250 * time.Millisecond)
-	}
-	if !sync.atomic_load_explicit(&wd.cancelled, .Acquire) {
-		sync.atomic_store_explicit(&wd.fired, true, .Release)
-		_ = os.process_kill(wd.process)
-	}
+	deadline := scaled_timeout(TEST_TIMEOUT_SECONDS * time.Second)
+	if sync.sema_wait_with_timeout(&wd.exited, deadline) do return
+	sync.atomic_store_explicit(&wd.fired, true, .Release)
+	_ = os.process_kill(wd.process)
 }
 
 run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool) -> Test_Result {
@@ -672,7 +666,7 @@ run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool) -> T
 
 	state, wait_err := os.process_wait(process)
 
-	sync.atomic_store_explicit(&watchdog_data.cancelled, true, .Release)
+	sync.sema_post(&watchdog_data.exited)
 	thread.join(watchdog)
 	thread.destroy(watchdog)
 
@@ -746,9 +740,6 @@ run_tests_parallel :: proc(t: ^testing.T) {
 	}
 
 	worker_budget := max(threads_act.get_cpu_count(), 2)
-	when #config(ODIN_TEST_THREADS, 0) == 1 {
-		worker_budget = 1
-	}
 	fmt.printf("Running %d tests in parallel (worker budget %d)...\n", len(tests), worker_budget)
 
 	for batch_start := 0; batch_start < len(tests); {

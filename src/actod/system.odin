@@ -818,7 +818,7 @@ shutdown_node :: proc(loc := #caller_location) {
 }
 
 send_terminate_to_active_actors_and_wait :: proc() {
-	active_states := Actor_State_Set{.RUNNING, .IDLE}
+	active_states := Actor_State_Set{.INIT, .RUNNING, .IDLE}
 
 	actors_to_wait: [dynamic]PID
 	defer delete(actors_to_wait)

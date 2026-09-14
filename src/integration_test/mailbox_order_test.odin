@@ -6,8 +6,20 @@ import "core:testing"
 import "core:time"
 
 Mailbox_Order_Data :: struct {
-	received: ^[dynamic]int,
-	done:     ^bool,
+	received:  ^[dynamic]int,
+	done:      ^bool,
+	blocking:  ^bool,
+	delivered: ^int,
+}
+
+Delivery_Probe :: struct {
+	delivered: ^int,
+	target:    int,
+}
+
+deliveries_reached :: proc(state: rawptr) -> bool {
+	probe := cast(^Delivery_Probe)state
+	return sync.atomic_load(probe.delivered) >= probe.target
 }
 
 Mailbox_Order_Behaviour :: actod.Actor_Behaviour(Mailbox_Order_Data) {
@@ -18,6 +30,7 @@ mailbox_order_handle_message :: proc(data: ^Mailbox_Order_Data, from: actod.PID,
 	switch v in msg {
 	case string:
 		if v == "block" {
+			sync.atomic_store(data.blocking, true)
 			time.sleep(300 * time.Millisecond)
 		}
 	case int:
@@ -26,6 +39,7 @@ mailbox_order_handle_message :: proc(data: ^Mailbox_Order_Data, from: actod.PID,
 			return
 		}
 		append(data.received, v)
+		sync.atomic_add(data.delivered, 1)
 	}
 }
 
@@ -35,10 +49,17 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 	received := make([dynamic]int)
 	defer delete(received)
 	done := false
+	blocking := false
+	delivered := 0
 
 	pid, spawned := actod.spawn(
 		"mailbox-order-actor",
-		Mailbox_Order_Data{received = &received, done = &done},
+		Mailbox_Order_Data {
+			received = &received,
+			done = &done,
+			blocking = &blocking,
+			delivered = &delivered,
+		},
 		Mailbox_Order_Behaviour,
 	)
 	expect(t, spawned, "Failed to spawn actor")
@@ -47,7 +68,11 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 	}
 
 	expect(t, actod.send_message(pid, "block") == .OK, "Failed to send the blocking message")
-	time.sleep(50 * time.Millisecond)
+	expect(
+		t,
+		poll_until(atomic_flag_raised, &blocking, 2 * time.Second),
+		"actor never entered the blocking handler",
+	)
 
 	sent := 0
 	for i in 0 ..< actod.DEFAULT_MAIL_BOX_SIZE * 2 {
@@ -57,7 +82,15 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 	}
 	expect(t, sent >= actod.DEFAULT_MAIL_BOX_SIZE, "the mailbox should accept a full load")
 
-	time.sleep(500 * time.Millisecond)
+	delivery := Delivery_Probe {
+		delivered = &delivered,
+		target    = sent,
+	}
+	expect(
+		t,
+		poll_until(deliveries_reached, &delivery, 2 * time.Second),
+		"actor never delivered every accepted send",
+	)
 
 	expect(t, actod.send_message(pid, -1) == .OK, "Failed to send the drain sentinel")
 	start := time.now()

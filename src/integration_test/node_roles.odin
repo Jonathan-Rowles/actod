@@ -5,7 +5,6 @@ import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:strconv"
-import "core:strings"
 import "core:sync"
 import "core:time"
 import "network/shared"
@@ -20,8 +19,6 @@ run_node_role :: proc(command: string) {
 		run_relay_node()
 	case "echo_back":
 		run_echo_back()
-	case "concurrent_echo":
-		run_concurrent_echo()
 	case "lifecycle_server":
 		run_lifecycle_server()
 	case "lifecycle_broadcast":
@@ -154,13 +151,13 @@ run_send_burst :: proc() {
 		port    = target_port,
 	}
 
-	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 	if !ok {
 		fmt.println("Failed to register target node")
 		os.exit(1)
 	}
 
-	time.sleep(500 * time.Millisecond)
+	_ = wait_for_connection_ready(target_node)
 
 	Burst_Sender_Data :: struct {
 		target_node:   string,
@@ -348,6 +345,9 @@ run_relay_node :: proc() {
 		fmt.println("Failed to spawn relay actor")
 		return
 	}
+
+	print_ready_once_listening()
+
 	for {
 		time.sleep(250 * time.Millisecond)
 	}
@@ -438,81 +438,7 @@ run_echo_back :: proc() {
 		return
 	}
 
-	for {
-		time.sleep(250 * time.Millisecond)
-	}
-}
-
-run_concurrent_echo :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "ConcurrentNode"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16002"
-	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	echo_count_str := os.lookup_env("ECHO_COUNT", context.temp_allocator) or_else "3"
-
-	node_port := 16002
-	if port_val, ok := strconv.parse_int(node_port_str); ok {
-		node_port = port_val
-	}
-
-	echo_count := 3
-	if count_val, ok := strconv.parse_int(echo_count_str); ok {
-		echo_count = count_val
-	}
-
-	shared.check_port_available(node_port)
-
-	actod.node_init(
-		name = node_name,
-		opts = actod.make_node_config(
-			network = actod.make_network_config(
-				port = node_port,
-				auth_password = auth_password,
-				heartbeat_interval = 100 * time.Millisecond,
-				heartbeat_timeout = scaled_timeout(300 * time.Millisecond),
-			),
-			actor_config = actod.make_actor_config(
-				logging = actod.make_log_config(level = test_log_level()),
-			),
-		),
-	)
-	defer actod.shutdown_node()
-
-	Concurrent_Echo_Data :: struct {
-		actor_name:     string,
-		received_count: int,
-	}
-
-	Concurrent_Echo_Behaviour :: actod.Actor_Behaviour(Concurrent_Echo_Data) {
-		handle_message = proc(data: ^Concurrent_Echo_Data, from: actod.PID, msg: any) {
-			switch m in msg {
-			case shared.Distributed_Echo_Request:
-				data.received_count += 1
-				response := shared.Distributed_Echo_Response {
-					id         = m.id,
-					message    = m.message,
-					from_actor = data.actor_name,
-				}
-
-				target := m.reply_to if m.reply_to != 0 else from
-				_ = actod.send_message(target, response)
-			}
-		},
-	}
-
-	for i in 0 ..< echo_count {
-		actor_name := fmt.tprintf("echo_actor_%d", i)
-		echo_data := Concurrent_Echo_Data {
-			actor_name = strings.clone(actor_name),
-		}
-
-		_, ok := actod.spawn(actor_name, echo_data, Concurrent_Echo_Behaviour)
-		if !ok {
-			fmt.printf("Failed to spawn echo actor %s\n", actor_name)
-			return
-		}
-		delete(actor_name)
-	}
+	print_ready_once_listening()
 
 	for {
 		time.sleep(250 * time.Millisecond)
@@ -679,7 +605,7 @@ run_lifecycle_broadcast :: proc() {
 	}
 	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
-	time.sleep(250 * time.Millisecond)
+	_ = wait_for_connection_ready(target_node)
 
 	Broadcast_Test_Data :: struct {
 		name: string,
@@ -699,7 +625,7 @@ run_lifecycle_broadcast :: proc() {
 		os.exit(1)
 	}
 
-	fmt.println("READY")
+	print_ready_once_listening()
 
 	for {
 		time.sleep(100 * time.Millisecond)
@@ -854,7 +780,7 @@ run_supervision_server :: proc() {
 	}
 	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
 
-	fmt.println("READY")
+	print_ready_once_listening()
 
 	for {
 		time.sleep(100 * time.Millisecond)
@@ -999,7 +925,7 @@ run_mesh_middle :: proc() {
 	}
 	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
-	fmt.println("READY")
+	print_ready_once_listening()
 
 	for {
 		time.sleep(100 * time.Millisecond)
@@ -1048,7 +974,7 @@ run_mesh_leaf :: proc() {
 	}
 	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
 
-	time.sleep(250 * time.Millisecond)
+	_ = wait_for_connection_ready(target_node)
 
 	Mesh_Leaf_Data :: struct {
 		name: string,
@@ -1312,4 +1238,28 @@ run_bytes_sender :: proc() {
 
 	actod.shutdown_node()
 	os.exit(0)
+}
+
+connection_ready :: proc(state: rawptr) -> bool {
+	node_id, found := actod.get_node_by_name((cast(^string)state)^)
+	if !found do return false
+	ring := actod.get_connection_ring(node_id)
+	return ring != nil && sync.atomic_load(&ring.state) == .Ready
+}
+
+wait_for_connection_ready :: proc(node_name: string, budget := 5 * time.Second) -> bool {
+	name := node_name
+	return poll_until(connection_ready, &name, budget)
+}
+
+listener_running :: proc(_: rawptr) -> bool {
+	return sync.atomic_load(&actod.NODE.network_listener_running) != 0
+}
+
+print_ready_once_listening :: proc() {
+	if !poll_until(listener_running, nil, 5 * time.Second) {
+		fmt.println("Network listener never started")
+		os.exit(1)
+	}
+	fmt.println("READY")
 }

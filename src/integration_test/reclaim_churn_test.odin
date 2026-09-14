@@ -11,7 +11,9 @@ RECLAIM_NUM_SLOTS :: 64
 RECLAIM_EXTERNAL_SENDERS :: 4
 RECLAIM_SENDER_ACTORS :: 4
 RECLAIM_TARGET_WORKER :: 0
-RECLAIM_RUN :: 1500 * time.Millisecond
+RECLAIM_MIN_TERMINATIONS :: 64_000
+RECLAIM_MIN_SENT :: 64_000
+RECLAIM_MAX_DURATION :: 10 * time.Second
 
 Reclaim_Ping :: struct {
 	n: u64,
@@ -80,6 +82,7 @@ reclaim_spawn_target :: proc(slot: int, seq: ^u64) {
 reclaim_external_sender_proc :: proc(_: rawptr) {
 	sent: u64
 	for !sync.atomic_load_explicit(&reclaim_stop, .Acquire) {
+		round_start := sent
 		for slot in 0 ..< RECLAIM_NUM_SLOTS {
 			pid := actod.PID(sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire))
 			if pid == 0 {
@@ -90,13 +93,12 @@ reclaim_external_sender_proc :: proc(_: rawptr) {
 				sent += 1
 			}
 		}
+		sync.atomic_add(&reclaim_total_sent, sent - round_start)
 	}
-	sync.atomic_add(&reclaim_total_sent, sent)
 }
 
 reclaim_reaper_proc :: proc(_: rawptr) {
 	seq: u64
-	terminations: u64
 	for !sync.atomic_load_explicit(&reclaim_stop, .Acquire) {
 		for slot in 0 ..< RECLAIM_NUM_SLOTS {
 			pid := actod.PID(sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire))
@@ -104,12 +106,10 @@ reclaim_reaper_proc :: proc(_: rawptr) {
 				reclaim_spawn_target(slot, &seq)
 				continue
 			}
-			_ = actod.terminate_actor(pid, .SHUTDOWN)
-			terminations += 1
+			if actod.terminate_actor(pid, .SHUTDOWN) do sync.atomic_add(&reclaim_total_terminations, 1)
 			reclaim_spawn_target(slot, &seq)
 		}
 	}
-	sync.atomic_store_explicit(&reclaim_total_terminations, terminations, .Release)
 }
 
 test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
@@ -146,7 +146,13 @@ test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
 	}
 	reaper := thread.create_and_start_with_data(nil, reclaim_reaper_proc)
 
-	time.sleep(RECLAIM_RUN)
+	run_start := time.tick_now()
+	for time.tick_since(run_start) < RECLAIM_MAX_DURATION {
+		terminations_done := sync.atomic_load(&reclaim_total_terminations) >= RECLAIM_MIN_TERMINATIONS
+		sends_done := sync.atomic_load(&reclaim_total_sent) >= RECLAIM_MIN_SENT
+		if terminations_done && sends_done do break
+		time.sleep(time.Millisecond)
+	}
 	sync.atomic_store(&reclaim_stop, true)
 
 	thread.join(reaper)
@@ -156,14 +162,22 @@ test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
 		thread.destroy(externals[i])
 	}
 
-	expect(
+	terminations := sync.atomic_load(&reclaim_total_terminations)
+	sent := sync.atomic_load(&reclaim_total_sent)
+	expectf(
 		t,
-		sync.atomic_load(&reclaim_total_sent) > 0,
-		"churn should have sent messages",
+		terminations >= RECLAIM_MIN_TERMINATIONS,
+		"churn terminated %d actors within %v, wanted %d",
+		terminations,
+		RECLAIM_MAX_DURATION,
+		RECLAIM_MIN_TERMINATIONS,
 	)
-	expect(
+	expectf(
 		t,
-		sync.atomic_load(&reclaim_total_terminations) > 0,
-		"churn should have terminated actors",
+		sent >= RECLAIM_MIN_SENT,
+		"churn sent %d messages within %v, wanted %d",
+		sent,
+		RECLAIM_MAX_DURATION,
+		RECLAIM_MIN_SENT,
 	)
 }

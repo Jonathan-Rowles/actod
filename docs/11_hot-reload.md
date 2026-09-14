@@ -9,7 +9,10 @@ Hot reload only affects code inside `Actor_Behaviour`, the function pointers:
 - `handle_message`
 - `init`
 - `terminate`
+- `on_idle`, `on_wake`
 - `on_child_started`, `on_child_terminated`, `on_child_restarted`, `on_max_restarts_exceeded`
+
+`on_wake` runs on sender threads, not the actor's, so a sender that read the pointer just before the swap can still run the previous module's `on_wake` once after a reload. A reload that changes how the wake is signalled must keep the old signal working until the actor has woken, or give the foreign wait in `on_idle` a timeout.
 
 **What does NOT change:**
 
@@ -134,6 +137,7 @@ The hot reload system resolves exported symbols by name:
 - `handle_message`: required
 - `init`: optional
 - `terminate`: optional
+- `on_idle`, `on_wake`: optional. A sender can still call the previous `on_wake` once right after the swap (see What Gets Reloaded).
 - `on_child_started`, `on_child_terminated`, etc.: optional
 
 If `handle_message` can't be resolved, the reload fails and the actor keeps its current behaviour.

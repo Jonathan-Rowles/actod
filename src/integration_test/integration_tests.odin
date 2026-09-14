@@ -236,6 +236,13 @@ broadcast_actor_handle_message :: proc(data: ^Broadcast_Actor_Data, from: actod.
 	}
 }
 
+echo_totals_reached :: proc(state: rawptr) -> bool {
+	total :=
+		sync.atomic_load(&global_test_state.messages_sent) +
+		sync.atomic_load(&global_test_state.messages_received)
+	return total >= (cast(^u64)state)^
+}
+
 test_request_reply_pattern :: proc(t: ^testing.T) {
 	reset_test_state()
 
@@ -268,18 +275,7 @@ test_request_reply_pattern :: proc(t: ^testing.T) {
 	}
 
 	expected_total := u64(total_messages * 2)
-	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
-		total :=
-			sync.atomic_load(&global_test_state.messages_sent) +
-			sync.atomic_load(&global_test_state.messages_received)
-		if total >= expected_total {
-			break
-		}
-
-		for _ in 0 ..< 250 {
-			time.sleep(time.Millisecond)
-		}
-	}
+	_ = poll_until(echo_totals_reached, &expected_total, INTEGRATION_TEST_TIMEOUT)
 
 	for pid in echo_actors {
 		_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
@@ -1396,11 +1392,20 @@ test_union_message_handling :: proc(t: ^testing.T) {
 CONTENTION_ACTOR_COUNT :: 128
 CONTENTION_WORKER_COUNT :: 2
 CONTENTION_SEED_PINGS :: 4
-CONTENTION_DURATION_MS :: 2000
+CONTENTION_MIN_RECEIVED :: 10000
+CONTENTION_MAX_DURATION :: 10 * time.Second
 CONTENTION_MIN_FAIRNESS :: 0.1
 
 contention_received: [CONTENTION_ACTOR_COUNT]u64
 contention_pids: [CONTENTION_ACTOR_COUNT]actod.PID
+
+contention_min_received :: proc() -> u64 {
+	lowest: u64 = max(u64)
+	for i in 0 ..< CONTENTION_ACTOR_COUNT {
+		lowest = min(lowest, sync.atomic_load(&contention_received[i]))
+	}
+	return lowest
+}
 
 test_worker_contention :: proc(t: ^testing.T) {
 	for i in 0 ..< CONTENTION_ACTOR_COUNT {
@@ -1438,29 +1443,33 @@ test_worker_contention :: proc(t: ^testing.T) {
 		}
 	}
 
-	time.sleep(time.Duration(CONTENTION_DURATION_MS) * time.Millisecond)
+	run_start := time.tick_now()
+	for time.tick_since(run_start) < CONTENTION_MAX_DURATION {
+		if contention_min_received() >= CONTENTION_MIN_RECEIVED do break
+		time.sleep(time.Millisecond)
+	}
 
-	total: u64 = 0
 	min_recv: u64 = max(u64)
 	max_recv: u64 = 0
-	starved := 0
+	behind := 0
 
 	for i in 0 ..< CONTENTION_ACTOR_COUNT {
 		count := sync.atomic_load(&contention_received[i])
-		total += count
 		if count < min_recv do min_recv = count
 		if count > max_recv do max_recv = count
-		if count == 0 do starved += 1
+		if count < CONTENTION_MIN_RECEIVED do behind += 1
 	}
 
 	fairness := f64(min_recv) / f64(max_recv) if max_recv > 0 else 0.0
 
 	expectf(
 		t,
-		starved == 0,
-		"Starved actors: %d of %d received zero messages",
-		starved,
+		behind == 0,
+		"%d of %d actors received fewer than %d messages within %v",
+		behind,
 		CONTENTION_ACTOR_COUNT,
+		CONTENTION_MIN_RECEIVED,
+		CONTENTION_MAX_DURATION,
 	)
 	expectf(
 		t,
@@ -1471,7 +1480,6 @@ test_worker_contention :: proc(t: ^testing.T) {
 		min_recv,
 		max_recv,
 	)
-	expectf(t, total > 0, "No messages processed at all")
 
 	for i in 0 ..< CONTENTION_ACTOR_COUNT {
 		_ = actod.terminate_actor(contention_pids[i])
@@ -1498,6 +1506,21 @@ Pubsub_Price_Update :: struct {
 
 PUBSUB_PUBLISHER_TYPE: actod.Actor_Type
 PUBSUB_SUBSCRIBER_COUNT :: 5
+
+Subscriber_Count_Probe :: struct {
+	actor_type: actod.Actor_Type,
+	expected:   u32,
+}
+
+subscriber_count_is :: proc(state: rawptr) -> bool {
+	probe := cast(^Subscriber_Count_Probe)state
+	return actod.get_subscriber_count(probe.actor_type) == probe.expected
+}
+
+wait_for_subscriber_count :: proc(actor_type: actod.Actor_Type, expected: u32) {
+	probe := Subscriber_Count_Probe{actor_type = actor_type, expected = expected}
+	_ = poll_until(subscriber_count_is, &probe, 2 * time.Second)
+}
 
 pubsub_types_registered := false
 pubsub_registration_mutex: sync.Mutex
@@ -1558,8 +1581,6 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 	pub_pid, pub_ok := actod.spawn("pubsub_publisher", Pubsub_Publisher_Data{}, pub_behaviour)
 	expect(t, pub_ok, "Should spawn publisher")
 
-	time.sleep(20 * time.Millisecond)
-
 	received_count: i32 = 0
 
 	sub_pids: [PUBSUB_SUBSCRIBER_COUNT]actod.PID
@@ -1576,7 +1597,7 @@ test_pubsub_broadcast :: proc(t: ^testing.T) {
 		sub_pids[i] = pid
 	}
 
-	time.sleep(50 * time.Millisecond)
+	wait_for_subscriber_count(PUBSUB_PUBLISHER_TYPE, PUBSUB_SUBSCRIBER_COUNT)
 
 	sub_count := actod.get_subscriber_count(PUBSUB_PUBLISHER_TYPE)
 	expectf(
@@ -1627,8 +1648,6 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	pub_pid, pub_ok := actod.spawn("pubsub_cleanup_pub", Pubsub_Publisher_Data{}, pub_behaviour)
 	expect(t, pub_ok, "Should spawn publisher")
 
-	time.sleep(20 * time.Millisecond)
-
 	received_count: i32 = 0
 	sub_data := Pubsub_Subscriber_Data {
 		received = &received_count,
@@ -1636,7 +1655,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 	sub_pid, sub_ok := actod.spawn("pubsub_cleanup_sub", sub_data, Pubsub_Subscriber_Behaviour)
 	expect(t, sub_ok, "Should spawn subscriber")
 
-	time.sleep(50 * time.Millisecond)
+	wait_for_subscriber_count(PUBSUB_PUBLISHER_TYPE, 1)
 
 	expect(
 		t,
@@ -1653,7 +1672,7 @@ test_pubsub_auto_cleanup :: proc(t: ^testing.T) {
 		time.sleep(time.Millisecond)
 	}
 
-	time.sleep(50 * time.Millisecond)
+	wait_for_subscriber_count(PUBSUB_PUBLISHER_TYPE, 0)
 
 	count_after := actod.get_subscriber_count(PUBSUB_PUBLISHER_TYPE)
 	expectf(

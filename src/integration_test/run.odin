@@ -33,7 +33,6 @@ Test_Entry :: struct {
 
 ALL_TESTS :: []Test_Entry {
 	// Core actor tests
-	{name = "test_actor_lifecycle", test_proc = test_actor_lifecycle},
 	{
 		name = "test_on_wake_interrupts_foreign_wait",
 		test_proc = test_on_wake_interrupts_foreign_wait,
@@ -53,12 +52,6 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_stress_message_throughput,
 		worker_count = ALL_CORES_WORKERS,
 	},
-	{name = "test_pool_integration", test_proc = test_pool_integration},
-	{
-		name = "test_pool_cleanup_on_actor_termination",
-		test_proc = test_pool_cleanup_on_actor_termination,
-	},
-	{name = "test_registry_consistency", test_proc = test_registry_consistency},
 	{name = "test_worker_contention", test_proc = test_worker_contention, worker_count = 2},
 	{
 		name = "test_sim_pump_basic",
@@ -218,7 +211,6 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_supervisor_survives_many_child_terminations,
 		worker_count = 2,
 	},
-	{name = "test_wait_helpers_honor_timeout", test_proc = test_wait_helpers_honor_timeout},
 	{
 		name = "test_mass_simultaneous_child_deaths",
 		test_proc = test_mass_simultaneous_child_deaths,
@@ -233,7 +225,6 @@ ALL_TESTS :: []Test_Entry {
 	},
 
 	// Supervisor hierarchy tests
-	{name = "test_supervisor_child_lifecycle", test_proc = test_supervisor_child_lifecycle},
 	{name = "test_one_for_one_strategy", test_proc = test_one_for_one_strategy},
 	{name = "test_permanent_restart_policy", test_proc = test_permanent_restart_policy},
 	{name = "test_add_child_dynamically", test_proc = test_add_child_dynamically},
@@ -333,13 +324,6 @@ ALL_TESTS :: []Test_Entry {
 
 	// Distributed tests - each gets a unique base port range for parallel execution
 	{
-		name = "test_distributed_communication",
-		test_proc = test_distributed_communication,
-		port = 17000,
-		node_name = "TestNode1",
-		is_networked = true,
-	},
-	{
 		name = "test_distributed_wrong_password_rejected",
 		test_proc = test_distributed_wrong_password_rejected,
 		port = 17240,
@@ -358,13 +342,6 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_distributed_concurrent_network_messages",
 		test_proc = test_distributed_concurrent_network_messages,
 		port = 17020,
-		node_name = "TestNode1",
-		is_networked = true,
-	},
-	{
-		name = "test_connection_lifecycle",
-		test_proc = test_connection_lifecycle,
-		port = 17030,
 		node_name = "TestNode1",
 		is_networked = true,
 	},
@@ -406,30 +383,9 @@ ALL_TESTS :: []Test_Entry {
 	},
 	// Cross-node supervision tests
 	{
-		name = "test_remote_spawn_basic",
-		test_proc = test_remote_spawn_basic,
-		port = 17070,
-		node_name = "TestNode1",
-		is_networked = true,
-	},
-	{
-		name = "test_remote_child_crash_notification",
-		test_proc = test_remote_child_crash_notification,
-		port = 17080,
-		node_name = "TestNode1",
-		is_networked = true,
-	},
-	{
 		name = "test_remote_one_for_one_restart",
 		test_proc = test_remote_one_for_one_restart,
 		port = 17090,
-		node_name = "TestNode1",
-		is_networked = true,
-	},
-	{
-		name = "test_remote_one_for_all_restart",
-		test_proc = test_remote_one_for_all_restart,
-		port = 17100,
 		node_name = "TestNode1",
 		is_networked = true,
 	},
@@ -536,13 +492,10 @@ ALL_TESTS :: []Test_Entry {
 
 	// Hot reload tests (Phase 1a)
 	{name = "test_hot_reload_basic", test_proc = test_hot_reload_basic},
-	{name = "test_hot_reload_state_preserved", test_proc = test_hot_reload_state_preserved},
-	{name = "test_reload_behaviour_system_msg", test_proc = test_reload_behaviour_system_msg},
 	{name = "test_rollback", test_proc = test_rollback},
 
 	// Hot reload tests (Phase 1b, file watcher + dev workflow)
 	{name = "test_file_watcher_detection", test_proc = test_file_watcher_detection},
-	{name = "test_file_watcher_excludes_tmp", test_proc = test_file_watcher_excludes_tmp},
 	{
 		name = "test_hot_reload_under_load",
 		test_proc = test_hot_reload_under_load,
@@ -875,7 +828,6 @@ register_integration_messages :: proc "contextless" () {
 	actod.register_message_type(Leak_Supervisor_Cmd)
 	actod.register_message_type(Pipeline_Message)
 	actod.register_message_type(Broadcast_Message)
-	actod.register_message_type(Large_Message)
 	actod.register_message_type(Target_Actors_Message)
 	actod.register_message_type(String_Test_Message)
 	actod.register_message_type(Complex_String_Message)

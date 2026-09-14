@@ -879,6 +879,7 @@ register_integration_messages :: proc "contextless" () {
 	actod.register_message_type(Target_Actors_Message)
 	actod.register_message_type(String_Test_Message)
 	actod.register_message_type(Complex_String_Message)
+	actod.register_message_type(Enumerated_String_Message)
 	actod.register_message_type(Mixed_Message)
 	actod.register_message_type(Byte_Slice_Test_Message)
 	actod.register_message_type(Complex_Byte_Slice_Message)

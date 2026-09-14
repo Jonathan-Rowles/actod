@@ -954,6 +954,22 @@ Complex_String_Message :: struct {
 	count:   int,
 }
 
+Compass_Point :: enum u8 {
+	North,
+	East,
+	South,
+	West,
+}
+
+Named_Point :: struct {
+	id:   int,
+	name: string,
+}
+
+Enumerated_String_Message :: struct {
+	points: [Compass_Point]Named_Point,
+}
+
 Mixed_Message :: struct {
 	id:    int,
 	name:  string,
@@ -988,12 +1004,27 @@ string_actor_handle_message :: proc(data: ^String_Actor_Data, from: actod.PID, m
 
 	case Complex_String_Message:
 		data.received_messages += 1
+		for tag, i in m.tags {
+			if tag != fmt.tprintf("tag%d", i + 1) || !string_points_into_message(tag, msg) do sync.atomic_add(&global_test_state.errors_count, 1)
+		}
+
+	case Enumerated_String_Message:
+		data.received_messages += 1
+		for point, slot in m.points {
+			if point.name != fmt.tprintf("point-%d", int(slot)) || !string_points_into_message(point.name, msg) do sync.atomic_add(&global_test_state.errors_count, 1)
+		}
 
 	case Mixed_Message:
 		data.received_messages += 1
 	}
 
 	sync.atomic_add(&global_test_state.messages_received, 1)
+}
+
+string_points_into_message :: proc(s: string, msg: any) -> bool {
+	message_start := uintptr(msg.data)
+	string_data := uintptr(raw_data(s))
+	return string_data >= message_start && string_data < message_start + actod.DEFAULT_PAGE_SIZE
 }
 
 test_string_handling :: proc(t: ^testing.T) {
@@ -1044,12 +1075,25 @@ test_string_handling :: proc(t: ^testing.T) {
 		title   = "Complex Message Test",
 		content = "This message contains multiple string fields and an array of strings",
 		author  = "Test Suite",
-		tags    = {"tag1", "tag2", "tag3", "", ""},
+		tags    = {"tag1", "tag2", "tag3", "tag4", "tag5"},
 		count   = 3,
 	}
 
 	err := actod.send_message(string_actor, complex_msg)
 	expect(t, err == actod.Send_Error.OK, "Failed to send complex message")
+
+
+	enumerated_msg := Enumerated_String_Message {
+		points = {
+			.North = {id = 0, name = "point-0"},
+			.East = {id = 1, name = "point-1"},
+			.South = {id = 2, name = "point-2"},
+			.West = {id = 3, name = "point-3"},
+		},
+	}
+
+	enumerated_err := actod.send_message(string_actor, enumerated_msg)
+	expect(t, enumerated_err == actod.Send_Error.OK, "Failed to send enumerated array message")
 
 
 	mixed_msg := Mixed_Message {
@@ -1109,7 +1153,7 @@ test_string_handling :: proc(t: ^testing.T) {
 	}
 
 
-	expected_total := u64(len(test_messages) + 2 + sender_count * 10)
+	expected_total := u64(len(test_messages) + 3 + sender_count * 10)
 	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&global_test_state.messages_received) >= expected_total {
 			break
@@ -1130,6 +1174,7 @@ test_string_handling :: proc(t: ^testing.T) {
 		received >= expected_total,
 		fmt.tprintf("Not all string messages received: %d < %d", received, expected_total),
 	)
+	expect_value(t, sync.atomic_load(&global_test_state.errors_count), u64(0))
 }
 
 Byte_Slice_Test_Message :: struct {

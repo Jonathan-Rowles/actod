@@ -1,5 +1,6 @@
 package actod
 
+import "core:fmt"
 import "core:mem"
 import "core:sync"
 import "core:testing"
@@ -26,6 +27,10 @@ register_test_types :: proc() {
 	register_message_type(Test_Mixed_Union)
 	register_message_type(Test_Mixed_Bytes_Union)
 	register_message_type(Test_Outer_With_Union)
+	register_message_type(Test_Array_Message)
+	register_message_type(Test_Enumerated_Array_Message)
+	register_message_type(Test_Union_Array_Message)
+	register_message_type(Test_Plain_Array_Message)
 
 	test_types_registered = true
 }
@@ -671,4 +676,164 @@ test_payload_truncated_var_data_rejected :: proc(t: ^testing.T) {
 	storage: [128]byte
 	copied := copy_variable_data_from_payload(&storage[0], &value, wire, info, 0)
 	testing.expect(t, !copied, "Truncated payload must be rejected")
+}
+
+Test_Array_Inner :: struct {
+	id:    u32,
+	label: string,
+}
+
+Test_Array_Message :: struct {
+	count: int,
+	items: [4]Test_Array_Inner,
+}
+
+Test_Array_Slot :: enum u8 {
+	North,
+	East,
+	South,
+	West,
+}
+
+Test_Enumerated_Array_Message :: struct {
+	count: int,
+	items: [Test_Array_Slot]Test_Array_Inner,
+}
+
+Test_Union_Array_Message :: struct {
+	entries: [3]Test_Mixed_Union,
+}
+
+Test_Plain_Array_Message :: struct {
+	id:    u32,
+	bytes: [4096]u8,
+}
+
+@(private)
+expect_every_label_copied :: proc(
+	t: ^testing.T,
+	info: ^Message_Type_Info,
+	src: ^$T,
+	dst: ^T,
+	labels: []^string,
+	dst_labels: []^string,
+	storage: []byte,
+) {
+	owned := make([]string, len(labels))
+	defer {
+		for s in owned do delete(s)
+		delete(owned)
+	}
+	for label, i in labels {
+		owned[i] = fmt.aprintf("label-%d", i)
+		label^ = owned[i]
+	}
+
+	variable_size := calculate_variable_data_size(src, info)
+	testing.expect_value(t, variable_size, 7 * len(labels))
+
+	copy_variable_data(raw_data(storage), dst, src, info, 0)
+
+	for s in owned do mem.set(raw_data(s), 'x', len(s))
+
+	for dst_label, i in dst_labels {
+		testing.expectf(t, dst_label^ == fmt.tprintf("label-%d", i), "element %d label was %q", i, dst_label^)
+		data := uintptr(raw_data(dst_label^))
+		testing.expectf(
+			t,
+			data >= uintptr(raw_data(storage)) && data < uintptr(raw_data(storage)) + uintptr(len(storage)),
+			"element %d label should point into the receiver's storage",
+			i,
+		)
+	}
+}
+
+@(test)
+test_array_every_element_gets_a_var_field :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, ok := get_type_info_ptr(typeid_of(Test_Array_Message))
+	testing.expect(t, ok, "Test_Array_Message should be registered")
+	testing.expect_value(t, len(info.var_fields), 4)
+	for i in 0 ..< min(len(info.var_fields), 4) {
+		testing.expect_value(
+			t,
+			info.var_fields[i].offset,
+			offset_of(Test_Array_Message, items) +
+			uintptr(i * size_of(Test_Array_Inner)) +
+			offset_of(Test_Array_Inner, label),
+		)
+	}
+
+	storage: [512]byte
+	src: Test_Array_Message
+	dst := (^Test_Array_Message)(rawptr(&storage[size_of(storage) - size_of(Test_Array_Message)]))
+	expect_every_label_copied(
+		t,
+		info,
+		&src,
+		dst,
+		{&src.items[0].label, &src.items[1].label, &src.items[2].label, &src.items[3].label},
+		{&dst.items[0].label, &dst.items[1].label, &dst.items[2].label, &dst.items[3].label},
+		storage[:size_of(storage) - size_of(Test_Array_Message)],
+	)
+}
+
+@(test)
+test_enumerated_array_elements_get_var_fields :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, ok := get_type_info_ptr(typeid_of(Test_Enumerated_Array_Message))
+	testing.expect(t, ok, "Test_Enumerated_Array_Message should be registered")
+	testing.expect(t, .Has_Var_Fields in info.flags, "enumerated array of strings should have var fields")
+	testing.expect_value(t, len(info.var_fields), 4)
+	for i in 0 ..< min(len(info.var_fields), 4) {
+		testing.expect_value(
+			t,
+			info.var_fields[i].offset,
+			offset_of(Test_Enumerated_Array_Message, items) +
+			uintptr(i * size_of(Test_Array_Inner)) +
+			offset_of(Test_Array_Inner, label),
+		)
+	}
+
+	storage: [512]byte
+	src: Test_Enumerated_Array_Message
+	dst := (^Test_Enumerated_Array_Message)(rawptr(&storage[size_of(storage) - size_of(Test_Enumerated_Array_Message)]))
+	expect_every_label_copied(
+		t,
+		info,
+		&src,
+		dst,
+		{&src.items[.North].label, &src.items[.East].label, &src.items[.South].label, &src.items[.West].label},
+		{&dst.items[.North].label, &dst.items[.East].label, &dst.items[.South].label, &dst.items[.West].label},
+		storage[:size_of(storage) - size_of(Test_Enumerated_Array_Message)],
+	)
+}
+
+@(test)
+test_array_of_unions_gets_an_entry_per_element :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, ok := get_type_info_ptr(typeid_of(Test_Union_Array_Message))
+	testing.expect(t, ok, "Test_Union_Array_Message should be registered")
+	testing.expect_value(t, len(info.union_fields), 3)
+	for i in 0 ..< min(len(info.union_fields), 3) {
+		testing.expect_value(
+			t,
+			info.union_fields[i].tag_offset,
+			uintptr(i * size_of(Test_Mixed_Union)) + info.union_fields[0].tag_offset,
+		)
+	}
+}
+
+@(test)
+test_plain_array_records_no_fixups :: proc(t: ^testing.T) {
+	register_test_types()
+
+	info, ok := get_type_info_ptr(typeid_of(Test_Plain_Array_Message))
+	testing.expect(t, ok, "Test_Plain_Array_Message should be registered")
+	testing.expect_value(t, info.flags, Message_Type_Flags_Set{})
+	testing.expect_value(t, len(info.var_fields), 0)
+	testing.expect_value(t, len(info.union_fields), 0)
 }

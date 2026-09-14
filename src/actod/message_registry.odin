@@ -434,11 +434,23 @@ check_type_safety :: proc(
 		}
 		return true, ""
 	case runtime.Type_Info_Array:
-		array_path := fmt.tprintf("%s[]", path)
-
-		return check_type_safety(
+		return check_array_elements(
 			v.elem,
-			array_path,
+			v.elem_size,
+			v.count,
+			path,
+			info,
+			base_offset,
+			var_fields,
+			allow_byte_slices,
+			union_fields,
+		)
+	case runtime.Type_Info_Enumerated_Array:
+		return check_array_elements(
+			v.elem,
+			v.elem_size,
+			v.count,
+			path,
 			info,
 			base_offset,
 			var_fields,
@@ -469,4 +481,55 @@ check_type_safety :: proc(
 	case:
 		return true, ""
 	}
+}
+
+@(private)
+check_array_elements :: proc(
+	elem: ^runtime.Type_Info,
+	elem_size: int,
+	count: int,
+	path: string,
+	info: ^Message_Type_Info,
+	base_offset: uintptr,
+	var_fields: ^[dynamic]Var_Field_Info,
+	allow_byte_slices: bool,
+	union_fields: ^[dynamic]Temp_Union_Info,
+) -> (
+	safe: bool,
+	error_msg: string,
+) {
+	if count == 0 do return true, ""
+
+	array_path := fmt.tprintf("%s[]", path)
+	var_fields_before := len(var_fields) if var_fields != nil else 0
+	union_fields_before := len(union_fields) if union_fields != nil else 0
+
+	first_safe, first_msg := check_type_safety(
+		elem,
+		array_path,
+		info,
+		base_offset,
+		var_fields,
+		allow_byte_slices,
+		union_fields,
+	)
+	if !first_safe do return false, first_msg
+
+	recorded_var_fields := var_fields != nil && len(var_fields) > var_fields_before
+	recorded_union_fields := union_fields != nil && len(union_fields) > union_fields_before
+	if !recorded_var_fields && !recorded_union_fields do return true, ""
+
+	for i in 1 ..< count {
+		element_safe, element_msg := check_type_safety(
+			elem,
+			array_path,
+			info,
+			base_offset + uintptr(i * elem_size),
+			var_fields,
+			allow_byte_slices,
+			union_fields,
+		)
+		if !element_safe do return false, element_msg
+	}
+	return true, ""
 }

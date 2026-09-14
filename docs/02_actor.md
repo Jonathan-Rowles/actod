@@ -252,7 +252,9 @@ A dedicated-thread actor normally sleeps on its mailbox semaphore when the mailb
 empty. An actor that owns something else to wait on (a window system, a socket, a pipe)
 cannot sleep in both, so `on_idle` replaces the semaphore wait: actod calls it with an
 empty mailbox, the actor sleeps in its own wait, and returns so the loop can drain. It is
-never reached by a pooled actor.
+never reached by a pooled actor, so spawning an actor that sets `on_idle` or `on_wake`
+without `use_dedicated_os_thread = true` logs an error naming the actor, restarts
+included, and the actor then runs pooled with neither hook called.
 
 On its own that sleep is deaf to the mailbox. `on_wake` is the other half: a callback
 actod invokes from the **sender's** thread whenever a message lands on the actor, so the

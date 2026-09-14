@@ -335,6 +335,15 @@ spawn_erased :: proc(
 		return actor.pid, true
 	}
 
+	if !opts.use_dedicated_os_thread && (behaviour.on_idle != nil || behaviour.on_wake != nil) {
+		log.errorf(
+			"spawn('%s'): on_idle and on_wake are only called on a dedicated OS thread, so this pooled actor never calls them. Set use_dedicated_os_thread = true in make_actor_config()%s",
+			name,
+			config_origin(opts.loc),
+			location = loc,
+		)
+	}
+
 	needs_first_run_wait := behaviour.init != nil || opts.children != nil
 	started: bool = false
 	if needs_first_run_wait do actor.started = &started

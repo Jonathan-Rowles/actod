@@ -1,6 +1,8 @@
 package actod
 
+import "base:runtime"
 import "core:fmt"
+import "core:log"
 import "core:mem"
 import "core:sync"
 import "core:testing"
@@ -836,4 +838,58 @@ test_plain_array_records_no_fixups :: proc(t: ^testing.T) {
 	testing.expect_value(t, info.flags, Message_Type_Flags_Set{})
 	testing.expect_value(t, len(info.var_fields), 0)
 	testing.expect_value(t, len(info.union_fields), 0)
+}
+
+Registry_Cap_Probe_A :: struct {
+	id: u8,
+}
+
+Registry_Cap_Probe_B :: struct {
+	id: u16,
+}
+
+Registry_Cap_Probe_C :: struct {
+	id: u32,
+}
+
+Registry_Cap_Probe_D :: struct {
+	id: u64,
+}
+
+Registry_Cap_Probe_E :: struct {
+	id: i8,
+}
+
+REGISTRY_CAP_UNDER_TEST :: 4
+
+register_probe_type :: proc(
+	r: ^Name_Registry(Message_Type_Info, $N),
+	$T: typeid,
+	loc := #caller_location,
+) {
+	register_message_type_into(r, T, size_of(T), type_info_of(T), loc)
+}
+
+@(test)
+test_message_registry_refuses_types_past_cap :: proc(t: ^testing.T) {
+	r: Name_Registry(Message_Type_Info, REGISTRY_CAP_UNDER_TEST)
+	register_probe_type(&r, Registry_Cap_Probe_A)
+	register_probe_type(&r, Registry_Cap_Probe_B)
+	register_probe_type(&r, Registry_Cap_Probe_C)
+	register_probe_type(&r, Registry_Cap_Probe_D)
+	testing.expect_value(t, registry_count(&r), REGISTRY_CAP_UNDER_TEST)
+
+	register_probe_type(&r, Registry_Cap_Probe_D)
+	testing.expect_value(t, registry_count(&r), REGISTRY_CAP_UNDER_TEST)
+
+	refused_at := runtime.Source_Code_Location {
+		file_path = "registry_cap_probe",
+		line      = 1,
+	}
+	testing.expect_assert_from(t, refused_at)
+	{
+		context.logger = log.nil_logger()
+		register_probe_type(&r, Registry_Cap_Probe_E, refused_at)
+	}
+	testing.expect(t, false, "registering past the cap returned instead of panicking")
 }

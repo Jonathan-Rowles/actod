@@ -141,13 +141,24 @@ register_message_type_info :: proc "contextless" (
 	loc: runtime.Source_Code_Location,
 ) {
 	context = runtime.default_context()
-	registry_ensure_init(&g_message_registry, loc)
+	register_message_type_into(&g_message_registry, type_id, size, ti, loc)
+}
 
-	for i in 0 ..< g_message_registry.count {
-		if g_message_registry.entries[i].value.type_id == type_id do return
+@(private)
+register_message_type_into :: proc(
+	r: ^Name_Registry(Message_Type_Info, $N),
+	type_id: typeid,
+	size: int,
+	ti: ^runtime.Type_Info,
+	loc: runtime.Source_Code_Location,
+) {
+	registry_ensure_init(r, loc)
+
+	for i in 0 ..< r.count {
+		if r.entries[i].value.type_id == type_id do return
 	}
 
-	type_name := get_type_name(ti, allocator = g_message_registry.allocator)
+	type_name := get_type_name(ti, allocator = r.allocator)
 	if type_name == "" {
 		panic_at(
 			loc,
@@ -197,7 +208,7 @@ register_message_type_info :: proc "contextless" (
 		info.var_fields = make(
 			[]Var_Field_Info,
 			len(temp_var_fields),
-			g_message_registry.allocator,
+			r.allocator,
 		)
 		copy(info.var_fields, temp_var_fields[:])
 	}
@@ -206,7 +217,7 @@ register_message_type_info :: proc "contextless" (
 		info.union_fields = make(
 			[]Union_Field_Info,
 			len(temp_union_fields),
-			g_message_registry.allocator,
+			r.allocator,
 		)
 		for &uf, ui in temp_union_fields {
 			info.union_fields[ui] = Union_Field_Info {
@@ -217,14 +228,14 @@ register_message_type_info :: proc "contextless" (
 			info.union_fields[ui].variants = make(
 				[]Union_Variant_Fields,
 				len(uf.variants),
-				g_message_registry.allocator,
+				r.allocator,
 			)
 			for &vf, vi in uf.variants {
 				if len(vf.var_fields) > 0 {
 					info.union_fields[ui].variants[vi].var_fields = make(
 						[]Var_Field_Info,
 						len(vf.var_fields),
-						g_message_registry.allocator,
+						r.allocator,
 					)
 					copy(info.union_fields[ui].variants[vi].var_fields, vf.var_fields[:])
 				}
@@ -237,7 +248,7 @@ register_message_type_info :: proc "contextless" (
 	info.name = type_name
 
 	when ODIN_DEBUG {
-		existing, found := get_type_info_by_hash(type_hash, loc)
+		existing, found := registry_get_by_hash(r, type_hash, loc)
 		if found && existing.type_id != type_id {
 			panic_at(
 				loc,
@@ -249,11 +260,20 @@ register_message_type_info :: proc "contextless" (
 		}
 	}
 
-	registry_register(&g_message_registry, type_name, info, loc)
+	idx, _ := registry_register(r, type_name, info, loc)
 
 	delete(temp_var_fields)
 	cleanup_temp_union_fields(temp_union_fields[:])
 	delete(temp_union_fields)
+
+	if idx < 0 {
+		panic_at(
+			loc,
+			"register_message_type: the message registry is full at its cap of %d types, cannot register '%s'. Raise MAX_MESSAGE_TYPES in message_registry.odin",
+			N,
+			type_name,
+		)
+	}
 }
 
 cleanup_temp_union_fields :: proc(fields: []Temp_Union_Info) {
@@ -281,9 +301,8 @@ get_validated_message_info_ptr :: #force_inline proc(
 			ptr, _ = get_type_info_ptr(T, loc)
 			if ptr == nil {
 				log.warnf(
-					"message type %v is not registered and registering it now failed, most likely a type name hash collision or a full message registry (cap %d)",
+					"message type %v is not registered and registering it now failed, most likely a type name hash collision",
 					typeid_of(T),
-					MAX_MESSAGE_TYPES,
 					location = loc,
 				)
 				_cached = &_sentinel

@@ -489,6 +489,14 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = ALL_CORES_WORKERS,
 		expects_error_logs = true,
 	},
+	{
+		name = "test_shutdown_waits_for_pinned_sender",
+		test_proc = test_shutdown_waits_for_pinned_sender,
+	},
+	{
+		name = "test_shutdown_waits_for_stuck_actor",
+		test_proc = test_shutdown_waits_for_stuck_actor,
+	},
 
 	// Hot reload tests (Phase 1a)
 	{name = "test_hot_reload_basic", test_proc = test_hot_reload_basic},

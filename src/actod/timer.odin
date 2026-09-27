@@ -328,7 +328,7 @@ start_timer_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 stop_timer_actor :: proc() {
 	if NODE.timer_pid != 0 {
 		_ = terminate_actor(NODE.timer_pid)
-		wait_for_pids([]PID{NODE.timer_pid})
+		wait_until_pids_leave([]PID{NODE.timer_pid})
 		NODE.timer_pid = 0
 	}
 }

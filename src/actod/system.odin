@@ -206,9 +206,7 @@ Node_State :: struct {
 	hot_reload_pid:           PID,
 	logger:                   runtime.Logger,
 	logger_data:              ^Actor_Logger_Data,
-	shutdown_deferred_frees:  [dynamic]rawptr,
 	shutdown_leaked_actors:   int,
-	shutdown_deferred_lock:   sync.Mutex,
 	signal_wake:              sync.Atomic_Sema,
 	stop_requested:           bool,
 	blocking_actor:           ^Actor,
@@ -599,14 +597,6 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	sync.atomic_store(&actor_typed.stopped_closed, true)
 	if pid != NODE.pid do drain_stop_signals_to_node(actor_typed)
 
-	if sync.atomic_load(&NODE.shutting_down) {
-		sync.mutex_lock(&NODE.shutdown_deferred_lock)
-		append(&NODE.shutdown_deferred_frees, actor_ptr)
-		sync.mutex_unlock(&NODE.shutdown_deferred_lock)
-		if pid == NODE.pid do NODE.pid = 0
-		return
-	}
-
 	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
 	current := sync.atomic_load(state_ptr)
 
@@ -616,10 +606,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
 			offset_of(Actor, pool_handle))
 		if pool_handle_ptr^ != nil {
-			for i := 0; i < 10000; i += 1 {
-				if sync.atomic_load_explicit(&pool_handle_ptr^.terminated, .Acquire) do break
-				runtime_sleep(100 * time.Microsecond)
-			}
+			wait_for_pool_handle_terminated(pool_handle_ptr^)
 		} else {
 			cleanup_actor_thread(actor_ptr)
 		}
@@ -638,10 +625,7 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			offset_of(Actor, pool_handle))
 		if pool_handle_ptr^ != nil {
 			wake_pooled_actor(pool_handle_ptr^)
-			for i := 0; i < 10000; i += 1 {
-				if sync.atomic_load_explicit(&pool_handle_ptr^.terminated, .Acquire) do break
-				runtime_sleep(100 * time.Microsecond)
-			}
+			wait_for_pool_handle_terminated(pool_handle_ptr^)
 		} else {
 			sync.atomic_sema_post(
 				cast(^sync.Atomic_Sema)(uintptr(actor_ptr) + offset_of(Actor, wake_sema)),
@@ -676,6 +660,15 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	reclaim_scan()
 
 	if pid == NODE.pid do NODE.pid = 0
+}
+
+@(private)
+wait_for_pool_handle_terminated :: proc(handle: ^Pooled_Actor_Handle) {
+	for i := 0; i < 10000; i += 1 {
+		if sync.atomic_load_explicit(&handle.terminated, .Acquire) do break
+		if NODE.config.sim_mode && sim_pump() do continue
+		runtime_sleep(100 * time.Microsecond)
+	}
 }
 
 node_shutdown :: shutdown_node
@@ -787,31 +780,14 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	if NODE.hot_reload_pid != 0 do hot_reload_hooks.stop()
 
-	system_actors := 1
-	if NODE.timer_pid != 0 do system_actors += 1
-	if !wait_for_actors_to_clear(max_remaining = system_actors, max_wait_ms = 1000) {
-		log.warnf(
-			"shutdown: %d actors were still alive after 1000 ms and are being torn down anyway",
-			num_used(&NODE.actor_registry) - system_actors,
-		)
-	}
+	wait_until_actors_leave(is_local_user_actor)
 
 	stop_timer_actor()
 
 	cleanup_node_actor()
 	shutdown_worker_pool()
 
-	sync.mutex_lock(&NODE.shutdown_deferred_lock)
-	for ptr in NODE.shutdown_deferred_frees {
-		cleanup_actor_arena(ptr)
-		free(ptr, actor_system_allocator)
-	}
-
-	delete(NODE.shutdown_deferred_frees)
-	NODE.shutdown_deferred_frees = {}
-	sync.mutex_unlock(&NODE.shutdown_deferred_lock)
-
-	reclaim_drain_all()
+	free_retired_actors_when_unpinned()
 
 	NODE.shutdown_leaked_actors = num_used(&NODE.actor_registry)
 	destroy(&NODE.actor_registry)
@@ -820,30 +796,136 @@ shutdown_node :: proc(loc := #caller_location) {
 	reset_node_state()
 }
 
-send_terminate_to_active_actors_and_wait :: proc() {
-	active_states := Actor_State_Set{.INIT, .RUNNING, .IDLE}
+@(private)
+shutdown_terminate_delivered: map[PID]struct{}
 
-	actors_to_wait: [dynamic]PID
-	defer delete(actors_to_wait)
+send_terminate_to_active_actors_and_wait :: proc() {
+	defer {
+		delete(shutdown_terminate_delivered)
+		shutdown_terminate_delivered = {}
+	}
+	terminate_user_actors_without_live_parent()
+	wait_until_actors_leave(
+		is_local_user_actor_outside_connections,
+		on_poll = terminate_user_actors_without_live_parent,
+	)
+}
+
+@(private)
+terminate_user_actors_without_live_parent :: proc() {
+	active_states := Actor_State_Set{.INIT, .RUNNING, .IDLE}
 
 	it := make_iter(&NODE.actor_registry)
 	for {
 		_, pid, ok := iter(&it)
 		if !ok do break
-		if is_system_actod_pid(pid) do continue
-		if is_connection_actor(pid) do continue
-		if !is_local_pid(pid) do continue
+		if !is_local_user_actor_outside_connections(pid) do continue
+		if pid in shutdown_terminate_delivered do continue
 
 		actor_ptr, _, valid := get_valid_actor(pid, active_states, system_operation = true)
-		if valid {
-			parent_ptr := cast(^PID)(uintptr(actor_ptr) + offset_of(Actor, parent))
-			parent := parent_ptr^
-			if parent != 0 && parent != NODE.pid do continue
-			if terminate_actor(pid) do append(&actors_to_wait, pid)
-		}
+		if !valid do continue
+		parent_ptr := cast(^PID)(uintptr(actor_ptr) + offset_of(Actor, parent))
+		if has_live_local_parent(parent_ptr^) do continue
+		if terminate_actor(pid) do shutdown_terminate_delivered[pid] = {}
 	}
+}
 
-	wait_for_pids(actors_to_wait[:])
+@(private)
+has_live_local_parent :: proc(parent: PID) -> bool {
+	if parent == 0 || parent == NODE.pid || !is_local_pid(parent) do return false
+	_, active := get(&NODE.actor_registry, parent)
+	return active
+}
+
+@(private)
+is_local_user_actor :: proc(pid: PID) -> bool {
+	return is_local_pid(pid) && !is_system_actod_pid(pid)
+}
+
+@(private)
+is_local_user_actor_outside_connections :: proc(pid: PID) -> bool {
+	return is_local_user_actor(pid) && !is_connection_actor(pid)
+}
+
+SHUTDOWN_POLL_INTERVAL :: 10 * time.Millisecond
+SHUTDOWN_REPORT_INTERVAL :: 1 * time.Second
+
+@(private)
+wait_until_actors_leave :: proc(awaited: proc(pid: PID) -> bool, on_poll: proc() = nil) {
+	last_report := mono_now()
+	for {
+		drain_node_stop_signals()
+		if on_poll != nil do on_poll()
+		report_due := mono_since(last_report) >= SHUTDOWN_REPORT_INTERVAL
+		if count_awaited_actors(awaited, report_due) == 0 do return
+		if report_due do last_report = mono_now()
+		if NODE.config.sim_mode && sim_pump() do continue
+		runtime_sleep(SHUTDOWN_POLL_INTERVAL)
+	}
+}
+
+@(private)
+count_awaited_actors :: proc(awaited: proc(pid: PID) -> bool, report: bool) -> int {
+	remaining := 0
+	it := make_iter(&NODE.actor_registry)
+	for {
+		_, pid, ok := iter(&it)
+		if !ok do break
+		if !awaited(pid) do continue
+		remaining += 1
+		if report do report_awaited_actor(pid)
+	}
+	return remaining
+}
+
+@(private)
+shutdown_awaited_pids: []PID
+
+@(private)
+is_shutdown_awaited_pid :: proc(pid: PID) -> bool {
+	for awaited in shutdown_awaited_pids do if awaited == pid do return true
+	return false
+}
+
+@(private)
+wait_until_pids_leave :: proc(pids: []PID) {
+	shutdown_awaited_pids = pids
+	defer shutdown_awaited_pids = nil
+	wait_until_actors_leave(is_shutdown_awaited_pid)
+}
+
+@(private)
+report_awaited_actor :: proc(pid: PID) {
+	reclaim_pin()
+	defer reclaim_unpin()
+	actor_ptr, active := get(&NODE.actor_registry, pid)
+	if !active || actor_ptr == nil do return
+	actor := cast(^Actor)actor_ptr
+	execution := "pooled" if actor.pool_handle != nil else "dedicated thread"
+	log.warnf(
+		"shutdown is waiting for %s, state %v, %s",
+		actor_origin(pid),
+		sync.atomic_load(&actor.state),
+		execution,
+	)
+}
+
+@(private)
+free_retired_actors_when_unpinned :: proc() {
+	last_report := mono_now()
+	for {
+		reclaim_scan()
+		remaining := reclaim_retired_count()
+		if remaining == 0 do return
+		if mono_since(last_report) >= SHUTDOWN_REPORT_INTERVAL {
+			last_report = mono_now()
+			log.warnf(
+				"shutdown is waiting for a sender to release its reclaim pin before freeing %d terminated actors",
+				remaining,
+			)
+		}
+		runtime_sleep(SHUTDOWN_POLL_INTERVAL)
+	}
 }
 
 cleanup_remote_proxy_entries :: proc() {
@@ -863,7 +945,7 @@ terminate_connection_actors_and_wait :: proc() {
 		if conn_pid != 0 && terminate_actor(conn_pid, .SHUTDOWN) do append(&conn_actors, conn_pid)
 	}
 
-	wait_for_pids(conn_actors[:])
+	wait_until_pids_leave(conn_actors[:])
 }
 
 is_connection_actor :: proc(pid: PID) -> bool {
@@ -883,10 +965,7 @@ cleanup_node_actor :: proc() {
 	if !active || node_ptr == nil do return
 
 	n, ok := get_actor_from_pointer(node_ptr, true)
-	if ok && n != nil {
-		n.termination_reason = .SHUTDOWN
-		if n.behaviour.terminate != nil do n.behaviour.terminate(n.data)
-	}
+	if ok && n != nil do n.termination_reason = .SHUTDOWN
 
 	cleanup_terminated_actor(NODE.pid, node_ptr)
 }
@@ -929,23 +1008,6 @@ reset_node_state :: proc() {
 
 	slot_slab_destroy(&NODE.actor_slab)
 	slot_slab_destroy(&NODE.coro_slab)
-}
-
-wait_for_actors_to_clear :: proc(
-	max_remaining: int,
-	max_wait_ms: int = 1000,
-	poll_interval_ms: int = 10,
-) -> bool {
-	iterations := max_wait_ms / poll_interval_ms
-
-	for i := 0; i < iterations; i += 1 {
-		drain_node_stop_signals()
-		if num_used(&NODE.actor_registry) <= max_remaining do return true
-		if NODE.config.sim_mode && sim_pump() do continue
-		runtime_sleep(time.Duration(poll_interval_ms) * time.Millisecond)
-	}
-
-	return false
 }
 
 @(private)

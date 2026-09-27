@@ -134,16 +134,10 @@ reclaim_scan :: proc() {
 	resize(&NODE.reclaim.retire_list, keep)
 }
 
-reclaim_drain_all :: proc() {
+reclaim_retired_count :: proc() -> int {
 	sync.mutex_lock(&NODE.reclaim.retire_mutex)
 	defer sync.mutex_unlock(&NODE.reclaim.retire_mutex)
-
-	for r in NODE.reclaim.retire_list {
-		cleanup_actor_arena(r.actor_ptr)
-		free(r.actor_ptr, actor_system_allocator)
-	}
-
-	resize(&NODE.reclaim.retire_list, 0)
+	return len(NODE.reclaim.retire_list)
 }
 
 reclaim_reset :: proc() {

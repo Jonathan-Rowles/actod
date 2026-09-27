@@ -582,9 +582,9 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 		actod.shutdown_node()
 	}
 
-	final_count := actod.num_used(&actod.NODE.actor_registry)
-	if final_count > 0 {
-		fmt.eprintf("Test %s: zombie actors detected (%d remaining)\n", entry.name, final_count)
+	leaked := actod.NODE.shutdown_leaked_actors
+	if leaked > 0 {
+		fmt.eprintf("Test %s: %d actors were still registered when shutdown tore the registry down\n", entry.name, leaked)
 		return false
 	}
 

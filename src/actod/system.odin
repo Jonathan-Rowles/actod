@@ -207,6 +207,7 @@ Node_State :: struct {
 	logger:                   runtime.Logger,
 	logger_data:              ^Actor_Logger_Data,
 	shutdown_deferred_frees:  [dynamic]rawptr,
+	shutdown_leaked_actors:   int,
 	shutdown_deferred_lock:   sync.Mutex,
 	signal_wake:              sync.Atomic_Sema,
 	stop_requested:           bool,
@@ -358,6 +359,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 
 	NODE.started = true
 	NODE.shutting_down = false
+	NODE.shutdown_leaked_actors = 0
 	NODE.incarnation = generate_nonzero_nonce()
 	sync.atomic_store(&NODE.gossip_seq, 0)
 	if NODE.node_name_to_id == nil {
@@ -811,6 +813,7 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	reclaim_drain_all()
 
+	NODE.shutdown_leaked_actors = num_used(&NODE.actor_registry)
 	destroy(&NODE.actor_registry)
 
 	cleanup_logger_and_context()

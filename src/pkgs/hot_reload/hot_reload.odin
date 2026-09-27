@@ -81,7 +81,7 @@ load_error_message :: proc(err: Load_Error) -> string {
 			"HOT RELOAD REJECTED: State layout changed in '%s'\n" +
 			"  Expected size: %d bytes, got: %d bytes.\n" +
 			"  Hot reload preserves actor state in memory, struct changes would corrupt it.\n" +
-			"  For struct changes, use graceful restart (see graceful-restart.md).",
+			"  For struct changes, restart the node (see docs/11_hot-reload.md).",
 			err.module_path,
 			err.expected_size,
 			err.actual_size,

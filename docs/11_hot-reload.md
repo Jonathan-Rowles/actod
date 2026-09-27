@@ -50,7 +50,7 @@ that watches for file changes.
 2. Runtime recompile's and reloads the shared library
 3. `Reload_Behaviour` message broadcast to affected actors
 4. Each actor's function pointers are swapped to the new versions
-5. The `init` callback runs again on the existing state
+5. The existing state is kept exactly as it was. `init` does not run again
 
 ## Named Procs Required
 

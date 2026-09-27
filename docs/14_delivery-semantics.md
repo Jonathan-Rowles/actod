@@ -4,8 +4,8 @@ What a send result promises, and what it never promises. Every send proc returns
 
 ## The Short Version
 
-- `.OK` means **accepted**, never processed. Locally: the message is in the receiver's mailbox. Remotely: the message is in this node's send buffer; the peer may not even be connected.
-- **Per-sender FIFO, always.** Messages from one sender to one receiver arrive in send order. Overload never reorders and never silently drops; a send either lands in order or returns an error. This holds across connection-pool scaling too: a sender's stream rides one ring per epoch, ring-set changes are fenced, and the receiver dispatches nothing past a fence on any ring until every ring has caught up to it.
+- `.OK` means **accepted**, never processed. Locally: the message is in the receiver's mailbox. Remotely: the message is staged in this node's send buffer; the peer may not even be connected, and any close of that connection discards what is staged there. Remote delivery is **at-most-once**.
+- **Per-sender FIFO, always.** Messages from one sender to one receiver arrive in send order. Overload never reorders and a local send never silently drops; it either lands in order or returns an error. This holds across connection-pool scaling too: a sender's stream rides one ring per epoch, ring-set changes are fenced, and the receiver dispatches nothing past a fence on any ring until every ring has caught up to it.
 - If you need to know a message was **processed**, have the receiver reply. Nothing else in the runtime tells you. The built-in [`ask`/`reply` pair](02_actor.md#ask--reply) does exactly this, with a correlation token and a timeout.
 
 ## Send_Error Reference
@@ -20,7 +20,7 @@ What a send result promises, and what it never promises. Every send proc returns
 | `NETWORK_ERROR` | Transport failure on a remote send | With backoff |
 | `NETWORK_RING_FULL` | This node's send buffer for the peer is full | With backoff; the peer is not draining |
 | `NODE_NOT_FOUND` | Target node id is not registered on this node | After `register_node` |
-| `NODE_DISCONNECTED` | Peer is known but the message could not be buffered | With backoff; normally the buffer absorbs disconnects |
+| `NODE_DISCONNECTED` | Peer is known but the message could not be staged | With backoff; frames already staged when the connection closes are discarded, not held |
 | `NOT_ASKED` | `reply()` when the current message is not an ask, or `ask()` outside an actor | No, caller bug |
 
 ## Local Sends
@@ -35,10 +35,11 @@ Local termination signals are lossless. A dying actor does not send `Actor_Stopp
 
 ## Remote Sends
 
-`.OK` means the message was committed into this node's send buffer for the peer. The buffer keeps accepting while the peer is disconnected and flushes on (re)connect. There is no peer acknowledgement, and a remote send does not check whether the target actor exists on the peer:
+`.OK` means the message was staged into this node's send buffer for the peer. Remote delivery is at-most-once: the buffer accepts while the peer is disconnected, but any close of the connection (peer EOF, heartbeat timeout, transport failure, `unregister_node`) resets the buffer and discards every staged frame, logging the count. Nothing is retained or replayed on reconnect. There is no peer acknowledgement, and a remote send does not check whether the target actor exists on the peer:
 
 - A remote send to a dead actor still returns `.OK`. The peer drops it there.
 - A message whose type the receiving node never registered is dropped on the receiver with a warning in the **receiver's** log; the sender saw `.OK`. Register message types on every node ([Message Registration](03_message-registration.md#cross-node-messages)).
+- If you need a remote message to have arrived, use [`ask`/`reply`](02_actor.md#ask--reply): the reply is the acknowledgement, and `Ask_Timeout` is the signal to resend.
 
 Local and remote failure modes differ: local sends can return `ACTOR_NOT_FOUND` and `RECEIVER_BACKLOGGED`; remote sends return the `NODE_*`/`NETWORK_*` errors and never the local pair.
 

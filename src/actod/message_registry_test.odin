@@ -680,6 +680,102 @@ test_payload_truncated_var_data_rejected :: proc(t: ^testing.T) {
 	testing.expect(t, !copied, "Truncated payload must be rejected")
 }
 
+@(private)
+build_bytes_message_payload :: proc(value: Test_Bytes_Message, trailing: int) -> []byte {
+	wire := make([]byte, size_of(Test_Bytes_Message) + len(value.payload) + trailing)
+	content_copy := value
+	mem.copy(raw_data(wire), &content_copy, size_of(Test_Bytes_Message))
+	mem.copy(
+		rawptr(uintptr(raw_data(wire)) + size_of(Test_Bytes_Message)),
+		raw_data(value.payload),
+		len(value.payload),
+	)
+	return wire
+}
+
+@(test)
+test_payload_oversized_fixed_type_rejected :: proc(t: ^testing.T) {
+	register_test_types()
+	info, _ := get_type_info_ptr(typeid_of(Test_Simple_Message))
+	pool: Pool
+	pool_init(&pool, context.allocator)
+	defer cleanup_pool(&pool)
+
+	original := Test_Simple_Message{id = 3, value = 1.5}
+	wire := make([]byte, size_of(Test_Simple_Message) + 4)
+	defer delete(wire)
+	mem.copy(raw_data(wire), &original, size_of(Test_Simple_Message))
+
+	msg: Message
+	err, _ := create_message_from_payload(&msg, &pool, wire, info)
+	testing.expect_value(t, err, Alloc_Error.MALFORMED_PAYLOAD)
+
+	err, _ = create_message_from_payload(&msg, &pool, wire[:size_of(Test_Simple_Message)], info)
+	testing.expect_value(t, err, Alloc_Error.OK)
+	decoded := (cast(^Test_Simple_Message)&msg.inline_data[0])^
+	testing.expect_value(t, decoded.id, 3)
+	testing.expect_value(t, decoded.value, 1.5)
+}
+
+@(test)
+test_payload_oversized_var_data_rejected_inline :: proc(t: ^testing.T) {
+	register_test_types()
+	info, _ := get_type_info_ptr(typeid_of(Test_Bytes_Message))
+	pool: Pool
+	pool_init(&pool, context.allocator)
+	defer cleanup_pool(&pool)
+
+	blob := []byte{1, 2, 3}
+	original := Test_Bytes_Message{id = 9, payload = blob}
+
+	oversized := build_bytes_message_payload(original, 2)
+	defer delete(oversized)
+	msg: Message
+	err, _ := create_message_from_payload(&msg, &pool, oversized, info)
+	testing.expect_value(t, err, Alloc_Error.MALFORMED_PAYLOAD)
+
+	exact := build_bytes_message_payload(original, 0)
+	defer delete(exact)
+	err, _ = create_message_from_payload(&msg, &pool, exact, info)
+	testing.expect_value(t, err, Alloc_Error.OK)
+	testing.expect(t, msg.content == INLINE_NEEDS_FIXUP, "Small payload should decode inline")
+	decoded := cast(^Test_Bytes_Message)&msg.inline_data[0]
+	testing.expect_value(t, decoded.id, u64(9))
+	testing.expect_value(t, len(decoded.payload), 3)
+	for b, i in blob do testing.expect_value(t, decoded.payload[i], b)
+}
+
+@(test)
+test_payload_oversized_var_data_rejected_pooled :: proc(t: ^testing.T) {
+	register_test_types()
+	info, _ := get_type_info_ptr(typeid_of(Test_Bytes_Message))
+	pool: Pool
+	pool_init(&pool, context.allocator)
+	defer cleanup_pool(&pool)
+
+	blob := make([]byte, 64)
+	defer delete(blob)
+	for i in 0 ..< len(blob) do blob[i] = u8(i)
+	original := Test_Bytes_Message{id = 11, payload = blob}
+
+	oversized := build_bytes_message_payload(original, 1)
+	defer delete(oversized)
+	msg: Message
+	err, _ := create_message_from_payload(&msg, &pool, oversized, info)
+	testing.expect_value(t, err, Alloc_Error.MALFORMED_PAYLOAD)
+
+	exact := build_bytes_message_payload(original, 0)
+	defer delete(exact)
+	err, _ = create_message_from_payload(&msg, &pool, exact, info)
+	testing.expect_value(t, err, Alloc_Error.OK)
+	testing.expect(t, message_owns_page(msg.content), "Large payload should decode into a pool page")
+	decoded := cast(^Test_Bytes_Message)(uintptr(msg.content) + TYPE_HEADER_SIZE)
+	testing.expect_value(t, decoded.id, u64(11))
+	testing.expect_value(t, len(decoded.payload), 64)
+	for b, i in blob do testing.expect_value(t, decoded.payload[i], b)
+	free_message(&pool, msg.content)
+}
+
 Test_Array_Inner :: struct {
 	id:    u32,
 	label: string,

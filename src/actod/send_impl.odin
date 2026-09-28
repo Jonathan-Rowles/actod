@@ -588,6 +588,7 @@ create_message_from_payload :: #force_inline proc(
 	if len(payload) < struct_size do return .MALFORMED_PAYLOAD, 0
 
 	if info.flags == {} {
+		if len(payload) != struct_size do return .MALFORMED_PAYLOAD, 0
 		if struct_size <= INLINE_MESSAGE_SIZE && token == 0 {
 			msg.inline_type = info.type_id
 			msg.content = nil
@@ -731,5 +732,5 @@ copy_variable_data_from_payload :: #force_inline proc(
 		}
 	}
 
-	return true
+	return payload_offset == payload_len
 }

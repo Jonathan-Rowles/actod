@@ -572,7 +572,7 @@ report_alloc_error :: #force_no_inline proc(
 		return .RECEIVER_BACKLOGGED
 	case .MALFORMED_PAYLOAD:
 		log.errorf(
-			"send to %s failed: network payload truncated or malformed (variable data exceeds payload)",
+			"send to %s failed: network payload malformed (its length does not match the struct plus its variable data)",
 			actor_origin(to),
 			location = loc,
 		)

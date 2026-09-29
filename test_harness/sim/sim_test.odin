@@ -245,6 +245,27 @@ test_repeat_timer_fires_multiple :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_init_timers_get_distinct_ids_across_actors :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "first", timer_state{name = "first"}, timer_behaviour)
+	spawn(&s, "second", timer_state{name = "second"}, timer_behaviour)
+	init_all(&s)
+
+	first := get_state(&s, "first", timer_state)
+	second := get_state(&s, "second", timer_state)
+	testing.expect(t, first.timer_id != second.timer_id, "each actor's init timer gets its own id")
+
+	cancel_timer(&s, second.timer_id)
+	advance_time(&s, 2 * time.Second)
+	run_until_idle(&s)
+
+	testing.expect_value(t, first.ticks, 2)
+	testing.expect_value(t, second.ticks, 0)
+}
+
+@(test)
 test_run_until_idle_processes_chain :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)

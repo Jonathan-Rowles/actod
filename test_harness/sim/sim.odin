@@ -212,8 +212,13 @@ init_all :: proc(s: ^Sim) {
 		if actor.init_fn == nil do continue
 
 		install_intercept(s, actor)
-		defer uninstall_intercept()
 		actor.init_fn(actor.data)
+		uninstall_intercept()
+
+		s.next_timer_id = s.intercept.next_timer_id
+		s.next_pid = s.intercept.next_spawn_pid
+		s.next_ask_token = s.intercept.next_ask_token
+
 		process_captures(s, actor.pid)
 	}
 }

@@ -44,7 +44,6 @@ test_restart_info_local_defaults :: proc(t: ^testing.T) {
 		count         = 0,
 		first_restart = time.now(),
 		last_restart  = time.now(),
-		child_index   = 2,
 	}
 
 	testing.expect_value(t, info.spawn_func_name_hash, u64(0))
@@ -58,7 +57,6 @@ test_restart_info_remote_fields :: proc(t: ^testing.T) {
 		count                = 1,
 		first_restart        = time.now(),
 		last_restart         = time.now(),
-		child_index          = 0,
 		spawn_func_name_hash = hash,
 		node_id              = Node_ID(3),
 	}

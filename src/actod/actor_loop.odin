@@ -6,6 +6,7 @@ import "base:runtime"
 import "core:c/libc"
 import "core:log"
 import "core:mem"
+import "core:slice"
 import "core:sync"
 
 @(private)
@@ -194,22 +195,12 @@ spawn_initial_children :: proc(actor: ^Actor) {
 	if actor.opts.children == nil do return
 
 	log.info("Initializing children")
-	actor.children = make([dynamic]PID, actor.allocator)
 
-	for child_spawn, idx in actor.opts.children {
+	for child_spawn in actor.opts.children {
 		pid, ok := child_spawn("", actor.pid)
 		if !ok do panic_at(actor.spawn_loc, "Failed to start child in %s", actor.name)
 
-		child_node_id: Node_ID = 0
-		if !is_local_pid(pid) do child_node_id = get_node_id(pid)
-
-		actor.child_restarts[pid] = Restart_Info {
-			count         = 0,
-			first_restart = now(),
-			last_restart  = now(),
-			child_index   = idx,
-			node_id       = child_node_id,
-		}
+		record_spawned_child(actor, pid, child_spawn)
 
 		if actor.behaviour.on_child_started != nil {
 			actor.behaviour.on_child_started(actor.data, pid)
@@ -283,6 +274,7 @@ run_message_loop :: #force_inline proc(actor: ^Actor, ctx: ^Message_Processing_C
 	rounds: u8 = 0
 	for {
 		if !process_system_mailbox(actor, ctx) do return
+		process_spawn_signals(actor)
 		process_stop_signals(actor)
 		if !process_user_mailboxes(actor, ctx) do return
 		if sync.atomic_load(&actor.state) != .RUNNING do return
@@ -333,6 +325,7 @@ mark_stopping :: #force_inline proc(actor: ^Actor, reason: Termination_Reason) {
 mailbox_has_messages :: #force_inline proc(actor: ^Actor) -> bool {
 	if actor.local_read != actor.local_write do return true
 	if sync.atomic_load_explicit(&actor.stopped_head, .Relaxed) != nil do return true
+	if sync.atomic_load_explicit(&actor.spawned_head, .Relaxed) != nil do return true
 	return !mpsc_is_empty_relaxed(&actor.mailbox)
 }
 
@@ -344,6 +337,7 @@ process_system_mailbox :: #force_no_inline proc(
 	if mpsc_is_empty_relaxed(&actor.system_mailbox) do return true
 	ensure_message_batch(actor, ctx)
 	batch_count := mpsc_pop_batch(&actor.system_mailbox, ctx.message_batch[0:ctx.batch_size])
+	process_spawn_signals(actor)
 
 	for i in 0 ..< batch_count {
 		msg := &ctx.message_batch[i]
@@ -365,6 +359,7 @@ process_system_mailbox :: #force_no_inline proc(
 			stopped := v
 			stopped.child_pid = msg.from
 			handle_child_termination(actor, stopped)
+			handle_stop_signals(actor)
 		case Remove_Child:
 			handle_remove_child(actor, v)
 		case Add_Child:
@@ -453,7 +448,8 @@ wait_for_messages_if_idle :: #force_inline proc(
 ) {
 	if mpsc_size(&actor.mailbox) == 0 &&
 	   mpsc_size(&actor.system_mailbox) == 0 &&
-	   sync.atomic_load(&actor.stopped_head) == nil {
+	   sync.atomic_load(&actor.stopped_head) == nil &&
+	   sync.atomic_load(&actor.spawned_head) == nil {
 		if actor.behaviour.on_idle != nil {
 			actor.behaviour.on_idle(actor.data)
 		} else {
@@ -476,16 +472,17 @@ wake_actor :: #force_inline proc(actor: ^Actor) {
 
 @(private)
 terminate_children :: proc(actor: ^Actor) {
+	process_spawn_signals(actor)
 	if len(actor.children) == 0 do return
 
 	children_to_wait: [dynamic]PID
 	defer delete(children_to_wait)
 
-	for child_pid in actor.children {
-		if terminate_actor(child_pid, .SHUTDOWN) do append(&children_to_wait, child_pid)
+	for child in actor.children {
+		if terminate_actor(child.pid, .SHUTDOWN) do append(&children_to_wait, child.pid)
 	}
 
-	wait_for_pids(children_to_wait[:])
+	wait_for_pids(children_to_wait[:], supervisor = actor)
 }
 
 @(private)
@@ -606,29 +603,91 @@ take_stop_signals :: proc(actor: ^Actor) -> ^Actor {
 
 @(private)
 process_stop_signals :: proc(actor: ^Actor) {
-	child := take_stop_signals(actor)
+	taken := take_stop_signals(actor)
+	if taken == nil do return
+	if actor.pid == NODE.pid {
+		reap_stop_signals_at_node(actor, taken, true)
+		return
+	}
+	actor.pending_stop_signals = taken
+	handle_stop_signals(actor)
+}
+
+@(private)
+handle_stop_signals :: proc(actor: ^Actor) {
+	for child := pop_stop_signal(actor); child != nil; child = pop_stop_signal(actor) {
+		process_spawn_signals(actor)
+
+		name_buf: [STOP_SIGNAL_NAME_CAP]u8
+		name_len := copy(name_buf[:], child.stop_signal.name_buf[:child.stop_signal.name_len])
+		stopped := Actor_Stopped {
+			child_pid      = child.stop_signal.pid,
+			reason         = child.stop_signal.reason,
+			restart_policy = child.opts.restart_policy,
+			child_name     = string(name_buf[:name_len]),
+			child_index    = -1,
+		}
+		forward_stop_signal_to_node(child)
+		handle_child_termination(actor, stopped)
+	}
+}
+
+@(private)
+pop_stop_signal :: proc(actor: ^Actor) -> ^Actor {
+	child := actor.pending_stop_signals
+	if child != nil do actor.pending_stop_signals = cast(^Actor)child.stop_signal.next
+	return child
+}
+
+@(private)
+forward_pending_stop_signals_to_node :: proc(actor: ^Actor) {
+	for child := pop_stop_signal(actor); child != nil; child = pop_stop_signal(actor) do forward_stop_signal_to_node(child)
+}
+
+@(private)
+hand_waited_stop_signals_to_node :: proc(supervisor: ^Actor, waited: []PID) {
+	if supervisor.pid == NODE.pid do return
+	pending := &supervisor.pending_stop_signals
+	taken := take_stop_signals(supervisor)
+	if pending^ == nil {
+		pending^ = taken
+	} else if taken != nil {
+		last := pending^
+		for last.stop_signal.next != nil do last = cast(^Actor)last.stop_signal.next
+		last.stop_signal.next = taken
+	}
+
+	kept: ^Actor
+	child := pending^
+	for child != nil {
+		next := cast(^Actor)child.stop_signal.next
+		if slice.contains(waited, child.stop_signal.pid) {
+			if kept == nil {
+				pending^ = next
+			} else {
+				kept.stop_signal.next = next
+			}
+			forward_stop_signal_to_node(child)
+		} else {
+			kept = child
+		}
+		child = next
+	}
+}
+
+@(private)
+reap_stop_signals_at_node :: proc(node: ^Actor, taken: ^Actor, node_owns_this_thread: bool) {
+	if node_owns_this_thread do process_spawn_signals(node)
+	child := taken
 	for child != nil {
 		next := cast(^Actor)child.stop_signal.next
 
-		if actor.pid == NODE.pid {
-			if stop_signal_ready(child) {
-				if root_supervisor_died(child) do escalate_node_failure("the root supervisor died")
-				cleanup_terminated_actor(child.stop_signal.pid, rawptr(child))
-			} else {
-				push_stop_signal(cast(^Actor)rawptr(actor), child)
-			}
+		if stop_signal_ready(child) {
+			if root_supervisor_died(child) do escalate_node_failure("the root supervisor died")
+			if node_owns_this_thread && child.parent == node.pid do remove_child_from_supervisor(node, child.stop_signal.pid)
+			cleanup_terminated_actor(child.stop_signal.pid, rawptr(child))
 		} else {
-			name_buf: [STOP_SIGNAL_NAME_CAP]u8
-			name_len := copy(name_buf[:], child.stop_signal.name_buf[:child.stop_signal.name_len])
-			stopped := Actor_Stopped {
-				child_pid      = child.stop_signal.pid,
-				reason         = child.stop_signal.reason,
-				restart_policy = child.opts.restart_policy,
-				child_name     = string(name_buf[:name_len]),
-				child_index    = -1,
-			}
-			forward_stop_signal_to_node(child)
-			handle_child_termination(actor, stopped)
+			push_stop_signal(node, child)
 		}
 
 		child = next
@@ -700,6 +759,7 @@ push_termination_signal :: proc(actor: ^Actor) {
 	defer reclaim_unpin()
 
 	drain_stop_signals_to_node(self)
+	forward_pending_stop_signals_to_node(self)
 
 	if actor.parent != 0 && !is_local_pid(actor.parent) {
 		remote_msg := Actor_Stopped {
@@ -722,10 +782,7 @@ push_termination_signal :: proc(actor: ^Actor) {
 		return
 	}
 
-	deliver_to_parent :=
-		actor.parent != 0 &&
-		actor.termination_reason != .SHUTDOWN &&
-		actor.termination_reason != .KILLED
+	deliver_to_parent := actor.parent != 0 && actor.termination_reason != .KILLED
 
 	if deliver_to_parent {
 		parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, actor.parent), true)
@@ -746,4 +803,78 @@ push_termination_signal :: proc(actor: ^Actor) {
 	}
 
 	forward_stop_signal_to_node(self)
+}
+
+@(private)
+push_spawn_signal :: proc(parent: ^Actor, signal: ^Spawn_Signal) {
+	for {
+		old := sync.atomic_load(&parent.spawned_head)
+		signal.next = old
+		_, swapped := sync.atomic_compare_exchange_weak(&parent.spawned_head, old, signal)
+		if swapped do return
+	}
+}
+
+@(private)
+take_spawn_signals :: proc(actor: ^Actor) -> ^Spawn_Signal {
+	if sync.atomic_load(&actor.spawned_head) == nil do return nil
+	chain := sync.atomic_exchange(&actor.spawned_head, nil)
+
+	reversed: ^Spawn_Signal
+	links := 0
+	for chain != nil {
+		links += 1
+		assert(
+			links <= STOP_SIGNAL_CHAIN_BOUND,
+			"spawn-signal chain exceeds any possible actor count, the intrusive list is cyclic",
+		)
+		next := chain.next
+		chain.next = reversed
+		reversed = chain
+		chain = next
+	}
+	return reversed
+}
+
+@(private)
+process_spawn_signals :: proc(actor: ^Actor) {
+	signal := take_spawn_signals(actor)
+	for signal != nil {
+		next := signal.next
+		record_direct_child(actor, signal.pid)
+		free(signal, actor_system_allocator)
+		signal = next
+	}
+}
+
+@(private)
+release_spawn_signals :: proc(actor: ^Actor) {
+	signal := take_spawn_signals(actor)
+	for signal != nil {
+		next := signal.next
+		if !terminate_actor(signal.pid, .SHUTDOWN) {
+			log.warnf(
+				"could not shut down child %s of parent %s",
+				actor_origin(signal.pid),
+				actor_origin(actor.pid),
+			)
+		}
+		free(signal, actor_system_allocator)
+		signal = next
+	}
+}
+
+@(private)
+signal_spawn_to_parent :: proc(parent: ^Actor, child_pid: PID) {
+	signal := new(Spawn_Signal, actor_system_allocator)
+	signal.pid = child_pid
+	push_spawn_signal(parent, signal)
+
+	if sync.atomic_load(&parent.spawned_closed) {
+		release_spawn_signals(parent)
+		return
+	}
+
+	parent_state := sync.atomic_load(&parent.state)
+	if parent_state != .STOPPING && parent_state != .THREAD_STOPPED && parent_state != .TERMINATED do wake_actor(parent)
 }

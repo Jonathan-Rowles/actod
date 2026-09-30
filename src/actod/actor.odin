@@ -142,9 +142,14 @@ Restart_Info :: struct {
 	count:                int,
 	first_restart:        time.Time,
 	last_restart:         time.Time,
-	child_index:          int,
+	spawn_func:           SPAWN,
 	spawn_func_name_hash: u64,
 	node_id:              Node_ID,
+}
+
+Supervised_Child :: struct {
+	pid:     PID,
+	restart: Restart_Info,
 }
 
 LOCAL_MAILBOX_SIZE :: 64
@@ -159,6 +164,11 @@ Stop_Signal :: struct {
 	reason:   Termination_Reason,
 	name_len: int,
 	name_buf: [STOP_SIGNAL_NAME_CAP]u8,
+}
+
+Spawn_Signal :: struct {
+	next: ^Spawn_Signal,
+	pid:  PID,
 }
 
 Actor :: struct #align (CACHE_LINE_SIZE) {
@@ -194,9 +204,12 @@ Actor :: struct #align (CACHE_LINE_SIZE) {
 	system_drops:       u64,
 
 	// keep unknown sizes at the bottom
-	children:           [dynamic]PID,
-	child_restarts:     map[PID]Restart_Info,
+	children:           [dynamic]Supervised_Child,
 	started:            ^bool,
+	spawned_head:       ^Spawn_Signal,
+	spawned_closed:     bool,
+	children_lock:      sync.Mutex,
+	pending_stop_signals: ^Actor,
 }
 
 Panic_Jmp_Buf :: struct #align (16) {
@@ -769,12 +782,18 @@ remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
 
 // Get list of children for an actor
 get_children :: proc(parent: PID) -> []PID {
+	reclaim_pin()
+	defer reclaim_unpin()
+
 	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervising_parent(parent)))
 	if !ok do return nil
 
+	sync.mutex_lock(&parent_actor.children_lock)
+	defer sync.mutex_unlock(&parent_actor.children_lock)
+
 	// Return a copy to avoid external modifications
 	result := make([]PID, len(parent_actor.children))
-	copy(result, parent_actor.children[:])
+	for child, i in parent_actor.children do result[i] = child.pid
 	return result
 }
 

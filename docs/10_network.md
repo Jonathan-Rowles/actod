@@ -129,6 +129,8 @@ _ = act.send_message(remote_pid, Work_Item{...})
 
 `spawn_remote` sends a request to the target node, which calls the registered spawn function and returns the new PID. The calling node creates a remote proxy in its local registry.
 
+A `parent_pid` of `get_local_node_pid()` attaches the remote child to the root supervisor.
+
 ## Node Discovery and Actor Mirrors
 
 How this node learned about a peer decides what it gets from it:

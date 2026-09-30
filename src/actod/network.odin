@@ -751,7 +751,15 @@ spawn_remote :: proc(
 	PID,
 	bool,
 ) {
-	return spawn_remote_impl(spawn_func_name, actor_name, target_node, parent_pid, timeout, true, loc)
+	return spawn_remote_impl(
+		spawn_func_name,
+		actor_name,
+		target_node,
+		supervising_parent(parent_pid),
+		timeout,
+		true,
+		loc,
+	)
 }
 
 @(private)

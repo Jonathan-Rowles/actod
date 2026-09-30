@@ -928,7 +928,104 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 	time.sleep(200 * time.Millisecond)
 }
 
-test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
+@(private = "file")
+g_declared_remote_starts: i32
+
+Declared_Remote_Supervisor_Data :: struct {}
+
+Declared_Remote_Supervisor_Behaviour :: actod.Actor_Behaviour(Declared_Remote_Supervisor_Data) {
+	handle_message = proc(data: ^Declared_Remote_Supervisor_Data, from: actod.PID, msg: any) {},
+	on_child_started = proc(data: ^Declared_Remote_Supervisor_Data, child_pid: actod.PID) {
+		sync.atomic_add(&g_declared_remote_starts, 1)
+	},
+}
+
+@(private = "file")
+Started_Count_Probe :: struct {
+	expected: i32,
+}
+
+@(private = "file")
+declared_remote_starts_reached :: proc(state: rawptr) -> bool {
+	probe := cast(^Started_Count_Probe)state
+	return sync.atomic_load(&g_declared_remote_starts) >= probe.expected
+}
+
+test_remote_declared_child_restart :: proc(t: ^testing.T) {
+	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
+
+	g_supervision_target_node = "SupervisionNode"
+	sync.atomic_store(&g_remote_child_counter, 0)
+	sync.atomic_store(&g_declared_remote_starts, 0)
+
+	supervision_node: Node_Role_Process
+	start_ok := start_supervision_server(&supervision_node, test_base_port + 1, test_base_port)
+	expect(t, start_ok, "Failed to start supervision server")
+	defer stop_node_role(&supervision_node)
+	expect(
+		t,
+		wait_for_node_role_ready(&supervision_node),
+		"Supervision server never reported READY",
+	)
+
+	remote_addr := net.Endpoint {
+		address = net.IP4_Loopback,
+		port    = test_base_port + 1,
+	}
+	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
+	expect(t, reg_ok, "Failed to register remote node")
+
+	declared := actod.make_children(create_remote_crash_child())
+	defer delete(declared)
+	supervisor_pid, sup_ok := actod.spawn(
+		"remote-declared-supervisor",
+		Declared_Remote_Supervisor_Data{},
+		Declared_Remote_Supervisor_Behaviour,
+		actod.make_actor_config(
+			supervision_strategy = .ONE_FOR_ONE,
+			max_restarts = 5,
+			children = declared,
+		),
+	)
+	expect(t, sup_ok, "Failed to spawn supervisor")
+	if !sup_ok do return
+
+	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 declared child")
+	children := actod.get_children(supervisor_pid)
+	defer delete(children)
+	if !expect(t, len(children) == 1, "Should have exactly one child") do return
+	child_pid := children[0]
+	expect(t, !actod.is_local_pid(child_pid), "Declared child should be remote")
+
+	time.sleep(200 * time.Millisecond)
+	expect_value(t, sync.atomic_load(&g_declared_remote_starts), 1)
+	verify_child_count(t, supervisor_pid, 1)
+
+	for round in 0 ..< 2 {
+		crash_cmd := shared.Supervision_Crash_Command {
+			reason = .INTERNAL_ERROR,
+		}
+		err := actod.send_message(child_pid, crash_cmd)
+		expect(t, err == .OK, "Should send crash to remote child")
+
+		new_pid, changed := wait_for_child_pid_change(supervisor_pid, child_pid, 0, 5000)
+		expectf(t, changed, "Remote declared child should restart with a new PID, round %d", round)
+		if !changed do break
+		expect(t, !actod.is_local_pid(new_pid), "Restarted child should still be remote")
+		child_pid = new_pid
+
+		starts := Started_Count_Probe{expected = i32(round + 2)}
+		expect(t, poll_until(declared_remote_starts_reached, &starts, 2 * time.Second), "on_child_started fires once per restart")
+		time.sleep(200 * time.Millisecond)
+		expect_value(t, sync.atomic_load(&g_declared_remote_starts), i32(round + 2))
+		verify_child_count(t, supervisor_pid, 1)
+	}
+
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	time.sleep(200 * time.Millisecond)
+}
+
+test_remote_child_of_the_node_restarts :: proc(t: ^testing.T) {
 	_ = actod.register_spawn_func("supervision_worker", local_supervision_worker_stub)
 
 	supervision_node: Node_Role_Process
@@ -948,48 +1045,22 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
 	expect(t, reg_ok, "Failed to register remote node")
 
-	supervisor_data := Supervisor_Test_Data {
-		id = 203,
-	}
-	supervisor_pid, sup_ok := actod.spawn(
-		"remote-registry-restart-supervisor",
-		supervisor_data,
-		Supervisor_Test_Behaviour,
-		actod.make_actor_config(
-			supervision_strategy = .ONE_FOR_ONE,
-			max_restarts = 5,
-		),
-	)
-	expect(t, sup_ok, "Failed to spawn supervisor")
-
+	node_pid := actod.get_local_node_pid()
 	remote_pid, spawn_ok := actod.spawn_remote(
 		"supervision_worker",
-		"registry-restart-child",
+		"node-remote-child",
 		"SupervisionNode",
-		supervisor_pid,
+		node_pid,
 	)
-	expect(t, spawn_ok, "spawn_remote should succeed")
-	expect(t, remote_pid != 0, "Remote PID should not be zero")
+	expect(t, spawn_ok, "spawn_remote with the node as parent should succeed")
+	if !spawn_ok do return
 	expect(t, !actod.is_local_pid(remote_pid), "Child should be remote")
 
-	spawn_hash := actod.get_spawn_func_hash("supervision_worker")
-
-	adopt_ok := actod.add_child_existing(
-		supervisor_pid,
-		remote_pid,
-		local_supervision_worker_stub,
-		spawn_hash,
+	expect(
+		t,
+		wait_for_child_count(node_pid, 1, 2000),
+		"A remote child spawned under the node must be supervised by the root supervisor",
 	)
-	expect(t, adopt_ok, "Should adopt remote child")
-
-	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "Should have 1 child")
-
-	children := actod.get_children(supervisor_pid)
-	defer delete(children)
-	expect_value(t, len(children), 1)
-	if len(children) > 0 {
-		expect_value(t, children[0], remote_pid)
-	}
 
 	crash_cmd := shared.Supervision_Crash_Command {
 		reason = .INTERNAL_ERROR,
@@ -997,15 +1068,43 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 	err := actod.send_message(remote_pid, crash_cmd)
 	expect(t, err == .OK, "Should send crash to remote child")
 
-	new_pid, changed := wait_for_child_pid_change(supervisor_pid, remote_pid, 0, 5000)
-	expect(t, changed, "Remote child should be restarted with new PID")
-	expect(t, new_pid != remote_pid, "New PID should differ from old")
+	new_pid, changed := wait_for_child_pid_change(node_pid, remote_pid, 0, 5000)
+	expect(t, changed, "A remote child of the node should be restarted with a new PID")
+	if !changed do return
 	expect(t, !actod.is_local_pid(new_pid), "Restarted child should still be remote")
+	verify_child_count(t, node_pid, 1)
 
-	verify_child_count(t, supervisor_pid, 1)
+	expect(t, actod.remove_child(node_pid, new_pid), "Should remove the restarted child")
+	expect(t, wait_for_child_count(node_pid, 0, 2000), "The root supervisor should drop the removed child")
 
-	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
-	time.sleep(200 * time.Millisecond)
+	adopted_pid, adopted_ok := actod.spawn_remote(
+		"supervision_worker",
+		"node-adopted-remote-child",
+		"SupervisionNode",
+	)
+	expect(t, adopted_ok, "spawn_remote without a parent should succeed")
+	if !adopted_ok do return
+	raw_add_child := actod.Add_Child {
+		existing_pid         = adopted_pid,
+		spawn_func_name_hash = actod.get_spawn_func_hash("supervision_worker"),
+	}
+	expect(
+		t,
+		actod.send_message(node_pid, raw_add_child) == .OK,
+		"Should deliver a raw Add_Child to the node",
+	)
+	expect(
+		t,
+		wait_for_child_count(node_pid, 1, 2000),
+		"A raw Add_Child of a remote pid sent to the node must reach the root supervisor",
+	)
+	children := actod.get_children(node_pid)
+	defer delete(children)
+	expect(
+		t,
+		len(children) == 1 && children[0] == adopted_pid,
+		"The root supervisor should hold the remote pid the node was asked to adopt",
+	)
 }
 
 test_remote_spawn_invalid_func_name :: proc(t: ^testing.T) {

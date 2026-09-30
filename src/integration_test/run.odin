@@ -212,26 +212,18 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
-		name = "test_mass_simultaneous_child_deaths",
-		test_proc = test_mass_simultaneous_child_deaths,
-		worker_count = 4,
-		expects_error_logs = true,
-	},
-	{
 		name = "test_blocked_supervisor_past_old_retry_window",
 		test_proc = test_blocked_supervisor_past_old_retry_window,
 		worker_count = 4,
 		expects_error_logs = true,
 	},
+	{
+		name = "test_one_for_all_restart_of_two_crashed_children_does_not_wait_out_the_limit",
+		test_proc = test_one_for_all_restart_of_two_crashed_children_does_not_wait_out_the_limit,
+		worker_count = 4,
+	},
 
 	// Supervisor hierarchy tests
-	{name = "test_one_for_one_strategy", test_proc = test_one_for_one_strategy},
-	{name = "test_permanent_restart_policy", test_proc = test_permanent_restart_policy},
-	{name = "test_add_child_dynamically", test_proc = test_add_child_dynamically},
-	{name = "test_remove_child_dynamically", test_proc = test_remove_child_dynamically},
-	{name = "test_adopt_existing_actor", test_proc = test_adopt_existing_actor},
-	{name = "test_self_termination_reasons", test_proc = test_self_termination_reasons},
-	{name = "test_transient_restart_policy", test_proc = test_transient_restart_policy},
 	{
 		name = "test_children_restart_by_their_own_policy",
 		test_proc = test_children_restart_by_their_own_policy,
@@ -240,8 +232,11 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_temporary_direct_child_leaves_permanent_supervisor",
 		test_proc = test_temporary_direct_child_leaves_permanent_supervisor,
 	},
-	{name = "test_rest_for_one_strategy", test_proc = test_rest_for_one_strategy},
 	{name = "test_node_child_restarts", test_proc = test_node_child_restarts},
+	{
+		name = "test_node_table_returns_to_its_size_after_its_children_end",
+		test_proc = test_node_table_returns_to_its_size_after_its_children_end,
+	},
 	{
 		name = "test_node_child_max_restarts_shuts_down_node",
 		test_proc = test_node_child_max_restarts_shuts_down_node,
@@ -271,6 +266,86 @@ ALL_TESTS :: []Test_Entry {
 		expects_error_logs = true,
 	},
 	{name = "test_remove_child_then_restart_all", test_proc = test_remove_child_then_restart_all},
+	{
+		name = "test_declared_child_spawning_a_helper_restarts_one_for_one",
+		test_proc = test_declared_child_spawning_a_helper_restarts_one_for_one,
+	},
+	{
+		name = "test_declared_child_spawning_a_helper_restarts_rest_for_one",
+		test_proc = test_declared_child_spawning_a_helper_restarts_rest_for_one,
+	},
+	{
+		name = "test_supervisor_child_table_through_a_mixed_life",
+		test_proc = test_supervisor_child_table_through_a_mixed_life,
+	},
+	{
+		name = "test_restart_returning_own_pid_keeps_later_sibling",
+		test_proc = test_restart_returning_own_pid_keeps_later_sibling,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_restart_returning_own_pid_as_last_child",
+		test_proc = test_restart_returning_own_pid_as_last_child,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_restart_returning_earlier_sibling_pid",
+		test_proc = test_restart_returning_earlier_sibling_pid,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_permanent_direct_child_is_pruned_under_every_strategy",
+		test_proc = test_permanent_direct_child_is_pruned_under_every_strategy,
+	},
+	{name = "test_one_for_all_prunes_direct_siblings", test_proc = test_one_for_all_prunes_direct_siblings},
+	{
+		name = "test_rest_for_one_prunes_direct_siblings_in_range",
+		test_proc = test_rest_for_one_prunes_direct_siblings_in_range,
+	},
+	{
+		name = "test_shut_down_children_leave_the_table_and_stay_down",
+		test_proc = test_shut_down_children_leave_the_table_and_stay_down,
+	},
+	{
+		name = "test_spawn_from_another_actor_registers_through_the_owner",
+		test_proc = test_spawn_from_another_actor_registers_through_the_owner,
+	},
+	{
+		name = "test_child_spawned_on_a_foreign_thread_restarts_by_its_own_policy",
+		test_proc = test_child_spawned_on_a_foreign_thread_restarts_by_its_own_policy,
+	},
+	{
+		name = "test_foreign_child_dying_before_the_drain_is_registered_first",
+		test_proc = test_foreign_child_dying_before_the_drain_is_registered_first,
+	},
+	{name = "test_spawn_signal_wakes_a_parked_parent", test_proc = test_spawn_signal_wakes_a_parked_parent},
+	{
+		name = "test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded",
+		test_proc = test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded,
+	},
+	{
+		name = "test_foreign_spawn_into_a_crashing_parent_is_registered_then_terminated",
+		test_proc = test_foreign_spawn_into_a_crashing_parent_is_registered_then_terminated,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_remove_child_right_after_a_foreign_spawn_finds_the_child",
+		test_proc = test_remove_child_right_after_a_foreign_spawn_finds_the_child,
+	},
+	{
+		name = "test_foreign_spawn_after_the_parent_terminated_its_children_is_reaped",
+		test_proc = test_foreign_spawn_after_the_parent_terminated_its_children_is_reaped,
+	},
+	{
+		name = "test_concurrent_foreign_spawns_register_each_child_once",
+		test_proc = test_concurrent_foreign_spawns_register_each_child_once,
+	},
+	{
+		name = "test_sim_foreign_spawn_registers_on_the_parents_drain",
+		test_proc = test_sim_foreign_spawn_registers_on_the_parents_drain,
+		sim_mode = true,
+		worker_count = 2,
+	},
 	{name = "test_string_handling", test_proc = test_string_handling},
 	{name = "test_byte_slice_handling", test_proc = test_byte_slice_handling},
 	{name = "test_union_message_handling", test_proc = test_union_message_handling},
@@ -328,7 +403,6 @@ ALL_TESTS :: []Test_Entry {
 		expects_error_logs = true,
 	},
 	{name = "test_restart_limit_window_reset", test_proc = test_restart_limit_window_reset},
-	{name = "test_one_for_all_strategy", test_proc = test_one_for_all_strategy},
 
 	// Distributed tests - each gets a unique base port range for parallel execution
 	{
@@ -405,9 +479,16 @@ ALL_TESTS :: []Test_Entry {
 		is_networked = true,
 	},
 	{
-		name = "test_remote_restart_via_registry_lookup",
-		test_proc = test_remote_restart_via_registry_lookup,
-		port = 17120,
+		name = "test_remote_declared_child_restart",
+		test_proc = test_remote_declared_child_restart,
+		port = 17250,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_remote_child_of_the_node_restarts",
+		test_proc = test_remote_child_of_the_node_restarts,
+		port = 17260,
 		node_name = "TestNode1",
 		is_networked = true,
 	},

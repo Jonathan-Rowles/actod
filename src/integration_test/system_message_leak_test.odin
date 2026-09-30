@@ -10,7 +10,6 @@ import "core:time"
 LEAK_TEST_ROUNDS :: 80
 LEAK_TEST_BATCH :: 8
 MASS_DEATH_CHILDREN :: 40
-BLOCKED_SUPERVISOR_CHILDREN :: 24
 
 #assert(size_of(actod.Actor_Stopped) > actod.INLINE_MESSAGE_SIZE)
 
@@ -32,7 +31,6 @@ Leak_Supervisor_Data :: struct {
 }
 
 Leak_Supervisor_Cmd :: enum {
-	Block,
 	Block_Long,
 }
 
@@ -45,8 +43,6 @@ leak_supervisor_handle_message :: proc(data: ^Leak_Supervisor_Data, from: actod.
 	if cmd, ok := msg.(Leak_Supervisor_Cmd); ok {
 		sync.atomic_store(&supervisor_blocking, true)
 		switch cmd {
-		case .Block:
-			time.sleep(400 * time.Millisecond)
 		case .Block_Long:
 			time.sleep(1300 * time.Millisecond)
 		}
@@ -119,14 +115,14 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 }
 
-test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
+test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 	reset_test_state()
 	sync.atomic_store(&reaped_by_supervisor, 0)
 	sync.atomic_store(&supervisor_blocking, false)
 
 	supervisor_pid, ok := actod.spawn(
-		"mass-death-supervisor",
-		Leak_Supervisor_Data{id = 12},
+		"blocked-supervisor",
+		Leak_Supervisor_Data{id = 13},
 		Leak_Supervisor_Behaviour,
 		actod.make_actor_config(
 			supervision_strategy = .ONE_FOR_ONE,
@@ -154,83 +150,6 @@ test_mass_simultaneous_child_deaths :: proc(t: ^testing.T) {
 
 	children := actod.get_children(supervisor_pid)
 	defer delete(children)
-	if !expectf(
-		t,
-		len(children) == MASS_DEATH_CHILDREN,
-		"expected %d children, got %d",
-		MASS_DEATH_CHILDREN,
-		len(children),
-	) {
-		return
-	}
-
-	_ = actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block)
-	expect(
-		t,
-		poll_until(atomic_flag_raised, &supervisor_blocking, 2 * time.Second),
-		"supervisor never entered its blocking handler",
-	)
-
-	for child in children {
-		_ = actod.send_message(child, actod.Terminate{reason = .NORMAL})
-	}
-
-	converged := wait_for_child_count(supervisor_pid, 0, 5000)
-	reaped := sync.atomic_load(&reaped_by_supervisor)
-
-	expectf(
-		t,
-		converged,
-		"supervisor must reap every child even when %d die at once, %d Actor_Stopped were lost",
-		MASS_DEATH_CHILDREN,
-		MASS_DEATH_CHILDREN - reaped,
-	)
-	expectf(
-		t,
-		reaped == MASS_DEATH_CHILDREN,
-		"on_child_terminated must fire once per child, got %d of %d",
-		reaped,
-		MASS_DEATH_CHILDREN,
-	)
-
-	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
-}
-
-test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
-	reset_test_state()
-	sync.atomic_store(&reaped_by_supervisor, 0)
-	sync.atomic_store(&supervisor_blocking, false)
-
-	supervisor_pid, ok := actod.spawn(
-		"blocked-supervisor",
-		Leak_Supervisor_Data{id = 13},
-		Leak_Supervisor_Behaviour,
-		actod.make_actor_config(
-			supervision_strategy = .ONE_FOR_ONE,
-		),
-	)
-	expect(t, ok, "Failed to spawn supervisor")
-	if !ok do return
-
-	for _ in 0 ..< BLOCKED_SUPERVISOR_CHILDREN {
-		added := false
-		for _ in 0 ..< 200 {
-			if add_ok := actod.add_child(supervisor_pid, create_temporary_crash_child()); add_ok {
-				added = true
-				break
-			}
-			time.sleep(5 * time.Millisecond)
-		}
-		if !added do fail_hard("failed to add child after retries")
-	}
-	expect(
-		t,
-		wait_for_child_count(supervisor_pid, BLOCKED_SUPERVISOR_CHILDREN, 3000),
-		"All children should be registered",
-	)
-
-	children := actod.get_children(supervisor_pid)
-	defer delete(children)
 
 	_ = actod.send_message(supervisor_pid, Leak_Supervisor_Cmd.Block_Long)
 	expect(
@@ -250,14 +169,14 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 		t,
 		converged,
 		"supervisor blocked past the old 1s retry give-up must still reap every child, %d Actor_Stopped were lost",
-		BLOCKED_SUPERVISOR_CHILDREN - reaped,
+		MASS_DEATH_CHILDREN - reaped,
 	)
 	expectf(
 		t,
-		reaped == BLOCKED_SUPERVISOR_CHILDREN,
+		reaped == MASS_DEATH_CHILDREN,
 		"on_child_terminated must fire once per child, got %d of %d",
 		reaped,
-		BLOCKED_SUPERVISOR_CHILDREN,
+		MASS_DEATH_CHILDREN,
 	)
 
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})

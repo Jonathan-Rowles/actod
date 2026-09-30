@@ -6,6 +6,8 @@ import "core:thread"
 
 @(private)
 clear_type_subscribers :: proc(actor_type: Actor_Type) {
+	sync.lock(&global_registry_swap_mutex)
+	defer sync.unlock(&global_registry_swap_mutex)
 	was_shutting_down := sync.atomic_load(&NODE.shutting_down)
 	sync.atomic_store(&NODE.shutting_down, true)
 	clear_type_subscriber_list(&NODE.type_subscribers[actor_type])

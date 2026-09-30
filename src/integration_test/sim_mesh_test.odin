@@ -270,6 +270,7 @@ test_sim_mesh_discovery :: proc(t: ^testing.T) {
 	_ = actod.sim_mesh_run_until_idle(mesh)
 	expect_value(t, g_mesh_counts[0], 1)
 
+	_ = actod.sim_mesh_bind(mesh, 2)
 	_, sees_a_actor := actod.get_actor_pid("mc@mesh0")
 	expect(t, sees_a_actor, "registering node A must deliver its actor snapshot to C")
 }

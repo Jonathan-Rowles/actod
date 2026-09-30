@@ -7,7 +7,6 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 
-@(private = "file")
 global_registry_swap_mutex: sync.Mutex
 
 CONCURRENT_THREADS :: 20

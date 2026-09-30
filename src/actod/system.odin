@@ -556,8 +556,7 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 		handle_remove_child(a, v)
 	case Add_Child:
-		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
-		handle_add_child(a, v)
+		hand_add_child_to_root_supervisor(from, v)
 	case Set_Parent:
 		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 		handle_set_parent(a, v)
@@ -586,6 +585,29 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 			actor_origin(from),
 		)
 	}
+}
+
+@(private)
+hand_add_child_to_root_supervisor :: proc(from: PID, msg: Add_Child) {
+	refusal := forward_add_child_to_root_supervisor(from, msg)
+	if refusal == "" do return
+	log.warnf(
+		"the node actor recorded no child for Add_Child(existing_pid=%v) from %s: %s; call add_child or adopt_child on the node that owns the child",
+		msg.existing_pid,
+		actor_origin(from),
+		refusal,
+	)
+}
+
+@(private)
+forward_add_child_to_root_supervisor :: proc(from: PID, msg: Add_Child) -> string {
+	if !is_local_pid(from) do return "it came from another node, and the pids it carries are numbered by that node"
+	root := NODE.root_supervisor_pid
+	if root == 0 do return "there is no root supervisor to hand it to"
+	root_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, root), true)
+	if !ok do return "the root supervisor is no longer running"
+	if send(root, msg, root_actor) != .OK do return "the root supervisor could not take it"
+	return ""
 }
 
 @(private)
@@ -638,13 +660,20 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	}
 
 	if !try_transition_state(state_ptr, .THREAD_STOPPED, .TERMINATED) do return
+	assert(
+		actor_typed.pending_stop_signals == nil,
+		"a terminated actor still holds stop signals it took off its chain, their children would never be reaped",
+	)
 
-	children_ptr := cast(^[dynamic]PID)(uintptr(actor_ptr) + offset_of(Actor, children))
+	sync.atomic_store(&actor_typed.spawned_closed, true)
+	release_spawn_signals(actor_typed)
+
+	children_ptr := cast(^[dynamic]Supervised_Child)(uintptr(actor_ptr) + offset_of(Actor, children))
 
 	if children_ptr != nil && len(children_ptr^) > 0 {
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 		child_pids := make([dynamic]PID, len(children_ptr^), context.temp_allocator)
-		copy(child_pids[:], children_ptr^[:])
+		for child, i in children_ptr^ do child_pids[i] = child.pid
 
 		for child_pid in child_pids {
 			if !terminate_actor(child_pid, .SHUTDOWN) {
@@ -1018,7 +1047,7 @@ drain_node_stop_signals :: proc() {
 	if !active || node_ptr == nil do return
 	node_actor, ok := get_actor_from_pointer(node_ptr, true)
 	if !ok || node_actor == nil do return
-	process_stop_signals(node_actor)
+	reap_stop_signals_at_node(node_actor, take_stop_signals(node_actor), false)
 }
 
 wait_for_pids :: proc(
@@ -1026,6 +1055,7 @@ wait_for_pids :: proc(
 	poll_interval_ms: int = 10,
 	max_wait_ms: int = 5000,
 	loc := #caller_location,
+	supervisor: ^Actor = nil,
 ) {
 	start := now()
 	max_wait := time.Duration(max_wait_ms) * time.Millisecond
@@ -1033,6 +1063,7 @@ wait_for_pids :: proc(
 	co := coro.running()
 
 	for {
+		if supervisor != nil do hand_waited_stop_signals_to_node(supervisor, pids)
 		all_done := true
 		stuck_pid: PID = 0
 		for pid in pids {

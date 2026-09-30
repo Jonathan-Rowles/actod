@@ -435,7 +435,8 @@ send_message_to_children_impl :: proc(
 	}
 	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
 	if !ok do return .ACTOR_NOT_FOUND
-	for child_pid in actor.children {
+	for child in actor.children {
+		child_pid := child.pid
 		if !is_local_pid(child_pid) {
 			err := send_message_impl(child_pid, data, size, tid, info, class, loc)
 			if err != .OK do return err

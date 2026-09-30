@@ -1,6 +1,7 @@
 package integration
 
 import "../actod"
+import "core:fmt"
 import "core:sync"
 import "core:testing"
 import "core:thread"
@@ -242,4 +243,68 @@ test_blocking_child_stops_on_escalation :: proc(t: ^testing.T) {
 	expect(t, sync.atomic_load(&actod.NODE.shutting_down), "escalation must mark the node shutting down")
 
 	actod.shutdown_node()
+}
+
+NODE_TABLE_CHURN :: 16
+
+@(private = "file")
+node_table_size :: proc() -> int {
+	actod.reclaim_pin()
+	defer actod.reclaim_unpin()
+	ptr, ok := actod.get(&actod.NODE.actor_registry, actod.NODE.pid)
+	if !ok || ptr == nil do return -1
+	node := cast(^actod.Actor)ptr
+	sync.mutex_lock(&node.children_lock)
+	defer sync.mutex_unlock(&node.children_lock)
+	return len(node.children)
+}
+
+@(private = "file")
+node_table_size_is :: proc(state: rawptr) -> bool {
+	return node_table_size() == (cast(^int)state)^
+}
+
+test_node_table_returns_to_its_size_after_its_children_end :: proc(t: ^testing.T) {
+	start_size := node_table_size()
+	if !expect(t, start_size > 0, "the node must record its system children") do return
+
+	pids: [NODE_TABLE_CHURN]actod.PID
+	for i in 0 ..< NODE_TABLE_CHURN {
+		pid, ok := actod.spawn(
+			fmt.tprintf("node-table-child-%d", i),
+			Crash_Test_Data{crash_on_msg = "crash", crash_reason = .NORMAL},
+			Crash_Test_Behaviour,
+			actod.make_actor_config(restart_policy = .TEMPORARY),
+			parent_pid = actod.NODE.pid,
+		)
+		if !expectf(t, ok, "spawn %d under the node failed", i) do return
+		pids[i] = pid
+	}
+
+	expected := start_size + NODE_TABLE_CHURN
+	expectf(
+		t,
+		poll_until(node_table_size_is, &expected, 2 * time.Second),
+		"the node must record every child spawned under it, expected %d records, has %d",
+		expected,
+		node_table_size(),
+	)
+
+	for pid, i in pids {
+		if i % 2 == 0 {
+			expect(t, actod.send_message(pid, "crash") == .OK, "crash send failed")
+		} else {
+			expect(t, actod.terminate_actor(pid, .SHUTDOWN), "terminate failed")
+		}
+	}
+	for pid in pids do expectf(t, wait_for_actor_invalid(pid, 2000), "child %v was never reaped", pid)
+
+	expected = start_size
+	expectf(
+		t,
+		poll_until(node_table_size_is, &expected, 2 * time.Second),
+		"the node must forget each child it reaps, expected %d records, has %d",
+		expected,
+		node_table_size(),
+	)
 }

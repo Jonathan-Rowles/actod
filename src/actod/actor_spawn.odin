@@ -219,7 +219,7 @@ spawn_alloc_actor :: proc(
 	actor.pid = pid
 	actor.state = .INIT
 	actor.termination_reason = .NORMAL
-	actor.child_restarts = make(map[PID]Restart_Info, actor.allocator)
+	actor.children = make([dynamic]Supervised_Child, actor.allocator)
 
 	return actor, pid, true
 }
@@ -297,23 +297,7 @@ spawn_erased :: proc(
 	}
 	context.allocator = actor.allocator
 
-	if parent_pid > 0 && is_local_pid(parent_pid) {
-		parent_ptr := get(&NODE.actor_registry, parent_pid)
-		if parent_ptr != nil {
-			parent_actor := cast(^Actor)parent_ptr
-			if parent_actor.children == nil {
-				parent_actor.children = make([dynamic]PID, parent_actor.allocator)
-			}
-			append(&parent_actor.children, pid)
-			parent_actor.child_restarts[pid] = Restart_Info {
-				count         = 0,
-				first_restart = now(),
-				last_restart  = now(),
-				child_index   = len(parent_actor.children) - 1,
-				node_id       = 0,
-			}
-		}
-	}
+	if parent_pid > 0 && is_local_pid(parent_pid) do attach_to_parent(parent_pid, pid)
 
 	broadcast_actor_spawned(pid, name, behaviour.actor_type, parent_pid)
 
@@ -378,6 +362,31 @@ spawn_erased :: proc(
 	if NODE.config.hot_reload_dev do hot_reload_hooks.register_actor(state, actor.pid, name)
 
 	return actor.pid, true
+}
+
+@(private)
+attach_to_parent :: proc(parent_pid: PID, child_pid: PID) {
+	reclaim_pin()
+	defer reclaim_unpin()
+
+	parent_ptr := get(&NODE.actor_registry, parent_pid)
+	if parent_ptr == nil {
+		if !terminate_actor(child_pid, .SHUTDOWN) {
+			log.warnf(
+				"could not shut down child %s of parent %s",
+				actor_origin(child_pid),
+				actor_origin(parent_pid),
+			)
+		}
+		return
+	}
+
+	parent_actor := cast(^Actor)parent_ptr
+	if current_actor_context != nil && current_actor_context.pid == parent_pid {
+		record_direct_child(parent_actor, child_pid)
+	} else {
+		signal_spawn_to_parent(parent_actor, child_pid)
+	}
 }
 
 @(private)

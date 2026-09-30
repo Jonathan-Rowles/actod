@@ -338,6 +338,7 @@ has_pending_messages :: #force_inline proc(handle: ^Pooled_Actor_Handle) -> bool
 	actor := cast(^Actor)handle.actor_ptr
 	if actor.local_read != actor.local_write do return true
 	if sync.atomic_load_explicit(&actor.stopped_head, .Relaxed) != nil do return true
+	if sync.atomic_load_explicit(&actor.spawned_head, .Relaxed) != nil do return true
 	if !mpsc_is_empty_relaxed(handle.mailbox) do return true
 	return !mpsc_is_empty_relaxed(handle.system_mailbox)
 }

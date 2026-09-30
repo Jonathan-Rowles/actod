@@ -135,6 +135,13 @@ Children_Replaced_Probe :: struct {
 	from:   int,
 }
 
+Slot_Restart_Probe :: struct {
+	parent:   actod.PID,
+	previous: []actod.PID,
+	index:    int,
+	new_pid:  actod.PID,
+}
+
 plain_condition_holds :: proc(state: rawptr) -> bool {
 	condition := (cast(^proc() -> bool)state)^
 	return condition()
@@ -167,6 +174,20 @@ child_pid_changed :: proc(state: rawptr) -> bool {
 		return true
 	}
 	return false
+}
+
+child_restarted_in_slot :: proc(state: rawptr) -> bool {
+	probe := cast(^Slot_Restart_Probe)state
+	children := actod.get_children(probe.parent)
+	defer delete(children)
+	if len(children) != len(probe.previous) do return false
+	candidate := children[probe.index]
+	for previous_pid in probe.previous {
+		if candidate == previous_pid do return false
+	}
+	if !actod.valid(&actod.NODE.actor_registry, candidate) do return false
+	probe.new_pid = candidate
+	return true
 }
 
 wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
@@ -209,6 +230,21 @@ wait_for_child_pid_change :: proc(
 	return 0, false
 }
 
+wait_for_child_restart :: proc(
+	parent: actod.PID,
+	previous: []actod.PID,
+	index: int,
+	timeout_ms: int,
+) -> (
+	new_pid: actod.PID,
+	success: bool,
+) {
+	probe := Slot_Restart_Probe{parent = parent, previous = previous, index = index}
+	restarted := poll_until(child_restarted_in_slot, &probe, time.Duration(timeout_ms) * time.Millisecond)
+	if restarted do return probe.new_pid, true
+	return 0, false
+}
+
 children_replaced :: proc(state: rawptr) -> bool {
 	probe := cast(^Children_Replaced_Probe)state
 	children := actod.get_children(probe.parent)
@@ -247,7 +283,23 @@ create_crash_child :: proc(parent: actod.PID) -> actod.SPAWN {
 				fmt.tprintf("crash-child-%d", data.id),
 				data,
 				Crash_Test_Behaviour,
-				actod.make_actor_config(),
+				actod.make_actor_config(restart_policy = .PERMANENT),
+			)
+		}
+}
+
+create_temporary_crash_child :: proc() -> actod.SPAWN {
+	return proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+			data := Crash_Test_Data {
+				id           = int(sync.atomic_add(&global_test_state.actors_spawned, 1)),
+				crash_on_msg = "crash",
+				crash_reason = .INTERNAL_ERROR,
+			}
+			return actod.spawn_child(
+				fmt.tprintf("temporary-crash-child-%d", data.id),
+				data,
+				Crash_Test_Behaviour,
+				actod.make_actor_config(restart_policy = .TEMPORARY),
 			)
 		}
 }
@@ -269,7 +321,7 @@ make_terminating_child_spawner :: proc(reason: actod.Termination_Reason) -> acto
 					fmt.tprintf("self-term-child-%d", data.id),
 					data,
 					Crash_Test_Behaviour,
-					actod.make_actor_config(),
+					actod.make_actor_config(restart_policy = .TEMPORARY),
 				)
 			}
 	case .INTERNAL_ERROR:
@@ -283,7 +335,7 @@ make_terminating_child_spawner :: proc(reason: actod.Termination_Reason) -> acto
 					fmt.tprintf("self-term-child-%d", data.id),
 					data,
 					Crash_Test_Behaviour,
-					actod.make_actor_config(),
+					actod.make_actor_config(restart_policy = .TEMPORARY),
 				)
 			}
 	case .ABNORMAL:
@@ -297,7 +349,7 @@ make_terminating_child_spawner :: proc(reason: actod.Termination_Reason) -> acto
 					fmt.tprintf("self-term-child-%d", data.id),
 					data,
 					Crash_Test_Behaviour,
-					actod.make_actor_config(),
+					actod.make_actor_config(restart_policy = .TEMPORARY),
 				)
 			}
 	case:
@@ -325,7 +377,6 @@ test_one_for_one_strategy :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)
@@ -377,7 +428,6 @@ test_one_for_all_strategy :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ALL,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)
@@ -435,7 +485,6 @@ test_rest_for_one_strategy :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .REST_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)
@@ -493,7 +542,6 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 3,
 			restart_window = 1 * time.Second,
 		),
@@ -572,7 +620,6 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 2,
 			restart_window = 200 * time.Millisecond,
 		),
@@ -644,7 +691,6 @@ test_permanent_restart_policy :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 10,
 		),
 	)
@@ -706,7 +752,6 @@ test_transient_restart_policy :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .TRANSIENT,
 			max_restarts = 10,
 		),
 	)
@@ -779,7 +824,6 @@ test_add_child_dynamically :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 		),
 	)
 	expect(t, ok, "Failed to spawn supervisor")
@@ -832,7 +876,6 @@ test_remove_child_dynamically :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 		),
 	)
 	expect(t, ok, "Failed to spawn supervisor")
@@ -877,7 +920,7 @@ test_adopt_existing_actor :: proc(t: ^testing.T) {
 		"adopt-supervisor",
 		supervisor_data,
 		Supervisor_Test_Behaviour,
-		actod.make_actor_config(supervision_strategy = .ONE_FOR_ONE, restart_policy = .PERMANENT),
+		actod.make_actor_config(supervision_strategy = .ONE_FOR_ONE),
 	)
 	expect(t, ok, "Failed to spawn supervisor")
 
@@ -955,10 +998,7 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 			fmt.tprintf("reason-test-supervisor-%d", test_reason),
 			supervisor_data,
 			Supervisor_Test_Behaviour,
-			actod.make_actor_config(
-				supervision_strategy = .ONE_FOR_ONE,
-				restart_policy = .TEMPORARY,
-			),
+			actod.make_actor_config(supervision_strategy = .ONE_FOR_ONE),
 		)
 		expect(t, ok, "Failed to spawn supervisor")
 		if !ok do continue
@@ -1012,5 +1052,245 @@ test_self_termination_reasons :: proc(t: ^testing.T) {
 
 		_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
 		expect(t, wait_for_actor_invalid(supervisor_pid, 1000), "supervisor should stop")
+	}
+}
+
+spawn_policy_child :: proc(restart_policy: actod.Restart_Policy) -> (actod.PID, bool) {
+	data := Crash_Test_Data {
+		id = int(sync.atomic_add(&global_test_state.actors_spawned, 1)),
+	}
+	return actod.spawn_child(
+		fmt.tprintf("%v-child-%d", restart_policy, data.id),
+		data,
+		Crash_Test_Behaviour,
+		actod.make_actor_config(restart_policy = restart_policy),
+	)
+}
+
+spawn_permanent_policy_child :: proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+	return spawn_policy_child(.PERMANENT)
+}
+
+spawn_transient_policy_child :: proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+	return spawn_policy_child(.TRANSIENT)
+}
+
+spawn_temporary_policy_child :: proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+	return spawn_policy_child(.TEMPORARY)
+}
+
+test_children_restart_by_their_own_policy :: proc(t: ^testing.T) {
+	reset_test_state()
+
+	child_spawns := actod.make_children(
+		spawn_permanent_policy_child,
+		spawn_transient_policy_child,
+		spawn_transient_policy_child,
+		spawn_temporary_policy_child,
+	)
+	defer delete(child_spawns)
+
+	supervisor_pid, ok := actod.spawn(
+		"mixed-policy-supervisor",
+		Supervisor_Test_Data{id = 20},
+		Supervisor_Test_Behaviour,
+		actod.make_actor_config(
+			children = child_spawns,
+			supervision_strategy = .ONE_FOR_ONE,
+			restart_policy = .TEMPORARY,
+			max_restarts = 10,
+		),
+	)
+	expect(t, ok, "Failed to spawn supervisor")
+	if !ok do return
+	expect(t, wait_for_child_count(supervisor_pid, 4, 500), "Children should be spawned")
+
+	initial := actod.get_children(supervisor_pid)
+	defer delete(initial)
+	if !expectf(t, len(initial) == 4, "expected 4 children, got %d", len(initial)) do return
+
+	_ = actod.send_message(initial[0], actod.Terminate{reason = .NORMAL})
+	new_permanent, permanent_restarted := wait_for_child_restart(supervisor_pid, initial, 0, 1000)
+	expect(
+		t,
+		permanent_restarted,
+		"a PERMANENT child must restart after a NORMAL exit under a TEMPORARY supervisor",
+	)
+
+	after_permanent := actod.get_children(supervisor_pid)
+	defer delete(after_permanent)
+	_ = actod.send_message(initial[1], actod.Terminate{reason = .ABNORMAL})
+	new_transient, transient_restarted := wait_for_child_restart(supervisor_pid, after_permanent, 1, 1000)
+	expect(
+		t,
+		transient_restarted,
+		"a TRANSIENT child must restart after an ABNORMAL exit under a TEMPORARY supervisor",
+	)
+
+	_ = actod.send_message(initial[2], actod.Terminate{reason = .NORMAL})
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 3, 1000),
+		"a TRANSIENT child must not restart after a NORMAL exit",
+	)
+
+	_ = actod.send_message(initial[3], actod.Terminate{reason = .ABNORMAL})
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 2, 1000),
+		"a TEMPORARY child must not restart even after an ABNORMAL exit",
+	)
+
+	final := actod.get_children(supervisor_pid)
+	defer delete(final)
+	if expectf(t, len(final) == 2, "expected 2 children left, got %d", len(final)) {
+		expect_value(t, final[0], new_permanent)
+		expect_value(t, final[1], new_transient)
+	}
+
+	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+	expect(t, wait_for_actor_invalid(supervisor_pid, 1000), "supervisor should stop")
+}
+
+ORDER_CHILD_COUNT :: 5
+
+Order_Supervisor_Data :: struct {
+	orders_spawned: int,
+}
+
+@(private = "file")
+g_order_restarts: i32
+@(private = "file")
+g_order_restart_intents: i32
+@(private = "file")
+g_order_children_len: int
+@(private = "file")
+g_order_restart_entries: int
+@(private = "file")
+g_order_table_reads: i32
+
+Order_Supervisor_Behaviour :: actod.Actor_Behaviour(Order_Supervisor_Data) {
+	handle_message = order_supervisor_handle_message,
+	on_child_terminated = proc(
+		data: ^Order_Supervisor_Data,
+		child_pid: actod.PID,
+		child_name: string,
+		reason: actod.Termination_Reason,
+		will_restart: bool,
+	) {
+		if will_restart do sync.atomic_add(&g_order_restart_intents, 1)
+	},
+	on_child_restarted = proc(
+		data: ^Order_Supervisor_Data,
+		old_pid: actod.PID,
+		new_pid: actod.PID,
+		restart_count: int,
+	) {
+		sync.atomic_add(&g_order_restarts, 1)
+	},
+}
+
+order_supervisor_handle_message :: proc(data: ^Order_Supervisor_Data, from: actod.PID, msg: any) {
+	switch m in msg {
+	case string:
+		switch m {
+		case "spawn_order":
+			data.orders_spawned += 1
+			_, _ = actod.spawn_child(
+				fmt.tprintf("order-%d", data.orders_spawned),
+				Crash_Test_Data{crash_on_msg = "done", crash_reason = .NORMAL},
+				Crash_Test_Behaviour,
+				actod.make_actor_config(restart_policy = .TEMPORARY),
+			)
+		case "read_tables":
+			self := cast(^actod.Actor)actod.get(&actod.NODE.actor_registry, actod.get_self_pid())
+			sync.atomic_store(&g_order_children_len, len(self.children))
+			sync.atomic_store(&g_order_restart_entries, len(self.child_restarts))
+			sync.atomic_add(&g_order_table_reads, 1)
+		}
+	}
+}
+
+order_tables_read :: proc(state: rawptr) -> bool {
+	before := (cast(^i32)state)^
+	return sync.atomic_load(&g_order_table_reads) > before
+}
+
+test_temporary_direct_child_leaves_permanent_supervisor :: proc(t: ^testing.T) {
+	strategies := []actod.Supervision_Strategy{.ONE_FOR_ONE, .ONE_FOR_ALL, .REST_FOR_ONE}
+	for strategy in strategies {
+		reset_test_state()
+		sync.atomic_store(&g_order_restarts, 0)
+		sync.atomic_store(&g_order_restart_intents, 0)
+
+		declared := actod.make_children(create_crash_child(0))
+		defer delete(declared)
+
+		supervisor_pid, ok := actod.spawn(
+			fmt.tprintf("order-supervisor-%v", strategy),
+			Order_Supervisor_Data{},
+			Order_Supervisor_Behaviour,
+			actod.make_actor_config(
+				children = declared,
+				supervision_strategy = strategy,
+				restart_policy = .PERMANENT,
+			),
+		)
+		expectf(t, ok, "%v: failed to spawn supervisor", strategy)
+		if !ok do continue
+		expectf(t, wait_for_child_count(supervisor_pid, 1, 500), "%v: declared child should start", strategy)
+
+		initial := actod.get_children(supervisor_pid)
+		declared_pid := initial[0] if len(initial) > 0 else 0
+		delete(initial)
+
+		for _ in 0 ..< ORDER_CHILD_COUNT {
+			_ = actod.send_message(supervisor_pid, "spawn_order")
+		}
+		expectf(
+			t,
+			wait_for_child_count(supervisor_pid, 1 + ORDER_CHILD_COUNT, 1000),
+			"%v: every order child should register",
+			strategy,
+		)
+
+		orders := actod.get_children(supervisor_pid)
+		for order_pid in orders {
+			if order_pid != declared_pid do _ = actod.send_message(order_pid, "done")
+		}
+		delete(orders)
+
+		expectf(
+			t,
+			wait_for_child_count(supervisor_pid, 1, 1000),
+			"%v: a TEMPORARY child ending NORMAL must leave the child list",
+			strategy,
+		)
+
+		reads_before := sync.atomic_load(&g_order_table_reads)
+		_ = actod.send_message(supervisor_pid, "read_tables")
+		answered := poll_until(order_tables_read, &reads_before, time.Second)
+		expectf(t, answered, "%v: supervisor never read its tables", strategy)
+		if answered {
+			expect_value(t, sync.atomic_load(&g_order_children_len), 1)
+			expect_value(t, sync.atomic_load(&g_order_restart_entries), 1)
+		}
+
+		expect_value(t, sync.atomic_load(&g_order_restart_intents), 0)
+		expect_value(t, sync.atomic_load(&g_order_restarts), 0)
+
+		remaining := actod.get_children(supervisor_pid)
+		if expectf(t, len(remaining) == 1, "%v: expected only the declared child, got %d", strategy, len(remaining)) {
+			expectf(
+				t,
+				remaining[0] == declared_pid,
+				"%v: the declared sibling must not be touched when a TEMPORARY child ends",
+				strategy,
+			)
+		}
+		delete(remaining)
+
+		_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
+		expectf(t, wait_for_actor_invalid(supervisor_pid, 1000), "%v: supervisor should stop", strategy)
 	}
 }

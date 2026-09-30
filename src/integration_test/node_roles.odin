@@ -732,7 +732,13 @@ spawn_supervision_worker :: proc(name: string, parent_pid: actod.PID) -> (actod.
 	data := Supervision_Worker_Data {
 		name = name,
 	}
-	return actod.spawn(name, data, Supervision_Worker_Behaviour, parent_pid = parent_pid)
+	return actod.spawn(
+		name,
+		data,
+		Supervision_Worker_Behaviour,
+		actod.make_actor_config(restart_policy = .PERMANENT),
+		parent_pid,
+	)
 }
 
 run_supervision_server :: proc() {

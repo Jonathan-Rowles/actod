@@ -45,7 +45,7 @@ main :: proc() {
 
 A node started with `blocking_child` cannot call `await_signal`, so `node_init` installs the signal handler itself: SIGINT or SIGTERM terminates the blocking child with `.SHUTDOWN`, `node_init` returns, and `main` calls `shutdown_node` as usual. The handler then resets to the default, so a second signal ends the process immediately if a shutdown ever hangs.
 
-Children declared in the node config are spawned under a root supervisor that carries the node's `actor_config`, so a crashed node child restarts under its `restart_policy`, and one that exhausts `max_restarts` shuts the node down. Inside such a child `get_parent_pid` returns the root supervisor, not the node, and a `send_parent` lands there (logged at debug and dropped).
+Children declared in the node config are spawned under a root supervisor that carries the node's `actor_config`, which supplies the strategy, `max_restarts` and `restart_window`. Whether a node child restarts is decided by the child's own `restart_policy`. A child whose spawn function calls `spawn` without a config, or builds one with `make_actor_config` without naming a policy, gets the node `actor_config` policy (`.PERMANENT` unless set otherwise), because both default to the node's config when called. A spawn function inside a hot-reloaded module is the exception: its `make_actor_config` defaults the policy to `.PERMANENT` whatever the node sets (see [Restart Policies](04_supervisor.md#restart-policies)). A node child that exhausts `max_restarts` shuts the node down. Inside such a child `get_parent_pid` returns the root supervisor, not the node, and a `send_parent` lands there (logged at debug and dropped).
 
 ## API
 

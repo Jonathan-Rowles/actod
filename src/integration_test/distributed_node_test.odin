@@ -801,7 +801,6 @@ test_remote_one_for_one_restart :: proc(t: ^testing.T) {
 		Supervisor_Test_Behaviour,
 		actod.make_actor_config(
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)
@@ -870,7 +869,6 @@ test_remote_rest_for_one_restart :: proc(t: ^testing.T) {
 		Supervisor_Test_Behaviour,
 		actod.make_actor_config(
 			supervision_strategy = .REST_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)
@@ -959,7 +957,6 @@ test_remote_restart_via_registry_lookup :: proc(t: ^testing.T) {
 		Supervisor_Test_Behaviour,
 		actod.make_actor_config(
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)

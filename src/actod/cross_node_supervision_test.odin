@@ -250,10 +250,11 @@ test_actor_stopped_message_fields :: proc(t: ^testing.T) {
 @(test)
 test_actor_stopped_wire_format :: proc(t: ^testing.T) {
 	msg := Actor_Stopped {
-		child_pid   = PID(42),
-		reason      = .ABNORMAL,
-		child_name  = "test-child",
-		child_index = 1,
+		child_pid      = PID(42),
+		reason         = .ABNORMAL,
+		restart_policy = .TEMPORARY,
+		child_name     = "test-child",
+		child_index    = 1,
 	}
 
 	buf: [1024]byte
@@ -276,6 +277,7 @@ test_actor_stopped_wire_format :: proc(t: ^testing.T) {
 	intrinsics.mem_copy_non_overlapping(&parsed, raw_data(header.payload), size_of(Actor_Stopped))
 	testing.expect_value(t, parsed.child_pid, PID(42))
 	testing.expect_value(t, parsed.reason, Termination_Reason.ABNORMAL)
+	testing.expect_value(t, parsed.restart_policy, Restart_Policy.TEMPORARY)
 	testing.expect_value(t, parsed.child_index, 1)
 
 	name_len := len(parsed.child_name)

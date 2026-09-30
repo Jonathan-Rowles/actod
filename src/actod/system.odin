@@ -31,10 +31,11 @@ Terminate :: struct {
 }
 
 Actor_Stopped :: struct {
-	child_pid:   PID,
-	reason:      Termination_Reason,
-	child_name:  string,
-	child_index: int,
+	child_pid:      PID,
+	reason:         Termination_Reason,
+	restart_policy: Restart_Policy,
+	child_name:     string,
+	child_index:    int,
 }
 
 Remove_Child :: struct {

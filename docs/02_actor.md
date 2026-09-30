@@ -326,7 +326,7 @@ Termination_Reason :: enum {
 }
 ```
 
-Actors recover from panics automatically. The panic is caught, the actor transitions to STOPPING, and the supervisor decides whether to restart based on the restart policy.
+Actors recover from panics automatically. The panic is caught, the actor transitions to STOPPING, and the supervisor decides whether to restart it from the actor's own `restart_policy`.
 
 ---
 [< Node](01_node.md) | [Message Registration >](03_message-registration.md)

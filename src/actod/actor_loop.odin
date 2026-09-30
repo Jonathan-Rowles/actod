@@ -621,10 +621,11 @@ process_stop_signals :: proc(actor: ^Actor) {
 			name_buf: [STOP_SIGNAL_NAME_CAP]u8
 			name_len := copy(name_buf[:], child.stop_signal.name_buf[:child.stop_signal.name_len])
 			stopped := Actor_Stopped {
-				child_pid   = child.stop_signal.pid,
-				reason      = child.stop_signal.reason,
-				child_name  = string(name_buf[:name_len]),
-				child_index = -1,
+				child_pid      = child.stop_signal.pid,
+				reason         = child.stop_signal.reason,
+				restart_policy = child.opts.restart_policy,
+				child_name     = string(name_buf[:name_len]),
+				child_index    = -1,
 			}
 			forward_stop_signal_to_node(child)
 			handle_child_termination(actor, stopped)
@@ -702,10 +703,11 @@ push_termination_signal :: proc(actor: ^Actor) {
 
 	if actor.parent != 0 && !is_local_pid(actor.parent) {
 		remote_msg := Actor_Stopped {
-			child_pid   = actor.pid,
-			reason      = actor.termination_reason,
-			child_name  = actor.name,
-			child_index = -1,
+			child_pid      = actor.pid,
+			reason         = actor.termination_reason,
+			restart_policy = actor.opts.restart_policy,
+			child_name     = actor.name,
+			child_index    = -1,
 		}
 		err := send_message(actor.parent, remote_msg)
 		if err != .OK && err != .ACTOR_NOT_FOUND {

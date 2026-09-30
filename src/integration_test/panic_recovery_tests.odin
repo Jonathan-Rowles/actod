@@ -83,7 +83,7 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 			"panic-child",
 			Panic_Actor_Data{},
 			Panic_Actor_Behaviour,
-			actod.make_actor_config(),
+			actod.make_actor_config(restart_policy = .PERMANENT),
 		)
 	})
 
@@ -94,7 +94,6 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)

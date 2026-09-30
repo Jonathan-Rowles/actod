@@ -53,6 +53,7 @@ spawn_init_death_child :: proc(name: string, parent: actod.PID) -> (actod.PID, b
 		Init_Death_Child_Behaviour,
 		actod.make_actor_config(
 			logging = actod.make_log_config(level = test_log_level()),
+			restart_policy = .TRANSIENT,
 			use_dedicated_os_thread = sync.atomic_load(&init_death_dedicated_thread),
 		),
 		parent,
@@ -68,7 +69,6 @@ spawn_init_death_sup :: proc(name: string, parent: actod.PID) -> (actod.PID, boo
 			logging = actod.make_log_config(level = test_log_level()),
 			children = actod.make_children(spawn_init_death_child),
 			supervision_strategy = .ONE_FOR_ONE,
-			restart_policy = .TRANSIENT,
 			max_restarts = 5,
 			restart_window = 10 * time.Second,
 		),

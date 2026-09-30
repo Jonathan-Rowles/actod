@@ -54,7 +54,6 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 		"dup_probe_parent",
 		Dup_Parent_Data{child_gone_count = &child_gone_count, child_gone = &child_gone},
 		parent_behaviour,
-		actod.make_actor_config(restart_policy = .TEMPORARY),
 	)
 	expect(t, parent_ok, "Should spawn the local parent")
 

@@ -232,6 +232,14 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_adopt_existing_actor", test_proc = test_adopt_existing_actor},
 	{name = "test_self_termination_reasons", test_proc = test_self_termination_reasons},
 	{name = "test_transient_restart_policy", test_proc = test_transient_restart_policy},
+	{
+		name = "test_children_restart_by_their_own_policy",
+		test_proc = test_children_restart_by_their_own_policy,
+	},
+	{
+		name = "test_temporary_direct_child_leaves_permanent_supervisor",
+		test_proc = test_temporary_direct_child_leaves_permanent_supervisor,
+	},
 	{name = "test_rest_for_one_strategy", test_proc = test_rest_for_one_strategy},
 	{name = "test_node_child_restarts", test_proc = test_node_child_restarts},
 	{

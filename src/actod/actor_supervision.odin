@@ -217,7 +217,7 @@ handle_child_termination :: proc(actor: ^Actor, msg: Actor_Stopped) {
 	}
 
 	should_restart := false
-	switch actor.opts.restart_policy {
+	switch msg.restart_policy {
 	case .PERMANENT:
 		should_restart = true
 	case .TRANSIENT:

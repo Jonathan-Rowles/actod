@@ -46,7 +46,6 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 		actod.make_actor_config(
 			children = child_spawns,
 			supervision_strategy = .ONE_FOR_ALL,
-			restart_policy = .PERMANENT,
 			max_restarts = 5,
 		),
 	)

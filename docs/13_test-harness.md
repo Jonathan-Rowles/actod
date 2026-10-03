@@ -55,6 +55,7 @@ send :: proc(h: ^Test_Harness($T), msg: $M, from: PID = EXTERNAL_PID)
 // Setup
 register_pid :: proc(h: ^Test_Harness($T), name: string, pid: PID)
 kill_pid :: proc(h: ^Test_Harness($T), pid: PID)      // make a registered PID dead, so sends to it fail
+add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: PID)  // declare a subscriber act.get_topic_subscribers lists
 add_child :: proc(h: ^Test_Harness($T), pid: PID)
 set_parent :: proc(h: ^Test_Harness($T), pid: PID)
 EXTERNAL_PID :: PID(999)                              // the default `from` for th.send
@@ -100,6 +101,8 @@ expect_subscribed_topic :: proc(h: ^Test_Harness($T), t: ^testing.T, topic: rawp
 `fire_timer` delivers a `Timer_Tick` for the given id. Get the id from `expect_timer`
 rather than assuming it, and prefer both to constructing an `act.Timer_Tick` by hand.
 
+The unit harness keeps no topic table of its own. `act.get_topic_subscribers` lists only the subscribers the test declared with `add_topic_sub`, in the order declared, and a call for a topic with none declared panics at the call's location, so the test fails instead of seeing no subscribers.
+
 ## Simulation Testing
 
 Test multiple actors together with a deterministic message queue. No real threads. Messages are queued and delivered step by step.
@@ -144,6 +147,8 @@ The sim models ask and reply in full, including timeout expiry on `sim.advance_t
 the dropping of a late reply, so a handler built on `act.ask` / `act.reply` /
 `act.replying_to` can be tested here. The unit harness does not.
 
+The sim keeps its own table of topic subscriptions, filled by `act.subscribe_topic` from an actor's `init` or handler and by `add_topic_sub`. `act.publish` routes through it, and `act.get_topic_subscribers` called from an actor reads it, so the real `Topic` struct is never written. An actor's subscriptions stay in the table after it is marked dead.
+
 Every sim capacity is a fixed array and overflowing one is an `assert`, not a soft
 failure: 32 actors, a 1024-message queue, 128 timers, 64 topics, 16 subscribers per
 topic, 16 fault rules.
@@ -165,6 +170,7 @@ send :: proc(s: ^Sim, actor_name: string, content: $T)              // external 
 send_to :: proc(s: ^Sim, pid: PID, content: $T)                     // external -> actor by PID
 send_from :: proc(s: ^Sim, to, from: PID, content: $T)              // actor -> actor
 publish :: proc(s: ^Sim, topic: rawptr, content: $T)
+add_topic_sub :: proc(s: ^Sim, topic: rawptr, pid: u64)       // subscribe a pid to a topic from outside any actor
 step :: proc(s: ^Sim) -> bool          // process one queued message, false if none
 run_until_idle :: proc(s: ^Sim)        // drain the queue
 

@@ -211,6 +211,51 @@ test_topic_publish_fans_out :: proc(t: ^testing.T) {
 	testing.expect_value(t, c3.count, 1)
 }
 
+Topic_Probe :: struct {
+	topic:  ^actod.Topic,
+	listed: [actod.MAX_TOPIC_SUBSCRIBERS]actod.PID,
+	count:  int,
+}
+
+topic_probe_behaviour := actod.Actor_Behaviour(Topic_Probe) {
+	handle_message = handle_topic_probe,
+}
+
+handle_topic_probe :: proc(s: ^Topic_Probe, from: actod.PID, msg: any) {
+	switch _ in msg {
+	case Increment:
+		s.count = actod.get_topic_subscribers(s.topic, s.listed[:])
+	}
+}
+
+@(test)
+test_topic_subscribers_are_the_sims_subscriptions :: proc(t: ^testing.T) {
+	topic: actod.Topic
+	other: actod.Topic
+
+	s := create()
+	defer destroy(&s)
+
+	c1 := spawn(&s, "c1", counter_state{name = "c1", topic = &topic}, counter_behaviour)
+	spawn(&s, "c2", counter_state{name = "c2", topic = &other}, counter_behaviour)
+	c3 := spawn(&s, "c3", counter_state{name = "c3", topic = &topic}, counter_behaviour)
+	spawn(&s, "probe", Topic_Probe{topic = &topic}, topic_probe_behaviour)
+
+	init_all(&s)
+	send(&s, "probe", Increment{})
+	run_until_idle(&s)
+
+	probe := get_state(&s, "probe", Topic_Probe)
+	testing.expectf(
+		t,
+		probe.count == 2 && probe.listed[0] == c1 && probe.listed[1] == c3,
+		"want c1 %v and c3 %v listed, got %v",
+		c1,
+		c3,
+		probe.listed[:probe.count],
+	)
+}
+
 @(test)
 test_timer_fires_on_advance :: proc(t: ^testing.T) {
 	s := create()

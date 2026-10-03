@@ -426,6 +426,33 @@ test_topic_double_remove :: proc(t: ^testing.T) {
 	)
 }
 
+@(test)
+test_get_topic_subscribers_skips_cleared_slots_and_stops_at_the_buffer :: proc(t: ^testing.T) {
+	topic: Topic
+	defer clear_topic(&topic)
+
+	pid1 := PID(0x0001_32_0001_000001)
+	pid3 := PID(0x0001_32_0001_000003)
+	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[0], u64(pid1), .Release)
+	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[2], u64(pid3), .Release)
+	sync.atomic_store_explicit(&topic.count, 3, .Release)
+
+	listed: [MAX_TOPIC_SUBSCRIBERS]PID
+	n := get_topic_subscribers(&topic, listed[:])
+	testing.expectf(
+		t,
+		n == 2 && listed[0] == pid1 && listed[1] == pid3,
+		"want %v and %v listed, got %v",
+		pid1,
+		pid3,
+		listed[:n],
+	)
+
+	one: [1]PID
+	testing.expect_value(t, get_topic_subscribers(&topic, one[:]), 1)
+	testing.expect_value(t, one[0], pid1)
+}
+
 TOPIC_TEST_THREADS :: 8
 
 @(test)

@@ -381,6 +381,10 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_topic_publish", test_proc = test_topic_publish},
 	{name = "test_topic_auto_cleanup", test_proc = test_topic_auto_cleanup},
 	{name = "test_topic_unsubscribe", test_proc = test_topic_unsubscribe},
+	{
+		name = "test_topic_subscribers_listed_before_and_after_termination",
+		test_proc = test_topic_subscribers_listed_before_and_after_termination,
+	},
 
 	// Timer tests
 	{name = "test_timer_repeating", test_proc = test_timer_repeating},

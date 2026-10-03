@@ -660,6 +660,33 @@ publish :: proc(topic: ^Topic, msg: $T, loc := #caller_location) {
 	}
 }
 
+get_topic_subscribers :: proc(topic: ^Topic, out: []PID, loc := #caller_location) -> int {
+	if topic == nil {
+		log.warn(
+			"get_topic_subscribers called with a nil topic, no subscribers were listed",
+			location = loc,
+		)
+		return 0
+	}
+
+	when ODIN_TEST {
+		if listed, ok := ti.intercept_get_topic_subscribers(topic, transmute([]u64)out, loc); ok {
+			return listed
+		}
+	}
+
+	n := sync.atomic_load_explicit(&topic.count, .Acquire)
+	listed := 0
+	for i in 0 ..< n {
+		if listed == len(out) do break
+		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
+		if pid == 0 do continue
+		out[listed] = pid
+		listed += 1
+	}
+	return listed
+}
+
 @(private)
 topic_remove_subscriber :: proc(topic: ^Topic, pid: PID) -> bool {
 	if topic == nil || pid == 0 do return false

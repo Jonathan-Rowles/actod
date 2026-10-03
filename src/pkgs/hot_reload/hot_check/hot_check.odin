@@ -112,6 +112,8 @@ exercise_node_api :: proc() {
 		_ = act.unsubscribe_topic(topic_sub)
 		_ = act.unsubscribe(topic_sub)
 	}
+	topic_subscribers: [act.MAX_TOPIC_SUBSCRIBERS]act.PID
+	_ = act.get_topic_subscribers(&probe_topic, topic_subscribers[:])
 
 	transport: act.Transport_Strategy
 	remote_node, _ := act.register_node("other-node", net.Endpoint{}, transport)

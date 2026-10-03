@@ -10,7 +10,7 @@ MAX_SIM_ACTORS :: 32
 MAX_SIM_QUEUE :: 1024
 MAX_SIM_TIMERS :: 128
 MAX_SIM_TOPICS :: 64
-MAX_SIM_TOPIC_SUBS :: 16
+MAX_SIM_TOPIC_SUBS :: ti.MAX_TOPIC_SUBSCRIBERS
 MAX_SIM_FAULTS :: 16
 #assert(MAX_SIM_FAULTS <= 16, "Sim_Message.faults_applied is a u16, one bit per fault rule")
 
@@ -89,11 +89,7 @@ Sim_Timer :: struct {
 	active:    bool,
 }
 
-Sim_Topic_Sub :: struct {
-	topic: rawptr,
-	pids:  [MAX_SIM_TOPIC_SUBS]u64,
-	count: int,
-}
+Sim_Topic_Sub :: ti.Topic_Subscribers
 
 Fault_Action :: enum {
 	Drop,
@@ -234,6 +230,7 @@ install_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.rename_capture = &s.rename_cap
 	s.intercept.subscribe_capture = &s.subscribe_cap
 	s.intercept.topic_subscribe_capture = &s.topic_sub_cap
+	s.intercept.topic_subscribers = s.topic_subs[:s.topic_sub_count]
 	s.intercept.children_pids = &s.children_pids
 	s.intercept.self_pid = actor.pid
 	s.intercept.self_name = actor.name

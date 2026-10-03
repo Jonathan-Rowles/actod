@@ -29,6 +29,7 @@ Ask_Timeout :: actod.Ask_Timeout
 Subscription :: actod.Subscription
 Topic :: actod.Topic
 Topic_Subscription :: actod.Topic_Subscription
+MAX_TOPIC_SUBSCRIBERS :: actod.MAX_TOPIC_SUBSCRIBERS
 
 // Supervision
 Supervision_Strategy :: actod.Supervision_Strategy
@@ -780,6 +781,14 @@ unsubscribe_topic :: proc(
 // Deliver a message to all current subscribers of the topic.
 publish :: proc(topic: ^Topic, msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
 	actod.publish(topic, msg, loc)
+}
+
+get_topic_subscribers :: proc(
+	topic: ^Topic,
+	out: []PID,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> int {
+	return actod.get_topic_subscribers(topic, out, loc)
 }
 
 // One name per direction, resolved by argument shape:

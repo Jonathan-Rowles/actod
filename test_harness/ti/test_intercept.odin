@@ -1,5 +1,6 @@
 package ti
 
+import "base:runtime"
 import "core:mem"
 _ :: mem
 import "core:time"
@@ -49,6 +50,8 @@ Test_Intercept :: struct {
 	rename_capture:          ^[dynamic]Captured_Rename,
 	subscribe_capture:       ^[dynamic]Captured_Subscribe,
 	topic_subscribe_capture: ^[dynamic]Captured_Topic_Subscribe,
+	topic_subscribers:       []Topic_Subscribers,
+	fail_undeclared_topic:   bool,
 	parent_pid:              u64,
 	children_pids:           ^[dynamic]u64,
 	next_spawn_pid:          u64,
@@ -107,6 +110,16 @@ Captured_Subscribe :: struct {
 
 Captured_Topic_Subscribe :: struct {
 	topic: rawptr,
+}
+
+MAX_TOPIC_SUBSCRIBERS :: 16
+
+UNDECLARED_TOPIC_MESSAGE :: "act.get_topic_subscribers was called under the unit harness for a topic with no declared subscribers; declare them with add_topic_sub before the call"
+
+Topic_Subscribers :: struct {
+	topic: rawptr,
+	pids:  [MAX_TOPIC_SUBSCRIBERS]u64,
+	count: int,
 }
 
 intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
@@ -270,6 +283,23 @@ intercept_subscribe_topic :: proc(topic: rawptr) -> bool {
 	if test_intercept == nil do return false
 	append(test_intercept.topic_subscribe_capture, Captured_Topic_Subscribe{topic = topic})
 	return true
+}
+
+intercept_get_topic_subscribers :: proc(
+	topic: rawptr,
+	out: []u64,
+	loc: runtime.Source_Code_Location,
+) -> (
+	int,
+	bool,
+) {
+	if test_intercept == nil do return 0, false
+	for &subscribers in test_intercept.topic_subscribers {
+		if subscribers.topic != topic do continue
+		return copy(out, subscribers.pids[:subscribers.count]), true
+	}
+	if test_intercept.fail_undeclared_topic do panic(UNDECLARED_TOPIC_MESSAGE, loc)
+	return 0, true
 }
 
 intercept_rename_actor :: proc(pid: u64, new_name: string) -> bool {

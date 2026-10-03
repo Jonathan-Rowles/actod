@@ -116,6 +116,7 @@ Hot_API :: struct {
 	subscribe_topic:           proc(topic: ^Topic, loc: runtime.Source_Code_Location) -> (Topic_Subscription, bool),
 	unsubscribe_topic:         proc(sub: Topic_Subscription, loc: runtime.Source_Code_Location) -> bool,
 	publish:                   proc(topic: ^Topic, msg: any, loc: runtime.Source_Code_Location),
+	get_topic_subscribers:     proc(topic: ^Topic, out: []PID, loc: runtime.Source_Code_Location) -> int,
 	register_node:             proc(
 		name: string,
 		address: net.Endpoint,

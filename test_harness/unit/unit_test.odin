@@ -31,6 +31,7 @@ Test_Send_Parent_Cmd :: struct {
 Test_Send_Children_Cmd :: struct {
 	value: int,
 }
+Test_List_Topic_Subscribers_Cmd :: struct {}
 
 @(init)
 init_harness_test_types :: proc "contextless" () {
@@ -46,15 +47,19 @@ init_harness_test_types :: proc "contextless" () {
 	actod.register_message_type(Test_Subscribe_Topic_Cmd)
 	actod.register_message_type(Test_Send_Parent_Cmd)
 	actod.register_message_type(Test_Send_Children_Cmd)
+	actod.register_message_type(Test_List_Topic_Subscribers_Cmd)
 }
 
 test_topic: actod.Topic
+other_topic: actod.Topic
 
 test_state :: struct {
-	init_called:      bool,
-	terminate_called: bool,
-	pings:            int,
-	last_value:       int,
+	init_called:              bool,
+	terminate_called:         bool,
+	pings:                    int,
+	last_value:               int,
+	topic_subscribers:        [actod.MAX_TOPIC_SUBSCRIBERS]actod.PID,
+	topic_subscribers_listed: int,
 }
 
 test_behaviour := actod.Actor_Behaviour(test_state) {
@@ -95,6 +100,8 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 		_ = actod.send_message_to_parent(Test_Pong{value = v.value})
 	case Test_Send_Children_Cmd:
 		_ = actod.send_message_to_children(Test_Pong{value = v.value})
+	case Test_List_Topic_Subscribers_Cmd:
+		s.topic_subscribers_listed = actod.get_topic_subscribers(&test_topic, s.topic_subscribers[:])
 	}
 }
 
@@ -329,6 +336,36 @@ test_expect_subscribed_topic :: proc(t: ^testing.T) {
 	send(&h, Test_Subscribe_Topic_Cmd{})
 	cap := expect_subscribed_topic(&h, t, &test_topic)
 	testing.expect(t, cap.topic == &test_topic, "topic should match")
+}
+
+@(test)
+test_topic_subscribers_are_the_declared_ones :: proc(t: ^testing.T) {
+	h := create(test_state{}, test_behaviour)
+	defer destroy(&h)
+	add_topic_sub(&h, &test_topic, actod.PID(50))
+	add_topic_sub(&h, &other_topic, actod.PID(70))
+	add_topic_sub(&h, &test_topic, actod.PID(60))
+	send(&h, Test_List_Topic_Subscribers_Cmd{})
+	s := get_state(&h)
+	testing.expectf(
+		t,
+		s.topic_subscribers_listed == 2 &&
+		s.topic_subscribers[0] == actod.PID(50) &&
+		s.topic_subscribers[1] == actod.PID(60),
+		"want 50 and 60 listed, got %v",
+		s.topic_subscribers[:s.topic_subscribers_listed],
+	)
+}
+
+@(test)
+test_topic_subscribers_of_an_undeclared_topic_fail_the_test :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	h := create(test_state{}, test_behaviour)
+	defer destroy(&h)
+	add_topic_sub(&h, &other_topic, actod.PID(70))
+	testing.expect_assert_message(t, ti.UNDECLARED_TOPIC_MESSAGE)
+	send(&h, Test_List_Topic_Subscribers_Cmd{})
+	testing.expect(t, false, "listing an undeclared topic returned instead of failing the test")
 }
 
 @(test)

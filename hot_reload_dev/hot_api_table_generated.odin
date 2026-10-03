@@ -52,6 +52,7 @@ g_hot_api := actod.Hot_API{
 	subscribe_topic        = actod.subscribe_topic,
 	unsubscribe_topic      = actod.unsubscribe_topic,
 	publish                = actod.publish_any,
+	get_topic_subscribers  = actod.get_topic_subscribers,
 	register_node          = actod.register_node,
 	get_node_info          = actod.get_node_info,
 	get_node_by_name       = actod.get_node_by_name,

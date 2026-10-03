@@ -46,12 +46,28 @@ act.publish(&shutdown_topic, Shutdown_Warning{countdown = 30})
 act.unsubscribe_topic(sub)
 ```
 
+## Listing Subscribers
+
+`get_topic_subscribers` fills a buffer you supply with the topic's subscriber PIDs and returns how many it wrote. It never allocates. A buffer of `act.MAX_TOPIC_SUBSCRIBERS` holds every subscriber a topic can have; a shorter one gets the first `len(out)`. Use it to send to each subscriber yourself and see each send's result, since `publish` does not report one.
+
+```odin
+subscribers: [act.MAX_TOPIC_SUBSCRIBERS]act.PID
+n := act.get_topic_subscribers(&sym.topic, subscribers[:])
+for pid in subscribers[:n] {
+    if err := act.send(pid, TICK{}); err != nil do log.errorf("tick to %v: %v", pid, err)
+}
+```
+
+It lists the table `publish` sends to, read the way `publish` reads it: no lock, `count` loaded once, then each slot below it, empty slots skipped. Unlike `publish`, it includes the caller when the caller is subscribed. With nothing subscribing, leaving or terminating on the topic during the call, and no earlier overlap having damaged the table, the result is each subscriber once, in the order `publish` sends to them. When removals overlap each other or the call, a listed PID may already have left, including one whose `wait_for_pids` has returned, and a subscriber that stayed may be missed or listed twice; two removals that overlapped can leave the table holding a PID that left and missing one that stayed after both have returned. When a subscribe overlapped a removal earlier, the table itself can be short of the actors holding a subscription, and the call reports the table. On a single-worker sim node none of this arises.
+
 ## API
 
 ```odin
 subscribe_topic :: proc(topic: ^Topic) -> (Topic_Subscription, bool)
 unsubscribe_topic :: proc(sub: Topic_Subscription) -> bool
 publish :: proc(topic: ^Topic, msg: $T)
+get_topic_subscribers :: proc(topic: ^Topic, out: []PID) -> int
+MAX_TOPIC_SUBSCRIBERS :: 64
 ```
 
 ## Compared to Type-Based Pub/Sub

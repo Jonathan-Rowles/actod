@@ -2,6 +2,7 @@ package integration
 
 import "../actod"
 import "core:fmt"
+import "core:slice"
 import "core:sync"
 import "core:testing"
 import "core:time"
@@ -120,6 +121,63 @@ test_topic_publish :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(pub_pid)
 	actod.wait_for_pids(sub_pids[:])
 	actod.wait_for_pids([]actod.PID{pub_pid})
+}
+
+lists_exactly :: proc(listed: []actod.PID, want: []actod.PID) -> bool {
+	if len(listed) != len(want) do return false
+	for pid in want {
+		if !slice.contains(listed, pid) do return false
+	}
+	return true
+}
+
+test_topic_subscribers_listed_before_and_after_termination :: proc(t: ^testing.T) {
+	shared_topic = {}
+
+	received_count: i32 = 0
+	SUBSCRIBER_COUNT :: 3
+
+	sub_pids: [SUBSCRIBER_COUNT]actod.PID
+	for i in 0 ..< SUBSCRIBER_COUNT {
+		pid, ok := actod.spawn(
+			fmt.tprintf("topic_listed_%d", i),
+			Topic_Sub_Data{received = &received_count},
+			Topic_Sub_Behaviour,
+		)
+		expect(t, ok, "Should spawn subscriber")
+		sub_pids[i] = pid
+	}
+
+	wait_for_topic_count(&shared_topic, SUBSCRIBER_COUNT)
+
+	listed: [actod.MAX_TOPIC_SUBSCRIBERS]actod.PID
+	n := actod.get_topic_subscribers(&shared_topic, listed[:])
+	expectf(
+		t,
+		lists_exactly(listed[:n], sub_pids[:]),
+		"Should list every subscriber %v, got %v",
+		sub_pids,
+		listed[:n],
+	)
+
+	terminated := sub_pids[1]
+	_ = actod.terminate_actor(terminated)
+	actod.wait_for_pids([]actod.PID{terminated})
+
+	survivors := []actod.PID{sub_pids[0], sub_pids[2]}
+	n = actod.get_topic_subscribers(&shared_topic, listed[:])
+	expectf(
+		t,
+		lists_exactly(listed[:n], survivors),
+		"Should list only the survivors %v after %v terminated, got %v",
+		survivors,
+		terminated,
+		listed[:n],
+	)
+
+	_ = actod.terminate_actor(sub_pids[0])
+	_ = actod.terminate_actor(sub_pids[2])
+	actod.wait_for_pids(survivors)
 }
 
 test_topic_auto_cleanup :: proc(t: ^testing.T) {

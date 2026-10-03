@@ -22,6 +22,7 @@ Test_Harness :: struct($T: typeid) {
 	rename_capture:          [dynamic]ti.Captured_Rename,
 	subscribe_capture:       [dynamic]ti.Captured_Subscribe,
 	topic_subscribe_capture: [dynamic]ti.Captured_Topic_Subscribe,
+	topic_subscribers:       [dynamic]ti.Topic_Subscribers,
 	children_pids:           [dynamic]u64,
 	dead_pids:               map[u64]bool,
 }
@@ -57,6 +58,7 @@ destroy :: proc(h: ^Test_Harness($T)) {
 	delete(h.rename_capture)
 	delete(h.subscribe_capture)
 	delete(h.topic_subscribe_capture)
+	delete(h.topic_subscribers)
 	delete(h.children_pids)
 	delete(h.dead_pids)
 	free(h.data)
@@ -73,6 +75,8 @@ install_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.rename_capture = &h.rename_capture
 	h.intercept.subscribe_capture = &h.subscribe_capture
 	h.intercept.topic_subscribe_capture = &h.topic_subscribe_capture
+	h.intercept.topic_subscribers = h.topic_subscribers[:]
+	h.intercept.fail_undeclared_topic = true
 	h.intercept.children_pids = &h.children_pids
 	h.intercept.dead_pids = &h.dead_pids
 	ti.test_intercept = &h.intercept
@@ -116,6 +120,22 @@ kill_pid :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 
 get_state :: proc(h: ^Test_Harness($T)) -> ^T {
 	return h.data
+}
+
+add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: actod.PID) {
+	for &subscribers in h.topic_subscribers {
+		if subscribers.topic != topic do continue
+		assert(subscribers.count < ti.MAX_TOPIC_SUBSCRIBERS, "unit: too many topic subscribers")
+		subscribers.pids[subscribers.count] = u64(pid)
+		subscribers.count += 1
+		return
+	}
+	subscribers := ti.Topic_Subscribers {
+		topic = topic,
+		count = 1,
+	}
+	subscribers.pids[0] = u64(pid)
+	append(&h.topic_subscribers, subscribers)
 }
 
 add_child :: proc(h: ^Test_Harness($T), pid: actod.PID) {

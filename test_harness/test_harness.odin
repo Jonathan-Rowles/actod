@@ -64,6 +64,10 @@ kill_pid :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 	unit.kill_pid(h, pid)
 }
 
+add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: actod.PID) {
+	unit.add_topic_sub(h, topic, pid)
+}
+
 // Add a child PID for send_message_to_children.
 add_child :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 	unit.add_child(h, pid)

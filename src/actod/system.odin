@@ -203,6 +203,7 @@ Node_State :: struct {
 	timer_registry:           Timer_Registry,
 	next_timer_id:            u32,
 	timer_pid:                PID,
+	sim_now:                  time.Time,
 	observer_pid:             PID,
 	hot_reload_pid:           PID,
 	logger:                   runtime.Logger,
@@ -1022,6 +1023,7 @@ reset_node_state :: proc() {
 	sync.atomic_store(&NODE.awaiting_signal, false)
 	NODE.signal_wake = {}
 	NODE.signal_relay_wake = {}
+	NODE.sim_now = {}
 	reset_timer_registry()
 
 	if NODE.node_name_to_id != nil {

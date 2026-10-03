@@ -1,6 +1,8 @@
 package actod
 
 import "base:builtin"
+import "core:log"
+import "core:time"
 
 Sim_Trace_Kind :: enum u8 {
 	Node_Step,
@@ -49,6 +51,31 @@ sim_rng: u64
 
 sim_seed :: proc(seed: u64) {
 	sim_rng = seed
+}
+
+sim_set_now :: proc(t: time.Time) -> bool {
+	context.logger = diagnostic_logger(context.logger)
+	if NODE.sim_now != {} && time.diff(NODE.sim_now, t) < 0 {
+		log.errorf(
+			"sim_set_now refused: the node clock cannot move backward, from %v to %v, it stays at %v",
+			NODE.sim_now,
+			t,
+			NODE.sim_now,
+		)
+		return false
+	}
+	if NODE.sim_now == {} {
+		if earliest_due, armed := sim_next_timer_due(); armed {
+			log.errorf(
+				"sim_set_now refused: the first set of the node clock, to %v, came after a timer was armed on the wall clock (the earliest is due at %v), set the clock before node_init or before any actor sets a timer; the clock stays unset",
+				t,
+				earliest_due,
+			)
+			return false
+		}
+	}
+	NODE.sim_now = t
+	return true
 }
 
 lcg_next :: proc(state: ^u64) -> u64 {

@@ -41,7 +41,7 @@ set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error)
 // Cancel a running timer.
 cancel_timer :: proc(id: u32) -> Send_Error
 
-// Current time (respects virtual time in test harness).
+// Current time (respects virtual time in the test harness and a sim-mode node's clock).
 now :: proc() -> time.Time
 ```
 

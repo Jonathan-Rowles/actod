@@ -66,6 +66,26 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_node_clock_steps_to_each_due_timer",
+		test_proc = test_sim_node_clock_steps_to_each_due_timer,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_node_clock_refuses_a_backward_set",
+		test_proc = test_sim_node_clock_refuses_a_backward_set,
+		sim_mode = true,
+		worker_count = 2,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_sim_node_clock_refuses_a_first_set_after_a_timer_is_armed",
+		test_proc = test_sim_node_clock_refuses_a_first_set_after_a_timer_is_armed,
+		sim_mode = true,
+		worker_count = 2,
+		expects_error_logs = true,
+	},
+	{
 		name = "test_sim_seeded_determinism",
 		test_proc = test_sim_seeded_determinism,
 		sim_mode = true,

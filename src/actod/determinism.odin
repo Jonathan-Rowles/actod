@@ -11,11 +11,16 @@ actod_rand_bytes :: proc(buf: []byte) {
 
 mono_now :: proc() -> time.Tick {
 	when ODIN_TEST {if t, ok := ti.intercept_tick_now(); ok do return t}
+	if NODE.config.sim_mode && NODE.sim_now != {} do return time.Tick{_nsec = time.to_unix_nanoseconds(NODE.sim_now)}
 	return time.tick_now()
 }
 
 runtime_sleep :: proc(d: time.Duration) {
 	when ODIN_TEST {if ti.intercept_sleep(d) do return}
+	if NODE.config.sim_mode && NODE.sim_now != {} {
+		NODE.sim_now = time.time_add(NODE.sim_now, d)
+		return
+	}
 	time.sleep(d)
 }
 

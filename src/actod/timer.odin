@@ -381,7 +381,16 @@ set_timer :: proc(
 
 now :: proc() -> time.Time {
 	when ODIN_TEST {if t, ok := ti.intercept_now(); ok do return t}
+	if NODE.config.sim_mode && NODE.sim_now != {} do return NODE.sim_now
 	return time.now()
+}
+
+sim_next_timer_due :: proc() -> (due: time.Time, ok: bool) {
+	reg := &NODE.timer_registry
+	sync.mutex_lock(&reg.lock)
+	defer sync.mutex_unlock(&reg.lock)
+	if pq.len(reg.heap) == 0 do return {}, false
+	return pq.peek(reg.heap).next_fire, true
 }
 
 cancel_timer :: proc(id: u32, loc := #caller_location) -> Send_Error {

@@ -65,6 +65,8 @@ Hot_API :: struct {
 	sim_pump:                  proc() -> bool,
 	sim_seed:                  proc(seed: u64),
 	sim_run_until_idle:        proc(max_steps: int) -> int,
+	sim_set_now:               proc(t: time.Time) -> bool,
+	sim_next_timer_due:        proc() -> (time.Time, bool),
 	get_local_node_pid:        proc() -> PID,
 	get_local_node_name:       proc() -> string,
 	register_spawn_func:       proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location) -> bool,

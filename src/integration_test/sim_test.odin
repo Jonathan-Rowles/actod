@@ -133,6 +133,121 @@ test_sim_virtual_timer :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
+g_sim_clock_ticks: [dynamic]time.Time
+
+@(private = "file")
+g_sim_clock_slow_ticks: [dynamic]time.Time
+
+SIM_CLOCK_PERIOD :: 2 * time.Second
+SIM_CLOCK_SLOW_PERIOD :: 3 * time.Second
+
+Sim_Clock_Probe_Data :: struct {
+	timer_id:      u32,
+	slow_timer_id: u32,
+}
+
+Sim_Clock_Probe_Behaviour :: actod.Actor_Behaviour(Sim_Clock_Probe_Data) {
+	init = proc(data: ^Sim_Clock_Probe_Data) {
+		data.slow_timer_id, _ = actod.set_timer(SIM_CLOCK_SLOW_PERIOD, true)
+		data.timer_id, _ = actod.set_timer(SIM_CLOCK_PERIOD, true)
+	},
+	handle_message = proc(data: ^Sim_Clock_Probe_Data, from: actod.PID, msg: any) {
+		v, ok := msg.(actod.Timer_Tick)
+		if !ok do return
+		if v.id == data.timer_id do append(&g_sim_clock_ticks, actod.now())
+		if v.id == data.slow_timer_id do append(&g_sim_clock_slow_ticks, actod.now())
+	},
+}
+
+@(private = "file")
+count_ticks_off_their_instant :: proc(
+	instants: []time.Time,
+	start: time.Time,
+	period: time.Duration,
+) -> int {
+	off := 0
+	for instant, i in instants {
+		if instant != time.time_add(start, time.Duration(i + 1) * period) do off += 1
+	}
+	return off
+}
+
+test_sim_node_clock_steps_to_each_due_timer :: proc(t: ^testing.T) {
+	clear(&g_sim_clock_ticks)
+	clear(&g_sim_clock_slow_ticks)
+	defer delete(g_sim_clock_ticks)
+	defer delete(g_sim_clock_slow_ticks)
+
+	_, timer_set_after_node_init := actod.sim_next_timer_due()
+	expect(t, !timer_set_after_node_init, "no timer is set straight after node_init")
+
+	start := time.unix(1_700_000_000, 0)
+	expect(t, actod.sim_set_now(start), "the first set after node_init with no timer armed is accepted")
+	expect_value(t, actod.now(), start)
+
+	_, ok := actod.spawn("sim_clock_probe", Sim_Clock_Probe_Data{}, Sim_Clock_Probe_Behaviour)
+	expect(t, ok, "probe spawn failed")
+	_ = actod.sim_run_until_idle()
+
+	until := time.time_add(start, time.Hour)
+	refused_steps := 0
+	for {
+		due, has_timer := actod.sim_next_timer_due()
+		if !has_timer || time.diff(until, due) > 0 do break
+		if !actod.sim_set_now(due) do refused_steps += 1
+		_ = actod.sim_run_until_idle()
+	}
+	expect_value(t, refused_steps, 0)
+
+	expect_value(t, len(g_sim_clock_ticks), int(time.Hour / SIM_CLOCK_PERIOD))
+	expect_value(t, count_ticks_off_their_instant(g_sim_clock_ticks[:], start, SIM_CLOCK_PERIOD), 0)
+	expect_value(t, len(g_sim_clock_slow_ticks), int(time.Hour / SIM_CLOCK_SLOW_PERIOD))
+	expect_value(
+		t,
+		count_ticks_off_their_instant(g_sim_clock_slow_ticks[:], start, SIM_CLOCK_SLOW_PERIOD),
+		0,
+	)
+
+	tick_before_sleep := actod.mono_now()
+	actod.runtime_sleep(5 * time.Second)
+	expect_value(t, actod.now(), time.time_add(until, 5 * time.Second))
+	expect_value(t, time.tick_diff(tick_before_sleep, actod.mono_now()), 5 * time.Second)
+}
+
+test_sim_node_clock_refuses_a_backward_set :: proc(t: ^testing.T) {
+	start := time.unix(1_700_000_000, 0)
+	later := time.time_add(start, 10 * time.Second)
+	expect(t, actod.sim_set_now(start), "the first set with no timer armed is accepted")
+	expect(t, actod.sim_set_now(later), "a forward set is accepted")
+
+	expect(t, !actod.sim_set_now(start), "a backward set is refused")
+	expect_value(t, actod.now(), later)
+	expect(t, !actod.sim_set_now({}), "a set to the zero instant on a set clock is refused")
+	expect_value(t, actod.now(), later)
+
+	expect(t, actod.sim_set_now(later), "a set equal to the current clock is accepted")
+	expect_value(t, actod.now(), later)
+}
+
+test_sim_node_clock_refuses_a_first_set_after_a_timer_is_armed :: proc(t: ^testing.T) {
+	_, ok := actod.spawn("sim_clock_probe", Sim_Clock_Probe_Data{}, Sim_Clock_Probe_Behaviour)
+	expect(t, ok, "probe spawn failed")
+	_ = actod.sim_run_until_idle()
+
+	due_before, armed := actod.sim_next_timer_due()
+	expect(t, armed, "the probe armed its timers on the wall clock")
+
+	start := time.unix(1_700_000_000, 0)
+	expect(t, !actod.sim_set_now(start), "the first set after a timer is armed is refused")
+	expect(t, actod.now() != start, "the refused set left the clock unset")
+	expect(t, abs(time.diff(time.now(), actod.now())) < time.Second, "an unset clock reads the wall")
+
+	due_after, still_armed := actod.sim_next_timer_due()
+	expect(t, still_armed, "the armed timers are untouched")
+	expect_value(t, due_after, due_before)
+}
+
+@(private = "file")
 g_sim_trace: [dynamic]int
 
 Sim_Chain_Data :: struct {

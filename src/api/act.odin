@@ -232,6 +232,16 @@ sim_run_until_idle :: proc(max_steps: int = 1_000_000) -> int {
 	return actod.sim_run_until_idle(max_steps)
 }
 
+@(hot = "skip")
+sim_set_now :: proc(t: time.Time) -> bool {
+	return actod.sim_set_now(t)
+}
+
+@(hot = "skip")
+sim_next_timer_due :: proc() -> (due: time.Time, ok: bool) {
+	return actod.sim_next_timer_due()
+}
+
 get_local_node_pid :: proc() -> PID {
 	return actod.get_local_node_pid()
 }
@@ -576,7 +586,7 @@ yield :: proc(loc: runtime.Source_Code_Location = #caller_location) {
 	actod.yield(loc)
 }
 
-// Returns real time in production, virtual time in tests.
+// Returns real time, or virtual time in tests and on a sim-mode node whose clock sim_set_now has set.
 now :: proc() -> time.Time {
 	return actod.now()
 }

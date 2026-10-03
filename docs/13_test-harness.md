@@ -262,7 +262,7 @@ th.advance_time(&h, 5 * time.Second)
 sim.advance_time(&s, 5 * time.Second)
 ```
 
-**Important:** Actor code that needs the current time must use `act.now()` instead of `time.now()`. In production, `act.now()` returns real time. In test contexts, it returns the virtual clock, making your tests deterministic and independent of wall-clock timing.
+**Important:** Actor code that needs the current time must use `act.now()` instead of `time.now()`. In production, `act.now()` returns real time. In test contexts, and on a sim-mode node whose clock has been set (see below), it returns the virtual clock, making your tests deterministic and independent of wall-clock timing.
 
 ```odin
 handle_message = proc(d: ^My_Data, from: act.PID, msg: any) {
@@ -291,6 +291,39 @@ act.sim_run_until_idle()   // run every ready actor until nothing is runnable
 
 Because everything happens on one thread, execution is deterministic. `act.sim_seed(n)` makes the scheduler pick the next runnable actor from a seeded RNG instead of round-robin, so one scenario can be replayed under many different interleavings, and any interleaving can be replayed exactly by reusing its seed.
 
+### The node clock
+
+A sim-mode node owns a virtual clock, in any build, test or not. Once `act.sim_set_now(t)` has set it, `act.now()` returns it, the runtime's monotonic reads follow it, and a runtime sleep advances it instead of sleeping. Apart from that sleep, only the driver moves it. `act.sim_next_timer_due()` returns the instant the earliest timer is due, and `false` when no timer is set, so a driver can step to every due instant in turn:
+
+```odin
+start := time.unix(1_790_000_000, 0)
+if !act.sim_set_now(start) do os.exit(1)
+act.node_init("replay", act.make_node_config(sim_mode = true, worker_count = 1))
+// spawn actors, act.sim_run_until_idle()
+
+until := time.time_add(start, time.Hour)
+for {
+    due, ok := act.sim_next_timer_due()
+    if !ok || time.diff(until, due) > 0 do break
+    if time.diff(act.now(), due) > 0 && !act.sim_set_now(due) do os.exit(1)
+    act.sim_run_until_idle()
+}
+```
+
+A timer is due at `now() + interval` as of when the timer actor handles it, so the clock has to be set before any timer is armed. `act.sim_set_now` returns `false`, logs an error naming the misuse and the instants involved, and leaves the clock as it was, in two cases:
+
+- The first set (the clock is unset) while a timer is armed: a timer armed on the wall clock would be due hours away from the virtual one. Nothing is re-based.
+- A set to an instant before the clock: the clock never moves backward. A set equal to the clock is accepted.
+
+Every other set is accepted and returns `true`. When the clock may first be set:
+
+- Before `node_init`: always accepted, and the documented order.
+- Straight after `node_init`, before the first `act.sim_pump` or `act.sim_run_until_idle` and before spawning anything: accepted. No runtime timer is armed at that point, with or without the observer.
+- After the node has been pumped: accepted only while no timer is armed. With the default config the runtime arms none of its own; with `enable_observer` and a non-zero `observer_interval`, the first pump arms the observer's collection timer, so after that the first set is refused.
+- After `node_shutdown`, which clears the clock and every timer: accepted, as a first set.
+
+Step to each due instant rather than jumping past several, because a repeating timer whose instant was overrun fires once and is re-phased from the new now. A runtime sleep (a send that stalls on a full mailbox) can carry the clock past the next due instant; that timer is already due and the next `act.sim_run_until_idle` fires it, which is why the loop sets the clock only when the due instant is ahead of it. Until the clock is set (and again after `node_shutdown`) the node reads the wall clock. Under `ODIN_TEST` the test intercept's clock, when installed, still takes precedence.
+
 Under `sim_mode`, real networking runs over an in-process byte pipe instead of the kernel: the wire format, handshake, authentication, partial-frame reassembly, and connection lifecycle are the production code paths, but delivery order and timing are under test control, and the virtual clock (`act.now()`) compresses timer races (heartbeat timeouts vs reconnect backoff vs restart windows) into microseconds.
 
 ### What DST does not cover
@@ -309,7 +342,7 @@ make vopr VOPR_COUNT=10000 # deep local sweep before merging risky changes
 
 A failure prints the seed and a replay one-liner; a replay under the same binary and profile is deterministic (cross-binary replays are not: any change to the op generator re-maps what every seed decodes to). Determinism is proven within a process by trace-equality tests; cross-process identity additionally requires the scenario to be the first mesh in its process, which the seed-replay path guarantees. `ACTOD_VOPR_VERBOSE=1` prints the generated op script with full logging. Failing seeds get committed to `VOPR_REGRESSION_SEEDS` so they keep running in `make test`, but because generator changes re-map seeds, every VOPR-found fix is durably pinned by a dedicated deterministic test in `sim_regression_test.odin` as well. CI runs a 500-seed sweep on every push to `main` and on every pull request.
 
-These APIs (`sim_mesh_create`, `frame_tap_add`, the trace hook) are package-internal for now; the facade exposes `sim_mode`, `sim_pump`, `sim_seed`, and `sim_run_until_idle`. A user-facing mesh API (embedded multi-node tests in your own suite) is planned.
+These APIs (`sim_mesh_create`, `frame_tap_add`, the trace hook) are package-internal for now; the facade exposes `sim_mode`, `sim_pump`, `sim_seed`, `sim_run_until_idle`, `sim_set_now`, and `sim_next_timer_due`. A user-facing mesh API (embedded multi-node tests in your own suite) is planned.
 
 ---
 [< Actor Registry](12_actor-registry.md) | [Delivery Semantics >](14_delivery-semantics.md)

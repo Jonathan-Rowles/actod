@@ -212,7 +212,7 @@ act.get_self_name() -> string
 act.get_parent_pid() -> PID
 act.self_terminate(reason)
 act.yield()  // cooperatively yield for pooled actors
-act.now()    // current time (virtual in tests, real in production)
+act.now()    // current time (virtual in tests and on a sim-mode node with a set clock, real otherwise)
 ```
 
 ### Renaming

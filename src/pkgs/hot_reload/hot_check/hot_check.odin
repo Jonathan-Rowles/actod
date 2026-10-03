@@ -134,6 +134,8 @@ exercise_node_api :: proc() {
 	act.sim_seed(0)
 	_ = act.sim_pump()
 	_ = act.sim_run_until_idle()
+	_ = act.sim_set_now(act.now())
+	_, _ = act.sim_next_timer_due()
 
 	act.await_signal()
 	act.node_shutdown()

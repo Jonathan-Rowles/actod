@@ -351,6 +351,8 @@ Hot_API :: struct {
 	sim_pump:                  proc() -> bool,
 	sim_seed:                  proc(seed: u64),
 	sim_run_until_idle:        proc(max_steps: int) -> int,
+	sim_set_now:               proc(t: time.Time) -> bool,
+	sim_next_timer_due:        proc() -> (time.Time, bool),
 	get_local_node_pid:        proc() -> PID,
 	get_local_node_name:       proc() -> string,
 	register_spawn_func:       proc(name: string, func: SPAWN, loc: runtime.Source_Code_Location) -> bool,
@@ -481,6 +483,14 @@ sim_seed :: proc(seed: u64) {
 
 sim_run_until_idle :: proc(max_steps: int = 1_000_000) -> int {
 	return hot_api.sim_run_until_idle(max_steps)
+}
+
+sim_set_now :: proc(t: time.Time) -> bool {
+	return hot_api.sim_set_now(t)
+}
+
+sim_next_timer_due :: proc() -> (due: time.Time, ok: bool) {
+	return hot_api.sim_next_timer_due()
 }
 
 get_local_node_pid :: proc() -> PID {

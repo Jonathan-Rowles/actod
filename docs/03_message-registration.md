@@ -61,7 +61,7 @@ The receive path validates that the payload actually contains the variable data 
 
 ## Cross-Node Messages
 
-The wire protocol identifies message types by a hash of their package-qualified name (e.g. `shared.Chat_Message`). Both the sending and receiving node must have the same type registered, same name, same package, same struct layout. This is a deliberate constraint: message compatibility is a compile-time concern, not a runtime negotiation. There is no schema evolution or version handshake. If the types do not match, delivery fails with a warning log.
+The wire protocol identifies message types by a hash of their package-qualified name (e.g. `shared.Chat_Message`). Both the sending and receiving node must have the same type registered, same name, same package, same struct layout. Two packages may each declare a type of the same name, such as `a.Refresh` and `b.Refresh`; they register as two types. This is a deliberate constraint: message compatibility is a compile-time concern, not a runtime negotiation. There is no schema evolution or version handshake. If the types do not match, delivery fails with a warning log.
 
 In practice, shared message types should live in a common package that all nodes import:
 

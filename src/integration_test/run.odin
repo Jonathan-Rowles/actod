@@ -42,6 +42,7 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_pooled_actor_with_on_idle_fails_to_spawn,
 		expects_error_logs = true,
 	},
+	{name = "test_same_type_name_in_two_packages", test_proc = test_same_type_name_in_two_packages},
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
 	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
 	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},
@@ -619,6 +620,10 @@ ALL_TESTS :: []Test_Entry {
 	// Hot reload tests (Phase 1a)
 	{name = "test_hot_reload_basic", test_proc = test_hot_reload_basic},
 	{name = "test_rollback", test_proc = test_rollback},
+	{
+		name = "test_hot_reload_delivers_package_qualified_type",
+		test_proc = test_hot_reload_delivers_package_qualified_type,
+	},
 
 	// Hot reload tests (Phase 1b, file watcher + dev workflow)
 	{name = "test_file_watcher_detection", test_proc = test_file_watcher_detection},

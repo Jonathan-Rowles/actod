@@ -3,6 +3,7 @@ package integration
 import "../../hot_reload_dev"
 import "../actod"
 import "../pkgs/hot_reload"
+import hot_reload_shared "../pkgs/hot_reload/mocks/shared"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -390,4 +391,63 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 	count_after, ok2 := hr_read_count(pid)
 	expect(t, ok2, "should read count after")
 	expect_value(t, count_after, count_before + 10)
+}
+
+@(init)
+register_hot_reload_messages :: proc "contextless" () {
+	actod.register_message_type(hot_reload_shared.Bump)
+}
+
+test_hot_reload_delivers_package_qualified_type :: proc(t: ^testing.T) {
+	info, registered := actod.get_type_info_ptr(hot_reload_shared.Bump)
+	expect(t, registered, "hot_reload_shared.Bump is registered")
+	if !registered do return
+	expect_value(t, info.name, "hot_reload_shared.Bump")
+
+	pid, spawned := actod.spawn("hr-named", HR_Counter_State{}, HR_V1_Behaviour)
+	expect(t, spawned, "Failed to spawn counter actor")
+	if !spawned do return
+
+	mod: ^hot_reload.Hot_Module
+	defer {
+		_ = actod.terminate_actor(pid)
+		actod.wait_for_pids([]actod.PID{pid})
+		if mod != nil {
+			delete_key(&hot_reload_dev.hot_module_table, 200)
+			hot_reload.unload_module(mod)
+		}
+	}
+
+	so_path, tmp, built := hr_build_test_module("counter_named")
+	defer os.remove_all(tmp)
+	expect(t, built, "Failed to build counter_named.so")
+	if !built do return
+
+	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
+	load_err: hot_reload.Load_Error
+	mod, load_err = hot_reload.load_module(
+		so_path,
+		specs,
+		size_of(HR_Counter_State),
+		"Counter_State",
+		generation = 200,
+	)
+	expect_value(t, load_err.kind, hot_reload.Load_Error_Kind.None)
+	if mod == nil do return
+	hot_reload_dev.hot_module_table[200] = mod
+
+	reload_err := hot_reload_dev.send_reload_behaviour(pid, 200)
+	expect(t, reload_err == .OK, "Failed to send reload")
+
+	time.sleep(20 * time.Millisecond)
+
+	for _ in 0 ..< 3 {
+		err := actod.send_message(pid, hot_reload_shared.Bump{amount = 7, label = hot_reload_shared.BUMP_LABEL})
+		expect(t, err == .OK, "Failed to send Bump after reload")
+	}
+
+	expect(t, hr_wait_for_count(pid, 21), "the reloaded handler should match hot_reload_shared.Bump three times")
+	count, ok := hr_read_count(pid)
+	expect(t, ok, "should read count")
+	expect_value(t, count, i32(21))
 }

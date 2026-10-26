@@ -334,6 +334,7 @@ largest_registered_message :: proc() -> (name: string, page_bytes: int) {
 
 get_type_name :: proc(ti: ^runtime.Type_Info, allocator := context.allocator) -> string {
 	if ti == nil do return ""
+	if named, ok := ti.variant.(runtime.Type_Info_Named); ok && named.pkg != "" do return fmt.aprintf("%s.%v", named.pkg, ti.id, allocator = allocator)
 	return fmt.aprintf("%v", ti.id, allocator = allocator)
 }
 

@@ -37,6 +37,11 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_on_wake_interrupts_foreign_wait",
 		test_proc = test_on_wake_interrupts_foreign_wait,
 	},
+	{
+		name = "test_pooled_actor_with_on_idle_fails_to_spawn",
+		test_proc = test_pooled_actor_with_on_idle_fails_to_spawn,
+		expects_error_logs = true,
+	},
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
 	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
 	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},

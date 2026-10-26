@@ -1729,6 +1729,28 @@ wake_test_behaviour := actod.Actor_Behaviour(Wake_Test_Actor) {
 	on_wake        = wake_test_wake,
 }
 
+test_pooled_actor_with_on_idle_fails_to_spawn :: proc(t: ^testing.T) {
+	reset_test_state()
+
+	handled, timeouts: u64
+	pid, ok := actod.spawn(
+		"pooled-wake-test",
+		Wake_Test_Actor{handled = &handled, timeouts = &timeouts},
+		wake_test_behaviour,
+	)
+	expect(t, !ok, "a pooled actor with on_idle and on_wake must not spawn")
+	expect(t, pid == 0, "a refused spawn returns no pid")
+	_, registered := actod.get_actor_pid("pooled-wake-test")
+	expect(t, !registered, "a refused spawn leaves nothing registered")
+
+	only_wake := actod.Actor_Behaviour(Wake_Test_Actor) {
+		handle_message = wake_test_handle,
+		on_wake        = wake_test_wake,
+	}
+	_, ok = actod.spawn("pooled-wake-only", Wake_Test_Actor{}, only_wake)
+	expect(t, !ok, "a pooled actor with on_wake alone must not spawn")
+}
+
 test_on_wake_interrupts_foreign_wait :: proc(t: ^testing.T) {
 	reset_test_state()
 

@@ -278,6 +278,17 @@ spawn_erased :: proc(
 		)
 	}
 
+	pooled := !opts.use_dedicated_os_thread && !spawning_blocking_child
+	if pooled && (behaviour.on_idle != nil || behaviour.on_wake != nil) {
+		log.errorf(
+			"spawn('%s') failed: on_idle and on_wake are only called on a dedicated OS thread, so a pooled actor cannot have them. Set use_dedicated_os_thread = true in make_actor_config()%s",
+			name,
+			config_origin(opts.loc),
+			location = loc,
+		)
+		return 0, false
+	}
+
 	actor, pid, allocated := spawn_alloc_actor(
 		name,
 		state,
@@ -317,15 +328,6 @@ spawn_erased :: proc(
 		sync.atomic_store(&NODE.blocking_actor, actor)
 		actor_loop(actor)
 		return actor.pid, true
-	}
-
-	if !opts.use_dedicated_os_thread && (behaviour.on_idle != nil || behaviour.on_wake != nil) {
-		log.errorf(
-			"spawn('%s'): on_idle and on_wake are only called on a dedicated OS thread, so this pooled actor never calls them. Set use_dedicated_os_thread = true in make_actor_config()%s",
-			name,
-			config_origin(opts.loc),
-			location = loc,
-		)
 	}
 
 	needs_first_run_wait := behaviour.init != nil || opts.children != nil

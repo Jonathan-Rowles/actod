@@ -2,6 +2,7 @@ package sim
 
 import "../../src/actod"
 import "base:runtime"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -139,6 +140,49 @@ init_test_types :: proc "contextless" () {
 	actod.register_message_type(Increment)
 	actod.register_message_type(Forward)
 	actod.register_message_type(Spawn_Child_Cmd)
+	actod.register_message_type(Note)
+}
+
+Note :: struct {
+	text: string,
+}
+
+NOTE_TEXT :: "note from temp memory"
+
+note_publisher_behaviour := actod.Actor_Behaviour(counter_state) {
+	handle_message = handle_note_publisher,
+}
+
+handle_note_publisher :: proc(s: ^counter_state, from: actod.PID, msg: any) {
+	switch _ in msg {
+	case Increment:
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+		actod.publish(s.topic, Note{text = strings.clone(NOTE_TEXT, context.temp_allocator)})
+	}
+}
+
+note_reader_state :: struct {
+	topic:  ^actod.Topic,
+	intact: bool,
+	text:   rawptr,
+}
+
+note_reader_behaviour := actod.Actor_Behaviour(note_reader_state) {
+	handle_message = handle_note_reader,
+	init           = init_note_reader,
+}
+
+init_note_reader :: proc(s: ^note_reader_state) {
+	_, _ = actod.subscribe_topic(s.topic)
+}
+
+handle_note_reader :: proc(s: ^note_reader_state, from: actod.PID, msg: any) {
+	switch v in msg {
+	case Note:
+		_ = strings.repeat("x", 256, context.temp_allocator)
+		s.intact = v.text == NOTE_TEXT
+		s.text = raw_data(v.text)
+	}
 }
 
 @(test)
@@ -959,4 +1003,27 @@ test_late_reply_is_dropped_after_timeout :: proc(t: ^testing.T) {
 	tr := get_state(&s, "trader", trader_state)
 	testing.expect_value(t, tr.timed_out, 1)
 	testing.expect_value(t, tr.replies, 0)
+}
+
+@(test)
+test_published_copies_own_their_strings :: proc(t: ^testing.T) {
+	topic: actod.Topic
+
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "publisher", counter_state{name = "publisher", topic = &topic}, note_publisher_behaviour)
+	spawn(&s, "r1", note_reader_state{topic = &topic}, note_reader_behaviour)
+	spawn(&s, "r2", note_reader_state{topic = &topic}, note_reader_behaviour)
+	init_all(&s)
+
+	_ = strings.clone("gives the temp arena a block", context.temp_allocator)
+	send(&s, "publisher", Increment{})
+	run_until_idle(&s)
+
+	r1 := get_state(&s, "r1", note_reader_state)
+	r2 := get_state(&s, "r2", note_reader_state)
+	testing.expect(t, r1.intact, "r1 read a garbled note")
+	testing.expect(t, r2.intact, "r2 read a garbled note")
+	testing.expect(t, r1.text != r2.text, "r1 and r2 read the same copy of the note")
 }

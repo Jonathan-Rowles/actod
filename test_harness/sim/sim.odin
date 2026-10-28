@@ -521,11 +521,7 @@ route_publish :: proc(s: ^Sim, sender_pid: u64, topic: rawptr, data: rawptr, typ
 }
 
 clone_msg :: proc(data: rawptr, type_id: typeid) -> rawptr {
-	info := type_info_of(type_id)
-	size := info.size
-	ptr, _ := mem.alloc(size)
-	mem.copy(ptr, data, size)
-	return ptr
+	return ti.copy_message(data, type_info_of(type_id).size, type_id)
 }
 
 add_timer :: proc(s: ^Sim, id: u32, owner: u64, interval: time.Duration, repeat: bool) {

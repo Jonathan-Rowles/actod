@@ -1,8 +1,6 @@
 package ti
 
 import "base:runtime"
-import "core:mem"
-_ :: mem
 import "core:time"
 
 Send_Error :: enum {
@@ -112,6 +110,15 @@ Captured_Topic_Subscribe :: struct {
 	topic: rawptr,
 }
 
+Message_Copier :: #type proc(content: rawptr, size: int, type_id: typeid) -> rawptr
+
+copy_message: Message_Copier
+
+capture :: proc(content: $T) -> rawptr {
+	val := content
+	return copy_message(&val, size_of(T), T)
+}
+
 MAX_TOPIC_SUBSCRIBERS :: 16
 
 UNDECLARED_TOPIC_MESSAGE :: "act.get_topic_subscribers was called under the unit harness for a topic with no declared subscribers; declare them with add_topic_sub before the call"
@@ -127,11 +134,7 @@ intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
 	if test_intercept.dead_pids != nil && to in test_intercept.dead_pids^ {
 		return .ACTOR_NOT_FOUND, true
 	}
-	val := content
-	ptr, _ := mem.alloc(size_of(T))
-	clone := cast(^T)ptr
-	clone^ = val
-	append(test_intercept.send_capture, Captured_Send{to = to, data = clone, type_id = T})
+	append(test_intercept.send_capture, Captured_Send{to = to, data = capture(content), type_id = T})
 	return .OK, true
 }
 
@@ -142,15 +145,11 @@ intercept_ask :: proc(to: u64, content: $T, timeout: time.Duration) -> (u64, Sen
 	}
 	test_intercept.next_ask_token += 1
 	token := test_intercept.next_ask_token
-	val := content
-	ptr, _ := mem.alloc(size_of(T))
-	clone := cast(^T)ptr
-	clone^ = val
 	append(
 		test_intercept.send_capture,
 		Captured_Send {
 			to = to,
-			data = clone,
+			data = capture(content),
 			type_id = T,
 			ask_token = token,
 			ask_timeout = timeout,
@@ -162,15 +161,11 @@ intercept_ask :: proc(to: u64, content: $T, timeout: time.Duration) -> (u64, Sen
 intercept_reply :: proc(content: $T) -> (Send_Error, bool) {
 	if test_intercept == nil do return {}, false
 	if test_intercept.current_ask_token == 0 do return .NOT_ASKED, true
-	val := content
-	ptr, _ := mem.alloc(size_of(T))
-	clone := cast(^T)ptr
-	clone^ = val
 	append(
 		test_intercept.send_capture,
 		Captured_Send {
 			to = test_intercept.current_ask_from,
-			data = clone,
+			data = capture(content),
 			type_id = T,
 			ask_token = test_intercept.current_ask_token,
 			is_reply = true,
@@ -265,11 +260,7 @@ intercept_terminate_actor :: proc(to: u64, reason: Termination_Reason) -> bool {
 
 intercept_broadcast :: proc(content: $T) -> bool {
 	if test_intercept == nil do return false
-	val := content
-	ptr, _ := mem.alloc(size_of(T))
-	clone := cast(^T)ptr
-	clone^ = val
-	append(test_intercept.broadcast_capture, Captured_Broadcast{data = clone, type_id = T})
+	append(test_intercept.broadcast_capture, Captured_Broadcast{data = capture(content), type_id = T})
 	return true
 }
 
@@ -344,13 +335,9 @@ intercept_set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send
 
 intercept_publish :: proc(topic: rawptr, content: $T) -> bool {
 	if test_intercept == nil do return false
-	val := content
-	ptr, _ := mem.alloc(size_of(T))
-	clone := cast(^T)ptr
-	clone^ = val
 	append(
 		test_intercept.publish_capture,
-		Captured_Publish{topic = topic, data = clone, type_id = T},
+		Captured_Publish{topic = topic, data = capture(content), type_id = T},
 	)
 	return true
 }

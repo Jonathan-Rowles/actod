@@ -25,6 +25,7 @@ Test_Harness :: struct($T: typeid) {
 	topic_subscribers:       [dynamic]ti.Topic_Subscribers,
 	children_pids:           [dynamic]u64,
 	dead_pids:               map[u64]bool,
+	taken_captures:          [dynamic]rawptr,
 }
 
 create :: proc(data: $T, behaviour: actod.Actor_Behaviour(T)) -> Test_Harness(T) {
@@ -48,6 +49,9 @@ destroy :: proc(h: ^Test_Harness($T)) {
 	for &cap in h.broadcast_capture {
 		free(cap.data)
 	}
+	for data in h.taken_captures {
+		free(data)
+	}
 	delete(h.send_capture)
 	delete(h.publish_capture)
 	delete(h.timer_capture)
@@ -61,6 +65,7 @@ destroy :: proc(h: ^Test_Harness($T)) {
 	delete(h.topic_subscribers)
 	delete(h.children_pids)
 	delete(h.dead_pids)
+	delete(h.taken_captures)
 	free(h.data)
 }
 
@@ -224,7 +229,7 @@ expect_sent :: proc(
 		return {}
 	}
 	result := (cast(^M)cap.data)^
-	free(cap.data)
+	append(&h.taken_captures, cap.data)
 	ordered_remove(&h.send_capture, 0)
 	return result
 }
@@ -262,7 +267,7 @@ expect_sent_to :: proc(
 		return {}
 	}
 	result := (cast(^M)cap.data)^
-	free(cap.data)
+	append(&h.taken_captures, cap.data)
 	ordered_remove(&h.send_capture, 0)
 	return result
 }
@@ -307,7 +312,7 @@ expect_sent_where :: proc(
 		)
 		return {}
 	}
-	free(cap.data)
+	append(&h.taken_captures, cap.data)
 	ordered_remove(&h.send_capture, 0)
 	return val
 }
@@ -340,7 +345,7 @@ find_sent :: proc(h: ^Test_Harness($T), $M: typeid) -> (M, int, bool) {
 		cap := &h.send_capture[i]
 		if cap.type_id == M {
 			result := (cast(^M)cap.data)^
-			free(cap.data)
+			append(&h.taken_captures, cap.data)
 			ordered_remove(&h.send_capture, i)
 			return result, i, true
 		}
@@ -378,7 +383,7 @@ expect_published :: proc(
 		return {}
 	}
 	result := (cast(^M)cap.data)^
-	free(cap.data)
+	append(&h.taken_captures, cap.data)
 	ordered_remove(&h.publish_capture, 0)
 	return result
 }
@@ -413,7 +418,7 @@ expect_published_to :: proc(
 		return {}
 	}
 	result := (cast(^M)cap.data)^
-	free(cap.data)
+	append(&h.taken_captures, cap.data)
 	ordered_remove(&h.publish_capture, 0)
 	return result
 }
@@ -565,7 +570,7 @@ expect_broadcast :: proc(
 		return {}
 	}
 	result := (cast(^M)cap.data)^
-	free(cap.data)
+	append(&h.taken_captures, cap.data)
 	ordered_remove(&h.broadcast_capture, 0)
 	return result
 }

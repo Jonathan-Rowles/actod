@@ -3,6 +3,7 @@ package unit
 import "../../src/actod"
 import "../ti"
 import "base:runtime"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -32,6 +33,11 @@ Test_Send_Children_Cmd :: struct {
 	value: int,
 }
 Test_List_Topic_Subscribers_Cmd :: struct {}
+Test_Send_Temp_Text_Cmd :: struct {}
+Test_Text :: struct {
+	text:  string,
+	bytes: []u8,
+}
 
 @(init)
 init_harness_test_types :: proc "contextless" () {
@@ -48,6 +54,8 @@ init_harness_test_types :: proc "contextless" () {
 	actod.register_message_type(Test_Send_Parent_Cmd)
 	actod.register_message_type(Test_Send_Children_Cmd)
 	actod.register_message_type(Test_List_Topic_Subscribers_Cmd)
+	actod.register_message_type(Test_Send_Temp_Text_Cmd)
+	actod.register_message_type(Test_Text)
 }
 
 test_topic: actod.Topic
@@ -102,7 +110,22 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 		_ = actod.send_message_to_children(Test_Pong{value = v.value})
 	case Test_List_Topic_Subscribers_Cmd:
 		s.topic_subscribers_listed = actod.get_topic_subscribers(&test_topic, s.topic_subscribers[:])
+	case Test_Send_Temp_Text_Cmd:
+		send_temp_text(from)
 	}
+}
+
+send_temp_text :: proc(to: actod.PID) {
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	text := Test_Text {
+		text  = strings.clone("text from temp memory", context.temp_allocator),
+		bytes = transmute([]u8)strings.clone("bytes from temp memory", context.temp_allocator),
+	}
+	_ = actod.send_message(to, text)
+	_, _ = actod.ask(to, text)
+	_ = actod.reply(text)
+	actod.broadcast(text)
+	actod.publish(&test_topic, text)
 }
 
 supervisor_state :: struct {
@@ -506,4 +529,27 @@ test_terminate_callback :: proc(t: ^testing.T) {
 	terminate(&h)
 	s := get_state(&h)
 	testing.expect(t, s.terminate_called, "terminate should have been called")
+}
+
+@(test)
+test_captures_own_their_strings :: proc(t: ^testing.T) {
+	h := create(test_state{}, test_behaviour)
+	defer destroy(&h)
+	h.intercept.current_ask_token = 7
+	h.intercept.current_ask_from = 400
+	_ = strings.clone("gives the temp arena a block", context.temp_allocator)
+	send(&h, Test_Send_Temp_Text_Cmd{})
+	_ = strings.repeat("x", 256, context.temp_allocator)
+
+	captured := [?]Test_Text {
+		expect_sent(&h, t, Test_Text),
+		expect_sent(&h, t, Test_Text),
+		expect_sent_to(&h, t, actod.PID(400), Test_Text),
+		expect_broadcast(&h, t, Test_Text),
+		expect_published_to(&h, t, &test_topic, Test_Text),
+	}
+	for text in captured {
+		testing.expect_value(t, text.text, "text from temp memory")
+		testing.expect_value(t, string(text.bytes), "bytes from temp memory")
+	}
 }

@@ -3,6 +3,7 @@ package unit
 import "../../src/actod"
 import "../ti"
 import "base:runtime"
+import "core:mem"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -549,6 +550,92 @@ test_captures_own_their_strings :: proc(t: ^testing.T) {
 		expect_published_to(&h, t, &test_topic, Test_Text),
 	}
 	for text in captured {
+		testing.expect_value(t, text.text, "text from temp memory")
+		testing.expect_value(t, string(text.bytes), "bytes from temp memory")
+	}
+}
+
+Poisoning_Allocator :: struct {
+	backing: runtime.Allocator,
+	sizes:   map[rawptr]int,
+	freed:   [dynamic]rawptr,
+}
+
+poisoning_allocator_proc :: proc(
+	allocator_data: rawptr,
+	mode: runtime.Allocator_Mode,
+	size, alignment: int,
+	old_memory: rawptr,
+	old_size: int,
+	loc := #caller_location,
+) -> (
+	[]byte,
+	runtime.Allocator_Error,
+) {
+	poisoner := cast(^Poisoning_Allocator)allocator_data
+	if mode == .Free {
+		if block_size, known := poisoner.sizes[old_memory]; known {
+			mem.set(old_memory, 'x', block_size)
+			delete_key(&poisoner.sizes, old_memory)
+			append(&poisoner.freed, old_memory)
+			return nil, nil
+		}
+	}
+	result, err := poisoner.backing.procedure(
+		poisoner.backing.data,
+		mode,
+		size,
+		alignment,
+		old_memory,
+		old_size,
+		loc,
+	)
+	#partial switch mode {
+	case .Alloc, .Alloc_Non_Zeroed:
+		poisoner.sizes[raw_data(result)] = len(result)
+	case .Resize, .Resize_Non_Zeroed:
+		delete_key(&poisoner.sizes, old_memory)
+		poisoner.sizes[raw_data(result)] = len(result)
+	}
+	return result, err
+}
+
+release_poisoned :: proc(poisoner: ^Poisoning_Allocator) {
+	for block in poisoner.freed do free(block, poisoner.backing)
+	delete(poisoner.freed)
+	delete(poisoner.sizes)
+}
+
+@(test)
+test_taken_captures_stay_valid_until_destroy :: proc(t: ^testing.T) {
+	poisoner := Poisoning_Allocator {
+		backing = context.allocator,
+		sizes   = make(map[rawptr]int, allocator = context.allocator),
+		freed   = make([dynamic]rawptr, allocator = context.allocator),
+	}
+	defer release_poisoned(&poisoner)
+	context.allocator = runtime.Allocator {
+		procedure = poisoning_allocator_proc,
+		data      = &poisoner,
+	}
+	h := create(test_state{}, test_behaviour)
+	defer destroy(&h)
+	h.intercept.current_ask_token = 7
+	h.intercept.current_ask_from = 400
+	send(&h, Test_Send_Temp_Text_Cmd{})
+	send(&h, Test_Send_Temp_Text_Cmd{})
+
+	found, _, _ := find_sent(&h, Test_Text)
+	taken := [?]Test_Text {
+		expect_sent(&h, t, Test_Text),
+		found,
+		expect_sent_to(&h, t, actod.PID(400), Test_Text),
+		expect_sent_where(&h, t, Test_Text, proc(_: Test_Text) -> bool {return true}),
+		expect_published(&h, t, Test_Text),
+		expect_published_to(&h, t, &test_topic, Test_Text),
+		expect_broadcast(&h, t, Test_Text),
+	}
+	for text in taken {
 		testing.expect_value(t, text.text, "text from temp memory")
 		testing.expect_value(t, string(text.bytes), "bytes from temp memory")
 	}

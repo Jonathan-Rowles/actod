@@ -492,7 +492,10 @@ call_terminate_handler :: proc(actor: ^Actor) {
 
 @(private)
 notify_termination :: proc(actor: ^Actor) {
-	if actor.blocking do sync.atomic_store(&NODE.blocking_actor, nil)
+	if actor.blocking {
+		sync.atomic_store(&NODE.blocking_actor, nil)
+		if actor.termination_reason == .ABNORMAL do sync.atomic_store(&NODE.failed, true)
+	}
 	if current_actor_context != nil {
 		for sub in current_actor_context.subscriptions {
 			remove_subscriber(sub.actor_type, sub.pid)

@@ -141,4 +141,5 @@ exercise_node_api :: proc() {
 
 	act.await_signal()
 	act.node_shutdown()
+	_ = act.node_failed()
 }

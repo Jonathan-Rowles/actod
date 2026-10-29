@@ -282,6 +282,19 @@ ALL_TESTS :: []Test_Entry {
 		expects_error_logs = true,
 	},
 	{
+		name = "test_blocking_child_panic_leaves_node_failed",
+		test_proc = test_blocking_child_panic_leaves_node_failed,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_blocking_child_clean_close_leaves_node_healthy",
+		test_proc = test_blocking_child_clean_close_leaves_node_healthy,
+	},
+	{
+		name = "test_blocking_child_sigterm_leaves_node_healthy",
+		test_proc = test_blocking_child_sigterm_leaves_node_healthy,
+	},
+	{
 		name = "test_init_death_does_not_wedge_name_dedicated",
 		test_proc = test_init_death_does_not_wedge_name_dedicated,
 		expects_error_logs = true,

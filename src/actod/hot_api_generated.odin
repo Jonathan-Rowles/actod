@@ -62,6 +62,7 @@ Hot_API :: struct {
 	node_init:                 proc(name: string, opts: System_Config, loc: runtime.Source_Code_Location),
 	node_shutdown:             proc(loc: runtime.Source_Code_Location),
 	await_signal:              proc(),
+	node_failed:               proc() -> bool,
 	sim_pump:                  proc() -> bool,
 	sim_seed:                  proc(seed: u64),
 	sim_run_until_idle:        proc(max_steps: int) -> int,

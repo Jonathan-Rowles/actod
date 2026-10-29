@@ -219,6 +219,11 @@ await_signal :: proc() {
 }
 
 @(hot = "skip")
+node_failed :: proc() -> bool {
+	return actod.node_failed()
+}
+
+@(hot = "skip")
 sim_pump :: proc() -> bool {
 	return actod.sim_pump()
 }

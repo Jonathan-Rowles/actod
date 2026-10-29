@@ -128,6 +128,7 @@ test_node_child_max_restarts_shuts_down_node :: proc(t: ^testing.T) {
 
 	expectf(t, elapsed < 2 * time.Second, "await_signal took %v to return after escalation", elapsed)
 	expect(t, !actod.NODE.started, "await_signal must have shut the node down after the second crash")
+	expect(t, actod.node_failed(), "a node child that exhausts the root budget under await_signal must leave the node failed")
 }
 
 Blocking_Test_Data :: struct {
@@ -177,6 +178,7 @@ test_blocking_child_stops_on_signal :: proc(t: ^testing.T) {
 	expect(t, !sync.atomic_load(&actod.NODE.shutting_down), "a signal must not mark the node shutting down before node_shutdown is called")
 
 	actod.shutdown_node()
+	expect(t, !actod.node_failed(), "SIGINT must not leave the node failed")
 }
 
 Foreign_Wait_Data :: struct {
@@ -243,6 +245,64 @@ test_blocking_child_stops_on_escalation :: proc(t: ^testing.T) {
 	expect(t, sync.atomic_load(&actod.NODE.shutting_down), "escalation must mark the node shutting down")
 
 	actod.shutdown_node()
+	expect(t, actod.node_failed(), "a node child that exhausts the root budget under a blocking child must leave the node failed")
+}
+
+panic_in_blocking_child :: proc() {
+	panic("blocking child panics")
+}
+
+close_blocking_child :: proc() {
+	actod.self_terminate(.NORMAL)
+}
+
+spawn_blocking_panic_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
+	return actod.spawn("blocking-panic-child", Blocking_Test_Data{on_init = panic_in_blocking_child}, Blocking_Test_Behaviour)
+}
+
+spawn_blocking_close_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
+	return actod.spawn("blocking-close-child", Blocking_Test_Data{on_init = close_blocking_child}, Blocking_Test_Behaviour)
+}
+
+spawn_blocking_sigterm_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
+	return actod.spawn("blocking-sigterm-child", Blocking_Test_Data{on_init = raise_sigterm_to_self}, Blocking_Test_Behaviour)
+}
+
+test_blocking_child_panic_leaves_node_failed :: proc(t: ^testing.T) {
+	reset_test_state()
+	sync.atomic_store(&blocking_child_terminated, false)
+
+	restart_node_with("blocking-panic", nil, 3, spawn_blocking_panic_child)
+
+	expect(t, sync.atomic_load(&blocking_child_terminated), "the panicking blocking child's terminate callback must run")
+	actod.shutdown_node()
+	expect(t, actod.node_failed(), "a blocking child that panics must leave the node failed after node_shutdown")
+}
+
+test_blocking_child_clean_close_leaves_node_healthy :: proc(t: ^testing.T) {
+	reset_test_state()
+	sync.atomic_store(&blocking_child_terminated, false)
+
+	restart_node_with("blocking-close", nil, 3, spawn_blocking_close_child)
+
+	expect(t, sync.atomic_load(&blocking_child_terminated), "the closing blocking child's terminate callback must run")
+	actod.shutdown_node()
+	expect(t, !actod.node_failed(), "a blocking child that closes normally must not leave the node failed")
+}
+
+test_blocking_child_sigterm_leaves_node_healthy :: proc(t: ^testing.T) {
+	when ODIN_OS == .Windows do return
+	reset_test_state()
+	sync.atomic_store(&blocking_child_terminated, false)
+
+	started := time.tick_now()
+	restart_node_with("blocking-sigterm", nil, 3, spawn_blocking_sigterm_child)
+	elapsed := time.tick_since(started)
+
+	expectf(t, elapsed < 2 * time.Second, "node_init took %v to return after SIGTERM", elapsed)
+	expect(t, sync.atomic_load(&blocking_child_terminated), "the blocking child's terminate callback must run on SIGTERM")
+	actod.shutdown_node()
+	expect(t, !actod.node_failed(), "SIGTERM must not leave the node failed")
 }
 
 NODE_TABLE_CHURN :: 16

@@ -9,6 +9,10 @@ raise_sigint_to_self :: proc() {
 	posix.raise(.SIGINT)
 }
 
+raise_sigterm_to_self :: proc() {
+	posix.raise(.SIGTERM)
+}
+
 raise_sigint_to_self_after :: proc(delay: time.Duration) {
 	thread.create_and_start_with_data(rawptr(uintptr(delay)), proc(data: rawptr) {
 		time.sleep(time.Duration(uintptr(data)))

@@ -196,6 +196,10 @@ await_signal :: proc() {
 	actod.await_signal()
 }
 
+node_failed :: proc() -> bool {
+	return actod.node_failed()
+}
+
 sim_pump :: proc() -> bool {
 	return actod.sim_pump()
 }

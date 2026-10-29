@@ -213,6 +213,7 @@ Node_State :: struct {
 	stop_requested:           bool,
 	blocking_actor:           ^Actor,
 	awaiting_signal:          bool,
+	failed:                   bool,
 	signal_handler_installed: bool,
 	signal_relay_wake:        sync.Atomic_Sema,
 	signal_relay_stop:        bool,
@@ -359,6 +360,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 
 	NODE.started = true
 	NODE.shutting_down = false
+	sync.atomic_store(&NODE.failed, false)
 	NODE.shutdown_leaked_actors = 0
 	NODE.incarnation = generate_nonzero_nonce()
 	sync.atomic_store(&NODE.gossip_seq, 0)
@@ -724,6 +726,10 @@ wake_blocking_actor :: proc() {
 	if blocking := sync.atomic_load(&NODE.blocking_actor); blocking != nil do wake_actor(blocking)
 }
 
+node_failed :: proc() -> bool {
+	return sync.atomic_load(&NODE.failed)
+}
+
 @(private)
 node_has_shutdown_host :: proc() -> bool {
 	return sync.atomic_load(&NODE.awaiting_signal) || sync.atomic_load(&NODE.blocking_actor) != nil
@@ -731,6 +737,7 @@ node_has_shutdown_host :: proc() -> bool {
 
 @(private)
 escalate_node_failure :: proc(what: string) {
+	sync.atomic_store(&NODE.failed, true)
 	if node_has_shutdown_host() {
 		log.errorf("shutting the node down: %s", what)
 		request_node_shutdown()

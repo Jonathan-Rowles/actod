@@ -11,6 +11,7 @@ g_hot_api := actod.Hot_API{
 	node_init              = actod.node_init,
 	node_shutdown          = actod.node_shutdown,
 	await_signal           = actod.await_signal,
+	node_failed            = actod.node_failed,
 	sim_pump               = actod.sim_pump,
 	sim_seed               = actod.sim_seed,
 	sim_run_until_idle     = actod.sim_run_until_idle,

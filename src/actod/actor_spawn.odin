@@ -240,9 +240,9 @@ spawn_impl :: proc(
 	when ODIN_TEST {
 		if pid, ok := ti.intercept_spawn(name, T); ok do return PID(pid), true
 	}
-	data := data
+	caller_data: any = data
 	state := Erased_State {
-		ptr       = &data,
+		ptr       = caller_data.data,
 		size      = size_of(T),
 		align     = align_of(T),
 		type_info = type_info_of(T),

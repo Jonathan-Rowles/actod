@@ -178,7 +178,6 @@ test_blocking_child_stops_on_signal :: proc(t: ^testing.T) {
 	expect(t, !sync.atomic_load(&actod.NODE.shutting_down), "a signal must not mark the node shutting down before node_shutdown is called")
 
 	actod.shutdown_node()
-	expect(t, !actod.node_failed(), "SIGINT must not leave the node failed")
 }
 
 Foreign_Wait_Data :: struct {

@@ -633,6 +633,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			offset_of(Actor, pool_handle))
 		if pool_handle_ptr^ != nil {
 			wait_for_pool_handle_terminated(pool_handle_ptr^)
+		} else if actor_typed.blocking {
+			wait_for_blocking_actor_finished(actor_typed)
 		} else {
 			cleanup_actor_thread(actor_ptr)
 		}
@@ -656,7 +658,11 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			sync.atomic_sema_post(
 				cast(^sync.Atomic_Sema)(uintptr(actor_ptr) + offset_of(Actor, wake_sema)),
 			)
-			cleanup_actor_thread(actor_ptr)
+			if actor_typed.blocking {
+				wait_for_blocking_actor_finished(actor_typed)
+			} else {
+				cleanup_actor_thread(actor_ptr)
+			}
 		}
 
 		current = sync.atomic_load(state_ptr)
@@ -702,6 +708,11 @@ wait_for_pool_handle_terminated :: proc(handle: ^Pooled_Actor_Handle) {
 		if NODE.config.sim_mode && sim_pump() do continue
 		runtime_sleep(100 * time.Microsecond)
 	}
+}
+
+@(private)
+wait_for_blocking_actor_finished :: proc(actor: ^Actor) {
+	for !sync.atomic_load_explicit(&actor.blocking_finished, .Acquire) do runtime_sleep(100 * time.Microsecond)
 }
 
 node_shutdown :: shutdown_node

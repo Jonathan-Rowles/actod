@@ -201,6 +201,7 @@ Actor :: struct #align (CACHE_LINE_SIZE) {
 	stopped_head:       rawptr,
 	stopped_closed:     bool,
 	blocking:           bool,
+	blocking_finished:  bool,
 	system_drops:       u64,
 
 	// keep unknown sizes at the bottom

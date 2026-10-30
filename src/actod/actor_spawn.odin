@@ -334,7 +334,8 @@ spawn_erased :: proc(
 		spawning_blocking_child = false
 		sync.atomic_store(&NODE.blocking_actor, actor)
 		actor_loop(actor)
-		return actor.pid, true
+		sync.atomic_store_explicit(&actor.blocking_finished, true, .Release)
+		return pid, true
 	}
 
 	needs_first_run_wait := behaviour.init != nil || opts.children != nil

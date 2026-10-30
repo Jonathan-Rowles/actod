@@ -369,9 +369,9 @@ spawn_erased :: proc(
 
 	if needs_first_run_wait do spawn_wait_started(&started)
 
-	if NODE.config.hot_reload_dev do hot_reload_hooks.register_actor(state, actor.pid, name)
+	if NODE.config.hot_reload_dev do hot_reload_hooks.register_actor(state, pid, name)
 
-	return actor.pid, true
+	return pid, true
 }
 
 @(private)
@@ -473,11 +473,12 @@ spawn_schedule_pooled :: proc(
 			idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
 		}
 	}
-	handle.home_worker = &NODE.worker_pool.workers[idx]
+	home_worker := &NODE.worker_pool.workers[idx]
+	handle.home_worker = home_worker
 	set_entry_home_worker(&NODE.actor_registry, pid, idx)
 	sync.atomic_store(&handle.in_ready_queue, true)
-	ready_push(handle.home_worker, handle)
-	sync.atomic_sema_post(&handle.home_worker.wake_sema)
+	ready_push(home_worker, handle)
+	sync.atomic_sema_post(&home_worker.wake_sema)
 
 	return true
 }

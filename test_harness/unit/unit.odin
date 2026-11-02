@@ -123,6 +123,10 @@ kill_pid :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 	h.dead_pids[u64(pid)] = true
 }
 
+fail_set_timer :: proc(h: ^Test_Harness($T), fail := true) {
+	h.intercept.fail_set_timer = fail
+}
+
 get_state :: proc(h: ^Test_Harness($T)) -> ^T {
 	return h.data
 }

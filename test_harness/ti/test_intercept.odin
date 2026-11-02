@@ -42,6 +42,7 @@ Test_Intercept :: struct {
 	self_name:               string,
 	timer_capture:           ^[dynamic]Captured_Timer,
 	next_timer_id:           u32,
+	fail_set_timer:          bool,
 	spawn_capture:           ^[dynamic]Captured_Spawn,
 	terminate_capture:       ^[dynamic]Captured_Terminate,
 	broadcast_capture:       ^[dynamic]Captured_Broadcast,
@@ -324,6 +325,7 @@ intercept_get_self_name :: proc() -> (string, bool) {
 
 intercept_set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error, bool) {
 	if test_intercept == nil do return 0, {}, false
+	if test_intercept.fail_set_timer do return 0, .ACTOR_NOT_FOUND, true
 	test_intercept.next_timer_id += 1
 	id := test_intercept.next_timer_id
 	append(

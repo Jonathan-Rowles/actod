@@ -39,6 +39,7 @@ Test_Text :: struct {
 	text:  string,
 	bytes: []u8,
 }
+Test_Set_Timer_Cmd :: struct {}
 
 @(init)
 init_harness_test_types :: proc "contextless" () {
@@ -57,6 +58,7 @@ init_harness_test_types :: proc "contextless" () {
 	actod.register_message_type(Test_List_Topic_Subscribers_Cmd)
 	actod.register_message_type(Test_Send_Temp_Text_Cmd)
 	actod.register_message_type(Test_Text)
+	actod.register_message_type(Test_Set_Timer_Cmd)
 }
 
 test_topic: actod.Topic
@@ -69,6 +71,8 @@ test_state :: struct {
 	last_value:               int,
 	topic_subscribers:        [actod.MAX_TOPIC_SUBSCRIBERS]actod.PID,
 	topic_subscribers_listed: int,
+	timer_id:                 u32,
+	timer_err:                actod.Send_Error,
 }
 
 test_behaviour := actod.Actor_Behaviour(test_state) {
@@ -113,6 +117,8 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 		s.topic_subscribers_listed = actod.get_topic_subscribers(&test_topic, s.topic_subscribers[:])
 	case Test_Send_Temp_Text_Cmd:
 		send_temp_text(from)
+	case Test_Set_Timer_Cmd:
+		s.timer_id, s.timer_err = actod.set_timer(time.Second, false)
 	}
 }
 
@@ -390,6 +396,26 @@ test_topic_subscribers_of_an_undeclared_topic_fail_the_test :: proc(t: ^testing.
 	testing.expect_assert_message(t, ti.UNDECLARED_TOPIC_MESSAGE)
 	send(&h, Test_List_Topic_Subscribers_Cmd{})
 	testing.expect(t, false, "listing an undeclared topic returned instead of failing the test")
+}
+
+@(test)
+test_a_failed_set_timer_returns_an_error_and_arms_nothing_until_cleared :: proc(t: ^testing.T) {
+	h := create(test_state{}, test_behaviour)
+	defer destroy(&h)
+	s := get_state(&h)
+
+	fail_set_timer(&h)
+	send(&h, Test_Set_Timer_Cmd{})
+	testing.expect_value(t, s.timer_err, actod.Send_Error.ACTOR_NOT_FOUND)
+	testing.expect_value(t, s.timer_id, u32(0))
+	testing.expect_value(t, len(h.timer_capture), 0)
+
+	fail_set_timer(&h, false)
+	send(&h, Test_Set_Timer_Cmd{})
+	testing.expect_value(t, s.timer_err, actod.Send_Error.OK)
+	timer := expect_timer(&h, t)
+	testing.expect_value(t, timer.id, s.timer_id)
+	testing.expect_value(t, timer.interval, time.Second)
 }
 
 @(test)

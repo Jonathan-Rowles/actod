@@ -64,6 +64,10 @@ kill_pid :: proc(h: ^Test_Harness($T), pid: actod.PID) {
 	unit.kill_pid(h, pid)
 }
 
+fail_set_timer :: proc(h: ^Test_Harness($T), fail := true) {
+	unit.fail_set_timer(h, fail)
+}
+
 add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: actod.PID) {
 	unit.add_topic_sub(h, topic, pid)
 }

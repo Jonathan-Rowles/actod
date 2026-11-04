@@ -294,3 +294,43 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 	success := sync.sema_wait_with_timeout(&done, 2 * time.Second)
 	expect(t, success, "Timer actor should still work after owner cleanup")
 }
+
+test_timers_fire_on_a_second_node_in_one_process :: proc(t: ^testing.T) {
+	actod.shutdown_node()
+
+	heap := actod.NODE.timer_registry.heap.queue
+	expectf(
+		t,
+		raw_data(heap) == nil && cap(heap) == 0 && heap.allocator.procedure == nil,
+		"a stopped node leaves the timer heap empty, it left data %p, cap %d, allocator %p",
+		raw_data(heap),
+		cap(heap),
+		heap.allocator.data,
+	)
+
+	actod.node_init(
+		"second_node_in_process",
+		actod.make_node_config(
+			worker_count = DEFAULT_TEST_WORKERS,
+			actor_config = actod.make_actor_config(
+				logging = actod.make_log_config(level = test_log_level()),
+			),
+		),
+	)
+	wait_for_node()
+	context.logger = actod.get_node_log_ctx()
+
+	done: sync.Sema
+	pid, spawn_ok := actod.spawn(
+		"timer_test_second_node",
+		Repeating_Timer_Data{expected_ticks = 3, done = &done},
+		Repeating_Timer_Behaviour,
+	)
+	if !expect(t, spawn_ok, "spawn a timer actor on the second node") do return
+	defer {
+		_ = actod.terminate_actor(pid)
+		actod.wait_for_pids([]actod.PID{pid})
+	}
+
+	expect(t, sync.sema_wait_with_timeout(&done, 2 * time.Second), "a timer on the second node fires 3 ticks")
+}

@@ -411,6 +411,10 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_timer_cancel", test_proc = test_timer_cancel},
 	{name = "test_timer_multiple", test_proc = test_timer_multiple},
 	{name = "test_timer_cleanup_on_termination", test_proc = test_timer_cleanup_on_termination},
+	{
+		name = "test_timers_fire_on_a_second_node_in_one_process",
+		test_proc = test_timers_fire_on_a_second_node_in_one_process,
+	},
 
 	// Panic recovery tests
 	{

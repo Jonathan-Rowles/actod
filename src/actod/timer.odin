@@ -100,6 +100,7 @@ reset_timer_registry :: proc() {
 	sync.mutex_lock(&NODE.timer_registry.lock)
 	defer sync.mutex_unlock(&NODE.timer_registry.lock)
 	pq.destroy(&NODE.timer_registry.heap)
+	NODE.timer_registry.heap = {}
 	delete(NODE.timer_registry.index_map)
 	NODE.timer_registry.index_map = {}
 }

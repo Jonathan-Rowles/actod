@@ -1,6 +1,8 @@
 package actod
 
+import "../pkgs/coro"
 import "base:builtin"
+import "base:runtime"
 import "core:log"
 import "core:time"
 
@@ -106,7 +108,22 @@ sim_resume_next :: proc(w: ^Worker) {
 	}
 	sim_trace_record(.Actor_Resume, u64(w.id), u64((cast(^Actor)handle.actor_ptr).pid))
 	worker_resume_handle(w, handle)
+	sim_refuse_a_yield_holding_a_temp_guard(handle)
 	worker_flush_staging()
+}
+
+@(private = "file")
+sim_refuse_a_yield_holding_a_temp_guard :: proc(handle: ^Pooled_Actor_Handle) {
+	if handle.co == nil || coro.status(handle.co) != .Suspended do return
+	open_guards := runtime.global_default_temp_allocator_data.arena.temp_count
+	if open_guards == 0 do return
+	actor := cast(^Actor)handle.actor_ptr
+	panic_at(
+		actor.spawn_loc,
+		"sim: actor '%v' yielded with %d temp allocator guards open on the driving thread, where every simulated actor shares one temp arena, so ending a guard after the yield frees temp memory other actors took while it was parked; open the guard with ignore = coro.running() != nil",
+		actor.name,
+		open_guards,
+	)
 }
 
 sim_create_node :: proc() -> ^Node_State {

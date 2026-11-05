@@ -28,6 +28,7 @@ Test_Entry :: struct {
 	hot_reload_watch_path: string,
 	enable_encryption:     bool,
 	expects_error_logs:    bool,
+	expects_panic:         string,
 	sim_mode:              bool,
 }
 
@@ -90,6 +91,20 @@ ALL_TESTS :: []Test_Entry {
 		sim_mode = true,
 		worker_count = 2,
 		expects_error_logs = true,
+	},
+	{
+		name = "test_sim_yield_holding_a_temp_guard_fails_the_run",
+		test_proc = test_sim_yield_holding_a_temp_guard_fails_the_run,
+		sim_mode = true,
+		worker_count = 2,
+		expects_error_logs = true,
+		expects_panic = SIM_GUARDED_YIELD_PANIC,
+	},
+	{
+		name = "test_sim_yield_with_its_temp_guard_ignored_in_a_coroutine_runs_on",
+		test_proc = test_sim_yield_with_its_temp_guard_ignored_in_a_coroutine_runs_on,
+		sim_mode = true,
+		worker_count = 2,
 	},
 	{
 		name = "test_sim_seeded_determinism",
@@ -770,7 +785,7 @@ test_watchdog_proc :: proc(data: rawptr) {
 	_ = os.process_kill(wd.process)
 }
 
-run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool) -> Test_Result {
+run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool, expects_panic: string) -> Test_Result {
 	result := Test_Result {
 		name    = test_name,
 		success = false,
@@ -835,6 +850,10 @@ run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool) -> T
 	}
 
 	result.exit_code = state.exit_code
+	if expects_panic != "" {
+		result.success = state.exit_code != 0 && strings.contains(string(captured), expects_panic)
+		return result
+	}
 	result.success = state.exit_code == 0 && (expects_error_logs || result.logged_err == "")
 
 	return result
@@ -852,7 +871,7 @@ first_logged_error :: proc(output: string) -> string {
 
 test_thread_proc :: proc(data: rawptr) {
 	ctx := cast(^Test_Thread_Context)data
-	ctx.result^ = run_test_in_subprocess(ctx.entry.name, ctx.entry.expects_error_logs)
+	ctx.result^ = run_test_in_subprocess(ctx.entry.name, ctx.entry.expects_error_logs, ctx.entry.expects_panic)
 	if ctx.result.success {
 		fmt.printf("  PASS: %s\n", ctx.result.name)
 	} else if ctx.result.exit_code == 0 && ctx.result.logged_err != "" {

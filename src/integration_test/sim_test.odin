@@ -2,6 +2,8 @@ package integration
 
 import "../../test_harness/ti"
 import "../actod"
+import "../pkgs/coro"
+import "base:runtime"
 import "core:fmt"
 import "core:net"
 import "core:slice"
@@ -512,4 +514,42 @@ test_sim_virtual_transport :: proc(t: ^testing.T) {
 	_ = actod.sim_bind_node(node_a)
 	_ = actod.sim_run_until_idle()
 	actod.sim_destroy_node(node_b)
+}
+
+SIM_GUARDED_YIELD_PANIC :: "sim: actor 'sim_guarded_yield' yielded with 1 temp allocator guards open"
+
+@(private = "file")
+g_sim_guarded_yields_resumed: int
+
+Sim_Guarded_Yield_Data :: struct {
+	ignore_in_coroutine: bool,
+}
+
+Sim_Guarded_Yield_Behaviour :: actod.Actor_Behaviour(Sim_Guarded_Yield_Data) {
+	handle_message = proc(data: ^Sim_Guarded_Yield_Data, from: actod.PID, msg: any) {
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD(ignore = data.ignore_in_coroutine && coro.running() != nil)
+		actod.yield()
+		g_sim_guarded_yields_resumed += 1
+	},
+}
+
+run_sim_guarded_yield :: proc(t: ^testing.T, ignore_in_coroutine: bool) {
+	g_sim_guarded_yields_resumed = 0
+	pid, ok := actod.spawn(
+		"sim_guarded_yield",
+		Sim_Guarded_Yield_Data{ignore_in_coroutine = ignore_in_coroutine},
+		Sim_Guarded_Yield_Behaviour,
+	)
+	expect(t, ok, "guarded yield actor spawn failed")
+	expect(t, actod.send_message(pid, Integration_Test_Message{id = 1, payload = "yield"}) == .OK, "send failed")
+	actod.sim_run_until_idle()
+	expect_value(t, g_sim_guarded_yields_resumed, 1)
+}
+
+test_sim_yield_holding_a_temp_guard_fails_the_run :: proc(t: ^testing.T) {
+	run_sim_guarded_yield(t, ignore_in_coroutine = false)
+}
+
+test_sim_yield_with_its_temp_guard_ignored_in_a_coroutine_runs_on :: proc(t: ^testing.T) {
+	run_sim_guarded_yield(t, ignore_in_coroutine = true)
 }

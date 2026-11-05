@@ -107,6 +107,12 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_sender_parked_on_another_workers_full_mailbox_holds_no_reclaim_pin",
+		test_proc = test_sim_sender_parked_on_another_workers_full_mailbox_holds_no_reclaim_pin,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_seeded_determinism",
 		test_proc = test_sim_seeded_determinism,
 		sim_mode = true,

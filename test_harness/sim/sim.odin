@@ -55,6 +55,7 @@ Sim :: struct {
 Sim_Pending_Ask :: struct {
 	token:     u64,
 	asker_pid: u64,
+	asked_pid: u64,
 	deadline:  time.Time,
 	active:    bool,
 }
@@ -284,21 +285,29 @@ requeue :: proc(s: ^Sim, msg: Sim_Message) {
 	s.queue_count += 1
 }
 
-register_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64, timeout: time.Duration) {
+register_pending_ask :: proc(
+	s: ^Sim,
+	token: u64,
+	asker_pid: u64,
+	asked_pid: u64,
+	timeout: time.Duration,
+) {
 	append(
 		&s.pending_asks,
 		Sim_Pending_Ask {
 			token = token,
 			asker_pid = asker_pid,
+			asked_pid = asked_pid,
 			deadline = time.time_add(s.clock, timeout),
 			active = true,
 		},
 	)
 }
 
-consume_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64) -> bool {
+consume_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64, replier_pid: u64) -> bool {
 	for &p in s.pending_asks {
 		if !p.active || p.token != token || p.asker_pid != asker_pid do continue
+		if p.asked_pid != replier_pid do return false
 		p.active = false
 		return true
 	}
@@ -310,7 +319,12 @@ fire_expired_asks :: proc(s: ^Sim) {
 		if !p.active do continue
 		if time.diff(p.deadline, s.clock) < 0 do continue
 		p.active = false
-		enqueue_clone(s, p.asker_pid, p.asker_pid, actod.Ask_Timeout{token = actod.Ask_Token(p.token)})
+		enqueue_clone(
+			s,
+			p.asker_pid,
+			p.asker_pid,
+			actod.Ask_Timeout{token = actod.Ask_Token(p.token)},
+		)
 	}
 }
 
@@ -361,7 +375,7 @@ step :: proc(s: ^Sim) -> bool {
 		return true
 	}
 
-	if msg.is_reply && !consume_pending_ask(s, msg.ask_token, msg.to) {
+	if msg.is_reply && !consume_pending_ask(s, msg.ask_token, msg.to, msg.from) {
 		if msg.data != nil do free(msg.data)
 		return true
 	}
@@ -400,17 +414,9 @@ run_until_idle :: proc(s: ^Sim) {
 
 process_captures :: proc(s: ^Sim, sender_pid: u64) {
 	for &cap in s.send_capture {
-		enqueue_ask(
-			s,
-			cap.to,
-			sender_pid,
-			cap.data,
-			cap.type_id,
-			cap.ask_token,
-			cap.is_reply,
-		)
+		enqueue_ask(s, cap.to, sender_pid, cap.data, cap.type_id, cap.ask_token, cap.is_reply)
 		if cap.ask_token != 0 && !cap.is_reply {
-			register_pending_ask(s, cap.ask_token, sender_pid, cap.ask_timeout)
+			register_pending_ask(s, cap.ask_token, sender_pid, cap.to, cap.ask_timeout)
 		}
 		cap.data = nil // ownership transferred
 	}

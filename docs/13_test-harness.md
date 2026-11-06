@@ -145,7 +145,7 @@ sim.find_actor_by_pid(&s, u64(pid)).alive = false
 ```
 
 The sim models ask and reply in full, including timeout expiry on `sim.advance_time` and
-the dropping of a late reply, so a handler built on `act.ask` / `act.reply` /
+the dropping of a late reply and of a reply from an actor that was not asked, so a handler built on `act.ask` / `act.reply` /
 `act.replying_to` can be tested here. The unit harness does not.
 
 The sim keeps its own table of topic subscriptions, filled by `act.subscribe_topic` from an actor's `init` or handler and by `add_topic_sub`. `act.publish` routes through it, and `act.get_topic_subscribers` called from an actor reads it, so the real `Topic` struct is never written. An actor's subscriptions stay in the table after it is marked dead.

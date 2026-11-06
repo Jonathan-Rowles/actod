@@ -510,10 +510,7 @@ test_fault_without_count_fires_forever :: proc(t: ^testing.T) {
 	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
 	init_all(&s)
 
-	add_fault(
-		&s,
-		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop},
-	)
+	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop})
 
 	for _ in 0 ..< 5 {
 		send(&s, "counter", Increment{})
@@ -694,10 +691,7 @@ test_fault_wildcard_match :: proc(t: ^testing.T) {
 	spawn(&s, "echo", echo_state{name = "echo"}, echo_behaviour)
 	init_all(&s)
 
-	add_fault(
-		&s,
-		Fault_Rule{match = Fault_Match{to_name = "echo"}, action = .Drop},
-	)
+	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "echo"}, action = .Drop})
 
 	send(&s, "echo", Ping{value = 1})
 	run_until_idle(&s)
@@ -714,10 +708,7 @@ test_fault_clear_removes_all :: proc(t: ^testing.T) {
 	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
 	init_all(&s)
 
-	add_fault(
-		&s,
-		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop},
-	)
+	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop})
 
 	send(&s, "counter", Increment{})
 	run_until_idle(&s)
@@ -1006,13 +997,49 @@ test_late_reply_is_dropped_after_timeout :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_reply_from_an_actor_that_was_not_asked_is_dropped :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	pricer_pid := spawn(&s, "pricer", pricer_state{stay_mute = true}, pricer_behaviour)
+	impostor_pid := spawn(&s, "impostor", pricer_state{}, pricer_behaviour)
+	trader_pid := spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	init_all(&s)
+
+	send(&s, "trader", Ping{})
+	run_until_idle(&s)
+
+	tr := get_state(&s, "trader", trader_state)
+	forged := new(Price)
+	forged.value = -7
+	enqueue_ask(&s, u64(trader_pid), u64(impostor_pid), forged, Price, u64(tr.token), true)
+	run_until_idle(&s)
+
+	tr = get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.replies, 0)
+	testing.expect_value(t, tr.price, 0)
+
+	advance_time(&s, 3 * time.Second)
+	run_until_idle(&s)
+
+	tr = get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.timed_out, 1)
+	testing.expect_value(t, tr.replies, 0)
+}
+
+@(test)
 test_published_copies_own_their_strings :: proc(t: ^testing.T) {
 	topic: actod.Topic
 
 	s := create()
 	defer destroy(&s)
 
-	spawn(&s, "publisher", counter_state{name = "publisher", topic = &topic}, note_publisher_behaviour)
+	spawn(
+		&s,
+		"publisher",
+		counter_state{name = "publisher", topic = &topic},
+		note_publisher_behaviour,
+	)
 	spawn(&s, "r1", note_reader_state{topic = &topic}, note_reader_behaviour)
 	spawn(&s, "r2", note_reader_state{topic = &topic}, note_reader_behaviour)
 	init_all(&s)

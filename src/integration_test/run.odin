@@ -43,7 +43,10 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_pooled_actor_with_on_idle_fails_to_spawn,
 		expects_error_logs = true,
 	},
-	{name = "test_same_type_name_in_two_packages", test_proc = test_same_type_name_in_two_packages},
+	{
+		name = "test_same_type_name_in_two_packages",
+		test_proc = test_same_type_name_in_two_packages,
+	},
 	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
 	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
 	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},
@@ -133,6 +136,12 @@ ALL_TESTS :: []Test_Entry {
 	{
 		name = "test_sim_mesh_basic",
 		test_proc = test_sim_mesh_basic,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_inbound_filter_judges_every_control_and_lifecycle_frame",
+		test_proc = test_sim_inbound_filter_judges_every_control_and_lifecycle_frame,
 		sim_mode = true,
 		worker_count = 2,
 	},
@@ -357,7 +366,10 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_permanent_direct_child_is_pruned_under_every_strategy",
 		test_proc = test_permanent_direct_child_is_pruned_under_every_strategy,
 	},
-	{name = "test_one_for_all_prunes_direct_siblings", test_proc = test_one_for_all_prunes_direct_siblings},
+	{
+		name = "test_one_for_all_prunes_direct_siblings",
+		test_proc = test_one_for_all_prunes_direct_siblings,
+	},
 	{
 		name = "test_rest_for_one_prunes_direct_siblings_in_range",
 		test_proc = test_rest_for_one_prunes_direct_siblings_in_range,
@@ -378,7 +390,10 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_foreign_child_dying_before_the_drain_is_registered_first",
 		test_proc = test_foreign_child_dying_before_the_drain_is_registered_first,
 	},
-	{name = "test_spawn_signal_wakes_a_parked_parent", test_proc = test_spawn_signal_wakes_a_parked_parent},
+	{
+		name = "test_spawn_signal_wakes_a_parked_parent",
+		test_proc = test_spawn_signal_wakes_a_parked_parent,
+	},
 	{
 		name = "test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded",
 		test_proc = test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded,
@@ -753,7 +768,11 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 
 	leaked := actod.NODE.shutdown_leaked_actors
 	if leaked > 0 {
-		fmt.eprintf("Test %s: %d actors were still registered when shutdown tore the registry down\n", entry.name, leaked)
+		fmt.eprintf(
+			"Test %s: %d actors were still registered when shutdown tore the registry down\n",
+			entry.name,
+			leaked,
+		)
 		return false
 	}
 
@@ -791,7 +810,11 @@ test_watchdog_proc :: proc(data: rawptr) {
 	_ = os.process_kill(wd.process)
 }
 
-run_test_in_subprocess :: proc(test_name: string, expects_error_logs: bool, expects_panic: string) -> Test_Result {
+run_test_in_subprocess :: proc(
+	test_name: string,
+	expects_error_logs: bool,
+	expects_panic: string,
+) -> Test_Result {
 	result := Test_Result {
 		name    = test_name,
 		success = false,
@@ -877,7 +900,11 @@ first_logged_error :: proc(output: string) -> string {
 
 test_thread_proc :: proc(data: rawptr) {
 	ctx := cast(^Test_Thread_Context)data
-	ctx.result^ = run_test_in_subprocess(ctx.entry.name, ctx.entry.expects_error_logs, ctx.entry.expects_panic)
+	ctx.result^ = run_test_in_subprocess(
+		ctx.entry.name,
+		ctx.entry.expects_error_logs,
+		ctx.entry.expects_panic,
+	)
 	if ctx.result.success {
 		fmt.printf("  PASS: %s\n", ctx.result.name)
 	} else if ctx.result.exit_code == 0 && ctx.result.logged_err != "" {

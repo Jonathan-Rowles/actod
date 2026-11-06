@@ -271,11 +271,7 @@ connection_handle_message :: proc(data: ^Connection_Actor_Data, from: PID, msg: 
 initiate_connection :: proc(data: ^Connection_Actor_Data) -> bool {
 	sock, err := runtime_dial_tcp(data.address)
 	if err != nil {
-		log.warnf(
-			"Failed to connect to node %d: %v, a reconnect is scheduled",
-			data.node_id,
-			err,
-		)
+		log.warnf("Failed to connect to node %d: %v, a reconnect is scheduled", data.node_id, err)
 		return false
 	}
 
@@ -530,7 +526,15 @@ establish_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !encryption_hooks.handshake(data.auth_password, sock, !data.is_incoming, my_hello, peer_payload, &keys, deadline) {
+		if !encryption_hooks.handshake(
+			data.auth_password,
+			sock,
+			!data.is_incoming,
+			my_hello,
+			peer_payload,
+			&keys,
+			deadline,
+		) {
 			return .Failed
 		}
 	}
@@ -625,7 +629,15 @@ handle_incoming_pool_join :: proc(
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !encryption_hooks.handshake(data.auth_password, sock, false, my_hello, peer_hello, &keys, deadline) {
+		if !encryption_hooks.handshake(
+			data.auth_password,
+			sock,
+			false,
+			my_hello,
+			peer_hello,
+			&keys,
+			deadline,
+		) {
 			return .Failed
 		}
 	}
@@ -638,7 +650,8 @@ handle_incoming_pool_join :: proc(
 		return .Failed
 	}
 
-	if owner_ptr, owner_alive := get(&NODE.actor_registry, owner_pid); !owner_alive || owner_ptr == nil {
+	if owner_ptr, owner_alive := get(&NODE.actor_registry, owner_pid);
+	   !owner_alive || owner_ptr == nil {
 		log.warnf("Pool join from %s: owner connection gone", info.node_name)
 		return .Failed
 	}
@@ -706,7 +719,15 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 
 	keys: Noise_Transport
 	if data.encrypted {
-		if !encryption_hooks.handshake(data.auth_password, sock, true, my_hello, peer_payload, &keys, deadline) {
+		if !encryption_hooks.handshake(
+			data.auth_password,
+			sock,
+			true,
+			my_hello,
+			peer_payload,
+			&keys,
+			deadline,
+		) {
 			return false
 		}
 	}
@@ -1001,7 +1022,11 @@ teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 @(private)
 resolve_incoming_peer :: proc(data: ^Connection_Actor_Data, info: Hello_Info) -> bool {
 	if info.node_name == NODE.name {
-		log.warnf("Refused a connection from %v that names itself %s, this node's own name", data.address, info.node_name)
+		log.warnf(
+			"Refused a connection from %v that names itself %s, this node's own name",
+			data.address,
+			info.node_name,
+		)
 		return false
 	}
 	peer_endpoint := net.Endpoint {
@@ -1009,7 +1034,11 @@ resolve_incoming_peer :: proc(data: ^Connection_Actor_Data, info: Hello_Info) ->
 		port    = int(info.listen_port),
 	}
 
-	local_node_id, registered := register_discovered_node(info.node_name, peer_endpoint, .TCP_Custom_Protocol)
+	local_node_id, registered := register_discovered_node(
+		info.node_name,
+		peer_endpoint,
+		.TCP_Custom_Protocol,
+	)
 	if !registered {
 		local_node_id, registered = get_node_by_name(info.node_name)
 		if !registered {
@@ -1219,6 +1248,7 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 
 	switch ctrl_data[0] {
 	case CTRL_MSG_HEARTBEAT:
+		if control_refused(data.node_id, .Heartbeat) do return
 		if len(ctrl_data) < 1 + 8 + 8 {
 			log.error("Heartbeat message too short")
 			return
@@ -1226,9 +1256,11 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 		data.last_heartbeat = now()
 
 	case CTRL_MSG_NODE_DIRECTORY:
+		if control_refused(data.node_id, .Node_Directory) do return
 		handle_node_directory(ctrl_data)
 
 	case CTRL_MSG_DISCONNECT:
+		if control_refused(data.node_id, .Disconnect) do return
 		r := Ctrl_Reader {
 			data = ctrl_data,
 			pos  = 1,
@@ -1242,6 +1274,7 @@ handle_control_message :: proc(data: ^Connection_Actor_Data, ctrl_data: []byte) 
 		close_connection(data)
 
 	case CTRL_MSG_LIFECYCLE_STREAM:
+		if control_refused(data.node_id, .Lifecycle_Stream) do return
 		if data.node_id != 0 && data.node_id < MAX_NODES {
 			sync.atomic_store(&NODE.lifecycle_stream_peers[data.node_id], true)
 			send_registry_snapshot(data)
@@ -1369,11 +1402,16 @@ decode_wire_payload :: proc(
 	return true
 }
 
-handle_lifecycle_event_inline :: proc(from_node: Node_ID, type_hash: u64, payload: []byte) -> bool {
+handle_lifecycle_event_inline :: proc(
+	from_node: Node_ID,
+	type_hash: u64,
+	payload: []byte,
+) -> bool {
 	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
 	terminated_info := get_validated_message_info_ptr(Actor_Terminated_Broadcast)
 
 	if type_hash == spawned_info.type_hash {
+		if lifecycle_refused(from_node, Actor_Spawned_Broadcast) do return true
 		msg: Actor_Spawned_Broadcast
 		fields := [?]Wire_String_Field {
 			{&msg.name, "name"},
@@ -1386,6 +1424,7 @@ handle_lifecycle_event_inline :: proc(from_node: Node_ID, type_hash: u64, payloa
 	}
 
 	if type_hash == terminated_info.type_hash {
+		if lifecycle_refused(from_node, Actor_Terminated_Broadcast) do return true
 		msg: Actor_Terminated_Broadcast
 		fields := [?]Wire_String_Field {
 			{&msg.name, "name"},
@@ -1398,6 +1437,7 @@ handle_lifecycle_event_inline :: proc(from_node: Node_ID, type_hash: u64, payloa
 	}
 
 	if type_hash == get_validated_message_info_ptr(Subscribe_Remote).type_hash {
+		if lifecycle_refused(from_node, Subscribe_Remote) do return true
 		if len(payload) >= size_of(Subscribe_Remote) {
 			msg: Subscribe_Remote
 			intrinsics.mem_copy_non_overlapping(&msg, raw_data(payload), size_of(Subscribe_Remote))
@@ -1407,6 +1447,7 @@ handle_lifecycle_event_inline :: proc(from_node: Node_ID, type_hash: u64, payloa
 	}
 
 	if type_hash == get_validated_message_info_ptr(Unsubscribe_Remote).type_hash {
+		if lifecycle_refused(from_node, Unsubscribe_Remote) do return true
 		if len(payload) >= size_of(Unsubscribe_Remote) {
 			msg: Unsubscribe_Remote
 			intrinsics.mem_copy_non_overlapping(
@@ -1426,8 +1467,10 @@ handle_lifecycle_event :: proc(from_node: Node_ID, type_hash: u64, payload: []by
 	if handle_lifecycle_event_inline(from_node, type_hash, payload) do return
 
 	if type_hash == get_validated_message_info_ptr(Remote_Spawn_Request).type_hash {
+		if lifecycle_refused(from_node, Remote_Spawn_Request) do return
 		handle_remote_spawn_request(from_node, payload)
 	} else if type_hash == get_validated_message_info_ptr(Remote_Spawn_Response).type_hash {
+		if lifecycle_refused(from_node, Remote_Spawn_Response) do return
 		handle_remote_spawn_response(payload)
 	} else {
 		log.warnf("Unknown lifecycle event type hash: %x", type_hash)
@@ -1572,10 +1615,7 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 		if batch_append_message_retry(data.ring, buf[:msg_len]) {
 			sent += 1
 		} else {
-			log.warnf(
-				"Registry snapshot entry for node %s dropped, ring full",
-				data.node_name,
-			)
+			log.warnf("Registry snapshot entry for node %s dropped, ring full", data.node_name)
 		}
 	}
 
@@ -1693,8 +1733,12 @@ relayed_gossip_incarnation_stale :: proc(
 		return false
 	}
 	info, known := get_node_info(source_node_id)
-	return known && info.incarnation != 0 && msg_incarnation != 0 &&
-	       msg_incarnation != info.incarnation
+	return(
+		known &&
+		info.incarnation != 0 &&
+		msg_incarnation != 0 &&
+		msg_incarnation != info.incarnation \
+	)
 }
 
 @(private)
@@ -1708,7 +1752,14 @@ hearsay_death_about_connected_node :: proc(
 }
 
 @(private)
-qualified_remote_name :: proc(buf: []byte, actor_name: string, source_name: string) -> (string, bool) {
+qualified_remote_name :: proc(
+	buf: []byte,
+	actor_name: string,
+	source_name: string,
+) -> (
+	string,
+	bool,
+) {
 	total := len(actor_name) + 1 + len(source_name)
 	if total > len(buf) do return "", false
 	copy(buf, actor_name)
@@ -1787,11 +1838,7 @@ handle_spawn_broadcast :: proc(msg: Actor_Spawned_Broadcast, from_node: Node_ID)
 }
 
 handle_terminate_broadcast :: proc(msg: Actor_Terminated_Broadcast, from_node: Node_ID) {
-	source_name, relevant := resolve_broadcast_source(
-		msg.source_node_name,
-		from_node,
-		"terminate",
-	)
+	source_name, relevant := resolve_broadcast_source(msg.source_node_name, from_node, "terminate")
 	if !relevant do return
 
 	source_node_id, found := get_node_by_name(source_name)

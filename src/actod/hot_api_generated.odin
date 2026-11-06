@@ -47,6 +47,7 @@ Hot_API :: struct {
 		reconnect_initial_delay: time.Duration,
 		reconnect_retry_delay: time.Duration,
 		connection_ring: Connection_Ring_Config,
+		inbound_filter: Inbound_Filter,
 		loc: runtime.Source_Code_Location,
 	) -> Network_Config,
 	make_log_config:           proc(

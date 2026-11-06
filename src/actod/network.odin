@@ -247,17 +247,20 @@ MAX_PENDING_INCOMING_HANDSHAKES :: 32
 
 g_pending_incoming_handshakes: i32
 
-make_connection_actor_data :: proc(node_id: Node_ID, address: net.Endpoint) -> Connection_Actor_Data {
+make_connection_actor_data :: proc(
+	node_id: Node_ID,
+	address: net.Endpoint,
+) -> Connection_Actor_Data {
 	return Connection_Actor_Data {
-		node_id                 = node_id,
-		state                   = .Disconnected,
-		address                 = address,
-		heartbeat_interval      = NODE.config.network.heartbeat_interval,
-		heartbeat_timeout       = NODE.config.network.heartbeat_timeout,
+		node_id = node_id,
+		state = .Disconnected,
+		address = address,
+		heartbeat_interval = NODE.config.network.heartbeat_interval,
+		heartbeat_timeout = NODE.config.network.heartbeat_timeout,
 		reconnect_initial_delay = NODE.config.network.reconnect_initial_delay,
-		reconnect_retry_delay   = NODE.config.network.reconnect_retry_delay,
-		auth_password           = get_auth_password(),
-		ring_config             = NODE.config.network.connection_ring,
+		reconnect_retry_delay = NODE.config.network.reconnect_retry_delay,
+		auth_password = get_auth_password(),
+		ring_config = NODE.config.network.connection_ring,
 	}
 }
 
@@ -382,7 +385,9 @@ deliver_to_target :: #force_inline proc(
 	payload: []byte,
 	token: u64 = 0,
 ) -> bool {
+	filter := NODE.config.network.inbound_filter
 	if .BROADCAST in flags {
+		if filter != nil && inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, 0, "") do return false
 		return deliver_broadcast_locally(
 			remote_node_id,
 			type_hash,
@@ -411,6 +416,8 @@ deliver_to_target :: #force_inline proc(
 		return false
 	}
 
+	if filter != nil && inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, to_pid, to_name) do return false
+
 	from_pid := pack_pid(from_handle, remote_node_id)
 
 	if .SYSTEM in flags {
@@ -419,6 +426,66 @@ deliver_to_target :: #force_inline proc(
 
 	result := send_from_payload(to_pid, from_pid, payload, type_info, token)
 	return result == .OK
+}
+
+@(private)
+inbound_refused :: proc(
+	filter: Inbound_Filter,
+	remote_node_id: Node_ID,
+	flags: Network_Message_Flags,
+	type_hash: u64,
+	from_handle: Handle,
+	to_pid: PID,
+	to_name: string,
+) -> bool {
+	type_info, known := get_type_info_by_hash(type_hash)
+	if !known do return false
+	reclaim_pin()
+	defer reclaim_unpin()
+	return(
+		!filter(
+			Inbound_Message {
+				from_node = remote_node_id,
+				from = pack_pid(from_handle, remote_node_id),
+				to = to_pid,
+				to_name = to_name if .BY_NAME in flags || to_pid == 0 else get_actor_name(to_pid),
+				type_id = type_info.type_id,
+				system = .SYSTEM in flags,
+				broadcast = .BROADCAST in flags,
+			},
+		) \
+	)
+}
+
+@(private)
+lifecycle_refused :: proc(from_node: Node_ID, type_id: typeid) -> bool {
+	filter := NODE.config.network.inbound_filter
+	if filter == nil do return false
+	return(
+		!filter(
+			Inbound_Message {
+				from_node = from_node,
+				from = pack_pid(Handle{}, from_node),
+				type_id = type_id,
+				lifecycle = true,
+			},
+		) \
+	)
+}
+
+@(private)
+control_refused :: proc(from_node: Node_ID, control: Inbound_Control) -> bool {
+	filter := NODE.config.network.inbound_filter
+	if filter == nil do return false
+	return(
+		!filter(
+			Inbound_Message {
+				from_node = from_node,
+				from = pack_pid(Handle{}, from_node),
+				control = control,
+			},
+		) \
+	)
 }
 
 deliver_broadcast_locally :: proc(
@@ -621,10 +688,7 @@ broadcast_to_others :: proc(msg: $T, except: Node_ID = 0, only_stream_peers := f
 				if !built do return
 			}
 			if !batch_append_message_retry(ring, frame) {
-				log.warnf(
-					"Failed to append lifecycle message to ring for node %d",
-					ring.node_id,
-				)
+				log.warnf("Failed to append lifecycle message to ring for node %d", ring.node_id)
 			}
 		}
 	}

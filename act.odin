@@ -51,6 +51,9 @@ Node_ID :: actod.Node_ID
 Connection_Ring_Config :: actod.Connection_Ring_Config
 Node_Info :: actod.Node_Info
 Transport_Strategy :: actod.Transport_Strategy
+Inbound_Message :: actod.Inbound_Message
+Inbound_Filter :: actod.Inbound_Filter
+Inbound_Control :: actod.Inbound_Control
 
 // Observer
 Actor_Stats :: actod.Actor_Stats
@@ -133,6 +136,7 @@ make_network_config :: proc(
 	reconnect_initial_delay: time.Duration = actod.NODE.config.network.reconnect_initial_delay,
 	reconnect_retry_delay: time.Duration = actod.NODE.config.network.reconnect_retry_delay,
 	connection_ring: Connection_Ring_Config = actod.NODE.config.network.connection_ring,
+	inbound_filter: Inbound_Filter = actod.NODE.config.network.inbound_filter,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Network_Config {
 	return actod.make_network_config(
@@ -145,6 +149,7 @@ make_network_config :: proc(
 		reconnect_initial_delay = reconnect_initial_delay,
 		reconnect_retry_delay = reconnect_retry_delay,
 		connection_ring = connection_ring,
+		inbound_filter = inbound_filter,
 		loc = loc,
 	)
 }

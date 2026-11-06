@@ -22,7 +22,30 @@ Network_Config :: struct {
 	reconnect_initial_delay: time.Duration,
 	reconnect_retry_delay:   time.Duration,
 	connection_ring:         Connection_Ring_Config,
+	inbound_filter:          Inbound_Filter,
 }
+
+Inbound_Message :: struct {
+	from_node: Node_ID,
+	from:      PID,
+	to:        PID,
+	to_name:   string,
+	type_id:   typeid,
+	system:    bool,
+	broadcast: bool,
+	lifecycle: bool,
+	control:   Inbound_Control,
+}
+
+Inbound_Control :: enum u8 {
+	None,
+	Heartbeat,
+	Node_Directory,
+	Disconnect,
+	Lifecycle_Stream,
+}
+
+Inbound_Filter :: #type proc(message: Inbound_Message) -> bool
 
 DEFAULT_NETWORK_CONFIG := Network_Config {
 	auth_password           = "",
@@ -46,6 +69,7 @@ make_network_config :: proc(
 	reconnect_initial_delay: time.Duration = NODE.config.network.reconnect_initial_delay,
 	reconnect_retry_delay: time.Duration = NODE.config.network.reconnect_retry_delay,
 	connection_ring: Connection_Ring_Config = NODE.config.network.connection_ring,
+	inbound_filter: Inbound_Filter = NODE.config.network.inbound_filter,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Network_Config {
 	if port < 0 || port > 65535 {
@@ -83,6 +107,7 @@ make_network_config :: proc(
 		reconnect_initial_delay = reconnect_initial_delay,
 		reconnect_retry_delay = reconnect_retry_delay,
 		connection_ring = connection_ring,
+		inbound_filter = inbound_filter,
 	}
 }
 

@@ -1,5 +1,6 @@
 package integration
 
+import "../../test_harness/ti"
 import "../actod"
 import "core:fmt"
 import "core:testing"
@@ -98,19 +99,27 @@ test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask :: proc(t: ^testing.T) 
 	forged := Ask_Answer {
 		y = -7,
 	}
+	posing_as_asked := ti.Test_Intercept {
+		self_pid = u64(silent),
+	}
+	ti.test_intercept = &posing_as_asked
+	forged_from_handle, _ := actod.unpack_pid(actod.get_self_pid())
+	silent_handle, _ := actod.unpack_pid(silent)
 	expect(
 		t,
-		actod.send_to_connection_ring_impl(
-			actod.get_connection_ring(asking_node),
-			requester,
-			&forged,
-			actod.get_validated_message_info_ptr(Ask_Answer),
-			{},
-			token = asked_token | actod.ASK_REPLY_BIT,
-		) ==
-		.OK,
-		"the peer sent the forged reply",
+		forged_from_handle == silent_handle,
+		"the forged reply copies the asked actor's handle",
 	)
+	forged_sent := actod.send_to_connection_ring_impl(
+		actod.get_connection_ring(asking_node),
+		requester,
+		&forged,
+		actod.get_validated_message_info_ptr(Ask_Answer),
+		{},
+		token = asked_token | actod.ASK_REPLY_BIT,
+	)
+	ti.test_intercept = nil
+	expect(t, forged_sent == .OK, "the peer sent the forged reply")
 	_ = actod.sim_mesh_run_until_idle(mesh)
 
 	expect_value(t, answer_y, 0)

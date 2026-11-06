@@ -61,6 +61,50 @@ ask :: #force_inline proc(
 }
 
 @(require_results)
+ask_to :: #force_inline proc(
+	actor_name: string,
+	node_name: string,
+	content: $T,
+	timeout: time.Duration = DEFAULT_ASK_TIMEOUT,
+	loc := #caller_location,
+) -> (
+	Ask_Token,
+	Send_Error,
+) {
+	when ODIN_TEST {
+		if err, ok := ti.intercept_send_to(actor_name, node_name, content); ok {
+			return 0, Send_Error(err)
+		}
+	}
+	ctx := current_actor_context
+	if ctx == nil {
+		log.errorf("ask_to() must be called from within an actor", location = loc)
+		return 0, .NOT_ASKED
+	}
+
+	timer_id, timer_err := set_timer(timeout, false, loc)
+	if timer_err != .OK do return 0, timer_err
+
+	token := ctx.next_ask_token + 1
+	v := content
+	info := get_validated_message_info_ptr(T, loc)
+	err := send_remote_by_name_impl(node_name, actor_name, &v, info, loc, token)
+	if err != .OK {
+		_ = cancel_timer(timer_id, loc)
+		return 0, err
+	}
+
+	asked_node, _ := get_node_by_name(node_name)
+	ctx.next_ask_token = token
+	ctx.pending_asks[token] = Pending_Ask {
+		timer_id   = timer_id,
+		asked_node = asked_node,
+	}
+	ctx.timer_asks[timer_id] = token
+	return Ask_Token(token), .OK
+}
+
+@(require_results)
 reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
 	when ODIN_TEST {
 		if err, ok := ti.intercept_reply(content); ok do return Send_Error(err)
@@ -151,13 +195,14 @@ deliver_user_message_ask :: #force_no_inline proc(
 			log.debugf("dropping late reply %v for ask %d from %v", data.id, token, msg.from)
 			return
 		}
-		if ask.asked != msg.from {
+		if ask.asked != 0 ? msg.from != ask.asked : get_node_id(msg.from) != ask.asked_node {
 			log.warnf(
-				"dropping reply %v for ask %d from %v, which was not asked; the ask went to %v",
+				"dropping reply %v for ask %d from %v, which was not asked; the ask went to %v on node %d",
 				data.id,
 				token,
 				msg.from,
 				ask.asked,
+				ask.asked_node,
 			)
 			return
 		}

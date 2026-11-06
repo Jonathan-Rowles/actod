@@ -1,5 +1,6 @@
 package integration
 
+import "../../test_harness/ti"
 import "../actod"
 import "core:sync"
 import "core:testing"
@@ -297,4 +298,132 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 	_ = actod.send_message(requester, actod.Terminate{reason = .NORMAL})
 	_ = actod.send_message(silent, actod.Terminate{reason = .NORMAL})
 	_ = actod.send_message(late, actod.Terminate{reason = .NORMAL})
+}
+
+@(private = "file")
+g_named_ask: struct {
+	asked_token:  u64,
+	ask_err:      actod.Send_Error,
+	answer_y:     int,
+	answer_token: u64,
+	timed_out:    bool,
+}
+
+Named_Asker_Data :: struct {
+	node: string,
+}
+
+Named_Asker_Behaviour :: actod.Actor_Behaviour(Named_Asker_Data) {
+	handle_message = proc(d: ^Named_Asker_Data, from: actod.PID, msg: any) {
+		switch m in msg {
+		case Do_Ask:
+			token, err := actod.ask_to("named-responder", d.node, Ask_Question{x = m.x})
+			g_named_ask.asked_token, g_named_ask.ask_err = u64(token), err
+		case Ask_Answer:
+			token, _ := actod.replying_to()
+			g_named_ask.answer_token, g_named_ask.answer_y = u64(token), m.y
+		case actod.Ask_Timeout:
+			g_named_ask.timed_out = true
+		}
+	},
+}
+
+test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_its_token :: proc(
+	t: ^testing.T,
+) {
+	g_named_ask = {}
+	reply_err := -1
+	misuse_err := -1
+
+	mesh := actod.sim_mesh_create(2, base_port = 36000, log_level = test_log_level())
+	defer actod.sim_mesh_destroy(mesh)
+	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	_, responder_ok := actod.spawn(
+		"named-responder",
+		Ask_Responder_Data{reply_err = &reply_err, misuse_err = &misuse_err},
+		Ask_Responder_Behaviour,
+	)
+	expect(t, responder_ok, "the responder spawned on node 0")
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	asker, asker_ok := actod.spawn(
+		"named-asker",
+		Named_Asker_Data{node = actod.sim_mesh_name(mesh, 0)},
+		Named_Asker_Behaviour,
+	)
+	expect(t, asker_ok, "the asker spawned on node 1")
+	expect_value(t, actod.send_message(asker, Do_Ask{x = 21}), actod.Send_Error.OK)
+	actod.sim_mesh_run_until_idle(mesh)
+
+	expect_value(t, g_named_ask.ask_err, actod.Send_Error.OK)
+	expect(t, g_named_ask.asked_token != 0, "ask_to returned a token")
+	expect_value(t, reply_err, int(actod.Send_Error.OK))
+	expect_value(t, g_named_ask.answer_y, 42)
+	expect_value(t, g_named_ask.answer_token, g_named_ask.asked_token)
+	expect(t, !g_named_ask.timed_out, "no Ask_Timeout once the reply arrived")
+}
+
+test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped :: proc(t: ^testing.T) {
+	g_named_ask = {}
+	reply_err := -1
+	misuse_err := -1
+
+	mesh := actod.sim_mesh_create(3, base_port = 36100, log_level = test_log_level())
+	defer actod.sim_mesh_destroy(mesh)
+	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	asked, asked_ok := actod.spawn(
+		"named-responder",
+		Ask_Responder_Data{silent = true, reply_err = &reply_err, misuse_err = &misuse_err},
+		Ask_Responder_Behaviour,
+	)
+	expect(t, asked_ok, "the silent responder spawned on node 1")
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	asker, asker_ok := actod.spawn(
+		"named-asker",
+		Named_Asker_Data{node = actod.sim_mesh_name(mesh, 1)},
+		Named_Asker_Behaviour,
+	)
+	expect(t, asker_ok, "the asker spawned on node 0")
+	expect_value(t, actod.send_message(asker, Do_Ask{x = 21}), actod.Send_Error.OK)
+	actod.sim_mesh_run_until_idle(mesh)
+	expect_value(t, g_named_ask.ask_err, actod.Send_Error.OK)
+	expect(t, g_named_ask.asked_token != 0, "ask_to returned a token")
+
+	_ = actod.sim_mesh_bind(mesh, 2)
+	asking_node, asking_known := actod.get_node_by_name(actod.sim_mesh_name(mesh, 0))
+	expect(t, asking_known, "the third node knows the asking node")
+	forged := Ask_Answer {
+		y = -7,
+	}
+	posing_as_asked := ti.Test_Intercept {
+		self_pid = u64(asked),
+	}
+	ti.test_intercept = &posing_as_asked
+	forged_sent := actod.send_to_connection_ring_impl(
+		actod.get_connection_ring(asking_node),
+		asker,
+		&forged,
+		actod.get_validated_message_info_ptr(Ask_Answer),
+		{},
+		token = g_named_ask.asked_token | actod.ASK_REPLY_BIT,
+	)
+	ti.test_intercept = nil
+	expect(t, forged_sent == .OK, "the third node sent a reply carrying the ask's token")
+	_ = actod.sim_mesh_run_until_idle(mesh)
+
+	expect_value(t, g_named_ask.answer_y, 0)
+	expect_value(t, g_named_ask.answer_token, u64(0))
+
+	actod.sim_mesh_advance_clock(mesh, actod.DEFAULT_ASK_TIMEOUT + time.Second)
+	_ = actod.sim_mesh_run_until_idle(mesh)
+	expect(
+		t,
+		g_named_ask.timed_out,
+		"the by-name ask still times out after a reply from another node",
+	)
 }

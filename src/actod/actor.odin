@@ -219,8 +219,9 @@ Panic_Jmp_Buf :: struct #align (16) {
 
 @(private)
 Pending_Ask :: struct {
-	timer_id: u32,
-	asked:    PID,
+	timer_id:   u32,
+	asked:      PID,
+	asked_node: Node_ID,
 }
 
 @(private)

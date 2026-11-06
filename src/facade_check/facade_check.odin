@@ -30,6 +30,7 @@ probe_behaviour := act.Actor_Behaviour(Probe) {
 			_ = act.send_children(d.n)
 			_ = act.reply(d.n)
 			_, _ = act.ask(from, d.n, 1 * time.Second)
+			_, _ = act.ask_to("probe-sized", "node", d.n, 1 * time.Second)
 			_, _ = act.replying_to()
 			_, _ = act.spawn_child("probe-child", Probe{}, probe_behaviour)
 			_, _ = act.spawn_child("probe-child-sized", Probe{}, probe_behaviour, 128)

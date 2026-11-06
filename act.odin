@@ -458,6 +458,20 @@ ask :: proc(
 	return actod.ask(to, content, timeout, loc)
 }
 
+@(require_results)
+ask_to :: proc(
+	actor_name: string,
+	node_name: string,
+	content: $T,
+	timeout: time.Duration = actod.DEFAULT_ASK_TIMEOUT,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> (
+	Ask_Token,
+	Send_Error,
+) {
+	return actod.ask_to(actor_name, node_name, content, timeout, loc)
+}
+
 // Send content back to the sender of the ask currently being handled, carrying its
 // token. Returns NOT_ASKED when the current message is not an ask. Valid only during
 // handle_message, like the message payload itself.

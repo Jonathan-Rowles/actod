@@ -111,7 +111,8 @@ build_wire_format_into_buffer_impl :: proc(
 
 	total_variable_size := calculate_variable_data_size(data, info)
 
-	message_size := NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size + total_variable_size
+	message_size :=
+		NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size + total_variable_size
 	total_buffer_size := 4 + message_size
 	if total_buffer_size > len(buffer) do return 0
 
@@ -271,7 +272,10 @@ send_to_connection_ring_body :: proc(
 		}
 
 		when ODIN_DEBUG {
-			assert(msg_len == exact_size, "wire format size mismatch in send_to_connection_ring_impl")
+			assert(
+				msg_len == exact_size,
+				"wire format size mismatch in send_to_connection_ring_impl",
+			)
 		}
 
 		when ODIN_TEST {
@@ -290,6 +294,7 @@ send_to_connection_ring_by_name_impl :: proc(
 	info: ^Message_Type_Info,
 	base_flags: Network_Message_Flags,
 	loc := #caller_location,
+	token: u64 = 0,
 ) -> Send_Error {
 	when ODIN_TEST {
 		drop, dup, corrupt := frame_tap(.Out, info.type_hash, nil, ring != nil ? ring.node_id : 0)
@@ -303,6 +308,7 @@ send_to_connection_ring_by_name_impl :: proc(
 				base_flags,
 				false,
 				loc,
+				token,
 			)
 		}
 		return send_to_connection_ring_by_name_body(
@@ -313,6 +319,7 @@ send_to_connection_ring_by_name_impl :: proc(
 			base_flags,
 			corrupt,
 			loc,
+			token,
 		)
 	} else {
 		return send_to_connection_ring_by_name_body(
@@ -323,6 +330,7 @@ send_to_connection_ring_by_name_impl :: proc(
 			base_flags,
 			false,
 			loc,
+			token,
 		)
 	}
 }
@@ -336,6 +344,7 @@ send_to_connection_ring_by_name_body :: proc(
 	base_flags: Network_Message_Flags,
 	corrupt: bool,
 	loc := #caller_location,
+	token: u64 = 0,
 ) -> Send_Error {
 	if ring == nil {
 		log.errorf(
@@ -355,7 +364,7 @@ send_to_connection_ring_by_name_body :: proc(
 
 	flags := base_flags | {.BY_NAME}
 
-	exact_size := wire_format_exact_size_impl(data, info, len(actor_name))
+	exact_size := wire_format_exact_size_impl(data, info, len(actor_name), token)
 	if exact_size > ring.usable_slot_size {
 		log.errorf(
 			"Message '%s' addressed to '%s' is %d bytes on the wire but the connection ring slot holds %d; raise connection_ring.send_slot_size in make_network_config or split the message",
@@ -398,6 +407,7 @@ send_to_connection_ring_by_name_body :: proc(
 			from_handle,
 			flags,
 			actor_name,
+			token,
 		)
 		if msg_len == 0 {
 			batch_abort(target, sid, dst)
@@ -481,6 +491,7 @@ send_remote_by_name_impl :: proc(
 	data: rawptr,
 	info: ^Message_Type_Info,
 	loc := #caller_location,
+	token: u64 = 0,
 ) -> Send_Error {
 	node_id, ok := get_node_by_name(node_name)
 	if !ok {
@@ -507,7 +518,15 @@ send_remote_by_name_impl :: proc(
 	}
 
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		result := send_to_connection_ring_by_name_impl(ring, actor_name, data, info, {}, loc)
+		result := send_to_connection_ring_by_name_impl(
+			ring,
+			actor_name,
+			data,
+			info,
+			{},
+			loc,
+			token,
+		)
 		if result != .NETWORK_RING_FULL do return result
 		ring_full_backoff(retry)
 	}

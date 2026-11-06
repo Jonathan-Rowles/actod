@@ -174,6 +174,7 @@ handle_message = proc(d: ^Pricer, from: act.PID, msg: any) {
 - If no reply lands within the timeout (default 5s), `Ask_Timeout{token}` is delivered instead. A reply arriving after the timeout is dropped; the requester never sees both.
 - `reply` targets the sender of the ask currently being handled and returns `NOT_ASKED` when the current message is not an ask. Replying is optional: an unanswered ask just times out.
 - Works across nodes: the token rides the wire and the reply routes back to the asking PID.
+- `ask_to(actor_name, node_name, content, timeout)` asks an actor on another node by name, as `send_to` sends, for when no PID of it is known; the reply and `Ask_Timeout` arrive as for `ask`. With no PID asked, its reply is accepted from any actor on the node it named and dropped from any other node.
 - Ask and reply messages always use the message pool, never the inline fast path.
 - Like other generic send helpers, `ask` and `reply` are not callable from hot-reloaded modules.
 

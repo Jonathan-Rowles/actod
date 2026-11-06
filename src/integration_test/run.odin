@@ -140,8 +140,20 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_its_token",
+		test_proc = test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_its_token,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_inbound_filter_judges_every_control_and_lifecycle_frame",
 		test_proc = test_sim_inbound_filter_judges_every_control_and_lifecycle_frame,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped",
+		test_proc = test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped,
 		sim_mode = true,
 		worker_count = 2,
 	},

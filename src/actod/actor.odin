@@ -172,44 +172,44 @@ Spawn_Signal :: struct {
 }
 
 Actor :: struct #align (CACHE_LINE_SIZE) {
-	state:              Actor_State,
-	local_write:        u64,
-	local_read:         u64,
-	local_buf:          ^[LOCAL_MAILBOX_SIZE]Message,
-	pool_handle:        ^Pooled_Actor_Handle,
-	msg_ctx:            ^Message_Processing_Context,
-	actor_ctx:          ^Actor_Context,
-	data:               rawptr,
-	handle_message:     proc(data: rawptr, from: PID, content: any),
-	pid:                PID,
-	pool:               Pool,
-	mailbox:            ACTOR_MAILBOX,
-	system_mailbox:     ACTOR_MAILBOX,
-	wake_sema:          sync.Atomic_Sema,
-	behaviour:          Erased_Behaviour,
-	opts:               Actor_Config,
-	allocator:          mem.Allocator,
-	arena:              Actor_Arena,
-	arena_slot:         u32,
-	parent:             PID,
-	name:               string,
-	thread:             ^thread.Thread,
-	restart_info:       Restart_Info,
-	termination_reason: Termination_Reason,
-	spawn_loc:          runtime.Source_Code_Location,
-	stop_signal:        Stop_Signal,
-	stopped_head:       rawptr,
-	stopped_closed:     bool,
-	blocking:           bool,
-	blocking_finished:  bool,
-	system_drops:       u64,
+	state:                Actor_State,
+	local_write:          u64,
+	local_read:           u64,
+	local_buf:            ^[LOCAL_MAILBOX_SIZE]Message,
+	pool_handle:          ^Pooled_Actor_Handle,
+	msg_ctx:              ^Message_Processing_Context,
+	actor_ctx:            ^Actor_Context,
+	data:                 rawptr,
+	handle_message:       proc(data: rawptr, from: PID, content: any),
+	pid:                  PID,
+	pool:                 Pool,
+	mailbox:              ACTOR_MAILBOX,
+	system_mailbox:       ACTOR_MAILBOX,
+	wake_sema:            sync.Atomic_Sema,
+	behaviour:            Erased_Behaviour,
+	opts:                 Actor_Config,
+	allocator:            mem.Allocator,
+	arena:                Actor_Arena,
+	arena_slot:           u32,
+	parent:               PID,
+	name:                 string,
+	thread:               ^thread.Thread,
+	restart_info:         Restart_Info,
+	termination_reason:   Termination_Reason,
+	spawn_loc:            runtime.Source_Code_Location,
+	stop_signal:          Stop_Signal,
+	stopped_head:         rawptr,
+	stopped_closed:       bool,
+	blocking:             bool,
+	blocking_finished:    bool,
+	system_drops:         u64,
 
 	// keep unknown sizes at the bottom
-	children:           [dynamic]Supervised_Child,
-	started:            ^bool,
-	spawned_head:       ^Spawn_Signal,
-	spawned_closed:     bool,
-	children_lock:      sync.Mutex,
+	children:             [dynamic]Supervised_Child,
+	started:              ^bool,
+	spawned_head:         ^Spawn_Signal,
+	spawned_closed:       bool,
+	children_lock:        sync.Mutex,
 	pending_stop_signals: ^Actor,
 }
 
@@ -218,26 +218,32 @@ Panic_Jmp_Buf :: struct #align (16) {
 }
 
 @(private)
+Pending_Ask :: struct {
+	timer_id: u32,
+	asked:    PID,
+}
+
+@(private)
 Actor_Context :: struct {
-	pid:                 PID,
-	name:                string,
+	pid:                    PID,
+	name:                   string,
 	panic_teardown_started: bool,
-	panic_recovery_done: bool,
-	panic_jmp_buf:       Panic_Jmp_Buf,
-	panic_message:       [PANIC_MESSAGE_BUF_SIZE]u8,
-	panic_message_len:   int,
-	panic_location:      runtime.Source_Code_Location,
-	subscriptions:       [dynamic]Subscription,
-	topic_subscriptions: [dynamic]Topic_Subscription,
-	pending_asks:        map[u64]u32,
-	timer_asks:          map[u32]u64,
-	next_ask_token:      u64,
-	current_ask_token:   u64,
-	current_ask_from:    PID,
-	current_reply_token: u64,
-	ask_dirty:           bool,
-	used_timers:         bool,
-	stats:               struct {
+	panic_recovery_done:    bool,
+	panic_jmp_buf:          Panic_Jmp_Buf,
+	panic_message:          [PANIC_MESSAGE_BUF_SIZE]u8,
+	panic_message_len:      int,
+	panic_location:         runtime.Source_Code_Location,
+	subscriptions:          [dynamic]Subscription,
+	topic_subscriptions:    [dynamic]Topic_Subscription,
+	pending_asks:           map[u64]Pending_Ask,
+	timer_asks:             map[u32]u64,
+	next_ask_token:         u64,
+	current_ask_token:      u64,
+	current_ask_from:       PID,
+	current_reply_token:    u64,
+	ask_dirty:              bool,
+	used_timers:            bool,
+	stats:                  struct {
 		received_list:     [dynamic]PID,
 		sent_list:         [dynamic]PID,
 		messages_received: u64,
@@ -248,7 +254,7 @@ Actor_Context :: struct {
 		received_from:     map[PID]u64,
 		sent_to:           map[PID]u64,
 	},
-	logger_data:         Actor_Logger_Data,
+	logger_data:            Actor_Logger_Data,
 }
 
 ARENA_COMMIT_SIZE :: mem.Kilobyte * 64
@@ -392,7 +398,10 @@ send_to :: proc(
 }
 
 @(require_results)
-send_message_to_children :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
+send_message_to_children :: #force_inline proc(
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
@@ -786,7 +795,9 @@ get_children :: proc(parent: PID) -> []PID {
 	reclaim_pin()
 	defer reclaim_unpin()
 
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervising_parent(parent)))
+	parent_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, supervising_parent(parent)),
+	)
 	if !ok do return nil
 
 	sync.mutex_lock(&parent_actor.children_lock)
@@ -855,10 +866,7 @@ self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_loca
 	when ODIN_TEST {if ti.intercept_self_terminate(ti.Termination_Reason(reason)) do return true}
 
 	if current_actor_context == nil {
-		log.error(
-			"self_terminate failed: must be called from inside an actor",
-			location = loc,
-		)
+		log.error("self_terminate failed: must be called from inside an actor", location = loc)
 		return false
 	}
 	pid := get_self_pid()
@@ -960,7 +968,13 @@ send_from_payload :: #force_inline proc(
 	msg: Message
 	msg.from = from_pid
 
-	alloc_err, attempted_size := create_message_from_payload(&msg, &actor.pool, payload, info, token)
+	alloc_err, attempted_size := create_message_from_payload(
+		&msg,
+		&actor.pool,
+		payload,
+		info,
+		token,
+	)
 	if alloc_err != .OK do return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
 
 	return push_to_mailbox(actor, msg, to_pid)

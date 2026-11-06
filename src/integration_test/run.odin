@@ -146,6 +146,12 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask",
+		test_proc = test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_mesh_determinism",
 		test_proc = test_sim_mesh_determinism,
 		sim_mode = true,

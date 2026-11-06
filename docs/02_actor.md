@@ -170,6 +170,7 @@ handle_message = proc(d: ^Pricer, from: act.PID, msg: any) {
 ```
 
 - The reply arrives raw: match its type in the switch, then `replying_to()` returns the token when the current message answers one of this actor's asks.
+- A reply is accepted only from the PID that was asked. A message carrying the ask's token from any other sender, such as a link peer forging it, is dropped with a warning and the ask still gets its real reply or its timeout.
 - If no reply lands within the timeout (default 5s), `Ask_Timeout{token}` is delivered instead. A reply arriving after the timeout is dropped; the requester never sees both.
 - `reply` targets the sender of the ask currently being handled and returns `NOT_ASKED` when the current message is not an ask. Replying is optional: an unanswered ask just times out.
 - Works across nodes: the token rides the wire and the reply routes back to the asking PID.

@@ -52,7 +52,10 @@ ask :: #force_inline proc(
 	}
 
 	ctx.next_ask_token = token
-	ctx.pending_asks[token] = timer_id
+	ctx.pending_asks[token] = Pending_Ask {
+		timer_id = timer_id,
+		asked    = to,
+	}
 	ctx.timer_asks[timer_id] = token
 	return Ask_Token(token), .OK
 }
@@ -143,14 +146,24 @@ deliver_user_message_ask :: #force_no_inline proc(
 	}
 
 	if is_reply {
-		timer_id, pending := ctx.pending_asks[token]
+		ask, pending := ctx.pending_asks[token]
 		if !pending {
 			log.debugf("dropping late reply %v for ask %d from %v", data.id, token, msg.from)
 			return
 		}
+		if ask.asked != msg.from {
+			log.warnf(
+				"dropping reply %v for ask %d from %v, which was not asked; the ask went to %v",
+				data.id,
+				token,
+				msg.from,
+				ask.asked,
+			)
+			return
+		}
 		delete_key(&ctx.pending_asks, token)
-		delete_key(&ctx.timer_asks, timer_id)
-		_ = cancel_timer(timer_id)
+		delete_key(&ctx.timer_asks, ask.timer_id)
+		_ = cancel_timer(ask.timer_id)
 		ctx.current_reply_token = token
 		ctx.ask_dirty = true
 		actor.handle_message(actor.data, msg.from, data)

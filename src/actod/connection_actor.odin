@@ -1000,6 +1000,10 @@ teardown_pool_rings :: proc(data: ^Connection_Actor_Data) {
 
 @(private)
 resolve_incoming_peer :: proc(data: ^Connection_Actor_Data, info: Hello_Info) -> bool {
+	if info.node_name == NODE.name {
+		log.warnf("Refused a connection from %v that names itself %s, this node's own name", data.address, info.node_name)
+		return false
+	}
 	peer_endpoint := net.Endpoint {
 		address = data.address.address,
 		port    = int(info.listen_port),

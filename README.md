@@ -102,7 +102,7 @@ Odin `dev-2026-11a` or newer (whatever CI pins under `release:` in [`.github/wor
 
 ```bash
 git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod
-cd vendor/actod && git checkout v0.4.0 && cd -
+cd vendor/actod && git checkout v0.5.0 && cd -
 odin build . -collection:actod=vendor/actod
 ```
 

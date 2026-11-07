@@ -8,6 +8,7 @@ import "core:mem"
 import "core:sync"
 
 MAX_SUBSCRIBERS_PER_TYPE :: #config(ACTOD_MAX_SUBSCRIBERS_PER_TYPE, 16384)
+#assert(u64(MAX_SUBSCRIBERS_PER_TYPE) * MAX_NODES <= u64(max(u32)))
 MAX_TOPIC_SUBSCRIBERS :: 64
 SUBSCRIBER_BLOCK_INITIAL_CAPACITY :: 64
 
@@ -19,6 +20,7 @@ Subscription :: struct {
 Topic :: struct {
 	subscribers: [MAX_TOPIC_SUBSCRIBERS]PID,
 	count:       u32,
+	mutate_lock: sync.Mutex,
 }
 
 Topic_Subscription :: struct {
@@ -109,9 +111,7 @@ add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location
 	block := list.block
 	if block == nil || n == block.capacity {
 		new_capacity :=
-			block == nil \
-			? u32(SUBSCRIBER_BLOCK_INITIAL_CAPACITY) \
-			: min(block.capacity * 2, MAX_SUBSCRIBERS_PER_TYPE)
+			block == nil ? u32(SUBSCRIBER_BLOCK_INITIAL_CAPACITY) : min(block.capacity * 2, MAX_SUBSCRIBERS_PER_TYPE)
 		new_block := alloc_subscriber_block(new_capacity, block)
 		if new_block == nil {
 			log.warnf(
@@ -253,9 +253,7 @@ pubsub_unsubscribe :: proc(sub: Subscription, loc := #caller_location) -> bool {
 
 	type_hash, hash_ok := get_actor_type_hash(sub.actor_type)
 	if hash_ok {
-		broadcast_to_others(
-			Unsubscribe_Remote{type_name_hash = type_hash, count = 1},
-		)
+		broadcast_to_others(Unsubscribe_Remote{type_name_hash = type_hash, count = 1})
 	} else {
 		log.warnf(
 			"pubsub_unsubscribe: no registered type name hash for actor type %d, the local subscription was removed but remote nodes still consider PID %v subscribed",
@@ -328,7 +326,11 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 	if ring == nil {
 		node_name, name_ok := get_node_name(node_id)
 		if name_ok {
-			log.warnf("Broadcast to node '%s' (%d) dropped, no connection ring", node_name, node_id)
+			log.warnf(
+				"Broadcast to node '%s' (%d) dropped, no connection ring",
+				node_name,
+				node_id,
+			)
 		} else {
 			log.warnf("Broadcast to node %d dropped, no connection ring", node_id)
 		}
@@ -362,13 +364,17 @@ Fanout_Behaviour :: Actor_Behaviour(Fanout_Data) {
 
 @(private)
 fanout_handle_message :: proc(data: ^Fanout_Data, from: PID, msg: any) {
-	if task, ok := msg.(Fan_Task); ok do deliver_fan_range(task)
+	if task, ok := msg.(Fan_Task); ok do deliver_fan_range(task, from)
 }
 
 @(private)
-deliver_fan_range :: proc(task: Fan_Task) {
+deliver_fan_range :: proc(task: Fan_Task, sender: PID) {
 	type_info, info_ok := get_type_info_by_hash(task.type_hash)
 	if !info_ok do return
+	if !is_local_pid(sender) && type_info.wire_policy != .Any_Actor {
+		log_refused_wire_broadcast(type_info, get_node_id(sender))
+		return
+	}
 	list := &NODE.type_subscribers[task.actor_type]
 	block := load_subscriber_block(list)
 	if block == nil do return
@@ -435,7 +441,7 @@ deliver_broadcast_sharded :: proc(
 		}
 		helper := NODE.fanout_pids[i]
 		if helper == 0 {
-			deliver_fan_range(task)
+			deliver_fan_range(task, from_pid)
 		} else if err := send_message(helper, task); err != .OK {
 			log.warnf(
 				"broadcast fan-out slice %d..%d dropped, helper backlogged: %v",
@@ -495,8 +501,22 @@ handle_remote_subscribe :: proc(msg: Subscribe_Remote, from_node: Node_ID) {
 	if msg.count == 0 do return
 
 	list := &NODE.type_subscribers[local_type]
-	sync.atomic_add_explicit(&list.remote_node_sub_count[from_node], msg.count, .Release)
-	sync.atomic_add_explicit(&list.count, msg.count, .Release)
+	current := sync.atomic_load_explicit(&list.remote_node_sub_count[from_node], .Acquire)
+	added := min(msg.count, MAX_SUBSCRIBERS_PER_TYPE - min(current, MAX_SUBSCRIBERS_PER_TYPE))
+	if added < msg.count {
+		log.warnf(
+			"Clamped a remote subscribe from node %d for actor type %d from %d to %d: that node has %d and may hold at most %d subscribers (MAX_SUBSCRIBERS_PER_TYPE)",
+			from_node,
+			local_type,
+			msg.count,
+			added,
+			current,
+			MAX_SUBSCRIBERS_PER_TYPE,
+		)
+	}
+	if added == 0 do return
+	sync.atomic_add_explicit(&list.remote_node_sub_count[from_node], added, .Release)
+	sync.atomic_add_explicit(&list.count, added, .Release)
 }
 
 handle_remote_unsubscribe :: proc(msg: Unsubscribe_Remote, from_node: Node_ID) {
@@ -508,6 +528,16 @@ handle_remote_unsubscribe :: proc(msg: Unsubscribe_Remote, from_node: Node_ID) {
 	list := &NODE.type_subscribers[local_type]
 	current := sync.atomic_load_explicit(&list.remote_node_sub_count[from_node], .Acquire)
 	removed := min(msg.count, current)
+	if msg.count > current {
+		log.warnf(
+			"Remote unsubscribe from node %d for actor type %d asked to remove %d but that node has %d, removing %d",
+			from_node,
+			local_type,
+			msg.count,
+			current,
+			removed,
+		)
+	}
 	if removed > 0 {
 		sync.atomic_sub_explicit(&list.remote_node_sub_count[from_node], removed, .Release)
 		sync.atomic_sub_explicit(&list.count, removed, .Release)
@@ -576,39 +606,31 @@ subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscr
 	}
 	pid := get_self_pid()
 
-	for {
-		idx := sync.atomic_load_explicit(&topic.count, .Acquire)
-		if idx >= MAX_TOPIC_SUBSCRIBERS {
-			log.warnf(
-				"Topic subscriber list full, cap is %d (MAX_TOPIC_SUBSCRIBERS), subscription dropped",
-				MAX_TOPIC_SUBSCRIBERS,
-				location = loc,
-			)
-			return {}, false
-		}
-
-		slot := cast(^u64)&topic.subscribers[idx]
-		if _, swapped := sync.atomic_compare_exchange_strong_explicit(
-			slot,
-			0,
-			u64(pid),
-			.Acq_Rel,
-			.Acquire,
-		); swapped {
-			sync.atomic_add_explicit(&topic.count, 1, .Release)
-
-			sub := Topic_Subscription {
-				topic = topic,
-				pid   = pid,
-			}
-
-			if current_actor_context != nil {
-				append(&current_actor_context.topic_subscriptions, sub)
-			}
-
-			return sub, true
-		}
+	sync.mutex_lock(&topic.mutate_lock)
+	idx := sync.atomic_load_explicit(&topic.count, .Relaxed)
+	if idx >= MAX_TOPIC_SUBSCRIBERS {
+		sync.mutex_unlock(&topic.mutate_lock)
+		log.warnf(
+			"Topic subscriber list full, cap is %d (MAX_TOPIC_SUBSCRIBERS), subscription dropped",
+			MAX_TOPIC_SUBSCRIBERS,
+			location = loc,
+		)
+		return {}, false
 	}
+	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[idx], u64(pid), .Release)
+	sync.atomic_store_explicit(&topic.count, idx + 1, .Release)
+	sync.mutex_unlock(&topic.mutate_lock)
+
+	sub := Topic_Subscription {
+		topic = topic,
+		pid   = pid,
+	}
+
+	if current_actor_context != nil {
+		append(&current_actor_context.topic_subscriptions, sub)
+	}
+
+	return sub, true
 }
 
 @(require_results)
@@ -691,18 +713,25 @@ get_topic_subscribers :: proc(topic: ^Topic, out: []PID, loc := #caller_location
 topic_remove_subscriber :: proc(topic: ^Topic, pid: PID) -> bool {
 	if topic == nil || pid == 0 do return false
 
-	n := sync.atomic_load_explicit(&topic.count, .Acquire)
+	sync.mutex_lock(&topic.mutate_lock)
+	defer sync.mutex_unlock(&topic.mutate_lock)
+
+	n := sync.atomic_load_explicit(&topic.count, .Relaxed)
 
 	for i in 0 ..< n {
 		slot := cast(^u64)&topic.subscribers[i]
-		if PID(sync.atomic_load_explicit(slot, .Acquire)) == pid {
+		if PID(sync.atomic_load_explicit(slot, .Relaxed)) == pid {
 			last := n - 1
+			last_slot := cast(^u64)&topic.subscribers[last]
 			if i != last {
-				last_pid := sync.atomic_load_explicit(cast(^u64)&topic.subscribers[last], .Acquire)
-				sync.atomic_store_explicit(slot, last_pid, .Release)
+				sync.atomic_store_explicit(
+					slot,
+					sync.atomic_load_explicit(last_slot, .Relaxed),
+					.Release,
+				)
 			}
-			sync.atomic_store_explicit(cast(^u64)&topic.subscribers[last], 0, .Release)
-			sync.atomic_sub_explicit(&topic.count, 1, .Release)
+			sync.atomic_store_explicit(&topic.count, last, .Release)
+			sync.atomic_store_explicit(last_slot, 0, .Release)
 			return true
 		}
 	}

@@ -1,6 +1,7 @@
 package actod
 
 import pq "core:container/priority_queue"
+import "core:log"
 import "core:sync"
 import "core:testing"
 import "core:time"
@@ -147,7 +148,9 @@ test_repeating_timer_repush :: proc(t: ^testing.T) {
 
 	entry.next_fire = time.time_add(entry.next_fire, entry.interval)
 
-	NODE.timer_registry.index_map[Timer_Key{entry.id, entry.owner}] = pq.len(NODE.timer_registry.heap)
+	NODE.timer_registry.index_map[Timer_Key{entry.id, entry.owner}] = pq.len(
+		NODE.timer_registry.heap,
+	)
 	pq.push(&NODE.timer_registry.heap, entry)
 
 	top := pq.peek(NODE.timer_registry.heap)
@@ -230,4 +233,21 @@ test_same_id_different_owners :: proc(t: ^testing.T) {
 	)
 
 	verify_index_map(t)
+}
+
+@(private = "file")
+set_timer_quietly :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error) {
+	context.logger = log.nil_logger()
+	return set_timer(interval, repeat)
+}
+
+@(test)
+test_set_timer_refuses_non_positive_repeating_interval :: proc(t: ^testing.T) {
+	id, err := set_timer_quietly(0, repeat = true)
+	testing.expect_value(t, err, Send_Error.INVALID_INTERVAL)
+	testing.expect_value(t, id, u32(0))
+
+	id, err = set_timer_quietly(-time.Millisecond, repeat = true)
+	testing.expect_value(t, err, Send_Error.INVALID_INTERVAL)
+	testing.expect_value(t, id, u32(0))
 }

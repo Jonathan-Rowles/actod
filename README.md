@@ -98,7 +98,7 @@ Maps and dynamic arrays are not valid message payloads. That keeps send cost pre
 
 ## Install
 
-Odin `dev-2026-07a` or newer (whatever CI pins under `release:` in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) wins). Pin actod to a tag:
+Odin `dev-2026-11a` or newer (whatever CI pins under `release:` in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) wins). Pin actod to a tag:
 
 ```bash
 git submodule add https://github.com/Jonathan-Rowles/actod.git vendor/actod

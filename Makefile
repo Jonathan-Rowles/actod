@@ -7,6 +7,7 @@ DEV_FLAGS := -vet -strict-style -microarch:native
 RELEASE_FLAGS := -o:aggressive -no-bounds-check -disable-assert -microarch:native
 TEST_FLAGS := -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning
 JOBS :=
+HOT_API_GENERATED := act.odin src/actod/hot_api_generated.odin hot_reload_dev/hot_api_table_generated.odin src/pkgs/hot_reload/generated_shims.odin
 
 CI_DEV_FLAGS := -vet -strict-style
 CI_TEST_FLAGS := -define:ODIN_TEST_SHORT_LOGS=true -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
@@ -61,6 +62,7 @@ bench-footprint:
 gen-hot-api:
 	@mkdir -p bin
 	@odin run ./src/pkgs/hot_reload/generator $(DEV_FLAGS)
+	@for f in $(HOT_API_GENERATED); do odinfmt -w "$$f" || exit 1; done
 
 clean:
 	@rm -rf bin/

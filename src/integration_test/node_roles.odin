@@ -39,6 +39,10 @@ run_node_role :: proc(command: string) {
 		run_union_sender()
 	case "bytes_sender":
 		run_bytes_sender()
+	case "local_only_type_sender":
+		run_local_only_type_sender()
+	case "system_control_sender":
+		run_system_control_sender()
 	case:
 		fmt.eprintf("Unknown node role: %s\n", command)
 		os.exit(1)
@@ -222,9 +226,7 @@ run_send_burst :: proc() {
 			time.sleep(10 * time.Millisecond)
 		}
 
-		conn_pid := actod.PID(
-			sync.atomic_load(cast(^u64)&actod.NODE.connection_actors[node_id]),
-		)
+		conn_pid := actod.PID(sync.atomic_load(cast(^u64)&actod.NODE.connection_actors[node_id]))
 		if conn_pid != 0 {
 			_ = actod.send_message(conn_pid, actod.Scale_Up_Request{})
 			time.sleep(50 * time.Millisecond)

@@ -3,9 +3,9 @@ package hot_reload
 
 import "base:runtime"
 import "core:sync"
+import win32 "core:sys/windows"
 import "core:thread"
 import "core:time"
-import win32 "core:sys/windows"
 
 MAX_WATCHES :: 64
 
@@ -19,23 +19,17 @@ Watch_Entry :: struct {
 }
 
 File_Watcher :: struct {
-	callback:       Watch_Callback,
-	user_data:      rawptr,
-	debounce_ms:    int,
-	should_stop:    bool,
-	watches:        [MAX_WATCHES]Watch_Entry,
-	watch_count:    int,
-	issued_count:   int,
-	thread:         ^thread.Thread,
+	callback:     Watch_Callback,
+	user_data:    rawptr,
+	debounce_ms:  int,
+	should_stop:  bool,
+	watches:      [MAX_WATCHES]Watch_Entry,
+	watch_count:  int,
+	issued_count: int,
+	thread:       ^thread.Thread,
 }
 
-make_watcher :: proc(
-	callback: Watch_Callback,
-	user_data: rawptr,
-) -> (
-	^File_Watcher,
-	bool,
-) {
+make_watcher :: proc(callback: Watch_Callback, user_data: rawptr) -> (^File_Watcher, bool) {
 	w := new(File_Watcher)
 	w.callback = callback
 	w.user_data = user_data
@@ -120,7 +114,12 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 					if check != win32.WAIT_OBJECT_0 do continue
 
 					bytes_returned: win32.DWORD
-					if win32.GetOverlappedResult(w.watches[wi].handle, &w.watches[wi].overlapped, &bytes_returned, win32.FALSE) {
+					if win32.GetOverlappedResult(
+						w.watches[wi].handle,
+						&w.watches[wi].overlapped,
+						&bytes_returned,
+						win32.FALSE,
+					) {
 						if bytes_returned > 0 {
 							process_notifications(
 								w.watches[wi].buf[:bytes_returned],
@@ -187,9 +186,9 @@ process_notifications :: proc(
 
 		info := cast(^win32.FILE_NOTIFY_INFORMATION)&buf[offset]
 
-		name_wchars := int(info.file_name_length) / size_of(win32.WCHAR)
+		name_wchars := int(info.FileNameLength) / size_of(win32.WCHAR)
 		if name_wchars > 0 {
-			name_ptr := &info.file_name
+			name_ptr := &info.FileName
 			wide_slice := ([^]win32.WCHAR)(name_ptr)[:name_wchars]
 
 			name_buf: [512]u8
@@ -226,8 +225,8 @@ process_notifications :: proc(
 			}
 		}
 
-		if info.next_entry_offset == 0 do break
-		offset += info.next_entry_offset
+		if info.NextEntryOffset == 0 do break
+		offset += info.NextEntryOffset
 	}
 }
 
@@ -236,7 +235,8 @@ stop_watcher :: proc(watcher: ^File_Watcher) {
 	sync.atomic_store_explicit(&watcher.should_stop, true, .Release)
 
 	for i in 0 ..< watcher.watch_count {
-		if watcher.watches[i].handle != nil && watcher.watches[i].handle != win32.INVALID_HANDLE_VALUE {
+		if watcher.watches[i].handle != nil &&
+		   watcher.watches[i].handle != win32.INVALID_HANDLE_VALUE {
 			win32.CancelIoEx(watcher.watches[i].handle, nil)
 		}
 	}
@@ -256,7 +256,8 @@ destroy_watcher :: proc(watcher: ^File_Watcher) {
 		if watcher.watches[i].overlapped.hEvent != nil {
 			win32.CloseHandle(watcher.watches[i].overlapped.hEvent)
 		}
-		if watcher.watches[i].handle != nil && watcher.watches[i].handle != win32.INVALID_HANDLE_VALUE {
+		if watcher.watches[i].handle != nil &&
+		   watcher.watches[i].handle != win32.INVALID_HANDLE_VALUE {
 			win32.CloseHandle(watcher.watches[i].handle)
 		}
 	}

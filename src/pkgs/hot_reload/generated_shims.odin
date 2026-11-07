@@ -8,6 +8,7 @@ import "base:runtime"
 import "core:log"
 import "core:time"
 import "core:net"
+import "core:sync"
 
 ACTOR_TYPE_UNTYPED :: Actor_Type(0)
 
@@ -180,6 +181,7 @@ Network_Config :: struct {
 	bind_address:            string,
 	port:                    int,
 	enable_encryption:       bool,
+	trusted_network:         bool,
 	heartbeat_interval:      time.Duration,
 	heartbeat_timeout:       time.Duration,
 	reconnect_initial_delay: time.Duration,
@@ -238,6 +240,7 @@ Send_Error :: enum {
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
 	NOT_ASKED,
+	INVALID_INTERVAL,
 }
 
 Stats_Response :: struct {
@@ -293,6 +296,7 @@ Timer_Tick :: struct {
 Topic :: struct {
 	subscribers: [MAX_TOPIC_SUBSCRIBERS]PID,
 	count:       u32,
+	mutate_lock: sync.Mutex,
 }
 
 Topic_Subscription :: struct {
@@ -351,6 +355,7 @@ Hot_API :: struct {
 		bind_address: string,
 		auth_password: string,
 		enable_encryption: bool,
+		trusted_network: bool,
 		heartbeat_interval: time.Duration,
 		heartbeat_timeout: time.Duration,
 		reconnect_initial_delay: time.Duration,
@@ -479,8 +484,8 @@ make_actor_config :: proc(logging: Log_Config = {}, restart_policy: Restart_Poli
 	return hot_api.make_actor_config(logging, restart_policy, max_restarts, restart_window, supervision_strategy, children, page_size, arena_headroom, coro_stack_size, home_worker, affinity, use_dedicated_os_thread, stack_size_dedicated_os_thread, loc)
 }
 
-make_network_config :: proc(port: int = 0, bind_address: string = "", auth_password: string = "", enable_encryption: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, inbound_filter: Inbound_Filter = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
-	return hot_api.make_network_config(port, bind_address, auth_password, enable_encryption, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, inbound_filter, loc)
+make_network_config :: proc(port: int = 0, bind_address: string = "", auth_password: string = "", enable_encryption: bool = false, trusted_network: bool = false, heartbeat_interval: time.Duration = {}, heartbeat_timeout: time.Duration = {}, reconnect_initial_delay: time.Duration = {}, reconnect_retry_delay: time.Duration = {}, connection_ring: Connection_Ring_Config = {}, inbound_filter: Inbound_Filter = {}, loc: runtime.Source_Code_Location = #caller_location) -> Network_Config {
+	return hot_api.make_network_config(port, bind_address, auth_password, enable_encryption, trusted_network, heartbeat_interval, heartbeat_timeout, reconnect_initial_delay, reconnect_retry_delay, connection_ring, inbound_filter, loc)
 }
 
 make_log_config :: proc(level: log.Level = {}, ident: string = "", enable_file: bool = false, log_path: string = "", console_opts: log.Options = {}, file_opts: log.Options = {}, custom_logger: Log_Callback = {}, custom_flush: Log_Flush = {}) -> Log_Config {

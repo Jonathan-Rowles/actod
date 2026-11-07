@@ -624,8 +624,7 @@ pool_note_contention :: proc(pool: ^Connection_Pool) {
 	}
 	count := sync.atomic_add(&pool.contention_count, 1)
 	if count < pool.contention_threshold do return
-	if _, swapped := sync.atomic_compare_exchange_strong(&pool.scale_up_requested, 0, 1);
-	   swapped {
+	if _, swapped := sync.atomic_compare_exchange_strong(&pool.scale_up_requested, 0, 1); swapped {
 		conn_pid := PID(sync.atomic_load_explicit(&pool.conn_pid, .Acquire))
 		if conn_pid != 0 {
 			_ = send_message(conn_pid, Scale_Up_Request{})
@@ -783,7 +782,11 @@ batch_seal_locked :: proc(ring: ^Connection_Ring, force: bool = false) {
 	write_pos := ring.batch_write_pos
 
 	if write_pos > ring.usable_slot_size {
-		log.errorf("batch_write_pos %d exceeds usable slot size %d", write_pos, ring.usable_slot_size)
+		log.errorf(
+			"batch_write_pos %d exceeds usable slot size %d",
+			write_pos,
+			ring.usable_slot_size,
+		)
 		ring.batch_slot_idx = -1
 		ring.batch_write_pos = 0
 		return
@@ -843,10 +846,7 @@ batch_promote_sealed :: proc(ring: ^Connection_Ring, slot_idx: u32, sealed: Send
 	when ODIN_DEBUG {
 		data := slot_data(ring, slot_idx)
 		if !validate_batch_messages(data[:slot.length], i32(slot_idx), slot.length) {
-			log.errorf(
-				"CRITICAL: Corrupted batch in slot %d on commit, releasing",
-				slot_idx,
-			)
+			log.errorf("CRITICAL: Corrupted batch in slot %d on commit, releasing", slot_idx)
 			_, _ = sync.atomic_compare_exchange_strong(&slot.state, sealed, .FREE)
 			return
 		}
@@ -1160,10 +1160,7 @@ submit_nbio_sends :: proc(ring: ^Connection_Ring) {
 	write_idx := sync.atomic_load(&ring.send_write_idx)
 	if ring.send_submit_idx >= write_idx do return
 
-	assert(
-		ring.tcp_socket != 0,
-		"submitting sends on a ring whose socket is already closed",
-	)
+	assert(ring.tcp_socket != 0, "submitting sends on a ring whose socket is already closed")
 
 	batch_count: u32 = 0
 	check_idx := ring.send_submit_idx
@@ -1571,9 +1568,7 @@ pool_recv_min_epoch :: proc(pool: ^Connection_Pool) -> u32 {
 		r := atomic_load_ring_ptr(&pool.rings[i])
 		if r == nil || r.tcp_socket == 0 do continue
 		if sync.atomic_load(&r.recv_closed) != 0 do continue
-		if i > 0 &&
-		   sync.atomic_load(&r.recv_epoch) == 0 &&
-		   sync.atomic_load(&r.recv_seen) == 0 {
+		if i > 0 && sync.atomic_load(&r.recv_epoch) == 0 && sync.atomic_load(&r.recv_seen) == 0 {
 			continue
 		}
 		lowest = min(lowest, sync.atomic_load(&r.recv_epoch))
@@ -1650,7 +1645,9 @@ process_recv_buffer :: proc(ring: ^Connection_Ring) {
 	if ring_recv_held(ring) do return
 	dispatch := ring.encrypted ? ring_dispatch_envelope : process_complete_message
 	region := ring.recv_buffer[ring.recv_read_pos:ring.recv_write_pos]
+	pinned := reclaim_pin_if_unpinned()
 	consumed, err := process_recv_frames(region, u32(len(region)), ring, dispatch)
+	if pinned do reclaim_unpin()
 	if err != .None {
 		reason: string
 		switch err {
@@ -1737,6 +1734,7 @@ process_complete_message_impl :: proc(ring: ^Connection_Ring, msg_data: []byte) 
 		header.to_name,
 		header.payload,
 		header.ask_token,
+		under_batch_pin = true,
 	)
 	return true
 }
@@ -1932,8 +1930,12 @@ get_or_create_node_ring :: proc(
 
 get_connection_pool :: #force_inline proc(node_id: Node_ID) -> ^Connection_Pool {
 	if node_id == 0 || node_id >= MAX_NODES do return nil
-	return cast(^Connection_Pool)rawptr(
-		uintptr(sync.atomic_load_explicit(cast(^u64)&NODE.connection_pools[node_id], .Acquire)),
+	return(
+		cast(^Connection_Pool)rawptr(
+			uintptr(
+				sync.atomic_load_explicit(cast(^u64)&NODE.connection_pools[node_id], .Acquire),
+			),
+		) \
 	)
 }
 

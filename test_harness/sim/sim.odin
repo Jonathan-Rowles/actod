@@ -208,9 +208,10 @@ init_all :: proc(s: ^Sim) {
 		if !actor.alive do continue
 		if actor.init_fn == nil do continue
 
-		install_intercept(s, actor)
+		wire_intercept(s, actor)
+		ti.test_intercept, ti.det = &s.intercept, &s.det
 		actor.init_fn(actor.data)
-		uninstall_intercept()
+		ti.test_intercept, ti.det = nil, nil
 
 		s.next_timer_id = s.intercept.next_timer_id
 		s.next_pid = s.intercept.next_spawn_pid
@@ -220,7 +221,7 @@ init_all :: proc(s: ^Sim) {
 	}
 }
 
-install_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
+wire_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.send_capture = &s.send_capture
 	s.intercept.publish_capture = &s.publish_capture
 	s.intercept.timer_capture = &s.timer_capture
@@ -243,13 +244,6 @@ install_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.current_ask_token = 0
 	s.intercept.current_ask_from = 0
 	s.intercept.current_reply_token = 0
-	ti.test_intercept = &s.intercept
-	ti.det = &s.det
-}
-
-uninstall_intercept :: proc() {
-	ti.test_intercept = nil
-	ti.det = nil
 }
 
 enqueue :: proc(s: ^Sim, to, from: u64, data: rawptr, type_id: typeid) {
@@ -380,7 +374,8 @@ step :: proc(s: ^Sim) -> bool {
 		return true
 	}
 
-	install_intercept(s, actor)
+	wire_intercept(s, actor)
+	ti.test_intercept, ti.det = &s.intercept, &s.det
 	if msg.ask_token != 0 {
 		if msg.is_reply {
 			s.intercept.current_reply_token = msg.ask_token
@@ -394,7 +389,7 @@ step :: proc(s: ^Sim) -> bool {
 		id   = msg.type_id,
 	}
 	actor.handle_message(actor.data, msg.from, content)
-	uninstall_intercept()
+	ti.test_intercept, ti.det = nil, nil
 
 	s.next_timer_id = s.intercept.next_timer_id
 	s.next_pid = s.intercept.next_spawn_pid

@@ -332,5 +332,63 @@ test_timers_fire_on_a_second_node_in_one_process :: proc(t: ^testing.T) {
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
-	expect(t, sync.sema_wait_with_timeout(&done, 2 * time.Second), "a timer on the second node fires 3 ticks")
+	expect(
+		t,
+		sync.sema_wait_with_timeout(&done, 2 * time.Second),
+		"a timer on the second node fires 3 ticks",
+	)
+}
+
+Duplicate_Timer_Data :: struct {
+	tick_count:     int,
+	expected_ticks: int,
+	done:           ^sync.Sema,
+	repeating_id:   u32,
+}
+
+Duplicate_Timer_Behaviour :: actod.Actor_Behaviour(Duplicate_Timer_Data) {
+	init           = duplicate_timer_init,
+	handle_message = duplicate_timer_handle,
+}
+
+duplicate_timer_init :: proc(data: ^Duplicate_Timer_Data) {
+	parked_id, _ := actod.set_timer(time.Hour, false)
+	_ = actod.send_message(
+		actod.NODE.timer_pid,
+		actod.Start_Timer{id = parked_id, interval = time.Hour, repeat = false},
+	)
+	data.repeating_id, _ = actod.set_timer(10 * time.Millisecond, true)
+}
+
+duplicate_timer_handle :: proc(data: ^Duplicate_Timer_Data, from: actod.PID, msg: any) {
+	switch v in msg {
+	case actod.Timer_Tick:
+		if v.id == data.repeating_id {
+			data.tick_count += 1
+			if data.tick_count == data.expected_ticks do sync.sema_post(data.done)
+		}
+	}
+}
+
+test_timer_duplicate_id_keeps_timer_thread_firing :: proc(t: ^testing.T) {
+	timer_pid_before := actod.NODE.timer_pid
+	done: sync.Sema
+	pid, spawn_ok := actod.spawn(
+		"timer_test_duplicate",
+		Duplicate_Timer_Data{expected_ticks = 3, done = &done},
+		Duplicate_Timer_Behaviour,
+	)
+	expect(t, spawn_ok, "Failed to spawn test actor")
+	defer {
+		_ = actod.terminate_actor(pid)
+		actod.wait_for_pids([]actod.PID{pid})
+	}
+
+	fired := sync.sema_wait_with_timeout(&done, scaled_timeout(2 * time.Second))
+	expect(
+		t,
+		fired,
+		"a repeating timer must keep firing after a duplicate Start_Timer from the same owner",
+	)
+	expect_value(t, actod.NODE.timer_pid, timer_pid_before)
 }

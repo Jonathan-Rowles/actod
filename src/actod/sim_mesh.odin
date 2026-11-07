@@ -34,7 +34,7 @@ sim_pump_any :: proc() -> bool {
 	if mesh == nil do return false
 	previous := NODE
 	progress := sim_mesh_pump(mesh)
-	NODE = previous
+	_ = sim_bind_node(previous)
 	return progress
 }
 
@@ -299,11 +299,16 @@ sim_mesh_destroy :: proc(mesh: ^Sim_Mesh) {
 		if mesh.crashed[i] do continue
 		_ = sim_bind_node(mesh.nodes[i])
 		node_shutdown()
-		sim_destroy_node(mesh.nodes[i])
 	}
 	for node in mesh.graveyard {
 		_ = sim_bind_node(node)
 		node_shutdown()
+	}
+	_ = sim_bind_node(mesh.prev_node)
+	for i in 0 ..< len(mesh.nodes) {
+		if !mesh.crashed[i] do sim_destroy_node(mesh.nodes[i])
+	}
+	for node in mesh.graveyard {
 		sim_destroy_node(node)
 	}
 	sim_transport_assert_quiescent()
@@ -317,6 +322,5 @@ sim_mesh_destroy :: proc(mesh: ^Sim_Mesh) {
 	delete(mesh.graveyard)
 	ti.det = mesh.prev_det
 	sim_seed(0)
-	NODE = mesh.prev_node
 	free(mesh, get_system_allocator())
 }

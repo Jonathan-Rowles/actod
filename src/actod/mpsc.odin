@@ -11,7 +11,8 @@ Entry :: struct($T: typeid) #align (CACHE_LINE_SIZE) {
 }
 
 @(private)
-MPSC_Queue :: struct($T: typeid, $N: int) where N >= 0, (N & (N - 1)) == 0 {
+MPSC_Queue :: struct($T: typeid, $N: int) where N >= 0,
+	(N & (N - 1)) == 0 {
 	_pad0:       [CACHE_LINE_SIZE]byte,
 	write_index: u64,
 	w_mask:      u64,
@@ -75,7 +76,7 @@ mpsc_push :: proc(q: ^MPSC_Queue($T, $N), data: T) -> bool {
 				&q.write_index,
 				pos,
 				pos + 1,
-				.Release,
+				.Relaxed,
 				.Relaxed,
 			)
 

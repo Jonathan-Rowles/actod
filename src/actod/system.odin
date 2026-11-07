@@ -123,28 +123,28 @@ Fan_Task :: struct {
 @(init)
 init_system_messages :: proc "contextless" () {
 	register_message_type(PID)
-	register_message_type(Terminate)
-	register_message_type(Actor_Stopped)
-	register_message_type(Remove_Child)
-	register_message_type(Add_Child)
-	register_message_type(Set_Parent)
-	register_message_type(Get_Stats)
-	register_message_type(Connect_Request)
-	register_message_type(Remote_Message)
-	register_message_type(Start_Receiving)
-	register_message_type(Rename_Actor)
-	register_message_type(Close_Connection)
-	register_message_type(Actor_Spawned_Broadcast)
-	register_message_type(Actor_Terminated_Broadcast)
-	register_message_type(Remote_Spawn_Request)
-	register_message_type(Remote_Spawn_Response)
-	register_message_type(Subscribe_Remote)
-	register_message_type(Unsubscribe_Remote)
-	register_message_type(Scale_Up_Request)
-	register_message_type(Pool_Ring_Closed)
-	register_message_type(Adopt_Pool_Ring)
-	register_message_type(Reload_Behaviour)
-	register_message_type(Fan_Task)
+	register_internal_message_type(Terminate, .Any_Actor)
+	register_internal_message_type(Actor_Stopped, .Any_Actor)
+	register_internal_message_type(Remove_Child, .Local_Only)
+	register_internal_message_type(Add_Child, .Local_Only)
+	register_internal_message_type(Set_Parent, .Local_Only)
+	register_internal_message_type(Get_Stats, .Local_Only)
+	register_internal_message_type(Connect_Request, .Local_Only)
+	register_internal_message_type(Remote_Message, .Local_Only)
+	register_internal_message_type(Start_Receiving, .Local_Only)
+	register_internal_message_type(Rename_Actor, .Local_Only)
+	register_internal_message_type(Close_Connection, .Local_Only)
+	register_internal_message_type(Actor_Spawned_Broadcast, .Connection_Stream)
+	register_internal_message_type(Actor_Terminated_Broadcast, .Connection_Stream)
+	register_internal_message_type(Remote_Spawn_Request, .Connection_Stream)
+	register_internal_message_type(Remote_Spawn_Response, .Connection_Stream)
+	register_internal_message_type(Subscribe_Remote, .Connection_Stream)
+	register_internal_message_type(Unsubscribe_Remote, .Connection_Stream)
+	register_internal_message_type(Scale_Up_Request, .Local_Only)
+	register_internal_message_type(Pool_Ring_Closed, .Local_Only)
+	register_internal_message_type(Adopt_Pool_Ring, .Local_Only)
+	register_internal_message_type(Reload_Behaviour, .Local_Only)
+	register_internal_message_type(Fan_Task, .Local_Only)
 }
 
 Node_Actor_Data :: struct {
@@ -282,6 +282,25 @@ get_node_log_ctx :: proc() -> log.Logger {
 	return NODE.logger
 }
 
+@(private)
+Network_Exposure_Refusal :: enum {
+	None,
+	Missing_Auth_Password,
+	Plaintext_On_Untrusted_Network,
+}
+
+@(private)
+network_exposure_refusal :: proc(
+	network: Network_Config,
+	bind_addr: net.Address,
+	auth_password: string,
+) -> Network_Exposure_Refusal {
+	if network.port <= 0 || address_is_loopback(bind_addr) do return .None
+	if auth_password == "" do return .Missing_Auth_Password
+	if !network.enable_encryption && !network.trusted_network do return .Plaintext_On_Untrusted_Network
+	return .None
+}
+
 node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	sys_allocator := get_system_allocator()
 	cloned_name := strings.clone(name, sys_allocator)
@@ -336,26 +355,37 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 		)
 	}
 
-	if opts.network.port > 0 && !address_is_loopback(bind_addr) {
-		if get_auth_password() == "" {
-			panic_at(
-				loc,
-				"node_init('%s'): refusing to listen on %s:%d with NO authentication and NO encryption%s. Any host that can reach this port could spawn actors, deliver messages, and terminate actors on this node. Set auth_password in make_network_config() or the ACTOD_AUTH_PASSWORD env var (and preferably enable_encryption), or keep the default loopback bind_address",
-				name,
-				NODE.config.network.bind_address,
-				opts.network.port,
-				config_origin(opts.loc),
-			)
-		}
-		if !opts.network.enable_encryption {
-			log.warnf(
-				"node_init('%s'): listening on %s:%d with plaintext authentication%s. The password exchange is offline-crackable and frames carry no post-auth integrity protection; set enable_encryption = true unless the network is trusted",
-				name,
-				NODE.config.network.bind_address,
-				opts.network.port,
-				config_origin(opts.loc),
-			)
-		}
+	switch network_exposure_refusal(opts.network, bind_addr, get_auth_password()) {
+	case .None:
+	case .Missing_Auth_Password:
+		panic_at(
+			loc,
+			"node_init('%s'): refusing to listen on %s:%d with NO authentication and NO encryption%s. Any host that can reach this port could spawn actors, deliver messages, and terminate actors on this node. Set auth_password in make_network_config() or the ACTOD_AUTH_PASSWORD env var (and preferably enable_encryption), or keep the default loopback bind_address",
+			name,
+			NODE.config.network.bind_address,
+			opts.network.port,
+			config_origin(opts.loc),
+		)
+	case .Plaintext_On_Untrusted_Network:
+		panic_at(
+			loc,
+			"node_init('%s'): refusing to listen on %s:%d in plaintext with trusted_network = false%s. The password exchange is offline-crackable and frames carry no post-auth integrity protection. Set enable_encryption = true, or set trusted_network = true in make_network_config() if every host that can reach this port is trusted, or keep the default loopback bind_address",
+			name,
+			NODE.config.network.bind_address,
+			opts.network.port,
+			config_origin(opts.loc),
+		)
+	}
+	if opts.network.port > 0 &&
+	   !address_is_loopback(bind_addr) &&
+	   !opts.network.enable_encryption {
+		log.warnf(
+			"node_init('%s'): listening on %s:%d with plaintext authentication%s. The password exchange is offline-crackable and frames carry no post-auth integrity protection; set enable_encryption = true unless the network is trusted",
+			name,
+			NODE.config.network.bind_address,
+			opts.network.port,
+			config_origin(opts.loc),
+		)
 	}
 
 	NODE.started = true
@@ -636,6 +666,9 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 		} else if actor_typed.blocking {
 			wait_for_blocking_actor_finished(actor_typed)
 		} else {
+			when ODIN_TEST {
+				if dedicated_thread_reap_hook != nil do dedicated_thread_reap_hook(pid, actor_typed.thread != nil)
+			}
 			cleanup_actor_thread(actor_ptr)
 		}
 
@@ -677,7 +710,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	sync.atomic_store(&actor_typed.spawned_closed, true)
 	release_spawn_signals(actor_typed)
 
-	children_ptr := cast(^[dynamic]Supervised_Child)(uintptr(actor_ptr) + offset_of(Actor, children))
+	children_ptr := cast(^[dynamic]Supervised_Child)(uintptr(actor_ptr) +
+		offset_of(Actor, children))
 
 	if children_ptr != nil && len(children_ptr^) > 0 {
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
@@ -769,12 +803,12 @@ SERVICE_THREAD_MIN_USABLE_STACK :: 64 * 1024
 start_signal_relay :: proc() {
 	sync.atomic_store(&NODE.signal_relay_stop, false)
 	NODE.signal_relay_thread = threads_act.make_thread_with_stack_size(nil, proc(_: rawptr) {
-		for {
-			sync.atomic_sema_wait(&NODE.signal_relay_wake)
-			if sync.atomic_load(&NODE.signal_relay_stop) do return
-			wake_blocking_actor()
-		}
-	}, SERVICE_THREAD_STACK_SIZE)
+			for {
+				sync.atomic_sema_wait(&NODE.signal_relay_wake)
+				if sync.atomic_load(&NODE.signal_relay_stop) do return
+				wake_blocking_actor()
+			}
+		}, SERVICE_THREAD_STACK_SIZE)
 	if NODE.signal_relay_thread == nil {
 		log.error(
 			"could not create the signal relay thread, SIGINT and SIGTERM will not stop the blocking child gracefully",
@@ -799,6 +833,7 @@ shutdown_node :: proc(loc := #caller_location) {
 			"shutdown_node ignored: the node is not running (already shut down, or node_init was never called)",
 			location = loc,
 		)
+		report_pins_held_across_reset()
 		cleanup_logger_and_context()
 		reset_node_state()
 		return
@@ -841,6 +876,7 @@ shutdown_node :: proc(loc := #caller_location) {
 	NODE.shutdown_leaked_actors = num_used(&NODE.actor_registry)
 	destroy(&NODE.actor_registry)
 
+	report_pins_held_across_reset()
 	cleanup_logger_and_context()
 	reset_node_state()
 }

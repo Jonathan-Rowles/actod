@@ -1,5 +1,7 @@
 package actod
 
+import "core:log"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 import "core:thread"
@@ -313,9 +315,9 @@ test_topic_add_remove :: proc(t: ^testing.T) {
 	pid1 := PID(0x0001_32_0001_000001)
 	pid2 := PID(0x0001_32_0001_000002)
 
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[0], u64(pid1), .Release)
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[1], u64(pid2), .Release)
-	sync.atomic_store_explicit(&topic.count, 2, .Release)
+	topic.subscribers[0] = pid1
+	topic.subscribers[1] = pid2
+	topic.count = 2
 
 	testing.expect(t, sync.atomic_load_explicit(&topic.count, .Acquire) == 2, "count should be 2")
 
@@ -337,8 +339,8 @@ test_topic_remove_last :: proc(t: ^testing.T) {
 
 	pid1 := PID(0x0001_32_0001_000001)
 
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[0], u64(pid1), .Release)
-	sync.atomic_store_explicit(&topic.count, 1, .Release)
+	topic.subscribers[0] = pid1
+	topic.count = 1
 
 	removed := topic_remove_subscriber(&topic, pid1)
 	testing.expect(t, removed, "remove should succeed")
@@ -356,8 +358,8 @@ test_topic_remove_nonexistent :: proc(t: ^testing.T) {
 	pid1 := PID(0x0001_32_0001_000001)
 	bogus := PID(0x0001_32_0001_FFFFFF)
 
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[0], u64(pid1), .Release)
-	sync.atomic_store_explicit(&topic.count, 1, .Release)
+	topic.subscribers[0] = pid1
+	topic.count = 1
 
 	removed := topic_remove_subscriber(&topic, bogus)
 	testing.expect(t, !removed, "remove of nonexistent PID should return false")
@@ -389,9 +391,9 @@ test_topic_compact_ordering :: proc(t: ^testing.T) {
 	pids: [5]PID
 	for i in 0 ..< 5 {
 		pids[i] = PID(0x0001_32_0001_000000 | u64(i + 1))
-		sync.atomic_store_explicit(cast(^u64)&topic.subscribers[i], u64(pids[i]), .Release)
+		topic.subscribers[i] = pids[i]
 	}
-	sync.atomic_store_explicit(&topic.count, 5, .Release)
+	topic.count = 5
 
 	topic_remove_subscriber(&topic, pids[2])
 	testing.expect(t, sync.atomic_load_explicit(&topic.count, .Acquire) == 4, "count should be 4")
@@ -413,8 +415,8 @@ test_topic_double_remove :: proc(t: ^testing.T) {
 	defer clear_topic(&topic)
 
 	pid1 := PID(0x0001_32_0001_000001)
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[0], u64(pid1), .Release)
-	sync.atomic_store_explicit(&topic.count, 1, .Release)
+	topic.subscribers[0] = pid1
+	topic.count = 1
 
 	topic_remove_subscriber(&topic, pid1)
 	removed := topic_remove_subscriber(&topic, pid1)
@@ -433,9 +435,9 @@ test_get_topic_subscribers_skips_cleared_slots_and_stops_at_the_buffer :: proc(t
 
 	pid1 := PID(0x0001_32_0001_000001)
 	pid3 := PID(0x0001_32_0001_000003)
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[0], u64(pid1), .Release)
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[2], u64(pid3), .Release)
-	sync.atomic_store_explicit(&topic.count, 3, .Release)
+	topic.subscribers[0] = pid1
+	topic.subscribers[2] = pid3
+	topic.count = 3
 
 	listed: [MAX_TOPIC_SUBSCRIBERS]PID
 	n := get_topic_subscribers(&topic, listed[:])
@@ -451,92 +453,6 @@ test_get_topic_subscribers_skips_cleared_slots_and_stops_at_the_buffer :: proc(t
 	one: [1]PID
 	testing.expect_value(t, get_topic_subscribers(&topic, one[:]), 1)
 	testing.expect_value(t, one[0], pid1)
-}
-
-TOPIC_TEST_THREADS :: 8
-
-@(test)
-test_topic_concurrent_subscribe :: proc(t: ^testing.T) {
-	topic: Topic
-	defer clear_topic(&topic)
-
-	barrier: sync.Barrier
-	sync.barrier_init(&barrier, TOPIC_TEST_THREADS)
-
-	Topic_Thread_Ctx :: struct {
-		topic:   ^Topic,
-		pid:     PID,
-		barrier: ^sync.Barrier,
-		ok:      bool,
-	}
-
-	contexts := make([]Topic_Thread_Ctx, TOPIC_TEST_THREADS)
-	defer delete(contexts)
-
-	for i in 0 ..< TOPIC_TEST_THREADS {
-		contexts[i] = Topic_Thread_Ctx {
-			topic   = &topic,
-			pid     = PID(0x0001_32_0001_000000 | u64(i + 1)),
-			barrier = &barrier,
-		}
-	}
-
-	threads: [TOPIC_TEST_THREADS]^thread.Thread
-	for i in 0 ..< TOPIC_TEST_THREADS {
-		threads[i] = thread.create_and_start_with_data(&contexts[i], proc(data: rawptr) {
-			ctx := cast(^Topic_Thread_Ctx)data
-			sync.barrier_wait(ctx.barrier)
-
-			for {
-				idx := sync.atomic_load_explicit(&ctx.topic.count, .Acquire)
-				if idx >= MAX_TOPIC_SUBSCRIBERS {
-					return
-				}
-				slot := cast(^u64)&ctx.topic.subscribers[idx]
-				if _, swapped := sync.atomic_compare_exchange_strong_explicit(
-					slot,
-					0,
-					u64(ctx.pid),
-					.Acq_Rel,
-					.Acquire,
-				); swapped {
-					sync.atomic_add_explicit(&ctx.topic.count, 1, .Release)
-					ctx.ok = true
-					return
-				}
-			}
-		})
-	}
-
-	for th in threads {
-		thread.join(th)
-		thread.destroy(th)
-	}
-
-	success := 0
-	for i in 0 ..< TOPIC_TEST_THREADS {
-		if contexts[i].ok do success += 1
-	}
-
-	testing.expectf(
-		t,
-		success == TOPIC_TEST_THREADS,
-		"all %d should succeed, got %d",
-		TOPIC_TEST_THREADS,
-		success,
-	)
-	testing.expectf(
-		t,
-		sync.atomic_load_explicit(&topic.count, .Acquire) == TOPIC_TEST_THREADS,
-		"count should be %d, got %d",
-		TOPIC_TEST_THREADS,
-		sync.atomic_load_explicit(&topic.count, .Acquire),
-	)
-
-	for i in 0 ..< u32(TOPIC_TEST_THREADS) {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
-		testing.expectf(t, pid != 0, "slot %d should be occupied", i)
-	}
 }
 
 @(test)
@@ -556,5 +472,97 @@ test_clear_node_does_not_affect_local :: proc(t: ^testing.T) {
 		t,
 		get_subscriber_count(test_type) == 1,
 		"local subscriptions should not be cleared",
+	)
+}
+
+@(private)
+capture_remote_subscribe_clamps :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	clamps := (^int)(data)
+	if level == .Warning && strings.has_prefix(text, "Clamped a remote subscribe") do clamps^ += 1
+}
+
+@(private)
+remote_subscribe_clamps :: proc(type_hash: u64, count: u32, peer: Node_ID) -> int {
+	clamps: int
+	context.logger = log.Logger {
+		procedure    = capture_remote_subscribe_clamps,
+		data         = &clamps,
+		lowest_level = .Debug,
+	}
+	handle_remote_subscribe(Subscribe_Remote{type_name_hash = type_hash, count = count}, peer)
+	return clamps
+}
+
+@(private)
+remote_node_subscriber_count :: proc(actor_type: Actor_Type, peer: Node_ID) -> u32 {
+	return sync.atomic_load_explicit(
+		&NODE.type_subscribers[actor_type].remote_node_sub_count[peer],
+		.Acquire,
+	)
+}
+
+@(test)
+test_remote_subscribe_count_is_capped_per_node :: proc(t: ^testing.T) {
+	test_type, registered := register_actor_type("remote_subscribe_cap_test")
+	testing.expect(t, registered, "test actor type registers")
+	type_hash, hash_ok := get_actor_type_hash(test_type)
+	testing.expect(t, hash_ok, "test actor type has a name hash")
+
+	peer := Node_ID(211)
+	defer clear_subscriptions_for_node(peer)
+	count_before_subscribe := get_subscriber_count(test_type)
+
+	testing.expect_value(t, remote_subscribe_clamps(type_hash, 0x8000_0000, peer), 1)
+	testing.expect_value(
+		t,
+		remote_node_subscriber_count(test_type, peer),
+		MAX_SUBSCRIBERS_PER_TYPE,
+	)
+	testing.expect_value(
+		t,
+		get_subscriber_count(test_type),
+		count_before_subscribe + MAX_SUBSCRIBERS_PER_TYPE,
+	)
+
+	testing.expect_value(t, remote_subscribe_clamps(type_hash, 3, peer), 1)
+	testing.expect_value(
+		t,
+		remote_node_subscriber_count(test_type, peer),
+		MAX_SUBSCRIBERS_PER_TYPE,
+	)
+
+	handle_remote_unsubscribe(Unsubscribe_Remote{type_name_hash = type_hash, count = 3}, peer)
+	testing.expect_value(
+		t,
+		remote_node_subscriber_count(test_type, peer),
+		MAX_SUBSCRIBERS_PER_TYPE - 3,
+	)
+
+	testing.expect_value(t, remote_subscribe_clamps(type_hash, 3, peer), 0)
+	testing.expect_value(
+		t,
+		remote_node_subscriber_count(test_type, peer),
+		MAX_SUBSCRIBERS_PER_TYPE,
+	)
+
+	count_before_unsubscribe := get_subscriber_count(test_type)
+	old_logger := context.logger
+	context.logger = log.nil_logger()
+	handle_remote_unsubscribe(
+		Unsubscribe_Remote{type_name_hash = type_hash, count = MAX_SUBSCRIBERS_PER_TYPE + 100},
+		peer,
+	)
+	context.logger = old_logger
+	testing.expect_value(t, remote_node_subscriber_count(test_type, peer), 0)
+	testing.expect(
+		t,
+		get_subscriber_count(test_type) <= count_before_unsubscribe,
+		"an oversized remote unsubscribe does not wrap the subscriber count",
 	)
 }

@@ -22,6 +22,7 @@ What a send result promises, and what it never promises. Every send proc returns
 | `NODE_NOT_FOUND` | Target node id is not registered on this node | After `register_node` |
 | `NODE_DISCONNECTED` | Peer is known but the message could not be staged | With backoff; frames already staged when the connection closes are discarded, not held |
 | `NOT_ASKED` | `reply()` when the current message is not an ask, or `ask()` outside an actor | No, caller bug |
+| `INVALID_INTERVAL` | `set_timer` with `repeat = true` and an interval of zero or less | No, caller bug |
 
 ## Local Sends
 

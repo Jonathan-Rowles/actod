@@ -52,7 +52,9 @@ reclaim_slots_held :: proc() -> int {
 	return held
 }
 
-test_sim_sender_parked_on_another_workers_full_mailbox_holds_no_reclaim_pin :: proc(t: ^testing.T) {
+test_sim_sender_parked_on_another_workers_full_mailbox_holds_no_reclaim_pin :: proc(
+	t: ^testing.T,
+) {
 	g_flood_received = 0
 	g_flood_started = false
 	g_flood_finished = false
@@ -72,7 +74,11 @@ test_sim_sender_parked_on_another_workers_full_mailbox_holds_no_reclaim_pin :: p
 		actod.make_actor_config(home_worker = 0),
 	)
 	expect(t, flooder_ok, "flooder spawn failed")
-	expect(t, actod.send_message(flooder, Integration_Test_Message{id = 0, payload = "go"}) == .OK, "send failed")
+	expect(
+		t,
+		actod.send_message(flooder, Integration_Test_Message{id = 0, payload = "go"}) == .OK,
+		"send failed",
+	)
 
 	steps_parked := 0
 	steps_parked_holding_a_slot := 0
@@ -86,4 +92,77 @@ test_sim_sender_parked_on_another_workers_full_mailbox_holds_no_reclaim_pin :: p
 	expect_value(t, steps_parked_holding_a_slot, 0)
 	expect_value(t, g_flood_slots_held_after_sends, 1)
 	expect_value(t, g_flood_received, SIM_FLOOD_COUNT)
+}
+
+
+test_sim_pin_held_across_bind_protects_other_node :: proc(t: ^testing.T) {
+	node_a := actod.NODE
+
+	node_b := actod.sim_create_node()
+	_ = actod.sim_bind_node(node_b)
+	opts := actod.make_node_config(
+		worker_count = 2,
+		sim_mode = true,
+		actor_config = actod.make_actor_config(
+			logging = actod.make_log_config(level = test_log_level()),
+		),
+	)
+	actod.node_init("sim_reclaim_b", opts)
+	pid, ok := actod.spawn("sim_reclaim_target", Shutdown_Probe{}, shutdown_probe_behaviour)
+	_ = actod.sim_run_until_idle()
+
+	_ = actod.sim_bind_node(node_a)
+	actod.reclaim_pin()
+	expect(
+		t,
+		actod.reclaim_pin_visible_to_scanner(),
+		"the main thread pin is visible to node A's scanner",
+	)
+
+	_ = actod.sim_bind_node(node_b)
+	if !expect(t, ok, "spawn sim_reclaim_target on node B") {
+		actod.reclaim_unpin()
+		return
+	}
+	expect(
+		t,
+		actod.reclaim_pin_visible_to_scanner(),
+		"the pin taken in node A is visible to node B's scanner",
+	)
+	actor_ptr, _ := actod.get(&actod.NODE.actor_registry, pid)
+	expect(t, actor_ptr != nil, "the pinned main thread read the target pointer in node B")
+
+	expect(t, actod.terminate_actor(pid, .SHUTDOWN), "terminate sim_reclaim_target")
+	_ = actod.sim_run_until_idle()
+	for _ in 0 ..< 10 {
+		actod.reclaim_scan()
+	}
+	target_still_retired := expectf(
+		t,
+		retired_actor_count() > 0,
+		"node B's scanner freed the target under the main thread pin (%d retired entries left)",
+		retired_actor_count(),
+	)
+	if target_still_retired && actor_ptr != nil do expect_value(t, (cast(^actod.Actor)actor_ptr).pid, pid)
+
+	actod.reclaim_unpin()
+	actod.reclaim_scan()
+	expect_value(t, retired_actor_count(), 0)
+
+	actod.node_shutdown()
+	_ = actod.sim_bind_node(node_a)
+	actod.sim_destroy_node(node_b)
+
+	pid_a, ok_a := actod.spawn("sim_reclaim_target_a", Shutdown_Probe{}, shutdown_probe_behaviour)
+	if !expect(t, ok_a, "spawn sim_reclaim_target_a on node A") do return
+	_ = actod.sim_run_until_idle()
+	expect(t, actod.terminate_actor(pid_a, .SHUTDOWN), "terminate sim_reclaim_target_a")
+	_ = actod.sim_run_until_idle()
+	actod.reclaim_scan()
+	expectf(
+		t,
+		retired_actor_count() == 0,
+		"node A still holds the pin released in node B (%d retired entries left)",
+		retired_actor_count(),
+	)
 }

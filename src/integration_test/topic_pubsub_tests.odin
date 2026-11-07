@@ -46,7 +46,10 @@ topic_count_is :: proc(state: rawptr) -> bool {
 }
 
 wait_for_topic_count :: proc(topic: ^actod.Topic, expected: u32) {
-	probe := Topic_Count_Probe{topic = topic, expected = expected}
+	probe := Topic_Count_Probe {
+		topic    = topic,
+		expected = expected,
+	}
 	_ = poll_until(topic_count_is, &probe, 2 * time.Second)
 }
 
@@ -336,4 +339,184 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	_ = actod.terminate_actor(sub_pid)
 	_ = actod.terminate_actor(pub_pid)
 	actod.wait_for_pids([]actod.PID{sub_pid, pub_pid})
+}
+
+TOPIC_CHURN_WORKERS :: 4
+TOPIC_CHURNERS :: 3
+TOPIC_CHURN_PUBLISHER_WORKER :: TOPIC_CHURNERS
+TOPIC_CHURN_ROUNDS :: 50
+TOPIC_CHURN_CYCLES_PER_ROUND :: 2000
+TOPIC_CHURN_PUBLISHES_PER_ROUND :: 64
+TOPIC_CHURN_BUDGET :: 20 * time.Second
+
+churn_topic: actod.Topic
+topic_churners_done: int
+topic_churn_failed_subscribes: int
+topic_churn_failed_unsubscribes: int
+topic_churn_stalled_rounds: int
+topic_churn_publishing: bool
+
+Topic_Churn_Round :: struct {
+	round: int,
+}
+
+Topic_Churner :: struct {
+	rounds_left: int,
+}
+
+topic_churner_behaviour := actod.Actor_Behaviour(Topic_Churner) {
+	handle_message = topic_churner_handle,
+}
+
+topic_churner_handle :: proc(data: ^Topic_Churner, from: actod.PID, msg: any) {
+	round, is_round := msg.(Topic_Churn_Round)
+	if !is_round do return
+
+	for _ in 0 ..< TOPIC_CHURN_CYCLES_PER_ROUND {
+		sub, subscribed := actod.subscribe_topic(&churn_topic)
+		if !subscribed {
+			sync.atomic_add(&topic_churn_failed_subscribes, 1)
+			continue
+		}
+		if !actod.unsubscribe_topic(sub) do sync.atomic_add(&topic_churn_failed_unsubscribes, 1)
+	}
+
+	data.rounds_left -= 1
+	if data.rounds_left > 0 {
+		if actod.send_self(Topic_Churn_Round{round = round.round + 1}) != .OK {
+			sync.atomic_add(&topic_churn_stalled_rounds, 1)
+		}
+		return
+	}
+
+	if _, subscribed := actod.subscribe_topic(&churn_topic); !subscribed {
+		sync.atomic_add(&topic_churn_failed_subscribes, 1)
+	}
+	sync.atomic_add(&topic_churners_done, 1)
+}
+
+Topic_Churn_Publisher :: struct {
+	published: int,
+}
+
+topic_churn_publisher_behaviour := actod.Actor_Behaviour(Topic_Churn_Publisher) {
+	handle_message = topic_churn_publisher_handle,
+}
+
+topic_churn_publisher_handle :: proc(data: ^Topic_Churn_Publisher, from: actod.PID, msg: any) {
+	round, is_round := msg.(Topic_Churn_Round)
+	if !is_round do return
+
+	for _ in 0 ..< TOPIC_CHURN_PUBLISHES_PER_ROUND {
+		actod.publish(&churn_topic, Topic_Price_Update{symbol = u64(round.round)})
+		data.published += 1
+	}
+
+	if !sync.atomic_load(&topic_churn_publishing) do return
+	if actod.send_self(Topic_Churn_Round{round = round.round + 1}) != .OK {
+		sync.atomic_add(&topic_churn_stalled_rounds, 1)
+	}
+}
+
+topic_churners_all_done :: proc(state: rawptr) -> bool {
+	return sync.atomic_load(&topic_churners_done) == TOPIC_CHURNERS
+}
+
+test_topic_churn_keeps_subscribers_dense :: proc(t: ^testing.T) {
+	churn_topic = {}
+	sync.atomic_store(&topic_churners_done, 0)
+	sync.atomic_store(&topic_churn_failed_subscribes, 0)
+	sync.atomic_store(&topic_churn_failed_unsubscribes, 0)
+	sync.atomic_store(&topic_churn_stalled_rounds, 0)
+	sync.atomic_store(&topic_churn_publishing, true)
+
+	publisher, publisher_spawned := actod.spawn(
+		"topic_churn_publisher",
+		Topic_Churn_Publisher{},
+		topic_churn_publisher_behaviour,
+		actod.make_actor_config(home_worker = TOPIC_CHURN_PUBLISHER_WORKER),
+	)
+	if !expect(t, publisher_spawned, "failed to spawn the topic churn publisher") do return
+
+	churners: [TOPIC_CHURNERS]actod.PID
+	for w in 0 ..< TOPIC_CHURNERS {
+		pid, spawned := actod.spawn(
+			fmt.tprintf("topic_churner_%d", w),
+			Topic_Churner{rounds_left = TOPIC_CHURN_ROUNDS},
+			topic_churner_behaviour,
+			actod.make_actor_config(home_worker = w),
+		)
+		if !expectf(t, spawned, "failed to spawn topic churner on worker %d", w) do return
+		churners[w] = pid
+	}
+
+	expect(
+		t,
+		actod.send_message(publisher, Topic_Churn_Round{}) == .OK,
+		"failed to start the publisher",
+	)
+	for pid in churners {
+		expect(t, actod.send_message(pid, Topic_Churn_Round{}) == .OK, "failed to start a churner")
+	}
+
+	finished := poll_until(topic_churners_all_done, nil, TOPIC_CHURN_BUDGET)
+	sync.atomic_store(&topic_churn_publishing, false)
+	if !expectf(
+		t,
+		finished,
+		"only %d of %d churners finished within %v, a subscribe is spinning on a slot outside the counted range",
+		sync.atomic_load(&topic_churners_done),
+		TOPIC_CHURNERS,
+		TOPIC_CHURN_BUDGET,
+	) {
+		return
+	}
+
+	expect_value(t, sync.atomic_load(&topic_churn_failed_subscribes), 0)
+	expect_value(t, sync.atomic_load(&topic_churn_failed_unsubscribes), 0)
+	expect_value(t, sync.atomic_load(&topic_churn_stalled_rounds), 0)
+
+	count := sync.atomic_load_explicit(&churn_topic.count, .Acquire)
+	expectf(
+		t,
+		count == TOPIC_CHURNERS,
+		"topic counts %d subscribers, want %d",
+		count,
+		TOPIC_CHURNERS,
+	)
+
+	for i in 0 ..< actod.MAX_TOPIC_SUBSCRIBERS {
+		pid := actod.PID(
+			sync.atomic_load_explicit(cast(^u64)&churn_topic.subscribers[i], .Acquire),
+		)
+		if u32(i) < count {
+			expectf(t, pid != 0, "slot %d inside the counted range %d is zero", i, count)
+		} else {
+			expectf(
+				t,
+				pid == 0,
+				"slot %d outside the counted range %d holds live pid %v",
+				i,
+				count,
+				pid,
+			)
+		}
+	}
+
+	listed: [actod.MAX_TOPIC_SUBSCRIBERS]actod.PID
+	n := actod.get_topic_subscribers(&churn_topic, listed[:])
+	expectf(
+		t,
+		lists_exactly(listed[:n], churners[:]),
+		"want every churner %v counted, got %v",
+		churners,
+		listed[:n],
+	)
+
+	for pid in churners {
+		_ = actod.terminate_actor(pid)
+	}
+	_ = actod.terminate_actor(publisher)
+	actod.wait_for_pids(churners[:])
+	actod.wait_for_pids([]actod.PID{publisher})
 }

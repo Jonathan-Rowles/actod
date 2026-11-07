@@ -90,10 +90,10 @@ timer_heap_swap :: proc(q: []Timer_Entry, i, j: int) {
 
 @(init)
 init_timer_messages :: proc "contextless" () {
-	register_message_type(Start_Timer)
-	register_message_type(Cancel_Timer)
-	register_message_type(Cancel_All_Timers)
-	register_message_type(Timer_Tick)
+	register_internal_message_type(Start_Timer, .Local_Only)
+	register_internal_message_type(Cancel_Timer, .Local_Only)
+	register_internal_message_type(Cancel_All_Timers, .Local_Only)
+	register_internal_message_type(Timer_Tick, .Local_Only)
 }
 
 reset_timer_registry :: proc() {
@@ -253,12 +253,12 @@ timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any)
 
 		key := Timer_Key{v.id, from}
 		if key in NODE.timer_registry.index_map {
-			panic_at(
-				NODE.config.loc,
-				"Duplicate timer: id=%d is already registered for owner %s",
+			log.errorf(
+				"Duplicate timer: id=%d is already registered for owner %s, dropping the new request and keeping the running timer",
 				v.id,
 				actor_origin(from),
 			)
+			return
 		}
 
 		entry := Timer_Entry {
@@ -344,6 +344,15 @@ set_timer :: proc(
 	Send_Error,
 ) {
 	when ODIN_TEST {if id, err, ok := ti.intercept_set_timer(interval, repeat); ok do return id, Send_Error(err)}
+
+	if repeat && interval <= 0 {
+		log.errorf(
+			"set_timer refused: a repeating timer needs a positive interval, got %v",
+			interval,
+			location = loc,
+		)
+		return 0, .INVALID_INTERVAL
+	}
 
 	id := sync.atomic_add(&NODE.next_timer_id, 1) + 1
 

@@ -48,13 +48,13 @@ frame_tap_add :: proc(rule: Frame_Fault_Rule) {
 	count := sync.atomic_load_explicit(&g_frame_fault_count, .Relaxed)
 	assert(count < MAX_FRAME_FAULTS, "frame_tap: too many fault rules")
 	g_frame_faults[count] = rule
-	sync.atomic_store_explicit(&g_frame_fault_count, count + 1, .Release)
+	sync.atomic_store_explicit(&g_frame_fault_count, count + 1, .Relaxed)
 }
 
 frame_tap_clear :: proc() {
 	sync.mutex_lock(&g_frame_fault_mutex)
 	defer sync.mutex_unlock(&g_frame_fault_mutex)
-	sync.atomic_store_explicit(&g_frame_fault_count, 0, .Release)
+	sync.atomic_store_explicit(&g_frame_fault_count, 0, .Relaxed)
 }
 
 frame_tap_fired :: proc() -> int {

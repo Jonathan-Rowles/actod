@@ -333,6 +333,52 @@ test_repeat_timer_fires_multiple :: proc(t: ^testing.T) {
 	testing.expect_value(t, tm.ticks, 3)
 }
 
+zero_interval_timer_state :: struct {
+	name:         string,
+	refused_id:   u32,
+	refused_err:  actod.Send_Error,
+	accepted_id:  u32,
+	accepted_err: actod.Send_Error,
+	ticks:        int,
+	stray_ticks:  int,
+}
+
+zero_interval_timer_behaviour := actod.Actor_Behaviour(zero_interval_timer_state) {
+	handle_message = proc(s: ^zero_interval_timer_state, from: actod.PID, msg: any) {
+		switch v in msg {
+		case actod.Timer_Tick:
+			if v.id == s.accepted_id {
+				s.ticks += 1
+			} else {
+				s.stray_ticks += 1
+			}
+		}
+	},
+	init = proc(s: ^zero_interval_timer_state) {
+		s.refused_id, s.refused_err = actod.set_timer(0, repeat = true)
+		s.accepted_id, s.accepted_err = actod.set_timer(1 * time.Second, repeat = true)
+	},
+}
+
+@(test)
+test_repeating_timer_with_zero_interval_is_refused :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "tmr", zero_interval_timer_state{name = "tmr"}, zero_interval_timer_behaviour)
+	init_all(&s)
+
+	advance_time(&s, 3 * time.Second)
+	run_until_idle(&s)
+
+	tm := get_state(&s, "tmr", zero_interval_timer_state)
+	testing.expect_value(t, tm.refused_err, actod.Send_Error.INVALID_INTERVAL)
+	testing.expect_value(t, tm.refused_id, u32(0))
+	testing.expect_value(t, tm.accepted_err, actod.Send_Error.OK)
+	testing.expect_value(t, tm.ticks, 3)
+	testing.expect_value(t, tm.stray_ticks, 0)
+}
+
 @(test)
 test_init_timers_get_distinct_ids_across_actors :: proc(t: ^testing.T) {
 	s := create()
@@ -1053,4 +1099,32 @@ test_published_copies_own_their_strings :: proc(t: ^testing.T) {
 	testing.expect(t, r1.intact, "r1 read a garbled note")
 	testing.expect(t, r2.intact, "r2 read a garbled note")
 	testing.expect(t, r1.text != r2.text, "r1 and r2 read the same copy of the note")
+}
+
+@(test)
+test_forged_reply_leaves_the_asked_actors_reply_to_arrive :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	pricer_pid := spawn(&s, "pricer", pricer_state{}, pricer_behaviour)
+	impostor_pid := spawn(&s, "impostor", pricer_state{}, pricer_behaviour)
+	trader_pid := spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	init_all(&s)
+
+	send(&s, "trader", Ping{})
+	testing.expect(t, step(&s), "the trader must handle Ping and ask the pricer")
+
+	asked_token := get_state(&s, "trader", trader_state).token
+	testing.expect(t, asked_token != 0, "the ask must have a token")
+
+	forged := new(Price)
+	forged.value = 999
+	enqueue_ask(&s, u64(trader_pid), u64(impostor_pid), forged, Price, u64(asked_token), true)
+	run_until_idle(&s)
+
+	tr := get_state(&s, "trader", trader_state)
+	testing.expect_value(t, tr.replies, 1)
+	testing.expect_value(t, tr.price, 40)
+	testing.expect(t, tr.matched_token, "the real reply must carry the ask token")
+	testing.expect_value(t, tr.timed_out, 0)
 }

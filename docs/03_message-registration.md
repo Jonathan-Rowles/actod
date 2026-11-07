@@ -39,7 +39,7 @@ Messages larger than 32 bytes are allocated from the actor's **message pool**.
 
 ## Variable-Length Data
 
-For registered types, the runtime introspects struct fields to find variable-width data. A `string` and a `[]u8` (byte slice) have the same memory layout (a pointer and a length), so they are treated identically: both are deep-copied alongside the fixed struct, both serialize across the network, and both work the same inside the active variant of a union field. Use whichever fits the data, text in a `string`, binary in a `[]u8`.
+For registered types, the runtime introspects struct fields to find variable-width data. A `string` and a `[]u8` (byte slice) have the same memory layout (a pointer and a length), so they are treated identically: both are deep-copied alongside the fixed struct, both serialize across the network, and both work the same inside the active variant of a union field. A union holding strings or byte slices inside a union variant is refused at registration, since only one level of union is copied. Use whichever fits the data, text in a `string`, binary in a `[]u8`.
 
 On send, the variable data is appended after the fixed struct in **field declaration order**, and the receiver gets a fully owned copy with no shared pointers. An empty field arrives as a zero-length value (`""` or a nil slice). This holds for local sends and cross-node sends alike.
 

@@ -57,5 +57,7 @@ track_send_error :: #force_inline proc(state: ^Benchmark_State, err: actod.Send_
 	case .NODE_DISCONNECTED:
 		sync.atomic_add(&state.err_network, 1)
 	case .NOT_ASKED:
+	case .INVALID_INTERVAL:
+		sync.atomic_add(&state.err_message_too_large, 1)
 	}
 }

@@ -13,7 +13,11 @@ OBSERVER_TYPE: Actor_Type
 
 @(init)
 init_observer_messages :: proc "contextless" () {
-	register_message_type(Set_Collection_Interval)
+	register_internal_message_type(Set_Collection_Interval, .Local_Only)
+	register_internal_message_type(Trigger_Collection, .Local_Only)
+	register_internal_message_type(Get_Actor_Stats_Request, .Local_Only)
+	register_internal_message_type(Get_All_Stats_Request, .Local_Only)
+	register_internal_message_type(Clear_Terminated_Stats, .Local_Only)
 	register_message_type(Stats_Response)
 	register_message_type(Stats_Snapshot)
 }
@@ -138,7 +142,7 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 	switch m in msg {
 	case Stats_Response:
 		stats := m.stats
-		stats.name = strings.clone(m.stats.name)
+		stats.name = strings.clone(m.stats.name, actor_system_allocator)
 
 		if stats.terminated {
 			if old_stats, ok := data.active_stats[stats.pid]; ok {
@@ -176,8 +180,22 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 
 	case Get_All_Stats_Request:
 		response := All_Stats_Response {
-			active_stats     = data.active_stats,
-			terminated_stats = data.terminated_stats[:],
+			active_stats     = make(
+				map[PID]Actor_Stats,
+				len(data.active_stats),
+				actor_system_allocator,
+			),
+			terminated_stats = make(
+				[]Actor_Stats,
+				len(data.terminated_stats),
+				actor_system_allocator,
+			),
+		}
+		for pid, stats in data.active_stats {
+			response.active_stats[pid] = clone_actor_stats(stats)
+		}
+		for stats, i in data.terminated_stats {
+			response.terminated_stats[i] = clone_actor_stats(stats)
 		}
 		requester := m.requester
 		if requester == {} do requester = from
@@ -186,12 +204,12 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 	case Get_Actor_Stats_Request:
 		response: Actor_Stats_Response
 		if stats, ok := data.active_stats[m.actor_pid]; ok {
-			response.stats = stats
+			response.stats = clone_actor_stats(stats)
 			response.found = true
 		} else {
 			for &s in data.terminated_stats {
 				if s.pid == m.actor_pid {
-					response.stats = s
+					response.stats = clone_actor_stats(s)
 					response.found = true
 					break
 				}
@@ -287,6 +305,8 @@ broadcast_stats_snapshot :: proc(data: ^Observer_Data) {
 collect_all_stats :: proc(data: ^Observer_Data) {
 	data.collection_count += 1
 	data.last_collection = now()
+	clear_traffic_tally(&current_actor_context.stats.received)
+	clear_traffic_tally(&current_actor_context.stats.sent)
 
 	it := make_iter(&NODE.actor_registry)
 	actor_count := 0
@@ -311,8 +331,27 @@ collect_all_stats :: proc(data: ^Observer_Data) {
 }
 
 @(private)
+clone_pid_counts :: proc(counts: map[PID]u64) -> map[PID]u64 {
+	if counts == nil do return nil
+	copied := make(map[PID]u64, len(counts), actor_system_allocator)
+	for pid, count in counts {
+		copied[pid] = count
+	}
+	return copied
+}
+
+@(private)
+clone_actor_stats :: proc(stats: Actor_Stats) -> Actor_Stats {
+	copied := stats
+	copied.name = strings.clone(stats.name, actor_system_allocator)
+	copied.received_from = clone_pid_counts(stats.received_from)
+	copied.sent_to = clone_pid_counts(stats.sent_to)
+	return copied
+}
+
+@(private)
 free_actor_stats :: proc(stats: ^Actor_Stats) {
-	if len(stats.name) > 0 do delete(stats.name)
+	if len(stats.name) > 0 do delete(stats.name, actor_system_allocator)
 	if stats.received_from != nil do delete(stats.received_from)
 	if stats.sent_to != nil do delete(stats.sent_to)
 }
@@ -378,7 +417,10 @@ start_observer :: proc(
 	NODE.observer_pid = pid
 
 	if collection_interval > 0 {
-		_ = send_message(NODE.observer_pid, Set_Collection_Interval{interval = collection_interval})
+		_ = send_message(
+			NODE.observer_pid,
+			Set_Collection_Interval{interval = collection_interval},
+		)
 	}
 
 	return pid, ok

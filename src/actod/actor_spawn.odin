@@ -11,6 +11,7 @@ _ :: mem
 import "../pkgs/threads_act"
 import "core:strings"
 import "core:sync"
+import "core:thread"
 
 @(private)
 spawn_fail :: proc(actor: ^Actor, pid: PID) {
@@ -99,6 +100,7 @@ spawn_alloc_actor :: proc(
 	context.allocator = actor.allocator
 
 	actor.name = strings.clone(name, context.allocator)
+	actor.published_name = new_clone(actor.name, context.allocator)
 	actor.spawn_loc = loc
 
 	data_ptr, data_err := mem.alloc(max(state.size, 1), state.align, actor.allocator)
@@ -254,7 +256,23 @@ spawn_impl :: proc(
 		align     = align_of(T),
 		type_info = type_info_of(T),
 	}
-	return spawn_erased(name, state, erase_behaviour(behaviour), mailbox_size, opts, parent_pid, loc)
+	return spawn_erased(
+		name,
+		state,
+		erase_behaviour(behaviour),
+		mailbox_size,
+		opts,
+		parent_pid,
+		loc,
+	)
+}
+
+when ODIN_TEST {
+	blocking_actor_last_touch_hook: proc(actor: ^Actor, pid: PID)
+	spawner_resumed_after_start_hook: proc(actor: ^Actor, pid: PID, name: string)
+	dedicated_thread_started_hook: proc(pid: PID, name: string)
+	dedicated_thread_starting_hook: proc(pid: PID, stored_thread: ^thread.Thread)
+	dedicated_thread_reap_hook: proc(pid: PID, joins_thread: bool)
 }
 
 @(private)
@@ -334,6 +352,9 @@ spawn_erased :: proc(
 		spawning_blocking_child = false
 		sync.atomic_store(&NODE.blocking_actor, actor)
 		actor_loop(actor)
+		when ODIN_TEST {
+			if blocking_actor_last_touch_hook != nil do blocking_actor_last_touch_hook(actor, pid)
+		}
 		sync.atomic_store_explicit(&actor.blocking_finished, true, .Release)
 		return pid, true
 	}
@@ -351,10 +372,14 @@ spawn_erased :: proc(
 		}
 	} else {
 		actor.pool_handle = nil
-		actor.thread = threads_act.make_thread_with_stack_size(actor, proc(actor_ptr: rawptr) {
+		dedicated_thread := threads_act.make_unstarted_thread_with_stack_size(
+			actor,
+			proc(actor_ptr: rawptr) {
 				actor_loop(cast(^Actor)actor_ptr)
-			}, uint(actor.opts.stack_size_dedicated_os_thread))
-		if actor.thread == nil {
+			},
+			uint(actor.opts.stack_size_dedicated_os_thread),
+		)
+		if dedicated_thread == nil {
 			log.errorf(
 				"spawn('%s') failed: could not create a dedicated OS thread with a %d B stack (PID %v)",
 				name,
@@ -365,9 +390,20 @@ spawn_erased :: proc(
 			spawn_fail(actor, pid)
 			return 0, false
 		}
+		actor.thread = dedicated_thread
+		when ODIN_TEST {
+			if dedicated_thread_starting_hook != nil do dedicated_thread_starting_hook(pid, actor.thread)
+		}
+		thread.start(dedicated_thread)
+		when ODIN_TEST {
+			if dedicated_thread_started_hook != nil do dedicated_thread_started_hook(pid, name)
+		}
 	}
 
 	if needs_first_run_wait do spawn_wait_started(&started)
+	when ODIN_TEST {
+		if spawner_resumed_after_start_hook != nil do spawner_resumed_after_start_hook(actor, pid, name)
+	}
 
 	if NODE.config.hot_reload_dev do hot_reload_hooks.register_actor(state, pid, name)
 

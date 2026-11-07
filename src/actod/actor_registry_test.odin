@@ -1116,9 +1116,18 @@ gossip_window_bounded_after_dropped_seq_test :: proc(t: ^testing.T) {
 	next_seq := NODE.node_registry[node].gossip.next_seq
 	sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
 
-	testing.expectf(t, ahead_len <= GOSSIP_AHEAD_LIMIT, "ahead grew to %d entries past a dropped seq", ahead_len)
+	testing.expectf(
+		t,
+		ahead_len <= GOSSIP_AHEAD_LIMIT,
+		"ahead grew to %d entries past a dropped seq",
+		ahead_len,
+	)
 	testing.expectf(t, next_seq > 3, "frontier stuck at %d behind the hole", next_seq)
-	testing.expect(t, gossip_seq_covered(node, 150), "sequences past the hole must count as covered")
+	testing.expect(
+		t,
+		gossip_seq_covered(node, 150),
+		"sequences past the hole must count as covered",
+	)
 	gossip_seq_reset(node, 0)
 }
 
@@ -1150,4 +1159,30 @@ terminate_actor_during_shutdown_reports_success_test :: proc(t: ^testing.T) {
 	sync.atomic_store(&NODE.shutting_down, was_shutting_down)
 
 	testing.expect(t, ok, "terminate_actor during shutdown should succeed, not report a stale PID")
+}
+
+@(test)
+test_a_local_handle_under_a_peer_node_id_resolves_to_nothing :: proc(t: ^testing.T) {
+	test_registry := make_test_registry()
+	defer free(test_registry)
+	clear(test_registry)
+
+	local_pid, added := add(test_registry, rawptr(uintptr(1)), "local_target")
+	testing.expect(t, added, "the local entry must be added")
+	handle, local_node := unpack_pid(local_pid)
+	peer_pid := pack_pid(handle, local_node + 1)
+
+	_, found := get(test_registry, peer_pid)
+	testing.expect(
+		t,
+		!found,
+		"a peer pid carrying a local handle must not resolve to the local entry",
+	)
+	testing.expect(
+		t,
+		!valid(test_registry, peer_pid),
+		"a peer pid carrying a local handle is not a valid entry",
+	)
+	_, local_found := get(test_registry, local_pid)
+	testing.expect(t, local_found, "the local pid still resolves")
 }

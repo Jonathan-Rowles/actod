@@ -37,10 +37,11 @@ actor_origin :: proc(pid: PID) -> string {
 	if !active || actor_ptr == nil do return fmt.tprintf("PID %v (no longer registered)", pid)
 
 	actor := cast(^Actor)actor_ptr
-	if actor.spawn_loc.file_path == "" do return fmt.tprintf("'%s' (PID %v)", actor.name, pid)
+	name := load_published_name(actor)
+	if actor.spawn_loc.file_path == "" do return fmt.tprintf("'%s' (PID %v)", name, pid)
 	return fmt.tprintf(
 		"'%s' (PID %v, spawned at %s:%d)",
-		actor.name,
+		name,
 		pid,
 		actor.spawn_loc.file_path,
 		actor.spawn_loc.line,
@@ -86,6 +87,7 @@ spawning_node_actor: bool
 @(private)
 make_logger :: proc(config: Log_Config) -> log.Logger {
 	actor_system_allocator = runtime.heap_allocator()
+	when ODIN_TEST do actor_system_allocator = counted_system_allocator(actor_system_allocator)
 	NODE.logger_data = new(Actor_Logger_Data, actor_system_allocator)
 
 	NODE.logger_data.log_config = config
@@ -116,6 +118,7 @@ cleanup_logger_and_context :: proc() {
 		log.destroy_console_logger(NODE.logger_data.console_logger, actor_system_allocator)
 		free(NODE.logger_data, actor_system_allocator)
 		NODE.logger_data = nil
+		NODE.logger = {}
 	}
 
 	if current_actor_context != nil {
@@ -187,8 +190,12 @@ setup_actor_context :: proc(
 	actor_ctx.timer_asks = make(map[u32]u64, actor_allocator)
 	actor_ctx.stats.messages_received = 0
 	actor_ctx.stats.messages_sent = 0
-	actor_ctx.stats.received_list = make([dynamic]PID, actor_allocator)
-	actor_ctx.stats.sent_list = make([dynamic]PID, actor_allocator)
+	actor_ctx.stats.received = Traffic_Recorder {
+		allocator = actor_allocator,
+	}
+	actor_ctx.stats.sent = Traffic_Recorder {
+		allocator = actor_allocator,
+	}
 	actor_ctx.stats.received_from = nil
 	actor_ctx.stats.sent_to = nil
 	actor_ctx.stats.start_time = now()

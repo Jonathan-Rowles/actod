@@ -39,6 +39,7 @@ act.make_network_config(
     bind_address            = "127.0.0.1",   // loopback by default; see Trust boundary
     auth_password           = "",            // empty = no auth
     enable_encryption       = false,         // Noise NNpsk0 over the TCP link
+    trusted_network         = false,         // allow plaintext on a non-loopback bind
     heartbeat_interval      = 30 * time.Second,
     heartbeat_timeout       = 90 * time.Second,
     reconnect_initial_delay = 2 * time.Second,
@@ -55,9 +56,9 @@ The listener binds `bind_address`. The default is `127.0.0.1`, so out of the box
 Two rules are enforced at `node_init`:
 
 - **A non-loopback bind requires a password.** `bind_address` beyond loopback with an empty `auth_password` is refused at startup. Any host that reaches the port would otherwise join the mesh with full authority.
-- **A non-loopback bind without `enable_encryption` warns.** Plaintext challenge-response proves the peer knows the password, but the exchange is offline-crackable and post-handshake frames carry no integrity protection. Treat plaintext mode as LAN-trusted-only.
+- **A non-loopback bind without `enable_encryption` requires `trusted_network = true`.** Plaintext challenge-response proves the peer knows the password, but the exchange is offline-crackable and post-handshake frames carry no integrity protection. Without `trusted_network` it is refused at startup; with it, startup and each plaintext session with a non-loopback peer log a warning.
 
-Know what the password grants: an authenticated peer is **fully trusted**. It can spawn any registered behaviour on this node, deliver messages to any actor by name, and terminate actors. The password is cluster admission, not per-action authorization; only share it with nodes you would let run arbitrary registered code.
+Know what the password grants: an authenticated peer is **fully trusted**. It can spawn any registered behaviour on this node and deliver your registered message types to any actor by name. Of the runtime's own types, a peer may send `PID` and `Stats_Snapshot` (plain data) to any actor, and `Terminate` and `Actor_Stopped` to any actor, so it can stop any local actor. The lifecycle and remote spawn types (`Remote_Spawn_Request`, `Remote_Spawn_Response`, `Subscribe_Remote`, `Unsubscribe_Remote`, `Actor_Spawned_Broadcast`, `Actor_Terminated_Broadcast`) travel only as lifecycle frames handled by the connection. Every other runtime type is local only, and a peer frame carrying one is dropped with a warning naming the type and the peer. The two messages `actod/hot_reload_dev` registers, `Register_Hot_Actor` and `File_Changed`, are not yet among them: a node that imports that package accepts both from a peer. The password is cluster admission, not per-action authorization; only share it with nodes you would let run arbitrary registered code.
 
 ## Encryption
 

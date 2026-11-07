@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:mem"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 
@@ -33,6 +34,7 @@ register_test_types :: proc() {
 	register_message_type(Test_Enumerated_Array_Message)
 	register_message_type(Test_Union_Array_Message)
 	register_message_type(Test_Plain_Array_Message)
+	register_message_type(Union_In_Plain_Field_Message)
 
 	test_types_registered = true
 }
@@ -439,7 +441,11 @@ test_union_struct_with_union_field :: proc(t: ^testing.T) {
 		.Has_Unions in info.flags,
 		"Struct with union field should have Has_Unions flag",
 	)
-	testing.expect(t, .Has_Var_Fields not_in info.flags, "Should not have top-level Has_Var_Fields")
+	testing.expect(
+		t,
+		.Has_Var_Fields not_in info.flags,
+		"Should not have top-level Has_Var_Fields",
+	)
 	testing.expect(t, len(info.union_fields) == 1, "Should have 1 union field entry")
 }
 
@@ -701,7 +707,10 @@ test_payload_oversized_fixed_type_rejected :: proc(t: ^testing.T) {
 	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
-	original := Test_Simple_Message{id = 3, value = 1.5}
+	original := Test_Simple_Message {
+		id    = 3,
+		value = 1.5,
+	}
 	wire := make([]byte, size_of(Test_Simple_Message) + 4)
 	defer delete(wire)
 	mem.copy(raw_data(wire), &original, size_of(Test_Simple_Message))
@@ -726,7 +735,10 @@ test_payload_oversized_var_data_rejected_inline :: proc(t: ^testing.T) {
 	defer cleanup_pool(&pool)
 
 	blob := []byte{1, 2, 3}
-	original := Test_Bytes_Message{id = 9, payload = blob}
+	original := Test_Bytes_Message {
+		id      = 9,
+		payload = blob,
+	}
 
 	oversized := build_bytes_message_payload(original, 2)
 	defer delete(oversized)
@@ -756,7 +768,10 @@ test_payload_oversized_var_data_rejected_pooled :: proc(t: ^testing.T) {
 	blob := make([]byte, 64)
 	defer delete(blob)
 	for i in 0 ..< len(blob) do blob[i] = u8(i)
-	original := Test_Bytes_Message{id = 11, payload = blob}
+	original := Test_Bytes_Message {
+		id      = 11,
+		payload = blob,
+	}
 
 	oversized := build_bytes_message_payload(original, 1)
 	defer delete(oversized)
@@ -768,7 +783,11 @@ test_payload_oversized_var_data_rejected_pooled :: proc(t: ^testing.T) {
 	defer delete(exact)
 	err, _ = create_message_from_payload(&msg, &pool, exact, info)
 	testing.expect_value(t, err, Alloc_Error.OK)
-	testing.expect(t, message_owns_page(msg.content), "Large payload should decode into a pool page")
+	testing.expect(
+		t,
+		message_owns_page(msg.content),
+		"Large payload should decode into a pool page",
+	)
 	decoded := cast(^Test_Bytes_Message)(uintptr(msg.content) + TYPE_HEADER_SIZE)
 	testing.expect_value(t, decoded.id, u64(11))
 	testing.expect_value(t, len(decoded.payload), 64)
@@ -835,11 +854,18 @@ expect_every_label_copied :: proc(
 	for s in owned do mem.set(raw_data(s), 'x', len(s))
 
 	for dst_label, i in dst_labels {
-		testing.expectf(t, dst_label^ == fmt.tprintf("label-%d", i), "element %d label was %q", i, dst_label^)
+		testing.expectf(
+			t,
+			dst_label^ == fmt.tprintf("label-%d", i),
+			"element %d label was %q",
+			i,
+			dst_label^,
+		)
 		data := uintptr(raw_data(dst_label^))
 		testing.expectf(
 			t,
-			data >= uintptr(raw_data(storage)) && data < uintptr(raw_data(storage)) + uintptr(len(storage)),
+			data >= uintptr(raw_data(storage)) &&
+			data < uintptr(raw_data(storage)) + uintptr(len(storage)),
 			"element %d label should point into the receiver's storage",
 			i,
 		)
@@ -883,7 +909,11 @@ test_enumerated_array_elements_get_var_fields :: proc(t: ^testing.T) {
 
 	info, ok := get_type_info_ptr(typeid_of(Test_Enumerated_Array_Message))
 	testing.expect(t, ok, "Test_Enumerated_Array_Message should be registered")
-	testing.expect(t, .Has_Var_Fields in info.flags, "enumerated array of strings should have var fields")
+	testing.expect(
+		t,
+		.Has_Var_Fields in info.flags,
+		"enumerated array of strings should have var fields",
+	)
 	testing.expect_value(t, len(info.var_fields), 4)
 	for i in 0 ..< min(len(info.var_fields), 4) {
 		testing.expect_value(
@@ -897,14 +927,26 @@ test_enumerated_array_elements_get_var_fields :: proc(t: ^testing.T) {
 
 	storage: [512]byte
 	src: Test_Enumerated_Array_Message
-	dst := (^Test_Enumerated_Array_Message)(rawptr(&storage[size_of(storage) - size_of(Test_Enumerated_Array_Message)]))
+	dst := (^Test_Enumerated_Array_Message)(
+		rawptr(&storage[size_of(storage) - size_of(Test_Enumerated_Array_Message)]),
+	)
 	expect_every_label_copied(
 		t,
 		info,
 		&src,
 		dst,
-		{&src.items[.North].label, &src.items[.East].label, &src.items[.South].label, &src.items[.West].label},
-		{&dst.items[.North].label, &dst.items[.East].label, &dst.items[.South].label, &dst.items[.West].label},
+		{
+			&src.items[.North].label,
+			&src.items[.East].label,
+			&src.items[.South].label,
+			&src.items[.West].label,
+		},
+		{
+			&dst.items[.North].label,
+			&dst.items[.East].label,
+			&dst.items[.South].label,
+			&dst.items[.West].label,
+		},
 		storage[:size_of(storage) - size_of(Test_Enumerated_Array_Message)],
 	)
 }
@@ -988,4 +1030,343 @@ test_message_registry_refuses_types_past_cap :: proc(t: ^testing.T) {
 		register_probe_type(&r, Registry_Cap_Probe_E, refused_at)
 	}
 	testing.expect(t, false, "registering past the cap returned instead of panicking")
+}
+
+Wire_Probe_Procedure :: struct {
+	callback: proc(),
+}
+
+Wire_Probe_Map :: struct {
+	counts: map[PID]u64,
+}
+
+Wire_Probe_Procedure_Variant :: union {
+	int,
+	proc(),
+}
+
+Wire_Probe_Union_Field :: struct {
+	id:      u64,
+	variant: Wire_Probe_Procedure_Variant,
+}
+
+Wire_Probe_Procedure_Array :: struct {
+	callbacks: [2]proc(),
+}
+
+Wire_Probe_Pointer :: struct {
+	target: ^int,
+}
+
+Wire_Probe_Multi_Pointer :: struct {
+	target: [^]int,
+}
+
+Wire_Probe_Cstring :: struct {
+	text: cstring,
+}
+
+Wire_Probe_Simd_Pointers :: struct {
+	targets: #simd[2]rawptr,
+}
+
+Wire_Probe_Fixed_Capacity_Procedures :: struct {
+	callbacks: [dynamic; 2]proc(),
+}
+
+@(test)
+test_wire_safety_refuses_procedure_pointer_and_map_fields_anywhere :: proc(t: ^testing.T) {
+	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Procedure)), "procedure field")
+	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Map)), "map field")
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Union_Field)),
+		"procedure inside a union",
+	)
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Procedure_Array)),
+		"array of procedures",
+	)
+	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Pointer)), "pointer field")
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Multi_Pointer)),
+		"multi-pointer field",
+	)
+	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Cstring)), "cstring field")
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Simd_Pointers)),
+		"simd vector of pointers",
+	)
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Fixed_Capacity_Procedures)),
+		"fixed capacity dynamic array of procedures",
+	)
+	for id in ([?]typeid{Adopt_Pool_Ring, Pool_Ring_Closed, Fan_Task}) {
+		info, found := get_type_info_ptr(id)
+		testing.expect(
+			t,
+			found && info.wire_policy == .Local_Only,
+			fmt.tprintf("%v must be registered local only", id),
+		)
+	}
+
+	testing.expect(t, type_is_wire_safe(type_info_of(Test_Simple_Message)), "plain struct")
+	testing.expect(
+		t,
+		type_is_wire_safe(type_info_of(Test_Mixed_Var_Message)),
+		"strings and byte slices",
+	)
+	testing.expect(t, type_is_wire_safe(type_info_of(Test_Outer_With_Union)), "union of strings")
+}
+
+@(test)
+test_registration_records_wire_safety :: proc(t: ^testing.T) {
+	r: Name_Registry(Message_Type_Info, 4)
+	defer registry_destroy(&r)
+	register_probe_type(&r, Wire_Probe_Procedure)
+	register_probe_type(&r, Test_String_Message)
+
+	procedure_info, procedure_found := registry_get_by_hash(
+		&r,
+		fnv1a_hash("actod.Wire_Probe_Procedure"),
+	)
+	testing.expect(
+		t,
+		procedure_found && procedure_info.wire_policy == .Local_Only,
+		"a type with a procedure field is local only",
+	)
+	string_info, string_found := registry_get_by_hash(&r, fnv1a_hash("actod.Test_String_Message"))
+	testing.expect(
+		t,
+		string_found && string_info.wire_policy == .Any_Actor,
+		"a type of strings and scalars is wire safe",
+	)
+}
+
+Expected_Wire_Policy :: struct {
+	id:     typeid,
+	policy: Wire_Policy,
+}
+
+@(test)
+test_system_types_carry_the_wire_policy_their_exchange_needs :: proc(t: ^testing.T) {
+	expected := [?]Expected_Wire_Policy {
+		{PID, .Any_Actor},
+		{Stats_Snapshot, .Any_Actor},
+		{Terminate, .Any_Actor},
+		{Actor_Stopped, .Any_Actor},
+		{Actor_Spawned_Broadcast, .Connection_Stream},
+		{Actor_Terminated_Broadcast, .Connection_Stream},
+		{Remote_Spawn_Request, .Connection_Stream},
+		{Remote_Spawn_Response, .Connection_Stream},
+		{Subscribe_Remote, .Connection_Stream},
+		{Unsubscribe_Remote, .Connection_Stream},
+		{Add_Child, .Local_Only},
+		{Set_Parent, .Local_Only},
+		{Remove_Child, .Local_Only},
+		{Get_Stats, .Local_Only},
+		{Stats_Response, .Local_Only},
+		{Rename_Actor, .Local_Only},
+		{Reload_Behaviour, .Local_Only},
+		{Connect_Request, .Local_Only},
+		{Close_Connection, .Local_Only},
+		{Start_Receiving, .Local_Only},
+		{Remote_Message, .Local_Only},
+		{Scale_Up_Request, .Local_Only},
+		{Start_Timer, .Local_Only},
+		{Cancel_Timer, .Local_Only},
+		{Cancel_All_Timers, .Local_Only},
+		{Timer_Tick, .Local_Only},
+		{Ask_Timeout, .Local_Only},
+		{Set_Collection_Interval, .Local_Only},
+		{Trigger_Collection, .Local_Only},
+		{Get_Actor_Stats_Request, .Local_Only},
+		{Get_All_Stats_Request, .Local_Only},
+		{Clear_Terminated_Stats, .Local_Only},
+	}
+	for entry in expected {
+		info, found := get_type_info_ptr(entry.id)
+		testing.expect(t, found, fmt.tprintf("%v must be registered", entry.id))
+		if !found do continue
+		testing.expect(
+			t,
+			info.wire_policy == entry.policy,
+			fmt.tprintf("%v must be %v, got %v", entry.id, entry.policy, info.wire_policy),
+		)
+	}
+}
+
+@(private)
+Refusal_Capture :: struct {
+	refusals:     int,
+	names_type:   string,
+	type_matched: bool,
+}
+
+@(private)
+capture_refusal_logs :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	capture := (^Refusal_Capture)(data)
+	if level == .Warning && strings.has_prefix(text, "Refused ") {
+		capture.refusals += 1
+		capture.type_matched = strings.has_prefix(text, capture.names_type)
+	}
+}
+
+@(private)
+fan_task_refusals_from_peer :: proc(type_id: typeid) -> Refusal_Capture {
+	info, _ := get_type_info_ptr(type_id)
+	capture := Refusal_Capture {
+		names_type = fmt.tprintf("Refused a %s from node", info.name),
+	}
+	peer_pid := pack_pid(Handle{idx = 1, gen = 1}, Node_ID(NODE.node_id + 7))
+	context.logger = log.Logger {
+		procedure    = capture_refusal_logs,
+		data         = &capture,
+		lowest_level = .Debug,
+	}
+	fan_data: Fanout_Data
+	fanout_handle_message(
+		&fan_data,
+		peer_pid,
+		Fan_Task{from_pid = peer_pid, type_hash = info.type_hash, end = 1},
+	)
+	return capture
+}
+
+@(test)
+test_fan_task_from_a_peer_cannot_deliver_a_local_only_type :: proc(t: ^testing.T) {
+	refused := fan_task_refusals_from_peer(Add_Child)
+	testing.expect_value(t, refused.refusals, 1)
+	testing.expect(t, refused.type_matched, "the refusal names Add_Child")
+
+	accepted := fan_task_refusals_from_peer(PID)
+	testing.expect_value(t, accepted.refusals, 0)
+}
+
+Nested_Union_Variant :: struct {
+	label: Test_Mixed_Union,
+}
+
+Nested_Union_Outer :: union {
+	Test_Ping,
+	Nested_Union_Variant,
+}
+
+Nested_Union_Message :: struct {
+	id:   u32,
+	body: Nested_Union_Outer,
+}
+
+Direct_Nested_Union :: union {
+	Test_Ping,
+	Test_Mixed_Union,
+}
+
+Direct_Nested_Union_Message :: struct {
+	id:   u32,
+	body: Direct_Nested_Union,
+}
+
+Union_In_Plain_Field_Message :: struct {
+	id:      u32,
+	wrapped: Test_Outer_With_Union,
+}
+
+@(private)
+nested_union_refusal :: proc(ti: ^runtime.Type_Info) -> (safe: bool, error_msg: string) {
+	var_fields := make([dynamic]Var_Field_Info)
+	defer delete(var_fields)
+	union_fields := make([dynamic]Temp_Union_Info)
+	defer delete(union_fields)
+	defer cleanup_temp_union_fields(union_fields[:])
+	info: Message_Type_Info
+	return check_type_safety(ti, "", &info, 0, &var_fields, true, &union_fields)
+}
+
+@(test)
+test_union_of_strings_inside_a_union_variant_is_refused_naming_its_path :: proc(t: ^testing.T) {
+	through_struct_safe, through_struct_msg := nested_union_refusal(
+		type_info_of(Nested_Union_Message),
+	)
+	defer delete(through_struct_msg)
+	testing.expect(
+		t,
+		!through_struct_safe,
+		"a union of strings in a struct variant must be refused",
+	)
+	testing.expect(
+		t,
+		strings.has_prefix(through_struct_msg, "body.variant[1].label "),
+		fmt.tprintf("refusal names the path, got %q", through_struct_msg),
+	)
+
+	direct_safe, direct_msg := nested_union_refusal(type_info_of(Direct_Nested_Union_Message))
+	defer delete(direct_msg)
+	testing.expect(t, !direct_safe, "a union of strings as a union variant must be refused")
+	testing.expect(
+		t,
+		strings.has_prefix(direct_msg, "body.variant[1] "),
+		fmt.tprintf("refusal names the path, got %q", direct_msg),
+	)
+}
+
+@(test)
+test_registering_a_union_of_strings_inside_a_union_variant_panics :: proc(t: ^testing.T) {
+	r: Name_Registry(Message_Type_Info, 4)
+	refused_at := runtime.Source_Code_Location {
+		file_path = "nested_union_probe",
+		line      = 1,
+	}
+	testing.expect_assert_from(t, refused_at)
+	{
+		context.logger = log.nil_logger()
+		context.allocator = context.temp_allocator
+		register_probe_type(&r, Nested_Union_Message, refused_at)
+	}
+	testing.expect(t, false, "registering a nested union of strings returned instead of panicking")
+}
+
+@(test)
+test_union_inside_a_plain_struct_field_registers_and_deep_copies :: proc(t: ^testing.T) {
+	register_test_types()
+	info, ok := get_type_info_ptr(typeid_of(Union_In_Plain_Field_Message))
+	testing.expect(t, ok, "a union inside a plain struct field registers")
+	testing.expect_value(t, len(info.union_fields), 1)
+
+	name_backing := strings.clone("sender name")
+	defer delete(name_backing)
+	content_backing := strings.clone("sender content")
+	defer delete(content_backing)
+	original := Union_In_Plain_Field_Message {
+		id = 9,
+		wrapped = {id = 4, msg = Test_Chat{name = name_backing, content = content_backing}},
+	}
+
+	pool: Pool
+	pool_init(&pool, context.allocator)
+	defer cleanup_pool(&pool)
+	msg: Message
+	err, _ := create_message(&msg, &pool, original, info)
+	testing.expect_value(t, err, Alloc_Error.OK)
+
+	mem.set(raw_data(name_backing), 'x', len(name_backing))
+	mem.set(raw_data(content_backing), 'x', len(content_backing))
+
+	received := (^Union_In_Plain_Field_Message)(uintptr(msg.content) + TYPE_HEADER_SIZE)
+	chat, is_chat := received.wrapped.msg.(Test_Chat)
+	testing.expect(t, is_chat, "the chat variant survives")
+	testing.expect_value(t, received.id, 9)
+	testing.expect_value(t, received.wrapped.id, 4)
+	testing.expect_value(t, chat.name, "sender name")
+	testing.expect_value(t, chat.content, "sender content")
 }

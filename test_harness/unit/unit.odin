@@ -69,7 +69,7 @@ destroy :: proc(h: ^Test_Harness($T)) {
 	free(h.data)
 }
 
-install_intercept :: proc(h: ^Test_Harness($T)) {
+wire_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.send_capture = &h.send_capture
 	h.intercept.publish_capture = &h.publish_capture
 	h.intercept.timer_capture = &h.timer_capture
@@ -84,6 +84,10 @@ install_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.fail_undeclared_topic = true
 	h.intercept.children_pids = &h.children_pids
 	h.intercept.dead_pids = &h.dead_pids
+}
+
+install_intercept :: proc(h: ^Test_Harness($T)) {
+	wire_intercept(h)
 	ti.test_intercept = &h.intercept
 	ti.det = &h.det
 }
@@ -96,22 +100,25 @@ uninstall_intercept :: proc() {
 
 init :: proc(h: ^Test_Harness($T)) {
 	if h.behaviour.init == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.init(h.data)
 }
 
 send :: proc(h: ^Test_Harness($T), msg: $M, from: actod.PID = EXTERNAL_PID) {
 	if h.behaviour.handle_message == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.handle_message(h.data, actod.PID(from), msg)
 }
 
 terminate :: proc(h: ^Test_Harness($T)) {
 	if h.behaviour.terminate == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.terminate(h.data)
 }
 
@@ -172,15 +179,17 @@ simulate_child_terminated :: proc(
 	will_restart: bool = false,
 ) {
 	if h.behaviour.on_child_terminated == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.on_child_terminated(h.data, child_pid, child_name, reason, will_restart)
 }
 
 simulate_child_started :: proc(h: ^Test_Harness($T), child_pid: actod.PID) {
 	if h.behaviour.on_child_started == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.on_child_started(h.data, child_pid)
 }
 
@@ -191,15 +200,17 @@ simulate_child_restarted :: proc(
 	restart_count: int,
 ) {
 	if h.behaviour.on_child_restarted == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.on_child_restarted(h.data, old_pid, new_pid, restart_count)
 }
 
 simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID, child_name: string) {
 	if h.behaviour.on_max_restarts_exceeded == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.on_max_restarts_exceeded(h.data, child_pid, child_name)
 }
 
@@ -460,8 +471,9 @@ expect_timer :: proc(
 
 fire_timer :: proc(h: ^Test_Harness($T), id: u32) {
 	if h.behaviour.handle_message == nil do return
-	install_intercept(h)
-	defer uninstall_intercept()
+	wire_intercept(h)
+	ti.test_intercept, ti.det = &h.intercept, &h.det
+	defer ti.test_intercept, ti.det = nil, nil
 	h.behaviour.handle_message(h.data, actod.PID(h.intercept.self_pid), actod.Timer_Tick{id = id})
 }
 

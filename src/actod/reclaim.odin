@@ -1,12 +1,14 @@
 package actod
 
+import "../pkgs/coro"
+import "core:log"
 import "core:sync"
 
 MAX_RECLAIM_SLOTS :: 256
 
 Reclaim_Slot :: struct #align (CACHE_LINE_SIZE) {
 	active_epoch: u64,
-	pad:         [CACHE_LINE_SIZE - size_of(u64)]byte,
+	pad:          [CACHE_LINE_SIZE - size_of(u64)]byte,
 }
 
 Retired_Actor :: struct {
@@ -15,17 +17,25 @@ Retired_Actor :: struct {
 }
 
 Reclaim_State :: struct {
-	epoch:           u64,
-	slots:           [MAX_RECLAIM_SLOTS]Reclaim_Slot,
-	slot_count:      int,
-	overflow_active: int,
-	retire_mutex:    sync.Mutex,
-	retire_list:     [dynamic]Retired_Actor,
-	scan_lock:       sync.Mutex,
+	epoch:                 u64,
+	slots:                 [MAX_RECLAIM_SLOTS]Reclaim_Slot,
+	slot_count:            int,
+	overflow_active:       int,
+	retire_mutex:          sync.Mutex,
+	retire_list:           [dynamic]Retired_Actor,
+	scan_lock:             sync.Mutex,
+	bound_thread_slot1:    int,
+	bound_thread_overflow: bool,
 }
+
+@(private)
+reclaim_generation: u64
 
 @(private, thread_local)
 tls_reclaim_slot1: int
+
+@(private, thread_local)
+tls_reclaim_generation: u64
 
 @(private, thread_local)
 tls_reclaim_depth: int
@@ -35,11 +45,13 @@ tls_reclaim_overflow: bool
 
 @(private = "file")
 reclaim_claim_slot :: proc() -> int {
-	if tls_reclaim_slot1 != 0 do return tls_reclaim_slot1 - 1
+	generation := sync.atomic_load_explicit(&reclaim_generation, .Relaxed)
+	if tls_reclaim_slot1 != 0 && tls_reclaim_generation == generation do return tls_reclaim_slot1 - 1
 
 	idx := sync.atomic_add(&NODE.reclaim.slot_count, 1)
 	if idx < MAX_RECLAIM_SLOTS {
 		tls_reclaim_slot1 = idx + 1
+		tls_reclaim_generation = generation
 		return idx
 	}
 
@@ -79,6 +91,32 @@ reclaim_unpin :: #force_inline proc() {
 		}
 
 	}
+}
+
+reclaim_pin_unless_coroutine :: #force_inline proc() -> (pinned: bool) {
+	if coro.running() != nil do return false
+	reclaim_pin()
+	return true
+}
+
+reclaim_pin_if_unpinned :: #force_inline proc() -> (pinned: bool) {
+	if tls_reclaim_depth != 0 do return false
+	reclaim_pin()
+	return true
+}
+
+reclaim_unpin_all_levels :: #force_inline proc() -> (released_depth: int) {
+	released_depth = tls_reclaim_depth
+	if released_depth == 0 do return
+	tls_reclaim_depth = 1
+	reclaim_unpin()
+	return
+}
+
+reclaim_repin_levels :: #force_inline proc(depth: int) {
+	if depth == 0 do return
+	reclaim_pin()
+	tls_reclaim_depth = depth
 }
 
 reclaim_retire :: proc(actor_ptr: rawptr) {
@@ -159,5 +197,78 @@ reclaim_reset :: proc() {
 
 	for i in 0 ..< MAX_RECLAIM_SLOTS {
 		sync.atomic_store(&NODE.reclaim.slots[i].active_epoch, 0)
+	}
+	NODE.reclaim.bound_thread_slot1 = 0
+	NODE.reclaim.bound_thread_overflow = false
+
+	sync.atomic_add(&reclaim_generation, 1)
+}
+
+reclaim_detach_bound_thread :: proc() {
+	generation := sync.atomic_load_explicit(&reclaim_generation, .Relaxed)
+	slot_is_current := tls_reclaim_slot1 != 0 && tls_reclaim_generation == generation
+	NODE.reclaim.bound_thread_slot1 = slot_is_current ? tls_reclaim_slot1 : 0
+	NODE.reclaim.bound_thread_overflow = tls_reclaim_depth > 0 && tls_reclaim_overflow
+}
+
+reclaim_attach_bound_thread :: proc() {
+	tls_reclaim_slot1 = NODE.reclaim.bound_thread_slot1
+	tls_reclaim_generation = sync.atomic_load_explicit(&reclaim_generation, .Relaxed)
+
+	if tls_reclaim_depth == 0 {
+		if NODE.reclaim.bound_thread_overflow {
+			sync.atomic_sub(&NODE.reclaim.overflow_active, 1)
+		} else if tls_reclaim_slot1 != 0 {
+			sync.atomic_store_explicit(
+				&NODE.reclaim.slots[tls_reclaim_slot1 - 1].active_epoch,
+				0,
+				.Release,
+			)
+		}
+		NODE.reclaim.bound_thread_overflow = false
+		return
+	}
+
+	if NODE.reclaim.bound_thread_overflow {
+		tls_reclaim_overflow = true
+		return
+	}
+	if tls_reclaim_slot1 != 0 &&
+	   sync.atomic_load(&NODE.reclaim.slots[tls_reclaim_slot1 - 1].active_epoch) != 0 {
+		tls_reclaim_overflow = false
+		return
+	}
+
+	held_depth := tls_reclaim_depth
+	tls_reclaim_depth = 0
+	reclaim_repin_levels(held_depth)
+}
+
+report_pins_held_across_reset :: proc() {
+	held := sync.atomic_load(&NODE.reclaim.overflow_active)
+	n := min(sync.atomic_load(&NODE.reclaim.slot_count), MAX_RECLAIM_SLOTS)
+	for i in 0 ..< n {
+		if sync.atomic_load(&NODE.reclaim.slots[i].active_epoch) != 0 do held += 1
+	}
+	if held > 0 {
+		log.errorf(
+			"reclaim reset found %d pins still held, a thread pinned across a node restart will unpin a slot the next node has handed to another thread",
+			held,
+		)
+	}
+}
+
+when ODIN_TEST {
+	reclaim_pin_visible_to_scanner :: proc() -> bool {
+		if tls_reclaim_depth == 0 do return false
+		if tls_reclaim_overflow do return sync.atomic_load(&NODE.reclaim.overflow_active) > 0
+		idx := tls_reclaim_slot1 - 1
+		if idx < 0 || idx >= sync.atomic_load(&NODE.reclaim.slot_count) do return false
+		return sync.atomic_load(&NODE.reclaim.slots[idx].active_epoch) != 0
+	}
+
+	reclaim_slot_of_this_thread :: proc() -> int {
+		if tls_reclaim_depth == 0 || tls_reclaim_overflow do return -1
+		return tls_reclaim_slot1 - 1
 	}
 }

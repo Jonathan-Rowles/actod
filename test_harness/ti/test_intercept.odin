@@ -14,6 +14,7 @@ Send_Error :: enum {
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
 	NOT_ASKED,
+	INVALID_INTERVAL,
 }
 
 Termination_Reason :: enum {
@@ -135,7 +136,10 @@ intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
 	if test_intercept.dead_pids != nil && to in test_intercept.dead_pids^ {
 		return .ACTOR_NOT_FOUND, true
 	}
-	append(test_intercept.send_capture, Captured_Send{to = to, data = capture(content), type_id = T})
+	append(
+		test_intercept.send_capture,
+		Captured_Send{to = to, data = capture(content), type_id = T},
+	)
 	return .OK, true
 }
 
@@ -261,7 +265,10 @@ intercept_terminate_actor :: proc(to: u64, reason: Termination_Reason) -> bool {
 
 intercept_broadcast :: proc(content: $T) -> bool {
 	if test_intercept == nil do return false
-	append(test_intercept.broadcast_capture, Captured_Broadcast{data = capture(content), type_id = T})
+	append(
+		test_intercept.broadcast_capture,
+		Captured_Broadcast{data = capture(content), type_id = T},
+	)
 	return true
 }
 
@@ -326,6 +333,7 @@ intercept_get_self_name :: proc() -> (string, bool) {
 intercept_set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error, bool) {
 	if test_intercept == nil do return 0, {}, false
 	if test_intercept.fail_set_timer do return 0, .ACTOR_NOT_FOUND, true
+	if repeat && interval <= 0 do return 0, .INVALID_INTERVAL, true
 	test_intercept.next_timer_id += 1
 	id := test_intercept.next_timer_id
 	append(

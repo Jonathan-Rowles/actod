@@ -34,6 +34,8 @@ node_id := act.get_node_id(pid)
 actor_type := act.get_pid_actor_type(pid)
 ```
 
+`get_actor_name` returns a borrowed string that points into the actor's memory, without allocating. It stays valid while that actor is alive, renames included (a concurrent rename yields the old name or the new one, never a mix), and can be reclaimed once the actor stops, so copy it if you keep it. It returns `"<unknown>"` for a pid that is not a live local actor.
+
 ## Capacity
 
 The registry starts at a configurable size (default 256) and doubles whenever it fills, up to a hard ceiling of 1M entries. Growth commits more of an address range that was reserved up front, so raising the initial size only avoids the first few doublings; it does not change the ceiling.

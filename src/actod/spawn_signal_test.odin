@@ -66,8 +66,16 @@ spawn_signal_keeps_every_idle_predicate_awake_test :: proc(t: ^testing.T) {
 	f := make_spawn_signal_fixture()
 	defer destroy_spawn_signal_fixture(&f)
 
-	testing.expect(t, !mailbox_has_messages(f.actor), "an empty actor must look idle to its own loop")
-	testing.expect(t, !has_pending_messages(f.handle), "an empty actor must look idle to its worker")
+	testing.expect(
+		t,
+		!mailbox_has_messages(f.actor),
+		"an empty actor must look idle to its own loop",
+	)
+	testing.expect(
+		t,
+		!has_pending_messages(f.handle),
+		"an empty actor must look idle to its worker",
+	)
 	testing.expect(t, idle_hook_runs(&f), "an empty dedicated-thread actor must go idle")
 
 	signal := new(Spawn_Signal, actor_system_allocator)
@@ -94,9 +102,17 @@ spawn_signal_keeps_every_idle_predicate_awake_test :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(f.actor.children), 1)
 	if len(f.actor.children) == 1 do testing.expect_value(t, f.actor.children[0].pid, PID(77))
-	testing.expect(t, sync.atomic_load(&f.actor.spawned_head) == nil, "the drain must empty the chain")
+	testing.expect(
+		t,
+		sync.atomic_load(&f.actor.spawned_head) == nil,
+		"the drain must empty the chain",
+	)
 	testing.expect(t, !mailbox_has_messages(f.actor), "a drained actor must look idle again")
-	testing.expect(t, !has_pending_messages(f.handle), "a drained actor must look idle to its worker again")
+	testing.expect(
+		t,
+		!has_pending_messages(f.handle),
+		"a drained actor must look idle to its worker again",
+	)
 }
 
 @(test)
@@ -117,7 +133,11 @@ spawn_signals_register_once_each_in_push_order_test :: proc(t: ^testing.T) {
 	testing.expect_value(t, f.actor.children[0].pid, PID(11))
 	testing.expect_value(t, f.actor.children[1].pid, PID(12))
 	testing.expect_value(t, f.actor.children[2].pid, PID(13))
-	testing.expect(t, sync.atomic_load(&f.actor.spawned_head) == nil, "the drain must empty the chain")
+	testing.expect(
+		t,
+		sync.atomic_load(&f.actor.spawned_head) == nil,
+		"the drain must empty the chain",
+	)
 }
 
 @(test)
@@ -144,13 +164,21 @@ spawn_signals_left_on_a_dead_parent_are_released_test :: proc(t: ^testing.T) {
 	f.actor.state = .STOPPING
 
 	for gen in u16(1) ..= 64 do signal_spawn_to_parent(f.actor, unregistered_local_pid(gen))
-	testing.expect(t, sync.atomic_load(&f.actor.spawned_head) != nil, "a stopping parent keeps signals for its reaper")
+	testing.expect(
+		t,
+		sync.atomic_load(&f.actor.spawned_head) != nil,
+		"a stopping parent keeps signals for its reaper",
+	)
 
 	f.actor.state = .TERMINATED
 	sync.atomic_store(&f.actor.spawned_closed, true)
 	release_spawn_signals(f.actor)
 
-	testing.expect(t, sync.atomic_load(&f.actor.spawned_head) == nil, "the reaper must empty the chain")
+	testing.expect(
+		t,
+		sync.atomic_load(&f.actor.spawned_head) == nil,
+		"the reaper must empty the chain",
+	)
 	testing.expect_value(t, len(f.actor.children), 0)
 }
 
@@ -186,19 +214,27 @@ Terminate_Capture :: struct {
 }
 
 @(private = "file")
-install_terminate_capture :: proc(capture: ^Terminate_Capture) {
+install_terminate_capture :: proc() -> ^Terminate_Capture {
+	capture := new(Terminate_Capture)
 	capture.intercept.terminate_capture = &capture.captured
 	ti.test_intercept = &capture.intercept
+	return capture
 }
 
 @(private = "file")
 uninstall_terminate_capture :: proc(capture: ^Terminate_Capture) {
 	ti.test_intercept = nil
 	delete(capture.captured)
+	free(capture)
 }
 
 @(private = "file")
-expect_only_shutdown_of :: proc(t: ^testing.T, capture: ^Terminate_Capture, child_pid: PID, message: string) {
+expect_only_shutdown_of :: proc(
+	t: ^testing.T,
+	capture: ^Terminate_Capture,
+	child_pid: PID,
+	message: string,
+) {
 	if !testing.expect_value(t, len(capture.captured), 1) do return
 	testing.expect(t, PID(capture.captured[0].pid) == child_pid, message)
 	testing.expect_value(t, capture.captured[0].reason, ti.Termination_Reason.SHUTDOWN)
@@ -219,7 +255,9 @@ record_terminated_child :: proc(
 }
 
 @(test)
-spawn_signal_taken_with_its_child_stop_signal_registers_the_child_first_test :: proc(t: ^testing.T) {
+spawn_signal_taken_with_its_child_stop_signal_registers_the_child_first_test :: proc(
+	t: ^testing.T,
+) {
 	sync.lock(&global_registry_swap_mutex)
 	defer sync.unlock(&global_registry_swap_mutex)
 
@@ -246,17 +284,22 @@ spawn_signal_taken_with_its_child_stop_signal_registers_the_child_first_test :: 
 		"a child whose spawn signal was pending when its stop signal was taken must be known when its death is handled",
 	)
 	testing.expect_value(t, len(f.actor.children), 0)
-	testing.expect(t, sync.atomic_load(&f.actor.spawned_head) == nil, "the stop drain must take the spawn signal")
+	testing.expect(
+		t,
+		sync.atomic_load(&f.actor.spawned_head) == nil,
+		"the stop drain must take the spawn signal",
+	)
 }
 
 @(test)
-spawn_signal_pushed_after_the_reaper_closed_the_chain_is_released_by_its_pusher_test :: proc(t: ^testing.T) {
+spawn_signal_pushed_after_the_reaper_closed_the_chain_is_released_by_its_pusher_test :: proc(
+	t: ^testing.T,
+) {
 	swapped := swap_in_test_registry()
 	defer restore_registry(&swapped)
 
-	capture: Terminate_Capture
-	install_terminate_capture(&capture)
-	defer uninstall_terminate_capture(&capture)
+	capture := install_terminate_capture()
+	defer uninstall_terminate_capture(capture)
 
 	handle := new(Pooled_Actor_Handle)
 	defer free(handle)
@@ -287,7 +330,12 @@ spawn_signal_pushed_after_the_reaper_closed_the_chain_is_released_by_its_pusher_
 		sync.atomic_load(&pinned_parent.spawned_head) == nil,
 		"a pusher that pushes after cleanup released the chain must find it closed and take its signal back",
 	)
-	expect_only_shutdown_of(t, &capture, child_pid, "the pusher must shut down the child its dead parent will never drain")
+	expect_only_shutdown_of(
+		t,
+		capture,
+		child_pid,
+		"the pusher must shut down the child its dead parent will never drain",
+	)
 
 	pinned_parent.pool_handle = nil
 	reclaim_unpin()
@@ -322,7 +370,15 @@ copy_probe_allocator_proc :: proc(
 		probe.lock_held = !sync.mutex_try_lock(probe.lock)
 		if !probe.lock_held do sync.mutex_unlock(probe.lock)
 	}
-	return probe.backing.procedure(probe.backing.data, mode, size, alignment, old_memory, old_size, loc)
+	return probe.backing.procedure(
+		probe.backing.data,
+		mode,
+		size,
+		alignment,
+		old_memory,
+		old_size,
+		loc,
+	)
 }
 
 @(private = "file")
@@ -387,15 +443,19 @@ spawn_whose_parent_was_reaped_before_the_lookup_shuts_the_child_down_test :: pro
 	swapped := swap_in_test_registry()
 	defer restore_registry(&swapped)
 
-	capture: Terminate_Capture
-	install_terminate_capture(&capture)
-	defer uninstall_terminate_capture(&capture)
+	capture := install_terminate_capture()
+	defer uninstall_terminate_capture(capture)
 
 	reaped_parent_pid := pack_pid(Handle{idx = 1, gen = 1})
 	child_pid := unregistered_local_pid(1)
 	attach_to_parent(reaped_parent_pid, child_pid)
 
-	expect_only_shutdown_of(t, &capture, child_pid, "a child whose parent left the registry mid-spawn must be shut down")
+	expect_only_shutdown_of(
+		t,
+		capture,
+		child_pid,
+		"a child whose parent left the registry mid-spawn must be shut down",
+	)
 }
 
 @(test)
@@ -427,7 +487,11 @@ node_forgets_each_child_it_reaps_test :: proc(t: ^testing.T) {
 	reap_stop_signals_at_node(f.actor, take_stop_signals(f.actor), true)
 
 	if testing.expect_value(t, len(f.actor.children), 1) {
-		testing.expect(t, f.actor.children[0].pid == live_pid, "only the live child keeps its record")
+		testing.expect(
+			t,
+			f.actor.children[0].pid == live_pid,
+			"only the live child keeps its record",
+		)
 	}
 	testing.expect(
 		t,
@@ -457,7 +521,11 @@ node_reaping_off_its_own_thread_leaves_its_table_alone_test :: proc(t: ^testing.
 	push_stop_signal(f.actor, recorded)
 	reap_stop_signals_at_node(f.actor, take_stop_signals(f.actor), false)
 
-	testing.expect(t, sync.atomic_load(&f.actor.stopped_head) == nil, "the corpse must still be reaped")
+	testing.expect(
+		t,
+		sync.atomic_load(&f.actor.stopped_head) == nil,
+		"the corpse must still be reaped",
+	)
 	if testing.expect_value(t, len(f.actor.children), 1) {
 		testing.expect(
 			t,

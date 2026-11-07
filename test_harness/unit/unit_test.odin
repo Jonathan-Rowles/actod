@@ -114,7 +114,10 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 	case Test_Send_Children_Cmd:
 		_ = actod.send_message_to_children(Test_Pong{value = v.value})
 	case Test_List_Topic_Subscribers_Cmd:
-		s.topic_subscribers_listed = actod.get_topic_subscribers(&test_topic, s.topic_subscribers[:])
+		s.topic_subscribers_listed = actod.get_topic_subscribers(
+			&test_topic,
+			s.topic_subscribers[:],
+		)
 	case Test_Send_Temp_Text_Cmd:
 		send_temp_text(from)
 	case Test_Set_Timer_Cmd:
@@ -481,6 +484,46 @@ test_fire_timer_delivers_tick :: proc(t: ^testing.T) {
 	fire_timer(&h, timer.id)
 	s := get_state(&h)
 	testing.expect_value(t, s.ticks, 1)
+}
+
+zero_interval_timer_state :: struct {
+	refused_id:   u32,
+	refused_err:  actod.Send_Error,
+	accepted_id:  u32,
+	accepted_err: actod.Send_Error,
+	ticks:        int,
+}
+
+zero_interval_timer_behaviour := actod.Actor_Behaviour(zero_interval_timer_state) {
+	handle_message = proc(s: ^zero_interval_timer_state, from: actod.PID, msg: any) {
+		switch v in msg {
+		case actod.Timer_Tick:
+			if v.id == s.accepted_id do s.ticks += 1
+		}
+	},
+	init = proc(s: ^zero_interval_timer_state) {
+		s.refused_id, s.refused_err = actod.set_timer(0, repeat = true)
+		s.accepted_id, s.accepted_err = actod.set_timer(1 * time.Second, repeat = true)
+	},
+}
+
+@(test)
+test_repeating_timer_with_zero_interval_is_refused :: proc(t: ^testing.T) {
+	h := create(zero_interval_timer_state{}, zero_interval_timer_behaviour)
+	defer destroy(&h)
+	init(&h)
+
+	s := get_state(&h)
+	testing.expect_value(t, s.refused_err, actod.Send_Error.INVALID_INTERVAL)
+	testing.expect_value(t, s.refused_id, u32(0))
+	testing.expect_value(t, s.accepted_err, actod.Send_Error.OK)
+
+	timer := expect_timer(&h, t)
+	testing.expect_value(t, timer.id, s.accepted_id)
+	testing.expect_value(t, len(h.timer_capture), 0)
+
+	fire_timer(&h, timer.id)
+	testing.expect_value(t, get_state(&h).ticks, 1)
 }
 
 @(test)

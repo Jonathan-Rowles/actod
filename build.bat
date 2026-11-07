@@ -98,7 +98,12 @@ exit /b %errorlevel%
 :gen-hot-api
 if not exist bin mkdir bin
 odin run ./src/pkgs/hot_reload/generator %DEV_FLAGS%
-exit /b %errorlevel%
+if errorlevel 1 exit /b 1
+for %%f in (act.odin src/actod/hot_api_generated.odin hot_reload_dev/hot_api_table_generated.odin src/pkgs/hot_reload/generated_shims.odin) do (
+    odinfmt -w %%f
+    if errorlevel 1 exit /b 1
+)
+exit /b 0
 
 :clean
 if exist bin rmdir /s /q bin

@@ -26,6 +26,12 @@ Message_Type_Flags :: enum u32 {
 
 Message_Type_Flags_Set :: bit_set[Message_Type_Flags;u32]
 
+Wire_Policy :: enum u8 {
+	Local_Only,
+	Any_Actor,
+	Connection_Stream,
+}
+
 Message_Type_Info :: struct {
 	type_id:          typeid,
 	name:             string,
@@ -36,6 +42,7 @@ Message_Type_Info :: struct {
 	flags:            Message_Type_Flags_Set,
 	var_fields:       []Var_Field_Info,
 	union_fields:     []Union_Field_Info,
+	wire_policy:      Wire_Policy,
 }
 
 MAX_MESSAGE_TYPES :: 256
@@ -49,13 +56,7 @@ cleanup_message_registry :: proc "contextless" () {
 	registry_destroy(&g_message_registry)
 }
 
-get_type_info_ptr :: proc(
-	id: typeid,
-	loc := #caller_location,
-) -> (
-	^Message_Type_Info,
-	bool,
-) {
+get_type_info_ptr :: proc(id: typeid, loc := #caller_location) -> (^Message_Type_Info, bool) {
 	registry_ensure_init(&g_message_registry, loc)
 
 	for i in 0 ..< g_message_registry.count {
@@ -134,14 +135,25 @@ register_message_type :: #force_inline proc "contextless" ($T: typeid, loc := #c
 }
 
 @(private)
+register_internal_message_type :: #force_inline proc "contextless" (
+	$T: typeid,
+	wire_policy: Wire_Policy,
+	loc := #caller_location,
+) {
+	assert_message_fits_page(T)
+	register_message_type_info(T, size_of(T), type_info_of(T), loc, wire_policy)
+}
+
+@(private)
 register_message_type_info :: proc "contextless" (
 	type_id: typeid,
 	size: int,
 	ti: ^runtime.Type_Info,
 	loc: runtime.Source_Code_Location,
+	wire_policy := Wire_Policy.Any_Actor,
 ) {
 	context = runtime.default_context()
-	register_message_type_into(&g_message_registry, type_id, size, ti, loc)
+	register_message_type_into(&g_message_registry, type_id, size, ti, loc, wire_policy)
 }
 
 @(private)
@@ -151,6 +163,7 @@ register_message_type_into :: proc(
 	size: int,
 	ti: ^runtime.Type_Info,
 	loc: runtime.Source_Code_Location,
+	wire_policy := Wire_Policy.Any_Actor,
 ) {
 	registry_ensure_init(r, loc)
 
@@ -178,6 +191,7 @@ register_message_type_into :: proc(
 		wire_header_size = 4 + NETWORK_HEADER_SIZE + size,
 		type_info        = ti,
 		flags            = {},
+		wire_policy      = wire_policy if type_is_wire_safe(ti) else .Local_Only,
 	}
 
 	safe, unsafe_field := check_type_safety(
@@ -205,20 +219,12 @@ register_message_type_into :: proc(
 	}
 
 	if len(temp_var_fields) > 0 {
-		info.var_fields = make(
-			[]Var_Field_Info,
-			len(temp_var_fields),
-			r.allocator,
-		)
+		info.var_fields = make([]Var_Field_Info, len(temp_var_fields), r.allocator)
 		copy(info.var_fields, temp_var_fields[:])
 	}
 
 	if len(temp_union_fields) > 0 {
-		info.union_fields = make(
-			[]Union_Field_Info,
-			len(temp_union_fields),
-			r.allocator,
-		)
+		info.union_fields = make([]Union_Field_Info, len(temp_union_fields), r.allocator)
 		for &uf, ui in temp_union_fields {
 			info.union_fields[ui] = Union_Field_Info {
 				tag_offset = uf.tag_offset,
@@ -338,6 +344,45 @@ get_type_name :: proc(ti: ^runtime.Type_Info, allocator := context.allocator) ->
 	return fmt.aprintf("%v", ti.id, allocator = allocator)
 }
 
+type_is_wire_safe :: proc(ti: ^runtime.Type_Info) -> bool {
+	if ti == nil do return true
+
+	#partial switch v in runtime.type_info_base(ti).variant {
+	case runtime.Type_Info_Procedure,
+	     runtime.Type_Info_Pointer,
+	     runtime.Type_Info_Multi_Pointer,
+	     runtime.Type_Info_Soa_Pointer,
+	     runtime.Type_Info_Map,
+	     runtime.Type_Info_Dynamic_Array,
+	     runtime.Type_Info_Any:
+		return false
+	case runtime.Type_Info_String:
+		return !v.is_cstring
+	case runtime.Type_Info_Slice:
+		return type_is_wire_safe(v.elem)
+	case runtime.Type_Info_Array:
+		return type_is_wire_safe(v.elem)
+	case runtime.Type_Info_Enumerated_Array:
+		return type_is_wire_safe(v.elem)
+	case runtime.Type_Info_Simd_Vector:
+		return type_is_wire_safe(v.elem)
+	case runtime.Type_Info_Fixed_Capacity_Dynamic_Array:
+		return type_is_wire_safe(v.elem)
+	case runtime.Type_Info_Union:
+		for variant in v.variants {
+			if !type_is_wire_safe(variant) do return false
+		}
+		return true
+	case runtime.Type_Info_Struct:
+		for i in 0 ..< v.field_count {
+			if !type_is_wire_safe(v.types[i]) do return false
+		}
+		return true
+	case:
+		return true
+	}
+}
+
 check_type_safety :: proc(
 	ti: ^runtime.Type_Info,
 	path: string = "",
@@ -357,7 +402,7 @@ check_type_safety :: proc(
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 
 	build_error :: proc(path: string, type_desc: string) -> string {
-		return fmt.tprintf("%s (%s)", path, type_desc)
+		return fmt.aprintf("%s (%s)", path, type_desc)
 	}
 
 	#partial switch v in base.variant {
@@ -445,6 +490,10 @@ check_type_safety :: proc(
 					delete(vt.var_fields)
 				}
 				delete(variant_temps)
+				return false, build_error(
+					path,
+					"union holding strings or byte slices inside a union variant",
+				)
 			}
 		} else {
 			for &vt in variant_temps {

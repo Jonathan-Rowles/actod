@@ -32,7 +32,7 @@ jobs:
         uses: laytan/setup-odin@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          release: dev-2026-07a
+          release: dev-2026-11a
 
       - name: Print environment
         shell: bash
@@ -63,7 +63,7 @@ jobs:
         uses: laytan/setup-odin@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          release: dev-2026-07a
+          release: dev-2026-11a
 
       - name: VOPR sweep (time-seeded; on failure, replay the printed seed and commit it to VOPR_REGRESSION_SEEDS)
         run: make vopr VOPR_COUNT=500

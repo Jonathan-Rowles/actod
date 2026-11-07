@@ -49,3 +49,90 @@ default_network_config_binds_loopback :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	testing.expect(t, address_is_loopback(addr))
 }
+
+@(test)
+network_exposure_refusal_flags_non_loopback_bind_without_auth_password :: proc(t: ^testing.T) {
+	for input in ([]string{"0.0.0.0", "192.168.1.5", "::"}) {
+		addr, _ := parse_bind_address(input)
+		network := Network_Config {
+			port         = 5000,
+			bind_address = input,
+		}
+		testing.expect_value(
+			t,
+			network_exposure_refusal(network, addr, ""),
+			Network_Exposure_Refusal.Missing_Auth_Password,
+		)
+		network.enable_encryption = true
+		testing.expect_value(
+			t,
+			network_exposure_refusal(network, addr, ""),
+			Network_Exposure_Refusal.Missing_Auth_Password,
+		)
+		network.trusted_network = true
+		testing.expect_value(
+			t,
+			network_exposure_refusal(network, addr, ""),
+			Network_Exposure_Refusal.Missing_Auth_Password,
+		)
+	}
+}
+
+@(test)
+network_exposure_refusal_flags_plaintext_non_loopback_bind_without_trusted_network :: proc(
+	t: ^testing.T,
+) {
+	addr, _ := parse_bind_address("0.0.0.0")
+	network := Network_Config {
+		port         = 5000,
+		bind_address = "0.0.0.0",
+	}
+	testing.expect_value(
+		t,
+		network_exposure_refusal(network, addr, "secret"),
+		Network_Exposure_Refusal.Plaintext_On_Untrusted_Network,
+	)
+	network.trusted_network = true
+	testing.expect_value(
+		t,
+		network_exposure_refusal(network, addr, "secret"),
+		Network_Exposure_Refusal.None,
+	)
+	network.trusted_network = false
+	network.enable_encryption = true
+	testing.expect_value(
+		t,
+		network_exposure_refusal(network, addr, "secret"),
+		Network_Exposure_Refusal.None,
+	)
+}
+
+@(test)
+network_exposure_refusal_allows_loopback_and_listener_free_binds :: proc(t: ^testing.T) {
+	for input in ([]string{"127.0.0.1", "::1"}) {
+		addr, _ := parse_bind_address(input)
+		network := Network_Config {
+			port         = 5000,
+			bind_address = input,
+		}
+		testing.expect_value(
+			t,
+			network_exposure_refusal(network, addr, ""),
+			Network_Exposure_Refusal.None,
+		)
+	}
+	addr, _ := parse_bind_address("0.0.0.0")
+	without_listener := Network_Config {
+		bind_address = "0.0.0.0",
+	}
+	testing.expect_value(
+		t,
+		network_exposure_refusal(without_listener, addr, ""),
+		Network_Exposure_Refusal.None,
+	)
+}
+
+@(test)
+default_network_config_is_untrusted :: proc(t: ^testing.T) {
+	testing.expect(t, !DEFAULT_NETWORK_CONFIG.trusted_network)
+}

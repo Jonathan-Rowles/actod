@@ -30,6 +30,7 @@ Test_Entry :: struct {
 	expects_error_logs:    bool,
 	expects_panic:         string,
 	sim_mode:              bool,
+	expected_stderr:       string,
 }
 
 ALL_TESTS :: []Test_Entry {
@@ -56,6 +57,14 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_concurrent_actor_operations",
 		test_proc = test_concurrent_actor_operations,
 		worker_count = ALL_CORES_WORKERS,
+	},
+	{
+		name = "test_observer_memory_flat_across_collection_ticks",
+		test_proc = test_observer_memory_flat_across_collection_ticks,
+	},
+	{
+		name = "test_actor_traffic_memory_flat_while_observer_never_collects",
+		test_proc = test_actor_traffic_memory_flat_while_observer_never_collects,
 	},
 	{
 		name = "test_stress_message_throughput",
@@ -124,6 +133,12 @@ ALL_TESTS :: []Test_Entry {
 	{
 		name = "test_sim_two_nodes",
 		test_proc = test_sim_two_nodes,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_pin_held_across_bind_protects_other_node",
+		test_proc = test_sim_pin_held_across_bind_protects_other_node,
 		sim_mode = true,
 		worker_count = 2,
 	},
@@ -325,6 +340,10 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_blocking_child_signal_interrupts_foreign_wait,
 	},
 	{
+		name = "test_blocking_child_is_live_at_its_last_touch",
+		test_proc = test_blocking_child_is_live_at_its_last_touch,
+	},
+	{
 		name = "test_blocking_child_stops_on_escalation",
 		test_proc = test_blocking_child_stops_on_escalation,
 		expects_error_logs = true,
@@ -341,6 +360,10 @@ ALL_TESTS :: []Test_Entry {
 	{
 		name = "test_blocking_child_sigterm_leaves_node_healthy",
 		test_proc = test_blocking_child_sigterm_leaves_node_healthy,
+	},
+	{
+		name = "test_dedicated_thread_stopped_in_init_is_joined",
+		test_proc = test_dedicated_thread_stopped_in_init_is_joined,
 	},
 	{
 		name = "test_init_death_does_not_wedge_name_dedicated",
@@ -458,6 +481,11 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_topic_subscribers_listed_before_and_after_termination",
 		test_proc = test_topic_subscribers_listed_before_and_after_termination,
 	},
+	{
+		name = "test_topic_churn_keeps_subscribers_dense",
+		test_proc = test_topic_churn_keeps_subscribers_dense,
+		worker_count = TOPIC_CHURN_WORKERS,
+	},
 
 	// Timer tests
 	{name = "test_timer_repeating", test_proc = test_timer_repeating},
@@ -469,11 +497,26 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_timers_fire_on_a_second_node_in_one_process",
 		test_proc = test_timers_fire_on_a_second_node_in_one_process,
 	},
+	{
+		name = "test_timer_duplicate_id_keeps_timer_thread_firing",
+		test_proc = test_timer_duplicate_id_keeps_timer_thread_firing,
+		expects_error_logs = true,
+	},
 
 	// Panic recovery tests
 	{
 		name = "test_actor_panic_recovery",
 		test_proc = test_actor_panic_recovery,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_spawner_started_flag_not_written_after_return",
+		test_proc = test_spawner_started_flag_not_written_after_return,
+		expects_error_logs = true,
+	},
+	{
+		name = "test_spawner_does_not_read_header_after_init_panic",
+		test_proc = test_spawner_does_not_read_header_after_init_panic,
 		expects_error_logs = true,
 	},
 	{
@@ -594,6 +637,27 @@ ALL_TESTS :: []Test_Entry {
 		is_networked = true,
 	},
 	{
+		name = "test_peer_cannot_send_local_only_message_types",
+		test_proc = test_peer_cannot_send_local_only_message_types,
+		port = 17470,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_local_only_frames_refused_by_the_inbound_filter_still_log_a_warning",
+		test_proc = test_local_only_frames_refused_by_the_inbound_filter_still_log_a_warning,
+		port = 17540,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
+		name = "test_peer_cannot_address_system_control_messages",
+		test_proc = test_peer_cannot_address_system_control_messages,
+		port = 17530,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
 		name = "test_remote_spawn_invalid_func_name",
 		test_proc = test_remote_spawn_invalid_func_name,
 		port = 17130,
@@ -684,8 +748,25 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_shutdown_waits_for_pinned_sender,
 	},
 	{
+		name = "test_payload_send_holds_reclaim_pin_across_target_reuse",
+		test_proc = test_payload_send_holds_reclaim_pin_across_target_reuse,
+	},
+	{
+		name = "test_get_actor_name_never_reads_a_torn_rename",
+		test_proc = test_get_actor_name_never_reads_a_torn_rename,
+	},
+	{
+		name = "test_blocked_cross_worker_sender_releases_reclaim_slot",
+		test_proc = test_blocked_cross_worker_sender_releases_reclaim_slot,
+		worker_count = 2,
+	},
+	{
 		name = "test_shutdown_waits_for_stuck_actor",
 		test_proc = test_shutdown_waits_for_stuck_actor,
+	},
+	{
+		name = "test_reclaim_pin_survives_node_restart",
+		test_proc = test_reclaim_pin_survives_node_restart,
 	},
 
 	// Hot reload tests (Phase 1a)
@@ -703,13 +784,29 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_hot_reload_under_load,
 		worker_count = ALL_CORES_WORKERS,
 	},
+	{
+		name = "test_node_init_refuses_open_bind_with_no_password",
+		test_proc = test_node_init_refuses_open_bind_with_no_password,
+		expected_stderr = "Set auth_password in make_network_config",
+	},
+	{
+		name = "test_node_init_refuses_open_plaintext_bind_by_default",
+		test_proc = test_node_init_refuses_open_plaintext_bind_by_default,
+		expected_stderr = "set trusted_network = true in make_network_config",
+	},
 }
 
 test_base_port: int
 
 run_single_test :: proc(test_name: string) -> bool {
+	_, in_subprocess := os.lookup_env("ACTOD_TEST_SUBPROCESS", context.temp_allocator)
 	for entry in ALL_TESTS {
 		if entry.name == test_name {
+			if entry.expected_stderr != "" && !in_subprocess {
+				result: Test_Result
+				test_thread_proc(&Test_Thread_Context{entry = entry, result = &result})
+				return result.success
+			}
 			return run_test_entry(entry)
 		}
 	}
@@ -738,6 +835,11 @@ test_worker_weight :: proc(entry: Test_Entry) -> int {
 }
 
 run_test_entry :: proc(entry: Test_Entry) -> bool {
+	if entry.expected_stderr != "" {
+		entry.test_proc(&testing.T{})
+		return false
+	}
+
 	port := entry.port if entry.port != 0 else (8080 if entry.is_networked else 0)
 	node_name := entry.node_name if entry.node_name != "" else entry.name
 
@@ -828,11 +930,8 @@ test_watchdog_proc :: proc(data: rawptr) {
 	_ = os.process_kill(wd.process)
 }
 
-run_test_in_subprocess :: proc(
-	test_name: string,
-	expects_error_logs: bool,
-	expects_panic: string,
-) -> Test_Result {
+run_test_in_subprocess :: proc(entry: Test_Entry) -> Test_Result {
+	test_name := entry.name
 	result := Test_Result {
 		name    = test_name,
 		success = false,
@@ -857,7 +956,9 @@ run_test_in_subprocess :: proc(
 
 	proc_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
-		env     = make_test_env([]string{fmt.tprintf("ACTOD_TEST_RUN=%s", test_name)}),
+		env     = make_test_env(
+			[]string{fmt.tprintf("ACTOD_TEST_RUN=%s", test_name), "ACTOD_TEST_SUBPROCESS=1"},
+		),
 		stdout  = os.stdout,
 		stderr  = stderr_f,
 	}
@@ -881,7 +982,7 @@ run_test_in_subprocess :: proc(
 	thread.destroy(watchdog)
 
 	captured, read_err := os.read_entire_file(stderr_path, context.temp_allocator)
-	if read_err == nil && len(captured) > 0 {
+	if read_err == nil && len(captured) > 0 && entry.expected_stderr == "" {
 		os.write(os.stderr, captured)
 		result.logged_err = first_logged_error(string(captured))
 	}
@@ -897,11 +998,18 @@ run_test_in_subprocess :: proc(
 	}
 
 	result.exit_code = state.exit_code
-	if expects_panic != "" {
-		result.success = state.exit_code != 0 && strings.contains(string(captured), expects_panic)
+	if entry.expects_panic != "" {
+		result.success =
+			state.exit_code != 0 && strings.contains(string(captured), entry.expects_panic)
 		return result
 	}
-	result.success = state.exit_code == 0 && (expects_error_logs || result.logged_err == "")
+	if entry.expected_stderr != "" {
+		result.success =
+			state.exit_code != 0 && strings.contains(string(captured), entry.expected_stderr)
+		if !result.success do os.write(os.stderr, captured)
+		return result
+	}
+	result.success = state.exit_code == 0 && (entry.expects_error_logs || result.logged_err == "")
 
 	return result
 }
@@ -918,11 +1026,7 @@ first_logged_error :: proc(output: string) -> string {
 
 test_thread_proc :: proc(data: rawptr) {
 	ctx := cast(^Test_Thread_Context)data
-	ctx.result^ = run_test_in_subprocess(
-		ctx.entry.name,
-		ctx.entry.expects_error_logs,
-		ctx.entry.expects_panic,
-	)
+	ctx.result^ = run_test_in_subprocess(ctx.entry)
 	if ctx.result.success {
 		fmt.printf("  PASS: %s\n", ctx.result.name)
 	} else if ctx.result.exit_code == 0 && ctx.result.logged_err != "" {

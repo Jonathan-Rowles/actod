@@ -111,12 +111,12 @@ get_message_sender :: proc(msg: Two_Node_Message) -> string {
 
 get_response_content :: proc(resp: Two_Node_Response) -> string {
 	r := resp
-	return string(r.content[:r.content_len])
+	return strings.clone_from_bytes(r.content[:r.content_len])
 }
 
 get_response_receiver :: proc(resp: Two_Node_Response) -> string {
 	r := resp
-	return string(r.receiver[:r.receiver_len])
+	return strings.clone_from_bytes(r.receiver[:r.receiver_len])
 }
 
 Supervision_Crash_Command :: struct {

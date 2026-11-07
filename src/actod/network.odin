@@ -383,11 +383,19 @@ deliver_to_target :: #force_inline proc(
 	to_handle: Handle,
 	to_name: string,
 	payload: []byte,
-	token: u64 = 0,
+	token: u64,
+	$under_batch_pin: bool,
 ) -> bool {
 	filter := NODE.config.network.inbound_filter
 	if .BROADCAST in flags {
-		if filter != nil && inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, 0, "") do return false
+		if filter != nil &&
+		   inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, 0, "") {
+			if type_info, known := get_type_info_by_hash(type_hash);
+			   known && type_info.wire_policy != .Any_Actor {
+				log_refused_wire_broadcast(type_info, remote_node_id)
+			}
+			return false
+		}
 		return deliver_broadcast_locally(
 			remote_node_id,
 			type_hash,
@@ -395,6 +403,7 @@ deliver_to_target :: #force_inline proc(
 			to_handle,
 			payload,
 			flags,
+			under_batch_pin,
 		)
 	}
 
@@ -416,16 +425,27 @@ deliver_to_target :: #force_inline proc(
 		return false
 	}
 
-	if filter != nil && inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, to_pid, to_name) do return false
+	if filter != nil &&
+	   inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, to_pid, to_name) {
+		if type_info.wire_policy != .Any_Actor do log_refused_wire_type(type_info, remote_node_id)
+		return false
+	}
 
 	from_pid := pack_pid(from_handle, remote_node_id)
+	if type_info.wire_policy != .Any_Actor {
+		log_refused_wire_type(type_info, remote_node_id)
+		return false
+	}
 
 	if .SYSTEM in flags {
 		return send_system_from_payload(to_pid, from_pid, payload, type_info) == .OK
 	}
 
-	result := send_from_payload(to_pid, from_pid, payload, type_info, token)
-	return result == .OK
+	when under_batch_pin {
+		return send_from_payload_under_pin(to_pid, from_pid, payload, type_info, token) == .OK
+	} else {
+		return send_from_payload(to_pid, from_pid, payload, type_info, token) == .OK
+	}
 }
 
 @(private)
@@ -495,6 +515,7 @@ deliver_broadcast_locally :: proc(
 	to_handle: Handle,
 	payload: []byte,
 	flags: Network_Message_Flags,
+	$under_batch_pin: bool,
 ) -> bool {
 	actor_type_hash := transmute(u64)to_handle
 	local_type, type_found := get_actor_type_by_hash(actor_type_hash)
@@ -506,6 +527,10 @@ deliver_broadcast_locally :: proc(
 	type_info, info_ok := get_type_info_by_hash(type_hash)
 	if !info_ok {
 		log.warnf("Unknown message type hash in broadcast: %x", type_hash)
+		return false
+	}
+	if type_info.wire_policy != .Any_Actor {
+		log_refused_wire_broadcast(type_info, remote_node_id)
 		return false
 	}
 
@@ -522,10 +547,52 @@ deliver_broadcast_locally :: proc(
 
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
-		if pid != 0 do send_from_payload(pid, from_pid, payload, type_info)
+		if pid == 0 do continue
+		when under_batch_pin {
+			send_from_payload_under_pin(pid, from_pid, payload, type_info)
+		} else {
+			send_from_payload(pid, from_pid, payload, type_info)
+		}
 	}
 
 	return true
+}
+
+@(private)
+log_refused_wire_type :: proc(type_info: ^Message_Type_Info, remote_node_id: Node_ID) {
+	node_name, _ := get_node_name(remote_node_id)
+	switch type_info.wire_policy {
+	case .Local_Only:
+		log.warnf(
+			"Refused a %s from node %d (%s): the type is only accepted from local senders",
+			type_info.name,
+			remote_node_id,
+			node_name,
+		)
+	case .Connection_Stream:
+		log.warnf(
+			"Refused a %s from node %d (%s): the type is only accepted on the connection's lifecycle stream",
+			type_info.name,
+			remote_node_id,
+			node_name,
+		)
+	case .Any_Actor:
+	}
+}
+
+@(private)
+log_refused_wire_broadcast :: proc(type_info: ^Message_Type_Info, remote_node_id: Node_ID) {
+	if type_info.wire_policy == .Local_Only {
+		log_refused_wire_type(type_info, remote_node_id)
+		return
+	}
+	node_name, _ := get_node_name(remote_node_id)
+	log.warnf(
+		"Refused a %s from node %d (%s): a broadcast only carries types any peer may send to any actor",
+		type_info.name,
+		remote_node_id,
+		node_name,
+	)
 }
 
 send_remote :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {

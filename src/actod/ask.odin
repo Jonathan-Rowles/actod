@@ -15,7 +15,7 @@ Ask_Timeout :: struct {
 
 @(init)
 init_ask_messages :: proc "contextless" () {
-	register_message_type(Ask_Timeout)
+	register_internal_message_type(Ask_Timeout, .Local_Only)
 }
 
 @(require_results)

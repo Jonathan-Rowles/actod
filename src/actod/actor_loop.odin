@@ -76,7 +76,7 @@ actor_loop :: proc(actor: ^Actor) {
 
 	call_init_handler(actor)
 	sync.atomic_store(&actor.state, .RUNNING)
-	if actor.started != nil do sync.atomic_store_explicit(actor.started, true, .Release)
+	release_waiting_spawner(actor)
 
 	actor_run_phase(actor, actor_ctx, ctx)
 }
@@ -165,7 +165,7 @@ actor_panic_teardown :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
 
 	sync.atomic_store(&actor.state, .THREAD_STOPPED)
 
-	if actor.started != nil do sync.atomic_store_explicit(actor.started, true, .Release)
+	release_waiting_spawner(actor)
 
 	notify_termination(actor)
 
@@ -173,6 +173,14 @@ actor_panic_teardown :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
 	sync.atomic_store_explicit(&actor.pool.read_index, wi, .Release)
 
 	cleanup_actor_context(actor_ctx)
+}
+
+@(private)
+release_waiting_spawner :: proc(actor: ^Actor) {
+	spawner_started := actor.started
+	if spawner_started == nil do return
+	actor.started = nil
+	sync.atomic_store_explicit(spawner_started, true, .Release)
 }
 
 @(private)
@@ -206,7 +214,9 @@ spawn_initial_children :: proc(actor: ^Actor) {
 			actor.behaviour.on_child_started(actor.data, pid)
 		}
 
+		pinned := reclaim_pin_unless_coroutine()
 		log.infof("Spawned child %s", get_actor_name(pid))
+		if pinned do reclaim_unpin()
 	}
 }
 
@@ -442,10 +452,7 @@ process_user_mailboxes :: #force_inline proc(
 }
 
 @(private)
-wait_for_messages_if_idle :: #force_inline proc(
-	actor: ^Actor,
-	ctx: ^Message_Processing_Context,
-) {
+wait_for_messages_if_idle :: #force_inline proc(actor: ^Actor, ctx: ^Message_Processing_Context) {
 	if mpsc_size(&actor.mailbox) == 0 &&
 	   mpsc_size(&actor.system_mailbox) == 0 &&
 	   sync.atomic_load(&actor.stopped_head) == nil &&
@@ -554,8 +561,8 @@ notify_termination :: proc(actor: ^Actor) {
 	context.allocator = actor_system_allocator
 	defer context.allocator = saved_allocator
 
-	final_stats.received_from = build_pid_histogram(current_actor_context.stats.received_list[:])
-	final_stats.sent_to = build_pid_histogram(current_actor_context.stats.sent_list[:])
+	final_stats.received_from = take_traffic_histogram(&current_actor_context.stats.received)
+	final_stats.sent_to = take_traffic_histogram(&current_actor_context.stats.sent)
 
 	response := Stats_Response {
 		stats = final_stats,
@@ -706,6 +713,7 @@ root_supervisor_died :: proc(child: ^Actor) -> bool {
 
 @(private)
 stop_signal_ready :: proc(child: ^Actor) -> bool {
+	if child.blocking do return sync.atomic_load_explicit(&child.blocking_finished, .Acquire)
 	if child.pool_handle == nil do return true
 	return sync.atomic_load_explicit(&child.pool_handle.terminated, .Acquire)
 }

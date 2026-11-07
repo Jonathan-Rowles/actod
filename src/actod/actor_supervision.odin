@@ -73,7 +73,10 @@ record_spawned_child :: proc(actor: ^Actor, child_pid: PID, spawn_func: SPAWN) -
 @(private)
 has_restart_source :: proc(restart_info: Restart_Info) -> bool {
 	remote_child := restart_info.node_id != 0 && restart_info.node_id != NODE.node_id
-	return restart_info.spawn_func != nil || (remote_child && restart_info.spawn_func_name_hash != 0)
+	return(
+		restart_info.spawn_func != nil ||
+		(remote_child && restart_info.spawn_func_name_hash != 0) \
+	)
 }
 
 @(private)
@@ -173,7 +176,11 @@ handle_add_child :: proc(actor: ^Actor, msg: Add_Child) {
 
 @(private)
 is_remote_spawn_registration :: proc(msg: Add_Child) -> bool {
-	return msg.spawn_func == nil && msg.spawn_func_name_hash != 0 && !is_local_pid(msg.existing_pid)
+	return(
+		msg.spawn_func == nil &&
+		msg.spawn_func_name_hash != 0 &&
+		!is_local_pid(msg.existing_pid) \
+	)
 }
 
 @(private)
@@ -213,6 +220,7 @@ handle_set_parent :: proc(actor: ^Actor, msg: Set_Parent) {
 			msg.new_parent,
 			actor.pid,
 		)
+		return
 	}
 
 	add_msg := Add_Child {
@@ -426,7 +434,13 @@ stop_and_restart_children_from :: proc(actor: ^Actor, first_index: int, dying_pi
 	for &sibling in removed_siblings {
 		sibling_name := string(sibling.name_buf[:sibling.name_len])
 		if actor.behaviour.on_child_terminated != nil {
-			actor.behaviour.on_child_terminated(actor.data, sibling.pid, sibling_name, .KILLED, false)
+			actor.behaviour.on_child_terminated(
+				actor.data,
+				sibling.pid,
+				sibling_name,
+				.KILLED,
+				false,
+			)
 		}
 		if sibling.by_policy {
 			log.infof(
@@ -456,7 +470,11 @@ restart_child :: proc(actor: ^Actor, old_pid: PID) {
 
 	restart_info := actor.children[child_index].restart
 	if !has_restart_source(restart_info) {
-		log.errorf("Child %d at index %d has no spawn function to restart it from", old_pid, child_index)
+		log.errorf(
+			"Child %d at index %d has no spawn function to restart it from",
+			old_pid,
+			child_index,
+		)
 		return
 	}
 

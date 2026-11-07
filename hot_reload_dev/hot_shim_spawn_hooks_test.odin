@@ -14,6 +14,9 @@ HOOK_SIGNAL_LIMIT :: 10 * time.Second
 
 @(test)
 test_hot_shim_spawn_carries_foreign_wait_hooks :: proc(t: ^testing.T) {
+	sync.mutex_lock(&node_test_mutex)
+	defer sync.mutex_unlock(&node_test_mutex)
+
 	defer _ = os.remove_all(HOOKED_FIXTURE_DIR + "/tmp")
 
 	build_pkg, prepared := prepare_build_dir(HOOKED_FIXTURE_DIR, "hooked")
@@ -28,7 +31,11 @@ test_hot_shim_spawn_carries_foreign_wait_hooks :: proc(t: ^testing.T) {
 	populate_hot_api(lib)
 	spawn_sym, found := dynlib.symbol_address(lib, "spawn_hooked")
 	if !testing.expect(t, found, "fixture does not export spawn_hooked") do return
-	spawn_hooked := cast(proc "c" (idle_entered: ^sync.Sema, wake: ^sync.Sema, handled: ^sync.Sema) -> u64)spawn_sym
+	spawn_hooked := cast(proc "c" (
+		idle_entered: ^sync.Sema,
+		wake: ^sync.Sema,
+		handled: ^sync.Sema,
+	) -> u64)spawn_sym
 
 	actod.node_init("hot-shim-hooks", actod.make_node_config(worker_count = 1))
 	defer actod.shutdown_node()

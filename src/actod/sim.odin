@@ -137,7 +137,9 @@ sim_create_node :: proc() -> ^Node_State {
 
 sim_bind_node :: proc(node: ^Node_State) -> ^Node_State {
 	previous := NODE
+	reclaim_detach_bound_thread()
 	NODE = node
+	reclaim_attach_bound_thread()
 	return previous
 }
 

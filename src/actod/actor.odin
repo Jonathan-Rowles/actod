@@ -47,6 +47,7 @@ Send_Error :: enum {
 	NODE_NOT_FOUND,
 	NODE_DISCONNECTED,
 	NOT_ASKED, // reply() without a pending ask, or ask() outside an actor
+	INVALID_INTERVAL,
 }
 
 Supervision_Strategy :: enum {
@@ -193,6 +194,7 @@ Actor :: struct #align (CACHE_LINE_SIZE) {
 	arena_slot:           u32,
 	parent:               PID,
 	name:                 string,
+	published_name:       ^string,
 	thread:               ^thread.Thread,
 	restart_info:         Restart_Info,
 	termination_reason:   Termination_Reason,
@@ -245,8 +247,8 @@ Actor_Context :: struct {
 	ask_dirty:              bool,
 	used_timers:            bool,
 	stats:                  struct {
-		received_list:     [dynamic]PID,
-		sent_list:         [dynamic]PID,
+		received:          Traffic_Recorder,
+		sent:              Traffic_Recorder,
 		messages_received: u64,
 		messages_sent:     u64,
 		start_time:        time.Time,
@@ -634,6 +636,8 @@ terminate_actor :: proc(
 	}
 
 	is_system_op := reason == .SHUTDOWN
+	reclaim_pin()
+	defer reclaim_unpin()
 	actor_ptr := get(&NODE.actor_registry, to)
 
 	if actor_ptr == nil do return true
@@ -804,8 +808,8 @@ get_children :: proc(parent: PID) -> []PID {
 	sync.mutex_lock(&parent_actor.children_lock)
 	defer sync.mutex_unlock(&parent_actor.children_lock)
 
-	// Return a copy to avoid external modifications
-	result := make([]PID, len(parent_actor.children))
+	result, alloc_err := make([]PID, len(parent_actor.children))
+	if alloc_err != nil do return nil
 	for child, i in parent_actor.children do result[i] = child.pid
 	return result
 }
@@ -817,12 +821,17 @@ get_parent_pid :: proc() -> PID {
 }
 
 get_actor_name :: #force_inline proc(pid: PID) -> string {
+	reclaim_pin()
+	defer reclaim_unpin()
 	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return "<unknown>"
 
-	name_offset := offset_of(Actor, name)
-	name_ptr := cast(^string)(uintptr(actor_ptr) + name_offset)
-	return name_ptr^
+	return load_published_name(cast(^Actor)actor_ptr)
+}
+
+@(private)
+load_published_name :: #force_inline proc "contextless" (actor: ^Actor) -> string {
+	return intrinsics.atomic_load_explicit(&actor.published_name, .Acquire)^
 }
 
 @(require_results)
@@ -833,6 +842,8 @@ get_actor_pid :: #force_inline proc(name: string) -> (PID, bool) {
 }
 
 get_actor_parent :: #force_inline proc(pid: PID) -> PID {
+	reclaim_pin()
+	defer reclaim_unpin()
 	actor_ptr, active := get(&NODE.actor_registry, pid)
 	if !active || actor_ptr == nil do return 0
 	parent_offset := offset_of(Actor, parent)
@@ -951,6 +962,10 @@ create_message :: #force_inline proc(
 	return make_message_impl(msg, pool, &v, size_of(T), typeid_of(T), info)
 }
 
+when ODIN_TEST {
+	payload_send_looked_up_hook: proc(to_pid: PID)
+}
+
 // Send message directly from network payload to actor's mailbox
 // Bypasses the typed intermediate copy in the normal send path
 send_from_payload :: #force_inline proc(
@@ -960,11 +975,27 @@ send_from_payload :: #force_inline proc(
 	info: ^Message_Type_Info,
 	token: u64 = 0,
 ) -> Send_Error {
+	pinned := reclaim_pin_if_unpinned()
+	defer if pinned do reclaim_unpin()
+	return send_from_payload_under_pin(to_pid, from_pid, payload, info, token)
+}
+
+send_from_payload_under_pin :: #force_inline proc(
+	to_pid: PID,
+	from_pid: PID,
+	payload: []byte,
+	info: ^Message_Type_Info,
+	token: u64 = 0,
+) -> Send_Error {
+	when ODIN_TEST {assert(tls_reclaim_depth > 0)}
+
 	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, to_pid))
 	if !ok do return .ACTOR_NOT_FOUND
 
 	current_state := sync.atomic_load(&actor.state)
 	if current_state != .RUNNING && current_state != .IDLE do return .ACTOR_NOT_FOUND
+
+	when ODIN_TEST {if payload_send_looked_up_hook != nil do payload_send_looked_up_hook(to_pid)}
 
 	msg: Message
 	msg.from = from_pid
@@ -987,6 +1018,9 @@ send_system_from_payload :: #force_inline proc(
 	payload: []byte,
 	info: ^Message_Type_Info,
 ) -> Send_Error {
+	pinned := reclaim_pin_if_unpinned()
+	defer if pinned do reclaim_unpin()
+
 	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, to_pid))
 	if !ok do return .ACTOR_NOT_FOUND
 
@@ -996,6 +1030,8 @@ send_system_from_payload :: #force_inline proc(
 	   current_state == .STOPPING {
 		return .ACTOR_NOT_FOUND
 	}
+
+	when ODIN_TEST {if payload_send_looked_up_hook != nil do payload_send_looked_up_hook(to_pid)}
 
 	msg: Message
 	msg.from = from_pid
@@ -1019,11 +1055,78 @@ send_system_from_payload :: #force_inline proc(
 	return .OK
 }
 
+TRAFFIC_BATCH_LENGTH :: 64
+TRAFFIC_PEER_LIMIT :: 256
+UNLISTED_TRAFFIC_PEER :: PID(0)
+
+Traffic_Tally :: struct {
+	batch:                  [TRAFFIC_BATCH_LENGTH]PID,
+	counts:                 map[PID]u64,
+	unlisted_peer_messages: u64,
+}
+
+Traffic_Recorder :: struct {
+	tally:      ^Traffic_Tally,
+	free_slots: int,
+	allocator:  mem.Allocator,
+}
+
+@(private)
+record_traffic :: #force_inline proc(recorder: ^Traffic_Recorder, pid: PID) {
+	if recorder.free_slots == 0 do make_room_for_traffic(recorder)
+	recorder.free_slots -= 1
+	recorder.tally.batch[recorder.free_slots] = pid
+}
+
+@(private)
+make_room_for_traffic :: #force_no_inline proc(recorder: ^Traffic_Recorder) {
+	if recorder.tally == nil {
+		recorder.tally = new(Traffic_Tally, recorder.allocator)
+		recorder.tally.counts = make(map[PID]u64, recorder.allocator)
+	} else {
+		fold_traffic_batch(recorder.tally, recorder.tally.batch[:])
+	}
+	recorder.free_slots = TRAFFIC_BATCH_LENGTH
+}
+
+@(private)
+fold_traffic_batch :: proc(tally: ^Traffic_Tally, pids: []PID) {
+	for pid in pids {
+		if count, listed := &tally.counts[pid]; listed {
+			count^ += 1
+		} else if len(tally.counts) < TRAFFIC_PEER_LIMIT {
+			tally.counts[pid] = 1
+		} else {
+			tally.unlisted_peer_messages += 1
+		}
+	}
+}
+
+@(private)
+clear_traffic_tally :: proc(recorder: ^Traffic_Recorder) {
+	if recorder.tally == nil do return
+	clear_map(&recorder.tally.counts)
+	recorder.tally.unlisted_peer_messages = 0
+	recorder.free_slots = TRAFFIC_BATCH_LENGTH
+}
+
+@(private)
+take_traffic_histogram :: proc(recorder: ^Traffic_Recorder) -> map[PID]u64 {
+	histogram := make(map[PID]u64)
+	tally := recorder.tally
+	if tally == nil do return histogram
+	fold_traffic_batch(tally, tally.batch[recorder.free_slots:])
+	for pid, count in tally.counts do histogram[pid] = count
+	if tally.unlisted_peer_messages > 0 do histogram[UNLISTED_TRAFFIC_PEER] += tally.unlisted_peer_messages
+	clear_traffic_tally(recorder)
+	return histogram
+}
+
 @(private)
 track_message_received :: proc(from: PID) {
 	if NODE.observer_pid != {} {
 		current_actor_context.stats.messages_received += 1
-		if from != 0 do append(&current_actor_context.stats.received_list, from)
+		if from != 0 do record_traffic(&current_actor_context.stats.received, from)
 	}
 }
 
@@ -1035,13 +1138,6 @@ track_max_mailbox_size :: proc(mailbox: ^ACTOR_MAILBOX) {
 			current_actor_context.stats.max_mailbox_size = current_size
 		}
 	}
-}
-
-@(private)
-build_pid_histogram :: proc(list: []PID) -> map[PID]u64 {
-	histogram := make(map[PID]u64)
-	for pid in list do histogram[pid] += 1
-	return histogram
 }
 
 @(private)
@@ -1069,11 +1165,8 @@ collect_actor_stats :: proc(actor: ^Actor) -> Actor_Stats {
 		context.allocator = actor_system_allocator
 		defer context.allocator = saved_allocator
 
-		stats.received_from = build_pid_histogram(current_actor_context.stats.received_list[:])
-		stats.sent_to = build_pid_histogram(current_actor_context.stats.sent_list[:])
-
-		clear_dynamic_array(&current_actor_context.stats.received_list)
-		clear_dynamic_array(&current_actor_context.stats.sent_list)
+		stats.received_from = take_traffic_histogram(&current_actor_context.stats.received)
+		stats.sent_to = take_traffic_histogram(&current_actor_context.stats.sent)
 	}
 
 	return stats
@@ -1084,7 +1177,7 @@ handle_set_message_stats :: #force_inline proc(from: PID, to: PID) {
 	if NODE.observer_pid != {} {
 		if current_actor_context != nil && current_actor_context.pid == from {
 			current_actor_context.stats.messages_sent += 1
-			append(&current_actor_context.stats.sent_list, to)
+			record_traffic(&current_actor_context.stats.sent, to)
 		}
 	}
 }
@@ -1104,22 +1197,27 @@ handle_get_stats_request :: proc(actor: ^Actor, request: Get_Stats) {
 	}
 
 	requester_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, request.requester))
-	if ok {
-		send(request.requester, response, requester_actor)
-	} else {
-		delete(stats.received_from)
-		delete(stats.sent_to)
-	}
+	if ok && send(request.requester, response, requester_actor) == .OK do return
+	delete(stats.received_from)
+	delete(stats.sent_to)
 }
 
 @(private)
 handle_rename_actor :: proc(actor: ^Actor, msg: Rename_Actor) {
-	old_name := strings.clone(actor.name)
-	defer delete(old_name)
-
-	if actor.name != "" do delete(actor.name, actor.allocator)
-
-	actor.name = strings.clone(msg.new_name, actor.allocator)
+	old_name := actor.name
+	name_bytes, bytes_err := strings.clone(msg.new_name, actor.allocator)
+	renamed, record_err := new_clone(name_bytes, actor.allocator)
+	if bytes_err != nil || record_err != nil {
+		log.errorf(
+			"Actor '%s' (PID %v) keeps its name, its arena cannot hold the new name '%s'",
+			old_name,
+			actor.pid,
+			msg.new_name,
+		)
+		return
+	}
+	intrinsics.atomic_store_explicit(&actor.published_name, renamed, .Release)
+	actor.name = renamed^
 	current_actor_context.name = actor.name
 
 	pid_map_rename(&NODE.actor_registry, actor.pid, msg.new_name)

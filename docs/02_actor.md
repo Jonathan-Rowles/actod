@@ -134,6 +134,7 @@ Send_Error :: enum {
     NODE_NOT_FOUND,
     NODE_DISCONNECTED,
     NOT_ASKED,           // reply() without a pending ask, or ask() outside an actor
+    INVALID_INTERVAL,    // set_timer with repeat and an interval of zero or less
 }
 ```
 

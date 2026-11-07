@@ -31,6 +31,16 @@ make_thread_with_stack_size :: proc(
 	fn: proc(data: rawptr),
 	stack_size: uint,
 ) -> ^thread.Thread {
+	t := make_unstarted_thread_with_stack_size(data, fn, stack_size)
+	if t != nil do thread.start(t)
+	return t
+}
+
+make_unstarted_thread_with_stack_size :: proc(
+	data: rawptr,
+	fn: proc(data: rawptr),
+	stack_size: uint,
+) -> ^thread.Thread {
 	thread_proc :: proc(t: ^thread.Thread) {
 		fn := cast(proc(_: rawptr))t.data
 		assert(t.user_index >= 1)
@@ -61,9 +71,6 @@ make_thread_with_stack_size :: proc(
 	t.user_args[0] = data
 	t.win32_thread_id = win32_thread_id
 	t.id = int(win32_thread_id)
-
-	t.flags += {.Started}
-	win32.ResumeThread(t.win32_thread)
 
 	return t
 }

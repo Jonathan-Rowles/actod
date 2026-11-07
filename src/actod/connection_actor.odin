@@ -1172,7 +1172,6 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 
 	if data.node_id != 0 && is_active {
 		sync.atomic_store(&NODE.lifecycle_stream_peers[data.node_id], false)
-		clear_subscriptions_for_node(data.node_id)
 		broadcast_disconnect_terminations(data.node_id)
 		handle_node_disconnect(data.node_id)
 	}
@@ -1180,6 +1179,8 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 	if data.ring != nil do sync.atomic_store(&data.ring.io_stop, 1)
 	close_conn_socket(data)
 	stop_connection_io(data)
+
+	if data.node_id != 0 && is_active do clear_subscriptions_for_node(data.node_id)
 
 	if data.ring != nil && is_active {
 		teardown_pool_rings(data)
@@ -1237,6 +1238,7 @@ handle_incoming_data :: proc(data: ^Connection_Actor_Data, raw_data: []byte) {
 		header.to_name,
 		header.payload,
 		header.ask_token,
+		under_batch_pin = false,
 	)
 }
 
@@ -1562,54 +1564,60 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 
 		if pid == NODE.pid || pid == NODE.observer_pid do continue
 
-		actor_name := get_actor_name(pid)
-		origin_name := NODE.name
-		origin_port := u16(local_info.address.port)
-		origin_ip := ipv4_to_u32(local_info.address.address)
-		origin_incarnation := NODE.incarnation
-		ttl: u8 = DEFAULT_BROADCAST_TTL
-
-		if !is_local_pid(pid) {
-			origin_id := get_node_id(pid)
-			if origin_id == data.node_id do continue
-			origin_info, origin_ok := get_node_info(origin_id)
-			if !origin_ok || origin_info.node_name == "" do continue
-			origin_name = origin_info.node_name
-			origin_port = u16(origin_info.address.port)
-			origin_ip = ipv4_to_u32(origin_info.address.address)
-			origin_incarnation = origin_info.incarnation
-			ttl = DEFAULT_BROADCAST_TTL - 1
-			if at := strings.index_byte(actor_name, '@'); at >= 0 do actor_name = actor_name[:at]
-		}
-
-		msg := Actor_Spawned_Broadcast {
-			pid                = pid,
-			name               = actor_name,
-			actor_type         = get_pid_actor_type(pid),
-			parent_pid         = get_actor_parent(pid),
-			source_incarnation = origin_incarnation,
-			ttl                = ttl,
-			source_node_name   = origin_name,
-			source_port        = origin_port,
-			source_ip          = origin_ip,
-		}
-
 		buf: [512]byte
-		msg_len := build_wire_format_into_buffer(
-			buf[:],
-			msg,
-			Handle{},
-			from_handle,
-			{.LIFECYCLE_EVENT},
-			"",
-		)
-		if msg_len == 0 {
-			log.warnf(
-				"Registry snapshot entry for '%s' does not fit the %d byte wire buffer, the peer will not learn this actor",
-				msg.name,
-				len(buf),
+		msg_len: u32
+		{
+			pinned := reclaim_pin_unless_coroutine()
+			defer if pinned do reclaim_unpin()
+
+			actor_name := get_actor_name(pid)
+			origin_name := NODE.name
+			origin_port := u16(local_info.address.port)
+			origin_ip := ipv4_to_u32(local_info.address.address)
+			origin_incarnation := NODE.incarnation
+			ttl: u8 = DEFAULT_BROADCAST_TTL
+
+			if !is_local_pid(pid) {
+				origin_id := get_node_id(pid)
+				if origin_id == data.node_id do continue
+				origin_info, origin_ok := get_node_info(origin_id)
+				if !origin_ok || origin_info.node_name == "" do continue
+				origin_name = origin_info.node_name
+				origin_port = u16(origin_info.address.port)
+				origin_ip = ipv4_to_u32(origin_info.address.address)
+				origin_incarnation = origin_info.incarnation
+				ttl = DEFAULT_BROADCAST_TTL - 1
+				if at := strings.index_byte(actor_name, '@'); at >= 0 do actor_name = actor_name[:at]
+			}
+
+			msg := Actor_Spawned_Broadcast {
+				pid                = pid,
+				name               = actor_name,
+				actor_type         = get_pid_actor_type(pid),
+				parent_pid         = get_actor_parent(pid),
+				source_incarnation = origin_incarnation,
+				ttl                = ttl,
+				source_node_name   = origin_name,
+				source_port        = origin_port,
+				source_ip          = origin_ip,
+			}
+
+			msg_len = build_wire_format_into_buffer(
+				buf[:],
+				msg,
+				Handle{},
+				from_handle,
+				{.LIFECYCLE_EVENT},
+				"",
 			)
-			continue
+			if msg_len == 0 {
+				log.warnf(
+					"Registry snapshot entry for '%s' does not fit the %d byte wire buffer, the peer will not learn this actor",
+					msg.name,
+					len(buf),
+				)
+				continue
+			}
 		}
 
 		if batch_append_message_retry(data.ring, buf[:msg_len]) {

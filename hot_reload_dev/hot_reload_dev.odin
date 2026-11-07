@@ -28,39 +28,55 @@ install_hooks :: proc "contextless" () {
 
 swap_behaviour :: proc(actor: ^actod.Actor, generation: u32) {
 	sync.rw_mutex_shared_lock(&hot_module_table_mu)
-	module := hot_module_table[generation]
+	module, loaded := hot_module_table[generation]
+	if loaded {
+		for sym in module.symbols {
+			if sym.ptr == nil do continue
+			switch sym.name {
+			case "handle_message":
+				actor.handle_message = auto_cast sym.ptr
+				actor.behaviour.handle_message = auto_cast sym.ptr
+			case "init":
+				actor.behaviour.init = auto_cast sym.ptr
+			case "terminate":
+				actor.behaviour.terminate = auto_cast sym.ptr
+			case "on_idle":
+				actor.behaviour.on_idle = auto_cast sym.ptr
+			case "on_wake":
+				actor.behaviour.on_wake = auto_cast sym.ptr
+			case "on_child_started":
+				actor.behaviour.on_child_started = auto_cast sym.ptr
+			case "on_child_terminated":
+				actor.behaviour.on_child_terminated = auto_cast sym.ptr
+			case "on_child_restarted":
+				actor.behaviour.on_child_restarted = auto_cast sym.ptr
+			case "on_max_restarts_exceeded":
+				actor.behaviour.on_max_restarts_exceeded = auto_cast sym.ptr
+			}
+		}
+	}
 	sync.rw_mutex_shared_unlock(&hot_module_table_mu)
-	if module == nil {
-		log.errorf("hot reload: no module found for generation %d", generation)
+
+	if !loaded {
+		log.warnf(
+			"hot reload: actor %v received generation %d after it was unloaded, it keeps its current behaviour",
+			actor.pid,
+			generation,
+		)
 		return
 	}
 
-	for sym in module.symbols {
-		if sym.ptr == nil do continue
-		switch sym.name {
-		case "handle_message":
-			actor.handle_message = auto_cast sym.ptr
-			actor.behaviour.handle_message = auto_cast sym.ptr
-		case "init":
-			actor.behaviour.init = auto_cast sym.ptr
-		case "terminate":
-			actor.behaviour.terminate = auto_cast sym.ptr
-		case "on_idle":
-			actor.behaviour.on_idle = auto_cast sym.ptr
-		case "on_wake":
-			actor.behaviour.on_wake = auto_cast sym.ptr
-		case "on_child_started":
-			actor.behaviour.on_child_started = auto_cast sym.ptr
-		case "on_child_terminated":
-			actor.behaviour.on_child_terminated = auto_cast sym.ptr
-		case "on_child_restarted":
-			actor.behaviour.on_child_restarted = auto_cast sym.ptr
-		case "on_max_restarts_exceeded":
-			actor.behaviour.on_max_restarts_exceeded = auto_cast sym.ptr
-		}
-	}
-
 	log.debugf("hot reload: swapped behaviour for actor %v (generation %d)", actor.pid, generation)
+}
+
+@(private)
+unload_hot_module :: proc(mod: ^hot_reload.Hot_Module) {
+	so_path := strings.clone(mod.path, context.temp_allocator)
+	sync.rw_mutex_lock(&hot_module_table_mu)
+	delete_key(&hot_module_table, mod.generation)
+	sync.rw_mutex_unlock(&hot_module_table_mu)
+	hot_reload.unload_module(mod)
+	os.remove(so_path)
 }
 
 send_reload_behaviour :: proc(target: actod.PID, generation: u32) -> actod.Send_Error {
@@ -239,19 +255,11 @@ hot_reload_terminate :: proc(data: ^Hot_Reload_Actor_Data) {
 		data.watcher = nil
 	}
 
-	for _, mod in data.modules {
-		so_path := strings.clone(mod.path, context.temp_allocator)
-		hot_reload.unload_module(mod)
-		os.remove(so_path)
-	}
+	for _, mod in data.modules do unload_hot_module(mod)
 	delete(data.modules)
 
 	for _, mods in &data.prev_modules {
-		for mod in mods {
-			so_path := strings.clone(mod.path, context.temp_allocator)
-			hot_reload.unload_module(mod)
-			os.remove(so_path)
-		}
+		for mod in mods do unload_hot_module(mod)
 		delete(mods)
 	}
 	delete(data.prev_modules)
@@ -1080,10 +1088,8 @@ load_and_swap :: proc(data: ^Hot_Reload_Actor_Data, actor_names: []string, so_pa
 			append(prev, cur_mod)
 			for len(prev) > 3 {
 				old_mod := prev[0]
-				old_so := strings.clone(old_mod.path, context.temp_allocator)
 				ordered_remove(prev, 0)
-				hot_reload.unload_module(old_mod)
-				os.remove(old_so)
+				unload_hot_module(old_mod)
 			}
 		}
 		data.modules[name] = mod

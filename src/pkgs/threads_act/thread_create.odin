@@ -32,6 +32,16 @@ make_thread_with_stack_size :: proc(
 	fn: proc(data: rawptr),
 	stack_size: uint,
 ) -> ^thread.Thread {
+	t := make_unstarted_thread_with_stack_size(data, fn, stack_size)
+	if t != nil do thread.start(t)
+	return t
+}
+
+make_unstarted_thread_with_stack_size :: proc(
+	data: rawptr,
+	fn: proc(data: rawptr),
+	stack_size: uint,
+) -> ^thread.Thread {
 	thread_proc :: proc(t: ^thread.Thread) {
 		fn := cast(proc(_: rawptr))t.data
 		assert(t.user_index >= 1)
@@ -56,9 +66,6 @@ make_thread_with_stack_size :: proc(
 		free(t)
 		return nil
 	}
-
-	intrinsics.atomic_or(&t.flags, {.Started})
-	sync.post(&t.start_ok)
 
 	return t
 }

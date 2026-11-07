@@ -59,7 +59,7 @@ Match on `id` to distinguish between multiple timers on the same actor.
 
 - Timers are managed by a dedicated system timer actor
 - One-shot timers fire once and are automatically removed
-- Repeating timers re-schedule after each fire
+- Repeating timers re-schedule after each fire. A repeating timer needs a positive interval: `set_timer` refuses zero or less with `INVALID_INTERVAL` and returns id 0. A one-shot timer with interval 0 fires at once
 - Timers are cleaned up when the owning actor terminates
 - Precision is millisecond-level (1ms sleep granularity)
 

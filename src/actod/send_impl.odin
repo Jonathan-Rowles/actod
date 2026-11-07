@@ -100,13 +100,19 @@ send_user_backpressure :: #force_no_inline proc(
 	token: u64 = 0,
 	loc := #caller_location,
 ) -> Send_Error {
-	resume_pin_depth := 0 if coro.running() == nil else 1
-	entered_pinned := tls_reclaim_depth > resume_pin_depth
-	if entered_pinned do reclaim_unpin()
+	released_depth := 0
+	parked_pooled_pin := false
+	if coro.running() == nil {
+		released_depth = reclaim_unpin_all_levels()
+	} else if tls_reclaim_depth > 1 {
+		parked_pooled_pin = true
+		reclaim_unpin()
+	}
 
 	result := send_user_backpressure_loop(to, msg, msg_ready, data, size, tid, info, token, loc)
 
-	if entered_pinned do reclaim_pin()
+	reclaim_repin_levels(released_depth)
+	if parked_pooled_pin do reclaim_pin()
 	return result
 }
 
@@ -278,7 +284,15 @@ send_to_actor_impl :: proc(
 		msg.content = nil
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
 	} else {
-		alloc_err, attempted_size := make_message_impl(&msg, &actor.pool, data, size, tid, info, token)
+		alloc_err, attempted_size := make_message_impl(
+			&msg,
+			&actor.pool,
+			data,
+			size,
+			tid,
+			info,
+			token,
+		)
 		when class == .User {
 			if alloc_err == .POOL_EXHAUSTED || alloc_err == .ALLOC_CONTENDED {
 				return send_user_backpressure(to, &msg, false, data, size, tid, info, token, loc)
@@ -344,22 +358,33 @@ send_message_impl :: proc(
 	if !ok || actor_ptr == nil do return .ACTOR_NOT_FOUND
 
 	if current_worker != nil && home_worker == i32(current_worker.id) + 1 {
-		return send_to_actor_impl(to, cast(^Actor)actor_ptr, data, size, tid, info, class, loc, token)
+		return send_to_actor_impl(
+			to,
+			cast(^Actor)actor_ptr,
+			data,
+			size,
+			tid,
+			info,
+			class,
+			loc,
+			token,
+		)
 	}
 
-	reclaim_pin()
-	defer reclaim_unpin()
+	pinned := reclaim_pin_if_unpinned()
+	defer if pinned do reclaim_unpin()
 	return send_to_actor_impl(to, cast(^Actor)actor_ptr, data, size, tid, info, class, loc, token)
 }
 
 @(private)
-log_send_outside_actor :: proc(
-	send_proc: string,
-	tid: typeid,
-	loc: runtime.Source_Code_Location,
-) {
+log_send_outside_actor :: proc(send_proc: string, tid: typeid, loc: runtime.Source_Code_Location) {
 	context.logger = diagnostic_logger(context.logger)
-	log.errorf("%s(%v) failed: must be called from inside an actor", send_proc, tid, location = loc)
+	log.errorf(
+		"%s(%v) failed: must be called from inside an actor",
+		send_proc,
+		tid,
+		location = loc,
+	)
 }
 
 @(private)
@@ -407,6 +432,8 @@ send_message_to_parent_impl :: proc(
 	if !is_local_pid(actor.parent) {
 		return send_message_impl(actor.parent, data, size, tid, info, class, loc)
 	}
+	pinned := reclaim_pin_unless_coroutine()
+	defer if pinned do reclaim_unpin()
 	parent_actor, got_parent := get_actor_from_pointer(get(&NODE.actor_registry, actor.parent))
 	if !got_parent {
 		log.errorf(
@@ -443,6 +470,8 @@ send_message_to_children_impl :: proc(
 			if err != .OK do return err
 			continue
 		}
+		pinned := reclaim_pin_unless_coroutine()
+		defer if pinned do reclaim_unpin()
 		child_actor, child_ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
 		if !child_ok {
 			log.errorf(

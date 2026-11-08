@@ -768,6 +768,10 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_reclaim_pin_survives_node_restart",
 		test_proc = test_reclaim_pin_survives_node_restart,
 	},
+	{
+		name = "test_a_listener_stopped_right_after_start_listening_ends",
+		test_proc = test_a_listener_stopped_right_after_start_listening_ends,
+	},
 
 	// Hot reload tests (Phase 1a)
 	{name = "test_hot_reload_basic", test_proc = test_hot_reload_basic},

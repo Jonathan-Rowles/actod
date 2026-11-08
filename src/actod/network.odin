@@ -113,10 +113,6 @@ get_auth_password :: proc() -> string {
 	return ""
 }
 
-LISTENER_STOPPED :: 0
-LISTENER_RUNNING :: 1
-LISTENER_STARTING :: 2
-
 init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_location) {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	local_addr: net.Endpoint
@@ -137,7 +133,56 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 
 
 	if NODE.config.network.port == 0 do return
+	start_network_listener(loc)
+}
 
+start_listening :: proc(port: int, loc := #caller_location) -> bool {
+	network := NODE.config.network
+	network.port = port
+	bind_addr, _ := parse_bind_address(network.bind_address)
+	if port <= 0 {
+		log.errorf("start_listening(%d): the port must be above 0", port, location = loc)
+		return false
+	}
+	if refusal := network_exposure_refusal(network, bind_addr, get_auth_password());
+	   refusal != .None {
+		log.errorf(
+			"start_listening(%d): refusing to listen on %s:%d, %v; set auth_password and enable_encryption or trusted_network in make_network_config(), or keep the default loopback bind_address",
+			port,
+			network.bind_address,
+			port,
+			refusal,
+			location = loc,
+		)
+		return false
+	}
+	if NODE.network_listener_thread != nil || NODE.config.network.port != 0 {
+		log.errorf(
+			"start_listening(%d): this node already listens on port %d",
+			port,
+			NODE.config.network.port,
+			location = loc,
+		)
+		return false
+	}
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	sync.atomic_store(&NODE.config.network.port, port)
+	local := &NODE.node_registry[NODE.node_id]
+	local.address = net.Endpoint {
+		address = net.IP4_Loopback,
+		port    = port,
+	}
+	sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	start_network_listener(loc)
+	return true
+}
+
+LISTENER_STOPPED :: 0
+LISTENER_RUNNING :: 1
+LISTENER_STARTING :: 2
+
+@(private)
+start_network_listener :: proc(loc: runtime.Source_Code_Location) {
 	if NODE.config.sim_mode {
 		sim_listen(NODE.config.network.port)
 		return
@@ -232,7 +277,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	ctx := new(Listener_Context, get_system_allocator())
 	ctx.bind_addr, _ = parse_bind_address(NODE.config.network.bind_address)
 	ctx.port = NODE.config.network.port
-	ctx.logger = context.logger
+	ctx.logger = NODE.logger
 	ctx.loc = NODE.config.loc
 
 	sync.atomic_store(&NODE.network_listener_running, LISTENER_STARTING)

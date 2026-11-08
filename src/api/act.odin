@@ -870,6 +870,12 @@ unregister_node :: proc(node_id: Node_ID) {
 	actod.unregister_node(node_id)
 }
 
+@(require_results)
+@(hot = "skip")
+start_listening :: proc(port: int, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return actod.start_listening(port, loc)
+}
+
 // Observer
 
 // Start the stats-collecting observer actor. collection_interval 0 means

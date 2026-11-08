@@ -443,6 +443,7 @@ Hot_API :: struct {
 	get_node_info:             proc(node_id: Node_ID) -> (Node_Info, bool),
 	get_node_by_name:          proc(name: string) -> (Node_ID, bool),
 	unregister_node:           proc(node_id: Node_ID),
+	start_listening:           proc(port: int, loc: runtime.Source_Code_Location) -> bool,
 	start_observer:            proc(collection_interval: time.Duration, loc: runtime.Source_Code_Location) -> (PID, bool),
 	stop_observer:             proc(),
 	trigger_stats_collection:  proc(loc: runtime.Source_Code_Location) -> bool,
@@ -752,6 +753,10 @@ get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
 
 unregister_node :: proc(node_id: Node_ID) {
 	hot_api.unregister_node(node_id)
+}
+
+start_listening :: proc(port: int, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+	return hot_api.start_listening(port, loc)
 }
 
 start_observer :: proc(collection_interval: time.Duration = 0, loc: runtime.Source_Code_Location = #caller_location) -> (PID, bool) {

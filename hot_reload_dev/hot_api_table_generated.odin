@@ -58,6 +58,7 @@ g_hot_api := actod.Hot_API {
 	get_node_info            = actod.get_node_info,
 	get_node_by_name         = actod.get_node_by_name,
 	unregister_node          = actod.unregister_node,
+	start_listening          = actod.start_listening,
 	start_observer           = actod.start_observer,
 	stop_observer            = actod.stop_observer,
 	trigger_stats_collection = actod.trigger_stats_collection,

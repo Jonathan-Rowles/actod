@@ -230,8 +230,6 @@ start_network_listener :: proc(loc: runtime.Source_Code_Location) {
 		}
 		defer net.close(listen_sock)
 
-		NODE.network_listener_socket = listen_sock
-
 		log.infof(
 			"Node discoverable on %s port %d",
 			net.address_to_string(listener_ctx.bind_addr, context.temp_allocator),
@@ -420,12 +418,6 @@ stop_network_listener :: proc() {
 
 	if NODE.network_listener_thread != nil {
 		sync.atomic_store(&NODE.network_listener_running, 0)
-
-		if NODE.network_listener_socket != 0 {
-			net.close(NODE.network_listener_socket)
-			NODE.network_listener_socket = 0
-		}
-
 		thread.join(NODE.network_listener_thread)
 		thread.destroy(NODE.network_listener_thread)
 		NODE.network_listener_thread = nil

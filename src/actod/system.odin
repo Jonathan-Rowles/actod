@@ -237,7 +237,6 @@ Node_State :: struct {
 	fanout_ready:             bool,
 	network_listener_thread:  ^thread.Thread,
 	network_listener_running: i32,
-	network_listener_socket:  net.TCP_Socket,
 	shutdown_signal_port:     int, // Port for shutdown signaling
 	actor_slab:               Slot_Slab,
 	coro_slab:                Slot_Slab,
@@ -1088,7 +1087,6 @@ reset_node_state :: proc() {
 	NODE.lifecycle_stream_peers = {}
 	NODE.network_listener_thread = nil
 	sync.atomic_store(&NODE.network_listener_running, 0)
-	NODE.network_listener_socket = {}
 
 	NODE.node_registry = {}
 

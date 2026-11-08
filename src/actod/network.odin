@@ -113,6 +113,10 @@ get_auth_password :: proc() -> string {
 	return ""
 }
 
+LISTENER_STOPPED :: 0
+LISTENER_RUNNING :: 1
+LISTENER_STARTING :: 2
+
 init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_location) {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	local_addr: net.Endpoint
@@ -176,6 +180,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 				err,
 				location = listener_ctx.loc,
 			)
+			sync.atomic_store(&NODE.network_listener_running, LISTENER_STOPPED)
 			return
 		}
 		defer net.close(listen_sock)
@@ -187,8 +192,13 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 			net.address_to_string(listener_ctx.bind_addr, context.temp_allocator),
 			listener_ctx.port,
 		)
-		sync.atomic_store(&NODE.network_listener_running, 1)
-
+		if _, started := sync.atomic_compare_exchange_strong(
+			&NODE.network_listener_running,
+			LISTENER_STARTING,
+			LISTENER_RUNNING,
+		); !started {
+			return
+		}
 		net.set_blocking(listen_sock, false)
 
 		pfd := Poll_Fd {
@@ -225,6 +235,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	ctx.logger = context.logger
 	ctx.loc = NODE.config.loc
 
+	sync.atomic_store(&NODE.network_listener_running, LISTENER_STARTING)
 	prev_allocator := context.allocator
 	context.allocator = get_system_allocator()
 	NODE.network_listener_thread = threads_act.make_thread_with_stack_size(
@@ -234,6 +245,7 @@ init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_l
 	)
 	context.allocator = prev_allocator
 	if NODE.network_listener_thread == nil {
+		sync.atomic_store(&NODE.network_listener_running, LISTENER_STOPPED)
 		free(ctx, get_system_allocator())
 		log.errorf(
 			"Failed to create the network listener thread for port %d; this node will not accept incoming connections",

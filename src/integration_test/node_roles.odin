@@ -1261,7 +1261,7 @@ wait_for_connection_ready :: proc(node_name: string, budget := 5 * time.Second) 
 }
 
 listener_running :: proc(_: rawptr) -> bool {
-	return sync.atomic_load(&actod.NODE.network_listener_running) != 0
+	return sync.atomic_load(&actod.NODE.network_listener_running) == actod.LISTENER_RUNNING
 }
 
 print_ready_once_listening :: proc() {

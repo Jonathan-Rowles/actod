@@ -236,7 +236,7 @@ Node_State :: struct {
 	fanout_claim:             u32,
 	fanout_ready:             bool,
 	network_listener_thread:  ^thread.Thread,
-	network_listener_running: i32, // Atomic flag: 0 = stopped, 1 = running
+	network_listener_running: i32,
 	network_listener_socket:  net.TCP_Socket,
 	shutdown_signal_port:     int, // Port for shutdown signaling
 	actor_slab:               Slot_Slab,

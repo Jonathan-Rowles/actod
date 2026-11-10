@@ -113,7 +113,11 @@ test_slab_spills_for_oversized_actor :: proc(t: ^testing.T) {
 		slab_in_use(),
 	)
 
-	expect(t, actod.send_message(pid, u64(0xABCD)) == .OK, "the spilled actor must receive messages")
+	expect(
+		t,
+		actod.send_message(pid, u64(0xABCD)) == .OK,
+		"the spilled actor must receive messages",
+	)
 
 	_ = actod.terminate_actor(pid)
 	expect(t, wait_for_slab_in_use(before), "terminating a spilled actor must return its slot")
@@ -184,7 +188,11 @@ test_slab_neighbours_survive_arena_exhaustion :: proc(t: ^testing.T) {
 	neighbours: [SLAB_NEIGHBOUR_COUNT]actod.PID
 	for i in 0 ..< SLAB_NEIGHBOUR_COUNT {
 		sync.atomic_store(&slab_markers[i], 0)
-		pid, spawned := actod.spawn("slab-neighbour", Slab_Neighbour{index = i}, slab_neighbour_behaviour)
+		pid, spawned := actod.spawn(
+			"slab-neighbour",
+			Slab_Neighbour{index = i},
+			slab_neighbour_behaviour,
+		)
 		expectf(t, spawned, "neighbour %d failed to spawn", i)
 		if !spawned {
 			return
@@ -201,6 +209,12 @@ test_slab_neighbours_survive_arena_exhaustion :: proc(t: ^testing.T) {
 	for pid, i in neighbours {
 		expect(t, actod.send_message(pid, u64(0x1000 + i)) == .OK, "marker send failed")
 	}
+	first_marker_base := u64(0x1000)
+	expect(
+		t,
+		poll_until(slab_markers_match, &first_marker_base, 2 * time.Second),
+		"the neighbours never stored their first markers",
+	)
 	expect(t, actod.send_message(greedy, u64(1)) == .OK, "greedy trigger send failed")
 
 	deadline := time.tick_now()

@@ -70,10 +70,13 @@ probe_terminate :: proc(d: ^Probe) {
 }
 
 exercise_node_api :: proc() {
-	act.node_init("hot-check", act.make_node_config(
-		actor_config = act.make_actor_config(logging = act.make_log_config()),
-		network = act.make_network_config(),
-	))
+	act.node_init(
+		"hot-check",
+		act.make_node_config(
+			actor_config = act.make_actor_config(logging = act.make_log_config()),
+			network = act.make_network_config(),
+		),
+	)
 
 	p1, _ := act.spawn("probe-1", Probe{}, probe_behaviour)
 	p2, _ := act.spawn_default("probe-2", Probe{}, probe_behaviour)
@@ -121,6 +124,7 @@ exercise_node_api :: proc() {
 	_, _ = act.get_node_by_name("other-node")
 	act.unregister_node(remote_node)
 	log.info(act.get_local_node_pid(), act.get_local_node_name())
+	_ = act.start_listening(0)
 
 	_, _ = act.start_observer()
 	_ = act.trigger_stats_collection()

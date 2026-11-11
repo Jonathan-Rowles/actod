@@ -1631,6 +1631,7 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 }
 
 send_node_directory :: proc(data: ^Connection_Actor_Data) {
+	sync.atomic_thread_fence(.Seq_Cst)
 	entry_count: u16 = 0
 	total_size := 1 + 2
 	for i in 2 ..< MAX_NODES {
@@ -1681,11 +1682,12 @@ announce_node_to_peers :: proc(name: string, address: net.Endpoint, subject: Nod
 	ctrl_put_u32(&w, ipv4_to_u32(address.address))
 	ctrl_put_u16(&w, u16(address.port))
 
+	sync.atomic_thread_fence(.Seq_Cst)
 	registered_limit := int(sync.atomic_load(&NODE.next_node_id))
 	for node_id in 2 ..< registered_limit {
 		if Node_ID(node_id) == subject do continue
 		ring := get_connection_ring(Node_ID(node_id))
-		if ring == nil || sync.atomic_load(&ring.state) != .Ready do continue
+		if ring == nil do continue
 		_ = ring_append_ctrl(ring, ctrl_buf[:w.pos])
 	}
 }

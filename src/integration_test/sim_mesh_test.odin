@@ -3,6 +3,7 @@ package integration
 import "../actod"
 import "core:fmt"
 import "core:slice"
+import "core:sync"
 import "core:testing"
 import "core:time"
 
@@ -234,7 +235,12 @@ test_sim_mesh_remote_spawn_supervision :: proc(t: ^testing.T) {
 test_sim_mesh_discovery :: proc(t: ^testing.T) {
 	g_mesh_counts = {}
 
-	mesh := actod.sim_mesh_create(3, base_port = 27000, register_peers = false, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		3,
+		base_port = 27000,
+		register_peers = false,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	actod.sim_mesh_register(mesh, 0, 1)
@@ -273,6 +279,46 @@ test_sim_mesh_discovery :: proc(t: ^testing.T) {
 	_ = actod.sim_mesh_bind(mesh, 2)
 	_, sees_a_actor := actod.get_actor_pid("mc@mesh0")
 	expect(t, sees_a_actor, "registering node A must deliver its actor snapshot to C")
+}
+
+test_sim_node_registered_while_peer_ring_buffers_reaches_peer :: proc(t: ^testing.T) {
+	mesh := actod.sim_mesh_create(
+		3,
+		base_port = 37000,
+		register_peers = false,
+		log_level = test_log_level(),
+	)
+	defer actod.sim_mesh_destroy(mesh)
+
+	actod.sim_mesh_register(mesh, 0, 1)
+	actod.sim_mesh_register(mesh, 1, 0)
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	a_id, knows_a := actod.get_node_by_name("mesh0")
+	expect(t, knows_a, "B does not know A")
+	_ = actod.get_or_create_connection(a_id)
+
+	in_window := false
+	for _ in 0 ..< 10_000 {
+		if !actod.sim_mesh_pump(mesh) do break
+		_ = actod.sim_mesh_bind(mesh, 1)
+		ring := actod.get_connection_ring(a_id)
+		if ring != nil &&
+		   sync.atomic_load(&ring.io_owner) != 0 &&
+		   sync.atomic_load(&ring.state) == .Buffering {
+			in_window = true
+			break
+		}
+	}
+	expect(t, in_window, "never saw B's ring for A handshaken but still buffering")
+	if !in_window do return
+
+	actod.sim_mesh_register(mesh, 1, 2)
+	_ = actod.sim_mesh_run_until_idle(mesh)
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	_, knows_c := actod.get_node_by_name("mesh2")
+	expect(t, knows_c, "A never learned C, registered on B while B's ring for A was buffering")
 }
 
 test_sim_mesh_pool_scale_up :: proc(t: ^testing.T) {

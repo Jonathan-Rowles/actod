@@ -209,6 +209,12 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_node_registered_while_peer_ring_buffers_reaches_peer",
+		test_proc = test_sim_node_registered_while_peer_ring_buffers_reaches_peer,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_mesh_pool_scale_up",
 		test_proc = test_sim_mesh_pool_scale_up,
 		sim_mode = true,

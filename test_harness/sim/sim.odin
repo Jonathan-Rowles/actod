@@ -582,8 +582,15 @@ add_timer :: proc(
 	interval: time.Duration,
 	repeat: bool,
 ) {
-	assert(s.timer_count < MAX_SIM_TIMERS, "sim: too many timers")
-	s.timers[s.timer_count] = Sim_Timer {
+	slot := s.timer_count
+	for i in 0 ..< s.timer_count {
+		if !s.timers[i].active {
+			slot = i
+			break
+		}
+	}
+	assert(slot < MAX_SIM_TIMERS, "sim: too many timers")
+	s.timers[slot] = Sim_Timer {
 		id        = id,
 		owner_pid = owner,
 		interval  = interval,
@@ -591,7 +598,9 @@ add_timer :: proc(
 		repeat    = repeat,
 		active    = true,
 	}
-	s.timer_count += 1
+	if slot == s.timer_count {
+		s.timer_count += 1
+	}
 }
 
 cancel_timer :: proc(s: ^Sim, id: u32) {

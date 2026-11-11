@@ -1632,21 +1632,34 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 
 send_node_directory :: proc(data: ^Connection_Actor_Data) {
 	sync.atomic_thread_fence(.Seq_Cst)
+	ctrl_data, entry_count := snapshot_node_directory(data.node_name)
+	if entry_count == 0 do return
+	defer delete(ctrl_data)
+
+	if ring_append_ctrl_retry(data.ring, ctrl_data) {
+		log.infof("Sent node directory with %d entries to node %s", entry_count, data.node_name)
+	} else {
+		log.warnf("Failed to send node directory to node %s", data.node_name)
+	}
+}
+
+snapshot_node_directory :: proc(peer_name: string) -> ([]byte, u16) {
+	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
+
 	entry_count: u16 = 0
 	total_size := 1 + 2
 	for i in 2 ..< MAX_NODES {
 		info := NODE.node_registry[i]
 		if info.node_name == "" do continue
-		if info.node_name == NODE.name || info.node_name == data.node_name do continue
+		if info.node_name == NODE.name || info.node_name == peer_name do continue
 		entry_count += 1
 		total_size += 2 + len(info.node_name) + 4 + 2
 	}
 
-	if entry_count == 0 do return
+	if entry_count == 0 do return nil, 0
 
 	ctrl_data := make([]byte, total_size)
-	defer delete(ctrl_data)
-
 	w := Ctrl_Writer {
 		buf = ctrl_data,
 	}
@@ -1656,18 +1669,14 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 	for i in 2 ..< MAX_NODES {
 		info := NODE.node_registry[i]
 		if info.node_name == "" do continue
-		if info.node_name == NODE.name || info.node_name == data.node_name do continue
+		if info.node_name == NODE.name || info.node_name == peer_name do continue
 
 		ctrl_put_str(&w, info.node_name)
 		ctrl_put_u32(&w, ipv4_to_u32(info.address.address))
 		ctrl_put_u16(&w, u16(info.address.port))
 	}
 
-	if ring_append_ctrl_retry(data.ring, ctrl_data) {
-		log.infof("Sent node directory with %d entries to node %s", entry_count, data.node_name)
-	} else {
-		log.warnf("Failed to send node directory to node %s", data.node_name)
-	}
+	return ctrl_data, entry_count
 }
 
 announce_node_to_peers :: proc(name: string, address: net.Endpoint, subject: Node_ID) {

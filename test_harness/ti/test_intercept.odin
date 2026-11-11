@@ -42,6 +42,7 @@ Test_Intercept :: struct {
 	self_pid:                u64,
 	self_name:               string,
 	timer_capture:           ^[dynamic]Captured_Timer,
+	timer_cancel_capture:    ^[dynamic]u32,
 	next_timer_id:           u32,
 	fail_set_timer:          bool,
 	spawn_capture:           ^[dynamic]Captured_Spawn,
@@ -360,6 +361,7 @@ intercept_cancel_timer :: proc(id: u32) -> (Send_Error, bool) {
 			break
 		}
 	}
+	if test_intercept.timer_cancel_capture != nil do append(test_intercept.timer_cancel_capture, id)
 	return .OK, true
 }
 

@@ -29,6 +29,7 @@ Timer_Tick :: struct {
 }
 
 MAX_FIRE_BATCH :: 64
+TIMER_TICK_RETRY_DELAY :: time.Millisecond
 MAX_TIMERS :: 8192
 
 @(private)
@@ -43,6 +44,7 @@ Timer_Entry :: struct {
 	owner:     PID,
 	interval:  time.Duration,
 	next_fire: time.Time,
+	due:       time.Time,
 	repeat:    bool,
 }
 
@@ -119,6 +121,83 @@ spawn_timer_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
 
 @(private)
 fire_due_timers :: proc() -> int {
+	if NODE.config.sim_mode do return sim_fire_due_timers()
+
+	fire_time := now()
+	fired_count := 0
+	woken: [MAX_FIRE_BATCH]^Actor
+	woken_count := 0
+	reg := &NODE.timer_registry
+
+	pinned := reclaim_pin_if_unpinned()
+	defer if pinned do reclaim_unpin()
+
+	sync.mutex_lock(&reg.lock)
+	for pq.len(reg.heap) > 0 && fired_count < MAX_FIRE_BATCH {
+		top := pq.peek(reg.heap)
+		if time.diff(fire_time, top.next_fire) > 0 do break
+
+		entry, _ := pq.pop_safe(&reg.heap)
+		delete_key(&reg.index_map, Timer_Key{entry.id, entry.owner})
+		fired_count += 1
+
+		owner, offered := push_timer_tick(entry.owner, entry.id)
+		if offered == .OK {
+			woken[woken_count] = owner
+			woken_count += 1
+		}
+		if !reschedule_timer(&entry, offered, fire_time) do continue
+
+		reg.index_map[Timer_Key{entry.id, entry.owner}] = pq.len(reg.heap)
+		pq.push(&reg.heap, entry)
+	}
+	sync.mutex_unlock(&reg.lock)
+
+	from := get_self_pid()
+	for owner in woken[:woken_count] {
+		wake_actor(owner)
+		handle_set_message_stats(from, owner.pid)
+	}
+	return fired_count
+}
+
+@(private)
+reschedule_timer :: proc(entry: ^Timer_Entry, offered: Send_Error, fire_time: time.Time) -> bool {
+	if offered == .RECEIVER_BACKLOGGED {
+		entry.next_fire = time.time_add(fire_time, TIMER_TICK_RETRY_DELAY)
+		return true
+	}
+	if !entry.repeat do return false
+
+	periods := time.diff(entry.due, fire_time) / entry.interval + 1
+	entry.due = time.time_add(entry.due, periods * entry.interval)
+	entry.next_fire = entry.due
+	return true
+}
+
+@(private)
+push_timer_tick :: proc(owner: PID, id: u32) -> (^Actor, Send_Error) {
+	if sync.atomic_load_explicit(&NODE.shutting_down, .Relaxed) do return nil, .SYSTEM_SHUTTING_DOWN
+	if owner == 0 || !is_local_pid(owner) do return nil, .ACTOR_NOT_FOUND
+
+	actor_ptr, found := get_relaxed(&NODE.actor_registry, owner)
+	if !found || actor_ptr == nil do return nil, .ACTOR_NOT_FOUND
+	actor := cast(^Actor)actor_ptr
+	state := sync.atomic_load(&actor.state)
+	if state != .RUNNING && state != .IDLE && state != .INIT do return nil, .ACTOR_NOT_FOUND
+
+	msg: Message
+	msg.from = get_self_pid()
+	msg.inline_type = Timer_Tick
+	(cast(^Timer_Tick)&msg.inline_data[0])^ = Timer_Tick {
+		id = id,
+	}
+	if !mpsc_push(&actor.mailbox, msg) do return nil, .RECEIVER_BACKLOGGED
+	return actor, .OK
+}
+
+@(private)
+sim_fire_due_timers :: proc() -> int {
 	fire_time := now()
 	fired_buf: [MAX_FIRE_BATCH]Fired_Timer
 	fired_count := 0
@@ -150,9 +229,7 @@ fire_due_timers :: proc() -> int {
 	sync.mutex_unlock(&reg.lock)
 
 	for i in 0 ..< fired_count {
-		if NODE.config.sim_mode {
-			sim_trace_record(.Timer_Fire, u64(fired_buf[i].owner), u64(fired_buf[i].id))
-		}
+		sim_trace_record(.Timer_Fire, u64(fired_buf[i].owner), u64(fired_buf[i].id))
 		_ = send_message(fired_buf[i].owner, Timer_Tick{id = fired_buf[i].id})
 	}
 	return fired_count
@@ -261,11 +338,13 @@ timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any)
 			return
 		}
 
+		first_fire := time.time_add(now(), v.interval)
 		entry := Timer_Entry {
 			id        = v.id,
 			owner     = from,
 			interval  = v.interval,
-			next_fire = time.time_add(now(), v.interval),
+			next_fire = first_fire,
+			due       = first_fire,
 			repeat    = v.repeat,
 		}
 		NODE.timer_registry.index_map[key] = pq.len(NODE.timer_registry.heap)

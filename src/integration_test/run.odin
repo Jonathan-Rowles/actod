@@ -294,6 +294,18 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 		expects_error_logs = true,
 	},
+	{
+		name = "test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold",
+		test_proc = test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold,
+	},
+	{
+		name = "test_timer_tick_to_a_full_mailbox_is_not_sent_after_a_cancel",
+		test_proc = test_timer_tick_to_a_full_mailbox_is_not_sent_after_a_cancel,
+	},
+	{
+		name = "test_timer_wakes_its_owner_outside_the_registry_lock",
+		test_proc = test_timer_wakes_its_owner_outside_the_registry_lock,
+	},
 	{name = "test_spawn_sized_mailbox", test_proc = test_spawn_sized_mailbox, worker_count = 2},
 	{
 		name = "test_supervisor_survives_many_child_terminations",

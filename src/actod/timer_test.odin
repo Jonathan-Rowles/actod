@@ -251,3 +251,61 @@ test_set_timer_refuses_non_positive_repeating_interval :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Send_Error.INVALID_INTERVAL)
 	testing.expect_value(t, id, u32(0))
 }
+
+@(private = "file")
+make_repeating_entry :: proc(due: time.Time, interval: time.Duration) -> Timer_Entry {
+	return Timer_Entry {
+		id = 1,
+		owner = 100,
+		interval = interval,
+		next_fire = due,
+		due = due,
+		repeat = true,
+	}
+}
+
+@(test)
+test_backlogged_repeating_timer_keeps_its_phase :: proc(t: ^testing.T) {
+	entry := make_repeating_entry(make_time(3_000_000_000), time.Second)
+
+	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(3_000_000_000)))
+	testing.expect_value(t, entry.next_fire, make_time(3_001_000_000))
+
+	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(3_001_000_000)))
+	testing.expect(t, reschedule_timer(&entry, .OK, make_time(3_005_000_000)))
+	testing.expect_value(t, entry.next_fire, make_time(4_000_000_000))
+
+	testing.expect(t, reschedule_timer(&entry, .OK, make_time(4_000_000_000)))
+	testing.expect_value(t, entry.next_fire, make_time(5_000_000_000))
+}
+
+@(test)
+test_backlogged_repeating_timer_merges_missed_periods :: proc(t: ^testing.T) {
+	entry := make_repeating_entry(make_time(1_000_000_000), 100 * time.Millisecond)
+
+	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(1_000_000_000)))
+	testing.expect(t, reschedule_timer(&entry, .OK, make_time(1_350_000_000)))
+	testing.expect_value(t, entry.next_fire, make_time(1_400_000_000))
+
+	testing.expect(t, reschedule_timer(&entry, .OK, make_time(1_400_000_000)))
+	testing.expect_value(t, entry.next_fire, make_time(1_500_000_000))
+}
+
+@(test)
+test_backlogged_one_shot_timer_stays_until_delivered :: proc(t: ^testing.T) {
+	entry := Timer_Entry {
+		id        = 1,
+		owner     = 100,
+		next_fire = make_time(1000),
+		due       = make_time(1000),
+	}
+
+	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(1000)))
+	testing.expect_value(
+		t,
+		entry.next_fire,
+		time.time_add(make_time(1000), TIMER_TICK_RETRY_DELAY),
+	)
+	testing.expect(t, !reschedule_timer(&entry, .OK, entry.next_fire))
+	testing.expect(t, !reschedule_timer(&entry, .ACTOR_NOT_FOUND, entry.next_fire))
+}

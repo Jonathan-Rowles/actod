@@ -400,6 +400,96 @@ test_init_timers_get_distinct_ids_across_actors :: proc(t: ^testing.T) {
 	testing.expect_value(t, second.ticks, 0)
 }
 
+Arm_Cancel_Probe :: struct {
+	interval: time.Duration,
+	repeat:   bool,
+}
+
+Cancel_Probe_Timer :: struct {}
+
+cancel_probe_state :: struct {
+	name:                 string,
+	timer:                u32,
+	cancelled:            u32,
+	cancel_on_first_tick: bool,
+	ticks:                int,
+	ticks_of_cancelled:   int,
+}
+
+cancel_probe_cancel :: proc(s: ^cancel_probe_state) {
+	_ = actod.cancel_timer(s.timer)
+	s.cancelled = s.timer
+	s.timer = 0
+}
+
+cancel_probe_behaviour := actod.Actor_Behaviour(cancel_probe_state) {
+	handle_message = proc(s: ^cancel_probe_state, from: actod.PID, msg: any) {
+		switch v in msg {
+		case Arm_Cancel_Probe:
+			s.timer, _ = actod.set_timer(v.interval, v.repeat)
+		case Cancel_Probe_Timer:
+			cancel_probe_cancel(s)
+		case actod.Timer_Tick:
+			if s.cancelled != 0 && v.id == s.cancelled {
+				s.ticks_of_cancelled += 1
+			} else if v.id == s.timer {
+				s.ticks += 1
+				if s.cancel_on_first_tick do cancel_probe_cancel(s)
+			}
+		}
+	},
+}
+
+@(test)
+test_repeating_timer_cancelled_in_a_later_step_stops_ticking :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(
+		&s,
+		"probe",
+		cancel_probe_state{name = "probe", cancel_on_first_tick = true},
+		cancel_probe_behaviour,
+	)
+	init_all(&s)
+
+	send(&s, "probe", Arm_Cancel_Probe{interval = time.Second, repeat = true})
+	run_until_idle(&s)
+	advance_time(&s, 3 * time.Second)
+	run_until_idle(&s)
+
+	probe := get_state(&s, "probe", cancel_probe_state)
+	testing.expect_value(t, probe.ticks, 1)
+	testing.expect_value(t, probe.ticks_of_cancelled, 2)
+
+	advance_time(&s, 3 * time.Second)
+	run_until_idle(&s)
+
+	probe = get_state(&s, "probe", cancel_probe_state)
+	testing.expect_value(t, probe.ticks, 1)
+	testing.expect_value(t, probe.ticks_of_cancelled, 2)
+}
+
+@(test)
+test_one_shot_cancelled_by_a_later_message_never_fires :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+
+	spawn(&s, "probe", cancel_probe_state{name = "probe"}, cancel_probe_behaviour)
+	init_all(&s)
+
+	send(&s, "probe", Arm_Cancel_Probe{interval = time.Second})
+	run_until_idle(&s)
+	send(&s, "probe", Cancel_Probe_Timer{})
+	run_until_idle(&s)
+	advance_time(&s, 2 * time.Second)
+	run_until_idle(&s)
+
+	probe := get_state(&s, "probe", cancel_probe_state)
+	testing.expect_value(t, probe.ticks, 0)
+	testing.expect_value(t, probe.ticks_of_cancelled, 0)
+}
+
 @(test)
 test_run_until_idle_processes_chain :: proc(t: ^testing.T) {
 	s := create()

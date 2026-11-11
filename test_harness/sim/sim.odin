@@ -34,6 +34,7 @@ Sim :: struct {
 	send_capture:    [dynamic]ti.Captured_Send,
 	publish_capture: [dynamic]ti.Captured_Publish,
 	timer_capture:   [dynamic]ti.Captured_Timer,
+	timer_cancels:   [dynamic]u32,
 	spawn_capture:   [dynamic]ti.Captured_Spawn,
 	term_capture:    [dynamic]ti.Captured_Terminate,
 	topic_sub_cap:   [dynamic]ti.Captured_Topic_Subscribe,
@@ -154,6 +155,7 @@ destroy :: proc(s: ^Sim) {
 	delete(s.send_capture)
 	delete(s.publish_capture)
 	delete(s.timer_capture)
+	delete(s.timer_cancels)
 	delete(s.spawn_capture)
 	delete(s.term_capture)
 	delete(s.topic_sub_cap)
@@ -225,6 +227,7 @@ wire_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.send_capture = &s.send_capture
 	s.intercept.publish_capture = &s.publish_capture
 	s.intercept.timer_capture = &s.timer_capture
+	s.intercept.timer_cancel_capture = &s.timer_cancels
 	s.intercept.pid_registry = &s.pid_registry
 	s.intercept.spawn_capture = &s.spawn_capture
 	s.intercept.terminate_capture = &s.term_capture
@@ -430,6 +433,9 @@ process_captures :: proc(s: ^Sim, sender_pid: u64) {
 	}
 	clear(&s.timer_capture)
 
+	for id in s.timer_cancels do cancel_owned_timer(s, id, sender_pid)
+	clear(&s.timer_cancels)
+
 	for &cap in s.topic_sub_cap {
 		add_topic_sub(s, cap.topic, sender_pid)
 	}
@@ -541,6 +547,15 @@ add_timer :: proc(s: ^Sim, id: u32, owner: u64, interval: time.Duration, repeat:
 cancel_timer :: proc(s: ^Sim, id: u32) {
 	for i in 0 ..< s.timer_count {
 		if s.timers[i].id == id {
+			s.timers[i].active = false
+			return
+		}
+	}
+}
+
+cancel_owned_timer :: proc(s: ^Sim, id: u32, owner: u64) {
+	for i in 0 ..< s.timer_count {
+		if s.timers[i].id == id && s.timers[i].owner_pid == owner {
 			s.timers[i].active = false
 			return
 		}

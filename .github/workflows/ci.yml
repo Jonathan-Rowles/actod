@@ -22,7 +22,8 @@ jobs:
 
       - name: Install nasm (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y nasm
+        working-directory: ${{ runner.temp }}
+        run: curl -sfLO https://www.nasm.us/pub/nasm/releasebuilds/3.01/nasm-3.01.tar.xz && echo "b7324cbe86e767b65f26f467ed8b12ad80e124e3ccb89076855c98e43a9eddd4  nasm-3.01.tar.xz" | sha256sum -c - && tar xJf nasm-3.01.tar.xz && cd nasm-3.01 && ./configure -q && make -j"$(nproc)" nasm && sudo install nasm /usr/local/bin/nasm
 
       - name: Install nasm (Windows)
         if: runner.os == 'Windows'
@@ -57,7 +58,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install nasm
-        run: sudo apt-get update && sudo apt-get install -y nasm
+        working-directory: ${{ runner.temp }}
+        run: curl -sfLO https://www.nasm.us/pub/nasm/releasebuilds/3.01/nasm-3.01.tar.xz && echo "b7324cbe86e767b65f26f467ed8b12ad80e124e3ccb89076855c98e43a9eddd4  nasm-3.01.tar.xz" | sha256sum -c - && tar xJf nasm-3.01.tar.xz && cd nasm-3.01 && ./configure -q && make -j"$(nproc)" nasm && sudo install nasm /usr/local/bin/nasm
 
       - name: Setup Odin
         uses: laytan/setup-odin@v2

@@ -37,7 +37,15 @@ spawn_default :: proc(
 	PID,
 	bool,
 ) {
-	return spawn_impl(name, data, behaviour, DEFAULT_MAIL_BOX_SIZE, opts, parent_pid, loc)
+	return spawn_impl(
+		name,
+		data,
+		behaviour,
+		DEFAULT_MAIL_BOX_SIZE,
+		opts,
+		parent_pid,
+		loc,
+	)
 }
 
 @(require_results)
@@ -56,7 +64,15 @@ spawn_sized :: proc(
 	0,
 	(MAILBOX_SIZE & (MAILBOX_SIZE - 1)) ==
 	0 {
-	return spawn_impl(name, data, behaviour, MAILBOX_SIZE, opts, parent_pid, loc)
+	return spawn_impl(
+		name,
+		data,
+		behaviour,
+		MAILBOX_SIZE,
+		opts,
+		parent_pid,
+		loc,
+	)
 }
 
 Erased_State :: struct {
@@ -83,7 +99,11 @@ spawn_alloc_actor :: proc(
 	actor = new(Actor, actor_system_allocator)
 
 	if actor.state != .ZERO {
-		panic_at(loc, "spawn('%s'): allocator returned non-zeroed memory for Actor", name)
+		panic_at(
+			loc,
+			"spawn('%s'): allocator returned non-zeroed memory for Actor",
+			name,
+		)
 	}
 
 	arena_fresh, arena_ok := actor_arena_acquire(
@@ -103,7 +123,11 @@ spawn_alloc_actor :: proc(
 	actor.published_name = new_clone(actor.name, context.allocator)
 	actor.spawn_loc = loc
 
-	data_ptr, data_err := mem.alloc(max(state.size, 1), state.align, actor.allocator)
+	data_ptr, data_err := mem.alloc(
+		max(state.size, 1),
+		state.align,
+		actor.allocator,
+	)
 	if data_err != nil {
 		log.errorf(
 			"spawn('%s') failed: could not allocate %d B of actor data for %v: %v",
@@ -123,7 +147,12 @@ spawn_alloc_actor :: proc(
 
 	actor.opts = opts
 	if opts.children != nil {
-		actor.opts.children = make([dynamic]SPAWN, 0, len(opts.children), actor.allocator)
+		actor.opts.children = make(
+			[dynamic]SPAWN,
+			0,
+			len(opts.children),
+			actor.allocator,
+		)
 		for child in opts.children {
 			append(&actor.opts.children, child)
 		}
@@ -204,10 +233,25 @@ spawn_alloc_actor :: proc(
 		mem.slice_data_cast([]Entry(Message), system_raw),
 		entries_zeroed = arena_fresh,
 	)
-	mpsc_init_external(&actor.mailbox, mailbox_entries, entries_zeroed = arena_fresh)
-	pool_init(&actor.pool, actor.allocator, actor.opts.page_size, pool_max_pages(mailbox_size))
+	mpsc_init_external(
+		&actor.mailbox,
+		mailbox_entries,
+		entries_zeroed = arena_fresh,
+	)
+	pool_init(
+		&actor.pool,
+		actor.allocator,
+		actor.opts.page_size,
+		pool_max_pages(mailbox_size),
+	)
 
-	pid, ok = add(&NODE.actor_registry, rawptr(actor), name, behaviour.actor_type, loc)
+	pid, ok = add(
+		&NODE.actor_registry,
+		rawptr(actor),
+		name,
+		behaviour.actor_type,
+		loc,
+	)
 	if !ok {
 		log.errorf(
 			"spawn('%s') failed: actor registry is full (%d live actors). Raise actor_registry_size in make_node_config()",
@@ -269,9 +313,16 @@ spawn_impl :: proc(
 
 when ODIN_TEST {
 	blocking_actor_last_touch_hook: proc(actor: ^Actor, pid: PID)
-	spawner_resumed_after_start_hook: proc(actor: ^Actor, pid: PID, name: string)
+	spawner_resumed_after_start_hook: proc(
+		actor: ^Actor,
+		pid: PID,
+		name: string,
+	)
 	dedicated_thread_started_hook: proc(pid: PID, name: string)
-	dedicated_thread_starting_hook: proc(pid: PID, stored_thread: ^thread.Thread)
+	dedicated_thread_starting_hook: proc(
+		pid: PID,
+		stored_thread: ^thread.Thread,
+	)
 	dedicated_thread_reap_hook: proc(pid: PID, joins_thread: bool)
 }
 
@@ -291,7 +342,11 @@ spawn_erased :: proc(
 	context.logger = diagnostic_logger(context.logger)
 
 	if !NODE.started {
-		panic_at(loc, "spawn('%s'): node_init() must be called before spawning any actor", name)
+		panic_at(
+			loc,
+			"spawn('%s'): node_init() must be called before spawning any actor",
+			name,
+		)
 	}
 
 	if behaviour.handle_message == nil {
@@ -428,7 +483,8 @@ attach_to_parent :: proc(parent_pid: PID, child_pid: PID) {
 	}
 
 	parent_actor := cast(^Actor)parent_ptr
-	if current_actor_context != nil && current_actor_context.pid == parent_pid {
+	if current_actor_context != nil &&
+	   current_actor_context.pid == parent_pid {
 		record_direct_child(parent_actor, child_pid)
 	} else {
 		signal_spawn_to_parent(parent_actor, child_pid)
@@ -487,13 +543,16 @@ spawn_schedule_pooled :: proc(
 			)
 		}
 		idx = actor.opts.home_worker
-	} else if affinity_pid, affinity_ok := resolve_actor_ref(actor.opts.affinity); affinity_ok {
+	} else if affinity_pid, affinity_ok := resolve_actor_ref(
+		actor.opts.affinity,
+	); affinity_ok {
 		affinity_actor := get(&NODE.actor_registry, affinity_pid)
 		if affinity_actor != nil {
 			affinity_handle := (cast(^Actor)affinity_actor).pool_handle
 			if affinity_handle != nil && affinity_handle.home_worker != nil {
 				for i in 0 ..< NODE.worker_pool.worker_count {
-					if &NODE.worker_pool.workers[i] == affinity_handle.home_worker {
+					if &NODE.worker_pool.workers[i] ==
+					   affinity_handle.home_worker {
 						idx = i
 						break
 					}
@@ -502,11 +561,15 @@ spawn_schedule_pooled :: proc(
 		}
 	}
 	if idx < 0 {
-		idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
+		idx =
+			sync.atomic_add(&NODE.worker_pool.next_worker, 1) %
+			NODE.worker_pool.worker_count
 		if current_worker != nil &&
 		   &NODE.worker_pool.workers[idx] == current_worker &&
 		   NODE.worker_pool.worker_count > 1 {
-			idx = sync.atomic_add(&NODE.worker_pool.next_worker, 1) % NODE.worker_pool.worker_count
+			idx =
+				sync.atomic_add(&NODE.worker_pool.next_worker, 1) %
+				NODE.worker_pool.worker_count
 		}
 	}
 	home_worker := &NODE.worker_pool.workers[idx]
@@ -567,7 +630,15 @@ spawn_child_default :: proc(
 		)
 	}
 	self_pid := get_self_pid()
-	return spawn_impl(name, data, behaviour, DEFAULT_MAIL_BOX_SIZE, opts, self_pid, loc)
+	return spawn_impl(
+		name,
+		data,
+		behaviour,
+		DEFAULT_MAIL_BOX_SIZE,
+		opts,
+		self_pid,
+		loc,
+	)
 }
 
 @(require_results)

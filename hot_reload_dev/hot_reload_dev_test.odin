@@ -45,10 +45,22 @@ Bar :: struct {
 
 	testing.expect(t, contains(result, "Foo :: struct"), "should preserve Foo")
 	testing.expect(t, contains(result, "Bar :: struct"), "should preserve Bar")
-	testing.expect(t, contains(result, "package test"), "should preserve package")
+	testing.expect(
+		t,
+		contains(result, "package test"),
+		"should preserve package",
+	)
 	testing.expect(t, !contains(result, "@(init)"), "should strip @(init)")
-	testing.expect(t, !contains(result, "register"), "should strip register proc")
-	testing.expect(t, !contains(result, "do_something"), "should strip proc body")
+	testing.expect(
+		t,
+		!contains(result, "register"),
+		"should strip register proc",
+	)
+	testing.expect(
+		t,
+		!contains(result, "do_something"),
+		"should strip proc body",
+	)
 }
 
 @(test)
@@ -69,9 +81,17 @@ keep_me :: proc() {
 	result := strip_init_procs(source)
 
 	testing.expect(t, !contains(result, "setup"), "should strip setup")
-	testing.expect(t, !contains(result, "nested"), "should strip nested braces")
+	testing.expect(
+		t,
+		!contains(result, "nested"),
+		"should strip nested braces",
+	)
 	testing.expect(t, contains(result, "keep_me"), "should preserve keep_me")
-	testing.expect(t, contains(result, "hello"), "should preserve keep_me body")
+	testing.expect(
+		t,
+		contains(result, "hello"),
+		"should preserve keep_me body",
+	)
 }
 
 @(test)

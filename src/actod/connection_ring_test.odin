@@ -232,16 +232,36 @@ test_create_destroy_connection_ring :: proc(t: ^testing.T) {
 	testing.expect(t, ring.send_slot_count == 8, "Slot count mismatch")
 	testing.expect(t, ring.send_slot_size == 1024, "Slot size mismatch")
 	testing.expect(t, ring.send_mask == 7, "Mask should be count-1")
-	testing.expect(t, ring.recv_buffer_size == 4096, "Recv buffer size mismatch")
-	testing.expect(t, ring.state == .Buffering, "Initial state should be Buffering")
+	testing.expect(
+		t,
+		ring.recv_buffer_size == 4096,
+		"Recv buffer size mismatch",
+	)
+	testing.expect(
+		t,
+		ring.state == .Buffering,
+		"Initial state should be Buffering",
+	)
 	testing.expect(t, len(ring.send_slots) == 8, "Send slots length mismatch")
-	testing.expect(t, len(ring.recv_buffer) == 4096, "Recv buffer length mismatch")
+	testing.expect(
+		t,
+		len(ring.recv_buffer) == 4096,
+		"Recv buffer length mismatch",
+	)
 
 	for i in 0 ..< 8 {
-		testing.expect(t, ring.send_slots[i].state == .FREE, "Slot should start FREE")
+		testing.expect(
+			t,
+			ring.send_slots[i].state == .FREE,
+			"Slot should start FREE",
+		)
 	}
 
-	testing.expect(t, len(ring.send_data_buffer) == 8 * 1024, "Send data buffer size mismatch")
+	testing.expect(
+		t,
+		len(ring.send_data_buffer) == 8 * 1024,
+		"Send data buffer size mismatch",
+	)
 }
 
 @(test)
@@ -255,7 +275,11 @@ test_connection_ring_config_validation :: proc(t: ^testing.T) {
 		}
 		ring := make_connection_ring(config)
 		if ring != nil {
-			testing.expect(t, ring.send_slot_count == count, "Slot count should match")
+			testing.expect(
+				t,
+				ring.send_slot_count == count,
+				"Slot count should match",
+			)
 			destroy_connection_ring(ring)
 		}
 	}
@@ -279,7 +303,11 @@ test_acquire_slot :: proc(t: ^testing.T) {
 	testing.expect(t, ok1, "Should acquire first slot")
 	testing.expect(t, slot1 != nil, "Slot pointer should not be nil")
 	testing.expect(t, idx1 == 0, "First slot index should be 0")
-	testing.expect(t, slot1.state == .WRITING, "Slot should be in WRITING state")
+	testing.expect(
+		t,
+		slot1.state == .WRITING,
+		"Slot should be in WRITING state",
+	)
 
 	slot1.length = 100
 	sync.atomic_store_explicit(&slot1.state, .READY, .Release)
@@ -343,7 +371,11 @@ test_batch_append_message :: proc(t: ^testing.T) {
 
 	ok1 := batch_append_message(ring, msg1)
 	testing.expect(t, ok1, "First message should append")
-	testing.expect(t, ring.batch_slot_idx >= 0, "Should have active batch slot")
+	testing.expect(
+		t,
+		ring.batch_slot_idx >= 0,
+		"Should have active batch slot",
+	)
 	testing.expect(t, ring.batch_write_pos == 20, "Write pos should be 20")
 
 	msg2 := make([]byte, 12)
@@ -355,7 +387,11 @@ test_batch_append_message :: proc(t: ^testing.T) {
 	testing.expect(t, ring.batch_write_pos == 32, "Write pos should be 32")
 
 	batch_flush(ring)
-	testing.expect(t, ring.batch_slot_idx == -1, "Batch slot should be cleared")
+	testing.expect(
+		t,
+		ring.batch_slot_idx == -1,
+		"Batch slot should be cleared",
+	)
 	testing.expect(t, ring.batch_write_pos == 0, "Write pos should be reset")
 }
 
@@ -368,7 +404,11 @@ test_batch_append_empty_message :: proc(t: ^testing.T) {
 	empty := []byte{}
 	ok := batch_append_message(ring, empty)
 	testing.expect(t, ok, "Empty message should return true")
-	testing.expect(t, ring.batch_slot_idx == -1, "Should not acquire slot for empty message")
+	testing.expect(
+		t,
+		ring.batch_slot_idx == -1,
+		"Should not acquire slot for empty message",
+	)
 }
 
 
@@ -386,17 +426,33 @@ test_batch_small_messages_pack :: proc(t: ^testing.T) {
 	}
 
 	testing.expect(t, ring.batch_slot_idx >= 0, "Batch should still be open")
-	testing.expect(t, ring.batch_write_pos == 200, "Write pos should be 10 * 20")
+	testing.expect(
+		t,
+		ring.batch_write_pos == 200,
+		"Write pos should be 10 * 20",
+	)
 
 	batch_flush(ring)
 
 	slot := &ring.send_slots[0]
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "Slot should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"Slot should be READY",
+	)
 	testing.expect(t, slot.length == 200, "Slot length should be 200")
 
 	data := slot_data(ring, 0)
-	testing.expect(t, validate_batch_messages(data[:200], 0, 200), "Messages should validate")
-	testing.expect(t, count_messages_in_data(data[:200]) == 10, "Should count 10 messages")
+	testing.expect(
+		t,
+		validate_batch_messages(data[:200], 0, 200),
+		"Messages should validate",
+	)
+	testing.expect(
+		t,
+		count_messages_in_data(data[:200]) == 10,
+		"Should count 10 messages",
+	)
 }
 
 @(test)
@@ -413,7 +469,11 @@ test_batch_large_message_auto_seals :: proc(t: ^testing.T) {
 	testing.expect(t, ring.batch_slot_idx == -1, "Batch should be auto-sealed")
 
 	slot := &ring.send_slots[0]
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "Slot should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"Slot should be READY",
+	)
 	testing.expect(t, slot.length == 3200, "Slot length should be 3200")
 }
 
@@ -435,15 +495,27 @@ test_batch_spills_to_next_slot :: proc(t: ^testing.T) {
 	testing.expect(t, ok2, "Second message should append")
 
 	slot0 := &ring.send_slots[0]
-	testing.expect(t, sync.atomic_load(&slot0.state) == .READY, "Slot 0 should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot0.state) == .READY,
+		"Slot 0 should be READY",
+	)
 	testing.expect(t, slot0.length == 2500, "Slot 0 length should be 2500")
 
-	testing.expect(t, ring.batch_write_pos == 2000, "Slot 1 write pos should be 2000")
+	testing.expect(
+		t,
+		ring.batch_write_pos == 2000,
+		"Slot 1 write pos should be 2000",
+	)
 
 	batch_flush(ring)
 
 	slot1 := &ring.send_slots[1]
-	testing.expect(t, sync.atomic_load(&slot1.state) == .READY, "Slot 1 should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot1.state) == .READY,
+		"Slot 1 should be READY",
+	)
 	testing.expect(t, slot1.length == 2000, "Slot 1 length should be 2000")
 }
 
@@ -460,9 +532,17 @@ test_partial_flush_two_messages :: proc(t: ^testing.T) {
 	batch_append_message(ring, msg)
 	batch_append_message(ring, msg)
 
-	testing.expect(t, ring.batch_slot_idx >= 0, "Batch should be open (not auto-sealed)")
+	testing.expect(
+		t,
+		ring.batch_slot_idx >= 0,
+		"Batch should be open (not auto-sealed)",
+	)
 	testing.expect(t, ring.batch_write_pos == 40, "Write pos should be 40")
-	testing.expect(t, sync.atomic_load(&ring.batch_pending) == 1, "batch_pending should be set")
+	testing.expect(
+		t,
+		sync.atomic_load(&ring.batch_pending) == 1,
+		"batch_pending should be set",
+	)
 
 	batch_flush(ring)
 
@@ -470,12 +550,24 @@ test_partial_flush_two_messages :: proc(t: ^testing.T) {
 	testing.expect(t, ring.batch_write_pos == 0, "Write pos should be reset")
 
 	slot := &ring.send_slots[0]
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "Slot should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"Slot should be READY",
+	)
 	testing.expect(t, slot.length == 40, "Slot length should be 40")
 
 	data := slot_data(ring, 0)
-	testing.expect(t, count_messages_in_data(data[:40]) == 2, "Should have exactly 2 messages")
-	testing.expect(t, validate_batch_messages(data[:40], 0, 40), "Messages should validate")
+	testing.expect(
+		t,
+		count_messages_in_data(data[:40]) == 2,
+		"Should have exactly 2 messages",
+	)
+	testing.expect(
+		t,
+		validate_batch_messages(data[:40], 0, 40),
+		"Messages should validate",
+	)
 }
 
 @(test)
@@ -529,8 +621,16 @@ test_sealed_by_nearly_full :: proc(t: ^testing.T) {
 		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
 		"Slot should be SEALED (active writer prevents READY)",
 	)
-	testing.expect(t, sync.atomic_load(&slot.active_writers) == 1, "Should have 1 active writer")
-	testing.expect(t, ring.batch_slot_idx == -1, "Batch should be cleared by seal")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 1,
+		"Should have 1 active writer",
+	)
+	testing.expect(
+		t,
+		ring.batch_slot_idx == -1,
+		"Batch should be cleared by seal",
+	)
 
 	endian.put_u32(dst[0:4], .Little, u32(3200 - 4))
 
@@ -541,7 +641,11 @@ test_sealed_by_nearly_full :: proc(t: ^testing.T) {
 		sync.atomic_load(&slot.state) == .READY,
 		"Commit should promote SEALED to READY",
 	)
-	testing.expect(t, sync.atomic_load(&slot.active_writers) == 0, "No active writers remain")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 0,
+		"No active writers remain",
+	)
 	testing.expect(
 		t,
 		sync.atomic_load(&ring.batch_pending) == 1,
@@ -570,18 +674,42 @@ test_sealed_multiple_writers_last_promotes :: proc(t: ^testing.T) {
 	endian.put_u32(dst3[0:4], .Little, u32(1000 - 4))
 
 	slot := &ring.send_slots[sid1]
-	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "Should be SEALED")
-	testing.expect(t, sync.atomic_load(&slot.active_writers) == 3, "Should have 3 writers")
+	testing.expect(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"Should be SEALED",
+	)
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 3,
+		"Should have 3 writers",
+	)
 
 	batch_commit(ring, sid1)
-	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "Still SEALED after 1st commit")
+	testing.expect(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"Still SEALED after 1st commit",
+	)
 
 	batch_commit(ring, sid2)
-	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "Still SEALED after 2nd commit")
+	testing.expect(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"Still SEALED after 2nd commit",
+	)
 
 	batch_commit(ring, sid3)
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "READY after 3rd (last) commit")
-	testing.expect(t, sync.atomic_load(&slot.active_writers) == 0, "No writers remain")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"READY after 3rd (last) commit",
+	)
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 0,
+		"No writers remain",
+	)
 }
 
 @(test)
@@ -605,14 +733,22 @@ test_lazy_seal_skips_active_writers :: proc(t: ^testing.T) {
 		"Batch should still be open (lazy seal skipped)",
 	)
 	slot := &ring.send_slots[sid]
-	testing.expect(t, sync.atomic_load(&slot.state) == .WRITING, "Slot should still be WRITING")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .WRITING,
+		"Slot should still be WRITING",
+	)
 
 	batch_commit(ring, sid)
 
 	batch_flush(ring)
 
 	testing.expect(t, ring.batch_slot_idx == -1, "Batch should be sealed now")
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "Slot should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"Slot should be READY",
+	)
 }
 
 
@@ -690,7 +826,14 @@ test_build_wire_format_pod :: proc(t: ^testing.T) {
 	pod_msg := Pod_Message {
 		value = 123,
 	}
-	written := build_wire_format_into_buffer(buffer, pod_msg, to_handle, from_handle, {}, "")
+	written := build_wire_format_into_buffer(
+		buffer,
+		pod_msg,
+		to_handle,
+		from_handle,
+		{},
+		"",
+	)
 
 	testing.expect(t, written > 0, "Should write POD message")
 
@@ -699,7 +842,11 @@ test_build_wire_format_pod :: proc(t: ^testing.T) {
 
 	header, ok := parse_network_header(buffer[4:written])
 	testing.expect(t, ok, "Should parse header")
-	testing.expect(t, header.from_handle == from_handle, "From handle mismatch")
+	testing.expect(
+		t,
+		header.from_handle == from_handle,
+		"From handle mismatch",
+	)
 	testing.expect(t, header.to_handle == to_handle, "To handle mismatch")
 }
 
@@ -762,7 +909,11 @@ test_wire_format_exact_size_matches_build :: proc(t: ^testing.T) {
 		exact := wire_format_exact_size(msg, 0)
 		built := build_wire_format_into_buffer(buf[:], msg, to, from, {}, "")
 		testing.expect(t, exact == built, "Empty: exact_size != built size")
-		testing.expect(t, exact == u32(4 + NETWORK_HEADER_SIZE), "Empty: wrong size")
+		testing.expect(
+			t,
+			exact == u32(4 + NETWORK_HEADER_SIZE),
+			"Empty: wrong size",
+		)
 	}
 	{
 		msg := Test_Inline{}
@@ -795,7 +946,14 @@ test_wire_format_exact_size_matches_build :: proc(t: ^testing.T) {
 			idx = u32(len(name)),
 			gen = 0,
 		}
-		built := build_wire_format_into_buffer(buf[:], msg, to_named, from, {.BY_NAME}, name)
+		built := build_wire_format_into_buffer(
+			buf[:],
+			msg,
+			to_named,
+			from,
+			{.BY_NAME},
+			name,
+		)
 		testing.expect(t, exact == built, "Named: exact_size != built size")
 	}
 }
@@ -864,7 +1022,10 @@ test_stress_with_drainer_small :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Writer_Context
 	threads: [num_threads]^thread.Thread
@@ -876,7 +1037,10 @@ test_stress_with_drainer_small :: proc(t: ^testing.T) {
 			msg_size  = 20,
 			thread_id = u8(i + 1),
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], writer_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			writer_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -895,7 +1059,11 @@ test_stress_with_drainer_small :: proc(t: ^testing.T) {
 		total_failures += ctxs[i].failures
 	}
 
-	testing.expect(t, total_sent == num_threads * MSGS_PER_THREAD, "All sends should succeed")
+	testing.expect(
+		t,
+		total_sent == num_threads * MSGS_PER_THREAD,
+		"All sends should succeed",
+	)
 	testing.expect(t, total_failures == 0, "No send failures")
 }
 
@@ -912,7 +1080,10 @@ test_stress_with_drainer_medium :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Writer_Context
 	threads: [num_threads]^thread.Thread
@@ -924,7 +1095,10 @@ test_stress_with_drainer_medium :: proc(t: ^testing.T) {
 			msg_size  = 286,
 			thread_id = u8(i + 1),
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], writer_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			writer_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -943,7 +1117,11 @@ test_stress_with_drainer_medium :: proc(t: ^testing.T) {
 		total_failures += ctxs[i].failures
 	}
 
-	testing.expect(t, total_sent == num_threads * MSGS_PER_THREAD, "All sends should succeed")
+	testing.expect(
+		t,
+		total_sent == num_threads * MSGS_PER_THREAD,
+		"All sends should succeed",
+	)
 	testing.expect(t, total_failures == 0, "No send failures")
 }
 
@@ -960,7 +1138,10 @@ test_stress_with_drainer_large :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Writer_Context
 	threads: [num_threads]^thread.Thread
@@ -972,7 +1153,10 @@ test_stress_with_drainer_large :: proc(t: ^testing.T) {
 			msg_size  = 1058,
 			thread_id = u8(i + 1),
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], writer_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			writer_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -991,7 +1175,11 @@ test_stress_with_drainer_large :: proc(t: ^testing.T) {
 		total_failures += ctxs[i].failures
 	}
 
-	testing.expect(t, total_sent == num_threads * MSGS_PER_THREAD, "All sends should succeed")
+	testing.expect(
+		t,
+		total_sent == num_threads * MSGS_PER_THREAD,
+		"All sends should succeed",
+	)
 	testing.expect(t, total_failures == 0, "No send failures")
 }
 
@@ -1010,7 +1198,10 @@ test_stress_send_ring_empty :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Send_Ring_Context
 	threads: [num_threads]^thread.Thread
@@ -1020,7 +1211,10 @@ test_stress_send_ring_empty :: proc(t: ^testing.T) {
 			msg_count = MSGS_PER_THREAD,
 			msg_type  = 0,
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], send_ring_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			send_ring_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -1038,7 +1232,11 @@ test_stress_send_ring_empty :: proc(t: ^testing.T) {
 		total_sent += ctxs[i].sent
 		total_failures += ctxs[i].failures
 	}
-	testing.expect(t, total_sent == num_threads * MSGS_PER_THREAD, "All sends should succeed")
+	testing.expect(
+		t,
+		total_sent == num_threads * MSGS_PER_THREAD,
+		"All sends should succeed",
+	)
 	testing.expect(t, total_failures == 0, "No failures")
 }
 
@@ -1056,7 +1254,10 @@ test_stress_send_ring_medium :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Send_Ring_Context
 	threads: [num_threads]^thread.Thread
@@ -1066,7 +1267,10 @@ test_stress_send_ring_medium :: proc(t: ^testing.T) {
 			msg_count = MSGS_PER_THREAD,
 			msg_type  = 2,
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], send_ring_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			send_ring_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -1084,7 +1288,11 @@ test_stress_send_ring_medium :: proc(t: ^testing.T) {
 		total_sent += ctxs[i].sent
 		total_failures += ctxs[i].failures
 	}
-	testing.expect(t, total_sent == num_threads * MSGS_PER_THREAD, "All sends should succeed")
+	testing.expect(
+		t,
+		total_sent == num_threads * MSGS_PER_THREAD,
+		"All sends should succeed",
+	)
 	testing.expect(t, total_failures == 0, "No failures")
 }
 
@@ -1102,7 +1310,10 @@ test_stress_send_ring_large :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Send_Ring_Context
 	threads: [num_threads]^thread.Thread
@@ -1112,7 +1323,10 @@ test_stress_send_ring_large :: proc(t: ^testing.T) {
 			msg_count = MSGS_PER_THREAD,
 			msg_type  = 3,
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], send_ring_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			send_ring_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -1130,7 +1344,11 @@ test_stress_send_ring_large :: proc(t: ^testing.T) {
 		total_sent += ctxs[i].sent
 		total_failures += ctxs[i].failures
 	}
-	testing.expect(t, total_sent == num_threads * MSGS_PER_THREAD, "All sends should succeed")
+	testing.expect(
+		t,
+		total_sent == num_threads * MSGS_PER_THREAD,
+		"All sends should succeed",
+	)
 	testing.expect(t, total_failures == 0, "No failures")
 }
 
@@ -1145,7 +1363,10 @@ test_stress_send_ring_1m_baseline :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctx := Send_Ring_Context {
 		ring      = ring,
@@ -1200,7 +1421,10 @@ test_ring_full_rate_medium_messages :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Stat_Context
 	threads: [num_threads]^thread.Thread
@@ -1210,7 +1434,10 @@ test_ring_full_rate_medium_messages :: proc(t: ^testing.T) {
 			ring      = ring,
 			msg_count = MSGS_PER_THREAD,
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], stat_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			stat_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -1279,7 +1506,10 @@ test_ring_full_rate_large_messages :: proc(t: ^testing.T) {
 		ring = ring,
 		stop = false,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, drainer_thread_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		drainer_thread_proc,
+	)
 
 	ctxs: [num_threads]Stat_Context_L
 	threads: [num_threads]^thread.Thread
@@ -1289,7 +1519,10 @@ test_ring_full_rate_large_messages :: proc(t: ^testing.T) {
 			ring      = ring,
 			msg_count = MSGS_PER_THREAD,
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], stat_thread_proc_l)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			stat_thread_proc_l,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -1380,7 +1613,10 @@ test_drainer_flush_not_starved :: proc(t: ^testing.T) {
 			msg_count = MSGS_PER_THREAD,
 			msg_type  = 2, // medium 256B
 		}
-		threads[i] = thread.create_and_start_with_data(&ctxs[i], send_ring_thread_proc)
+		threads[i] = thread.create_and_start_with_data(
+			&ctxs[i],
+			send_ring_thread_proc,
+		)
 	}
 
 	for i in 0 ..< num_threads {
@@ -1453,8 +1689,16 @@ test_pool_add_park_reuse :: proc(t: ^testing.T) {
 	testing.expect(t, ring1.pool == pool, "ring linked to pool")
 
 	testing.expect(t, pool_remove_active(pool, ring1), "remove should succeed")
-	testing.expect(t, pool_active_count(pool) == 1, "one active ring after remove")
-	testing.expect(t, !pool_remove_active(pool, ring0), "primary must never be removed")
+	testing.expect(
+		t,
+		pool_active_count(pool) == 1,
+		"one active ring after remove",
+	)
+	testing.expect(
+		t,
+		!pool_remove_active(pool, ring0),
+		"primary must never be removed",
+	)
 
 	pool_park(pool, ring1)
 	testing.expect(t, pool.parked_count == 1, "ring parked")
@@ -1462,7 +1706,11 @@ test_pool_add_park_reuse :: proc(t: ^testing.T) {
 	reused := pool_take_parked(pool)
 	testing.expect(t, reused == ring1, "parked ring reused")
 	testing.expect(t, pool.parked_count == 0, "parked list empty after reuse")
-	testing.expect(t, pool_take_parked(pool) == nil, "empty parked list returns nil")
+	testing.expect(
+		t,
+		pool_take_parked(pool) == nil,
+		"empty parked list returns nil",
+	)
 }
 
 @(test)
@@ -1489,22 +1737,42 @@ test_pool_pick_is_sticky_and_skips_fenced :: proc(t: ^testing.T) {
 		for i in 0 ..< 3 {
 			if r == rings[i] do seen[i] = true
 		}
-		testing.expect(t, pool_pick_ring(pool, key) == r, "same key must pick the same ring")
+		testing.expect(
+			t,
+			pool_pick_ring(pool, key) == r,
+			"same key must pick the same ring",
+		)
 	}
-	testing.expect(t, seen[0] && seen[1] && seen[2], "keys should spread across all rings")
+	testing.expect(
+		t,
+		seen[0] && seen[1] && seen[2],
+		"keys should spread across all rings",
+	)
 
-	testing.expect(t, pool_pick_ring(pool, 0) == rings[0], "keyless senders pin the primary")
+	testing.expect(
+		t,
+		pool_pick_ring(pool, 0) == rings[0],
+		"keyless senders pin the primary",
+	)
 
 	sync.atomic_store(&rings[1].park_state, Ring_Park_State.Park_Asked)
 	picked_asked := false
 	for key: u64 = 1; key <= 64; key += 1 {
 		if pool_pick_ring(pool, key) == rings[1] do picked_asked = true
 	}
-	testing.expect(t, picked_asked, "Park_Asked stays pickable until the fence flip")
+	testing.expect(
+		t,
+		picked_asked,
+		"Park_Asked stays pickable until the fence flip",
+	)
 
 	sync.atomic_store(&rings[1].park_state, Ring_Park_State.Park_Fenced)
 	for key: u64 = 1; key <= 64; key += 1 {
-		testing.expect(t, pool_pick_ring(pool, key) != rings[1], "fenced ring must be skipped")
+		testing.expect(
+			t,
+			pool_pick_ring(pool, key) != rings[1],
+			"fenced ring must be skipped",
+		)
 	}
 }
 
@@ -1525,11 +1793,19 @@ test_pool_contention_sets_scale_request :: proc(t: ^testing.T) {
 	)
 	g_thread_send_key = 202
 	pool_note_contention(pool)
-	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 0, "below threshold")
+	testing.expect(
+		t,
+		sync.atomic_load(&pool.scale_up_requested) == 0,
+		"below threshold",
+	)
 	g_thread_send_key = 101
 	pool_note_contention(pool)
 	pool_note_contention(pool)
-	testing.expect(t, sync.atomic_load(&pool.scale_up_requested) == 1, "threshold crossed")
+	testing.expect(
+		t,
+		sync.atomic_load(&pool.scale_up_requested) == 1,
+		"threshold crossed",
+	)
 }
 
 @(test)
@@ -1541,22 +1817,50 @@ test_park_decommit_and_reuse :: proc(t: ^testing.T) {
 
 	msg := make_test_msg(100)
 	defer delete(msg)
-	testing.expect(t, batch_append_message(ring, msg), "append before park should succeed")
+	testing.expect(
+		t,
+		batch_append_message(ring, msg),
+		"append before park should succeed",
+	)
 	batch_flush(ring)
-	testing.expect(t, drainer_drain_ready(ring) == 1, "slot should drain before park")
+	testing.expect(
+		t,
+		drainer_drain_ready(ring) == 1,
+		"slot should drain before park",
+	)
 
 	ring_reset(ring)
-	testing.expect(t, ring_decommit_buffers(ring), "an idle ring should decommit")
+	testing.expect(
+		t,
+		ring_decommit_buffers(ring),
+		"an idle ring should decommit",
+	)
 	testing.expect(t, ring.buffers_decommitted, "decommit should be recorded")
-	testing.expect(t, !ring_decommit_buffers(ring), "a decommitted ring must not decommit again")
+	testing.expect(
+		t,
+		!ring_decommit_buffers(ring),
+		"a decommitted ring must not decommit again",
+	)
 
 	testing.expect(t, ring_commit_buffers(ring), "recommit should succeed")
 	testing.expect(t, !ring.buffers_decommitted, "recommit should be recorded")
-	testing.expect(t, ring_commit_buffers(ring), "recommit on a committed ring is a no-op")
+	testing.expect(
+		t,
+		ring_commit_buffers(ring),
+		"recommit on a committed ring is a no-op",
+	)
 
-	testing.expect(t, batch_append_message(ring, msg), "append after recommit should succeed")
+	testing.expect(
+		t,
+		batch_append_message(ring, msg),
+		"append after recommit should succeed",
+	)
 	batch_flush(ring)
-	testing.expect(t, drainer_drain_ready(ring) == 1, "recommitted pages should carry traffic")
+	testing.expect(
+		t,
+		drainer_drain_ready(ring) == 1,
+		"recommitted pages should carry traffic",
+	)
 }
 
 @(test)
@@ -1587,7 +1891,11 @@ test_decommit_skips_discarded_writer :: proc(t: ^testing.T) {
 	}
 	batch_commit(ring, sid)
 
-	testing.expect(t, ring_decommit_buffers(ring), "decommit once the writer released")
+	testing.expect(
+		t,
+		ring_decommit_buffers(ring),
+		"decommit once the writer released",
+	)
 	testing.expect(t, ring_commit_buffers(ring), "recommit should succeed")
 }
 
@@ -1600,18 +1908,50 @@ test_trim_idle_send_and_reuse :: proc(t: ^testing.T) {
 
 	msg := make_test_msg(100)
 	defer delete(msg)
-	testing.expect(t, batch_append_message(ring, msg), "append before trim should succeed")
+	testing.expect(
+		t,
+		batch_append_message(ring, msg),
+		"append before trim should succeed",
+	)
 	batch_flush(ring)
-	testing.expect(t, drainer_drain_ready(ring) == 1, "slot should drain before trim")
+	testing.expect(
+		t,
+		drainer_drain_ready(ring) == 1,
+		"slot should drain before trim",
+	)
 
-	testing.expect(t, ring_trim_send_buffer(ring), "an idle ring should trim its send buffer")
-	testing.expect(t, ring.batch_slot_idx == RING_BATCH_COLD, "trim should be recorded")
-	testing.expect(t, !ring_trim_send_buffer(ring), "a cold ring must not trim again")
+	testing.expect(
+		t,
+		ring_trim_send_buffer(ring),
+		"an idle ring should trim its send buffer",
+	)
+	testing.expect(
+		t,
+		ring.batch_slot_idx == RING_BATCH_COLD,
+		"trim should be recorded",
+	)
+	testing.expect(
+		t,
+		!ring_trim_send_buffer(ring),
+		"a cold ring must not trim again",
+	)
 
-	testing.expect(t, batch_append_message(ring, msg), "append should rewarm a trimmed ring")
-	testing.expect(t, ring.batch_slot_idx != RING_BATCH_COLD, "reserve should have recommitted the send buffer")
+	testing.expect(
+		t,
+		batch_append_message(ring, msg),
+		"append should rewarm a trimmed ring",
+	)
+	testing.expect(
+		t,
+		ring.batch_slot_idx != RING_BATCH_COLD,
+		"reserve should have recommitted the send buffer",
+	)
 	batch_flush(ring)
-	testing.expect(t, drainer_drain_ready(ring) == 1, "rewarmed pages should carry traffic")
+	testing.expect(
+		t,
+		drainer_drain_ready(ring) == 1,
+		"rewarmed pages should carry traffic",
+	)
 }
 
 @(test)
@@ -1625,22 +1965,46 @@ test_trim_skips_busy_ring :: proc(t: ^testing.T) {
 	defer delete(msg)
 	testing.expect(t, batch_append_message(ring, msg), "append failed")
 	testing.expect(t, ring.batch_slot_idx >= 0, "batch should be open")
-	testing.expect(t, !ring_trim_send_buffer(ring), "must not trim under an open batch")
+	testing.expect(
+		t,
+		!ring_trim_send_buffer(ring),
+		"must not trim under an open batch",
+	)
 
 	batch_flush(ring)
 	slot := &ring.send_slots[0]
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "slot should be READY")
-	testing.expect(t, !ring_trim_send_buffer(ring), "must not trim with an undrained READY slot")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"slot should be READY",
+	)
+	testing.expect(
+		t,
+		!ring_trim_send_buffer(ring),
+		"must not trim with an undrained READY slot",
+	)
 
 	dst, sid, ok, _ := batch_reserve(ring, 3200, nil, 0)
 	testing.expect(t, ok, "reserve failed")
 	if !ok do return
-	testing.expect(t, !ring_trim_send_buffer(ring), "must not trim under an outstanding writer")
+	testing.expect(
+		t,
+		!ring_trim_send_buffer(ring),
+		"must not trim under an outstanding writer",
+	)
 	endian.put_u32(dst[0:4], .Little, u32(3200 - 4))
 	batch_commit(ring, sid)
-	testing.expect(t, drainer_drain_ready(ring) == 2, "both slots should drain")
+	testing.expect(
+		t,
+		drainer_drain_ready(ring) == 2,
+		"both slots should drain",
+	)
 
-	testing.expect(t, ring_trim_send_buffer(ring), "trim should succeed once quiet")
+	testing.expect(
+		t,
+		ring_trim_send_buffer(ring),
+		"trim should succeed once quiet",
+	)
 }
 
 @(test)
@@ -1650,16 +2014,32 @@ test_fence_rewarms_trimmed_ring :: proc(t: ^testing.T) {
 	if ring == nil do return
 	defer destroy_connection_ring(ring)
 
-	testing.expect(t, ring_trim_send_buffer(ring), "fresh idle ring should trim")
+	testing.expect(
+		t,
+		ring_trim_send_buffer(ring),
+		"fresh idle ring should trim",
+	)
 
 	sync.mutex_lock(&ring.batch_mutex)
 	appended := append_ring_fence_locked(ring, 1, false)
 	sync.mutex_unlock(&ring.batch_mutex)
-	testing.expect(t, appended, "fence append should rewarm and succeed on a trimmed ring")
-	testing.expect(t, ring.batch_slot_idx != RING_BATCH_COLD, "fence append should have recommitted")
+	testing.expect(
+		t,
+		appended,
+		"fence append should rewarm and succeed on a trimmed ring",
+	)
+	testing.expect(
+		t,
+		ring.batch_slot_idx != RING_BATCH_COLD,
+		"fence append should have recommitted",
+	)
 
 	slot := &ring.send_slots[0]
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "fence slot should be READY")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"fence slot should be READY",
+	)
 	testing.expect(
 		t,
 		slot.length == u32(RING_FENCE_FRAME_SIZE),
@@ -1690,7 +2070,11 @@ test_pool_scale_up_skips_portless_peer :: proc(t: ^testing.T) {
 		!establish_pool_ring(&data),
 		"scale-up toward a peer with no listen port must be refused",
 	)
-	testing.expect(t, pool_active_count(pool) == 1, "no ring should have been added")
+	testing.expect(
+		t,
+		pool_active_count(pool) == 1,
+		"no ring should have been added",
+	)
 }
 
 @(test)
@@ -1703,12 +2087,20 @@ test_pool_take_parked_recommits :: proc(t: ^testing.T) {
 	if ring == nil do return
 	defer destroy_connection_ring(ring)
 
-	testing.expect(t, ring_decommit_buffers(ring), "fresh ring should decommit")
+	testing.expect(
+		t,
+		ring_decommit_buffers(ring),
+		"fresh ring should decommit",
+	)
 	pool_park(pool, ring)
 
 	got := pool_take_parked(pool)
 	testing.expect(t, got == ring, "parked ring should be returned")
-	testing.expect(t, !ring.buffers_decommitted, "taking a parked ring must recommit its buffers")
+	testing.expect(
+		t,
+		!ring.buffers_decommitted,
+		"taking a parked ring must recommit its buffers",
+	)
 	ring.send_data_buffer[0] = 1
 	ring.recv_buffer[0] = 1
 }
@@ -1733,11 +2125,19 @@ test_stale_promote_after_slot_lap_does_not_publish :: proc(t: ^testing.T) {
 	}
 
 	slot := &ring.send_slots[sid]
-	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "first lap should force-seal")
+	testing.expect(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"first lap should force-seal",
+	)
 	stale_sealed := sync.atomic_load(&slot.state)
 
 	batch_commit(ring, sid)
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "first lap last commit promotes")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"first lap last commit promotes",
+	)
 	testing.expect(t, drainer_drain_ready(ring) == 1, "first lap should drain")
 
 	for _ in 0 ..< 3 {
@@ -1748,7 +2148,11 @@ test_stale_promote_after_slot_lap_does_not_publish :: proc(t: ^testing.T) {
 		}
 		endian.put_u32(fill[0:4], .Little, u32(3200 - 4))
 		batch_commit(ring, fill_sid)
-		testing.expect(t, drainer_drain_ready(ring) == 1, "lap fill should drain")
+		testing.expect(
+			t,
+			drainer_drain_ready(ring) == 1,
+			"lap fill should drain",
+		)
 	}
 
 	dst2, sid2, ok2, _ := batch_reserve(ring, 3200, nil, 0)
@@ -1756,9 +2160,17 @@ test_stale_promote_after_slot_lap_does_not_publish :: proc(t: ^testing.T) {
 	if !ok2 {
 		return
 	}
-	testing.expect(t, sid2 == sid, "second lap must land in the same physical slot")
+	testing.expect(
+		t,
+		sid2 == sid,
+		"second lap must land in the same physical slot",
+	)
 	endian.put_u32(dst2[0:4], .Little, u32(3200 - 4))
-	testing.expect(t, slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED, "second lap should force-seal")
+	testing.expect(
+		t,
+		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
+		"second lap should force-seal",
+	)
 	testing.expect(
 		t,
 		sync.atomic_load(&slot.active_writers) == 1,
@@ -1780,11 +2192,27 @@ test_stale_promote_after_slot_lap_does_not_publish :: proc(t: ^testing.T) {
 		dst2[i] = 0xBB
 	}
 	batch_commit(ring, sid2)
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "the real last commit publishes")
-	testing.expect(t, sync.atomic_load(&slot.active_writers) == 0, "no writers remain")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"the real last commit publishes",
+	)
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 0,
+		"no writers remain",
+	)
 	data := slot_data(ring, sid)
-	testing.expect(t, slot.length == 3200, "second lap length should be published")
-	testing.expect(t, data[3199] == 0xBB, "published bytes must be the second lap's")
+	testing.expect(
+		t,
+		slot.length == 3200,
+		"second lap length should be published",
+	)
+	testing.expect(
+		t,
+		data[3199] == 0xBB,
+		"published bytes must be the second lap's",
+	)
 }
 
 @(test)
@@ -1803,17 +2231,29 @@ test_commit_delayed_past_seal_does_not_publish :: proc(t: ^testing.T) {
 	}
 	endian.put_u32(dst_a[0:4], .Little, u32(100 - 4))
 	slot := &ring.send_slots[sid_a]
-	testing.expect(t, sync.atomic_load(&slot.state) == .WRITING, "batch should stay open")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .WRITING,
+		"batch should stay open",
+	)
 
 	old := sync.atomic_sub(&slot.active_writers, 1)
-	testing.expect(t, old == 1, "the first writer's decrement should see itself as last")
+	testing.expect(
+		t,
+		old == 1,
+		"the first writer's decrement should see itself as last",
+	)
 
 	dst_b, sid_b, ok_b, _ := batch_reserve(ring, 3200, nil, 0)
 	testing.expect(t, ok_b, "second reserve failed")
 	if !ok_b {
 		return
 	}
-	testing.expect(t, sid_b == sid_a, "second reserve must extend the same batch slot")
+	testing.expect(
+		t,
+		sid_b == sid_a,
+		"second reserve must extend the same batch slot",
+	)
 	testing.expect(
 		t,
 		slot_state_kind(sync.atomic_load(&slot.state)) == .SEALED,
@@ -1837,10 +2277,26 @@ test_commit_delayed_past_seal_does_not_publish :: proc(t: ^testing.T) {
 
 	endian.put_u32(dst_b[0:4], .Little, u32(3200 - 4))
 	batch_commit(ring, sid_b)
-	testing.expect(t, sync.atomic_load(&slot.state) == .READY, "the true last commit publishes")
-	testing.expect(t, sync.atomic_load(&slot.active_writers) == 0, "no writers remain")
-	testing.expect(t, slot.length == 3300, "both frames should be in the published slot")
-	testing.expect(t, drainer_drain_ready(ring) == 1, "the published slot drains")
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.state) == .READY,
+		"the true last commit publishes",
+	)
+	testing.expect(
+		t,
+		sync.atomic_load(&slot.active_writers) == 0,
+		"no writers remain",
+	)
+	testing.expect(
+		t,
+		slot.length == 3300,
+		"both frames should be in the published slot",
+	)
+	testing.expect(
+		t,
+		drainer_drain_ready(ring) == 1,
+		"the published slot drains",
+	)
 }
 
 @(test)

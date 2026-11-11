@@ -59,7 +59,12 @@ timer_victim_handle :: proc(d: ^Timer_Victim, from: actod.PID, msg: any) {
 	case Timer_Hold:
 		sync.atomic_store(&p.holding, true)
 		if m.wait_for_filled {
-			_ = poll_until(atomic_flag_raised, &p.filled, 2 * time.Second, time.Millisecond)
+			_ = poll_until(
+				atomic_flag_raised,
+				&p.filled,
+				2 * time.Second,
+				time.Millisecond,
+			)
 		}
 		id, _ := actod.set_timer(m.interval, m.repeat)
 		sync.atomic_store(&p.timer, id)
@@ -87,7 +92,11 @@ timer_victim_handle :: proc(d: ^Timer_Victim, from: actod.PID, msg: any) {
 	}
 }
 
-timer_bystander_handle :: proc(d: ^Timer_Bystander, from: actod.PID, msg: any) {
+timer_bystander_handle :: proc(
+	d: ^Timer_Bystander,
+	from: actod.PID,
+	msg: any,
+) {
 	p := d.probe
 	switch m in msg {
 	case Arm_Bystander_Timer:
@@ -99,11 +108,19 @@ timer_bystander_handle :: proc(d: ^Timer_Bystander, from: actod.PID, msg: any) {
 	}
 }
 
-spawn_timer_victim :: proc(name: string, probe: ^Timer_Victim_Probe) -> (actod.PID, bool) {
+spawn_timer_victim :: proc(
+	name: string,
+	probe: ^Timer_Victim_Probe,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return actod.spawn(
 		name,
 		Timer_Victim{probe = probe},
-		actod.Actor_Behaviour(Timer_Victim){handle_message = timer_victim_handle},
+		actod.Actor_Behaviour(Timer_Victim) {
+			handle_message = timer_victim_handle,
+		},
 		actod.make_actor_config(use_dedicated_os_thread = true),
 	)
 }
@@ -113,17 +130,24 @@ timer_victim_ticked :: proc(state: rawptr) -> bool {
 }
 
 timer_bystander_ticked :: proc(state: rawptr) -> bool {
-	return sync.atomic_load(&(cast(^Timer_Bystander_Probe)state).tick_at_ns) != 0
+	return(
+		sync.atomic_load(&(cast(^Timer_Bystander_Probe)state).tick_at_ns) !=
+		0 \
+	)
 }
 
-test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold :: proc(t: ^testing.T) {
+test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold :: proc(
+	t: ^testing.T,
+) {
 	victim_probe: Timer_Victim_Probe
 	bystander_probe: Timer_Bystander_Probe
 
 	bystander, bystander_ok := actod.spawn(
 		"timer-bystander",
 		Timer_Bystander{probe = &bystander_probe},
-		actod.Actor_Behaviour(Timer_Bystander){handle_message = timer_bystander_handle},
+		actod.Actor_Behaviour(Timer_Bystander) {
+			handle_message = timer_bystander_handle,
+		},
 	)
 	expect(t, bystander_ok, "failed to spawn the bystander")
 	victim_probe.bystander = bystander
@@ -137,10 +161,19 @@ test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold :: proc(t: ^testin
 		wait_for_filled = true,
 		arm_bystander   = true,
 	}
-	expect(t, actod.send_message(victim, hold) == .OK, "failed to send the hold")
 	expect(
 		t,
-		poll_until(atomic_flag_raised, &victim_probe.holding, 2 * time.Second, time.Millisecond),
+		actod.send_message(victim, hold) == .OK,
+		"failed to send the hold",
+	)
+	expect(
+		t,
+		poll_until(
+			atomic_flag_raised,
+			&victim_probe.holding,
+			2 * time.Second,
+			time.Millisecond,
+		),
 		"victim never started holding",
 	)
 
@@ -153,7 +186,12 @@ test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold :: proc(t: ^testin
 
 	expect(
 		t,
-		poll_until(timer_bystander_ticked, &bystander_probe, 2 * time.Second, time.Millisecond),
+		poll_until(
+			timer_bystander_ticked,
+			&bystander_probe,
+			2 * time.Second,
+			time.Millisecond,
+		),
 		"the bystander's tick never arrived",
 	)
 	bystander_delay := time.Duration(
@@ -168,19 +206,34 @@ test_timer_tick_to_a_full_mailbox_arrives_once_after_the_hold :: proc(t: ^testin
 
 	expect(
 		t,
-		poll_until(timer_victim_ticked, &victim_probe, 2 * time.Second, time.Millisecond),
+		poll_until(
+			timer_victim_ticked,
+			&victim_probe,
+			2 * time.Second,
+			time.Millisecond,
+		),
 		"the tick to the full mailbox was lost",
 	)
-	expect(t, sync.atomic_load(&victim_probe.released), "the tick arrived before the hold ended")
+	expect(
+		t,
+		sync.atomic_load(&victim_probe.released),
+		"the tick arrived before the hold ended",
+	)
 	time.sleep(50 * time.Millisecond)
 	expect_value(t, sync.atomic_load(&victim_probe.ticks), 1)
-	expect_value(t, sync.atomic_load(&victim_probe.fillers), actod.DEFAULT_MAIL_BOX_SIZE)
+	expect_value(
+		t,
+		sync.atomic_load(&victim_probe.fillers),
+		actod.DEFAULT_MAIL_BOX_SIZE,
+	)
 
 	_ = actod.terminate_actor(victim)
 	_ = actod.terminate_actor(bystander)
 }
 
-test_timer_tick_to_a_full_mailbox_is_not_sent_after_a_cancel :: proc(t: ^testing.T) {
+test_timer_tick_to_a_full_mailbox_is_not_sent_after_a_cancel :: proc(
+	t: ^testing.T,
+) {
 	probe: Timer_Victim_Probe
 	victim, victim_ok := spawn_timer_victim("timer-victim", &probe)
 	expect(t, victim_ok, "failed to spawn the victim")
@@ -191,10 +244,19 @@ test_timer_tick_to_a_full_mailbox_is_not_sent_after_a_cancel :: proc(t: ^testing
 		hold            = 50 * time.Millisecond,
 		wait_for_filled = true,
 	}
-	expect(t, actod.send_message(victim, hold) == .OK, "failed to send the hold")
 	expect(
 		t,
-		poll_until(atomic_flag_raised, &probe.holding, 2 * time.Second, time.Millisecond),
+		actod.send_message(victim, hold) == .OK,
+		"failed to send the hold",
+	)
+	expect(
+		t,
+		poll_until(
+			atomic_flag_raised,
+			&probe.holding,
+			2 * time.Second,
+			time.Millisecond,
+		),
 		"victim never started holding",
 	)
 	for _ in 0 ..< actod.DEFAULT_MAIL_BOX_SIZE {
@@ -204,11 +266,20 @@ test_timer_tick_to_a_full_mailbox_is_not_sent_after_a_cancel :: proc(t: ^testing
 
 	expect(
 		t,
-		poll_until(atomic_flag_raised, &probe.released, 2 * time.Second, time.Millisecond),
+		poll_until(
+			atomic_flag_raised,
+			&probe.released,
+			2 * time.Second,
+			time.Millisecond,
+		),
 		"victim never ended its hold",
 	)
 	time.sleep(100 * time.Millisecond)
-	expect_value(t, sync.atomic_load(&probe.fillers), actod.DEFAULT_MAIL_BOX_SIZE)
+	expect_value(
+		t,
+		sync.atomic_load(&probe.fillers),
+		actod.DEFAULT_MAIL_BOX_SIZE,
+	)
 	expect_value(t, sync.atomic_load(&probe.ticks_after_cancel), 0)
 
 	_ = actod.terminate_actor(victim)
@@ -232,8 +303,13 @@ timer_wake_owner_init :: proc(d: ^Timer_Wake_Owner) {
 	sync.atomic_store(&d.probe.timer, id)
 }
 
-timer_wake_owner_handle :: proc(d: ^Timer_Wake_Owner, from: actod.PID, msg: any) {
-	if tick, ok := msg.(actod.Timer_Tick); ok && tick.id == sync.atomic_load(&d.probe.timer) {
+timer_wake_owner_handle :: proc(
+	d: ^Timer_Wake_Owner,
+	from: actod.PID,
+	msg: any,
+) {
+	if tick, ok := msg.(actod.Timer_Tick);
+	   ok && tick.id == sync.atomic_load(&d.probe.timer) {
 		sync.atomic_add(&d.probe.ticks, 1)
 		sync.atomic_store(&d.probe.counting, true)
 	}
@@ -270,7 +346,12 @@ test_timer_wakes_its_owner_outside_the_registry_lock :: proc(t: ^testing.T) {
 
 	expect(
 		t,
-		poll_until(timer_wake_owner_ticked_enough, &probe, 2 * time.Second, time.Millisecond),
+		poll_until(
+			timer_wake_owner_ticked_enough,
+			&probe,
+			2 * time.Second,
+			time.Millisecond,
+		),
 		"the timer owner was not woken by its ticks",
 	)
 	expect_value(t, sync.atomic_load(&probe.wakes_under_the_lock), 0)

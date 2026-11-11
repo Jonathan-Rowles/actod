@@ -20,17 +20,17 @@ NAME_BUCKET_TOMBSTONE :: 0xFFFFFFFF
 
 @(private)
 PID_Map :: struct($T: typeid, $HT: typeid) {
-	items:        []PID_Entry(T, HT),
-	capacity:     u32,
-	num_items:    u32,
-	next_unused:  u64,
-	unused_items: []u32,
-	num_unused:   u32,
-	name_buckets: []u32,
-	items_backing:  []byte,
-	unused_backing: []byte,
+	items:                []PID_Entry(T, HT),
+	capacity:             u32,
+	num_items:            u32,
+	next_unused:          u64,
+	unused_items:         []u32,
+	num_unused:           u32,
+	name_buckets:         []u32,
+	items_backing:        []byte,
+	unused_backing:       []byte,
 	name_buckets_backing: []byte,
-	mutex:        sync.Mutex,
+	mutex:                sync.Mutex,
 }
 
 @(private)
@@ -41,28 +41,55 @@ PID_Entry :: struct($T: typeid, $HT: typeid) #align (CACHE_LINE_SIZE) {
 	name_hash:   u64,
 	remote_name: string,
 	data:        T,
-	_pad:        [CACHE_LINE_SIZE - size_of(u32) - size_of(
-		i32,
-	) - size_of(HT) - size_of(u64) - size_of(string) - size_of(T)]byte,
+	_pad:        [CACHE_LINE_SIZE - size_of(
+		u32,
+	) - size_of(i32) - size_of(HT) - size_of(u64) - size_of(string) - size_of(T)]byte,
 }
 
 @(private)
 pid_map_init :: proc(m: ^PID_Map($T, $HT), initial_capacity: int) {
 	capacity := next_power_of_two(initial_capacity)
-	assert(capacity <= REGISTRY_MAX_CAPACITY, "registry capacity exceeds REGISTRY_MAX_CAPACITY")
+	assert(
+		capacity <= REGISTRY_MAX_CAPACITY,
+		"registry capacity exceeds REGISTRY_MAX_CAPACITY",
+	)
 
-	items_backing, items_err := vmem.reserve(REGISTRY_MAX_CAPACITY * size_of(PID_Entry(T, HT)))
-	assert(items_err == nil, "Failed to reserve address space for PID_Map items")
-	unused_backing, unused_err := vmem.reserve(REGISTRY_MAX_CAPACITY * size_of(u32))
-	assert(unused_err == nil, "Failed to reserve address space for the PID_Map freelist")
-	buckets_backing, buckets_err := vmem.reserve(NAME_BUCKET_COUNT * size_of(u32))
-	assert(buckets_err == nil, "Failed to reserve address space for the PID_Map name buckets")
+	items_backing, items_err := vmem.reserve(
+		REGISTRY_MAX_CAPACITY * size_of(PID_Entry(T, HT)),
+	)
+	assert(
+		items_err == nil,
+		"Failed to reserve address space for PID_Map items",
+	)
+	unused_backing, unused_err := vmem.reserve(
+		REGISTRY_MAX_CAPACITY * size_of(u32),
+	)
+	assert(
+		unused_err == nil,
+		"Failed to reserve address space for the PID_Map freelist",
+	)
+	buckets_backing, buckets_err := vmem.reserve(
+		NAME_BUCKET_COUNT * size_of(u32),
+	)
+	assert(
+		buckets_err == nil,
+		"Failed to reserve address space for the PID_Map name buckets",
+	)
 
-	items_commit := vmem.commit(raw_data(items_backing), uint(capacity) * size_of(PID_Entry(T, HT)))
+	items_commit := vmem.commit(
+		raw_data(items_backing),
+		uint(capacity) * size_of(PID_Entry(T, HT)),
+	)
 	assert(items_commit == nil, "Failed to commit PID_Map items")
-	unused_commit := vmem.commit(raw_data(unused_backing), uint(capacity) * size_of(u32))
+	unused_commit := vmem.commit(
+		raw_data(unused_backing),
+		uint(capacity) * size_of(u32),
+	)
 	assert(unused_commit == nil, "Failed to commit the PID_Map freelist")
-	buckets_commit := vmem.commit(raw_data(buckets_backing), NAME_BUCKET_COUNT * size_of(u32))
+	buckets_commit := vmem.commit(
+		raw_data(buckets_backing),
+		NAME_BUCKET_COUNT * size_of(u32),
+	)
 	assert(buckets_commit == nil, "Failed to commit the PID_Map name buckets")
 
 	m.items_backing = items_backing
@@ -78,7 +105,10 @@ pid_map_init :: proc(m: ^PID_Map($T, $HT), initial_capacity: int) {
 }
 
 @(private)
-try_grow_registry :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> bool {
+try_grow_registry :: proc(
+	m: ^PID_Map($T, $HT),
+	loc := #caller_location,
+) -> bool {
 	sync.lock(&m.mutex)
 	defer sync.unlock(&m.mutex)
 
@@ -101,7 +131,10 @@ try_grow_registry :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> bool
 		raw_data(m.items_backing),
 		uint(new_capacity) * size_of(PID_Entry(T, HT)),
 	)
-	unused_err := vmem.commit(raw_data(m.unused_backing), uint(new_capacity) * size_of(u32))
+	unused_err := vmem.commit(
+		raw_data(m.unused_backing),
+		uint(new_capacity) * size_of(u32),
+	)
 	if items_err != nil || unused_err != nil {
 		log.errorf(
 			"actor registry growth could not commit memory: %v / %v",
@@ -159,7 +192,13 @@ freelist_push :: proc(m: ^PID_Map($T, $HT), idx: u32) {
 }
 
 @(private)
-acquire_entry_slot :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> (u32, bool) {
+acquire_entry_slot :: proc(
+	m: ^PID_Map($T, $HT),
+	loc := #caller_location,
+) -> (
+	u32,
+	bool,
+) {
 	for {
 		current_items := sync.atomic_load_explicit(&m.num_items, .Acquire)
 
@@ -177,7 +216,10 @@ acquire_entry_slot :: proc(m: ^PID_Map($T, $HT), loc := #caller_location) -> (u3
 				sync.atomic_store_explicit(&m.items[0].pid, HT{}, .Release)
 				current_items = 1
 			} else {
-				current_items = sync.atomic_load_explicit(&m.num_items, .Acquire)
+				current_items = sync.atomic_load_explicit(
+					&m.num_items,
+					.Acquire,
+				)
 			}
 		}
 
@@ -288,11 +330,18 @@ register_name_bucket :: proc(m: ^PID_Map($T, $HT), name_hash: u64, idx: u32) {
 }
 
 @(private)
-deregister_name_bucket :: proc(m: ^PID_Map($T, $HT), name_hash: u64, idx: u32) {
+deregister_name_bucket :: proc(
+	m: ^PID_Map($T, $HT),
+	name_hash: u64,
+	idx: u32,
+) {
 	bucket := name_hash & NAME_BUCKET_MASK
 	for i in 0 ..< NAME_BUCKET_COUNT {
 		probe := (bucket + u64(i)) & NAME_BUCKET_MASK
-		stored_idx := sync.atomic_load_explicit(&m.name_buckets[probe], .Acquire)
+		stored_idx := sync.atomic_load_explicit(
+			&m.name_buckets[probe],
+			.Acquire,
+		)
 
 		if stored_idx == 0 do break
 
@@ -337,7 +386,13 @@ get_by_name :: proc(m: ^PID_Map($T, $HT), name: string) -> (HT, bool) {
 }
 
 @(private)
-find_by_name_hash :: proc(m: ^PID_Map($T, $HT), name_hash: u64) -> (u32, bool) {
+find_by_name_hash :: proc(
+	m: ^PID_Map($T, $HT),
+	name_hash: u64,
+) -> (
+	u32,
+	bool,
+) {
 	bucket := name_hash & NAME_BUCKET_MASK
 	for i in 0 ..< NAME_BUCKET_COUNT {
 		probe := (bucket + u64(i)) & NAME_BUCKET_MASK
@@ -351,7 +406,14 @@ find_by_name_hash :: proc(m: ^PID_Map($T, $HT), name_hash: u64) -> (u32, bool) {
 	return 0, false
 }
 
-add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool, bool) {
+add_remote :: proc(
+	m: ^PID_Map($T, $HT),
+	remote_pid: HT,
+	name: string,
+) -> (
+	bool,
+	bool,
+) {
 	name_hash := fnv1a_hash(name)
 
 	if existing_idx, found := find_by_name_hash(m, name_hash); found {
@@ -396,7 +458,8 @@ add_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> (bool,
 
 	register_name_bucket(m, name_hash, idx)
 
-	if canonical_idx, found := find_by_name_hash(m, name_hash); found && canonical_idx != idx {
+	if canonical_idx, found := find_by_name_hash(m, name_hash);
+	   found && canonical_idx != idx {
 		deregister_name_bucket(m, name_hash, idx)
 		sync.atomic_store_explicit(&entry.sequence, 0, .Release)
 
@@ -443,7 +506,11 @@ remove_entry_at :: proc(m: ^PID_Map($T, $HT), idx: u32) -> bool {
 	return true
 }
 
-remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> bool {
+remove_remote :: proc(
+	m: ^PID_Map($T, $HT),
+	remote_pid: HT,
+	name: string,
+) -> bool {
 	if idx, found := find_by_name_hash(m, fnv1a_hash(name)); found {
 		entry := &m.items[idx]
 		if sync.atomic_load_explicit(&entry.pid, .Acquire) == remote_pid {
@@ -470,7 +537,10 @@ remove_remote :: proc(m: ^PID_Map($T, $HT), remote_pid: HT, name: string) -> boo
 handle_node_disconnect :: proc(node_id: Node_ID) {
 	if node_id == 0 || node_id == NODE.node_id do return
 
-	num_items := sync.atomic_load_explicit(&NODE.actor_registry.num_items, .Acquire)
+	num_items := sync.atomic_load_explicit(
+		&NODE.actor_registry.num_items,
+		.Acquire,
+	)
 
 	for i in 1 ..< num_items {
 		entry := &NODE.actor_registry.items[i]
@@ -484,10 +554,15 @@ handle_node_disconnect :: proc(node_id: Node_ID) {
 	}
 }
 
-pid_map_rename :: proc(m: ^PID_Map($T, $HT), pid: HT, new_name: string) -> bool {
+pid_map_rename :: proc(
+	m: ^PID_Map($T, $HT),
+	pid: HT,
+	new_name: string,
+) -> bool {
 	handle, _ := unpack_pid(pid)
 
-	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, .Acquire) {
+	if handle.idx <= 0 ||
+	   handle.idx >= sync.atomic_load_explicit(&m.num_items, .Acquire) {
 		return false
 	}
 
@@ -519,7 +594,8 @@ validate_entry :: #force_inline proc(
 ) {
 	handle, _ := unpack_pid(pid)
 
-	if handle.idx <= 0 || handle.idx >= sync.atomic_load_explicit(&m.num_items, ORDER) {
+	if handle.idx <= 0 ||
+	   handle.idx >= sync.atomic_load_explicit(&m.num_items, ORDER) {
 		return nil, false
 	}
 
@@ -544,14 +620,27 @@ get :: proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, bool) #optional_ok {
 }
 
 @(private)
-get_relaxed :: #force_inline proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, bool) #optional_ok {
+get_relaxed :: #force_inline proc(
+	m: ^PID_Map($T, $HT),
+	pid: HT,
+) -> (
+	T,
+	bool,
+) #optional_ok {
 	entry, ok := validate_entry(m, pid, .Relaxed)
 	if !ok do return nil, false
 	return entry.data, true
 }
 
 @(private)
-get_relaxed_loc :: #force_inline proc(m: ^PID_Map($T, $HT), pid: HT) -> (T, i32, bool) {
+get_relaxed_loc :: #force_inline proc(
+	m: ^PID_Map($T, $HT),
+	pid: HT,
+) -> (
+	T,
+	i32,
+	bool,
+) {
 	entry, ok := validate_entry(m, pid, .Relaxed)
 	if !ok do return nil, 0, false
 	home_worker := sync.atomic_load_explicit(&entry.home_worker, .Relaxed)
@@ -567,7 +656,11 @@ set_entry_home_worker :: proc(m: ^PID_Map($T, $HT), pid: HT, worker_idx: int) {
 	entry := &m.items[handle.idx]
 	if sync.atomic_load_explicit(&entry.pid, .Relaxed) != pid do return
 
-	sync.atomic_store_explicit(&entry.home_worker, i32(worker_idx) + 1, .Release)
+	sync.atomic_store_explicit(
+		&entry.home_worker,
+		i32(worker_idx) + 1,
+		.Release,
+	)
 }
 
 @(private)
@@ -687,7 +780,10 @@ clear :: proc(m: ^PID_Map($T, $HT)) {
 
 	if committed > 0 do intrinsics.mem_zero(raw_data(m.unused_items), int(committed) * size_of(u32))
 	if m.name_buckets != nil {
-		intrinsics.mem_zero(raw_data(m.name_buckets), len(m.name_buckets) * size_of(u32))
+		intrinsics.mem_zero(
+			raw_data(m.name_buckets),
+			len(m.name_buckets) * size_of(u32),
+		)
 	}
 }
 
@@ -698,7 +794,10 @@ destroy :: proc(m: ^PID_Map($T, $HT)) {
 		vmem.release(raw_data(m.unused_backing), uint(len(m.unused_backing)))
 	}
 	if m.name_buckets_backing != nil {
-		vmem.release(raw_data(m.name_buckets_backing), uint(len(m.name_buckets_backing)))
+		vmem.release(
+			raw_data(m.name_buckets_backing),
+			uint(len(m.name_buckets_backing)),
+		)
 	}
 	m.items_backing = nil
 	m.unused_backing = nil
@@ -776,7 +875,13 @@ register_node :: proc(
 ) {
 	context.logger = diagnostic_logger(context.logger)
 
-	node_id, newly_registered := register_node_entry(name, address, transport, .Registered, loc)
+	node_id, newly_registered := register_node_entry(
+		name,
+		address,
+		transport,
+		.Registered,
+		loc,
+	)
 
 	if newly_registered do announce_node_to_peers(name, address, node_id)
 
@@ -811,7 +916,13 @@ register_discovered_node :: proc(
 	Node_ID,
 	bool,
 ) {
-	node_id, newly_registered := register_node_entry(name, address, transport, .Discovered, loc)
+	node_id, newly_registered := register_node_entry(
+		name,
+		address,
+		transport,
+		.Discovered,
+		loc,
+	)
 	if newly_registered do announce_node_to_peers(name, address, node_id)
 	return node_id, newly_registered
 }
@@ -978,7 +1089,10 @@ unregister_node :: proc(node_id: Node_ID) {
 	if node_id == 0 || node_id >= MAX_NODES do return
 
 	conn_pid := PID(
-		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[node_id], .Acquire),
+		sync.atomic_load_explicit(
+			cast(^u64)&NODE.connection_actors[node_id],
+			.Acquire,
+		),
 	)
 
 	if conn_pid != 0 {

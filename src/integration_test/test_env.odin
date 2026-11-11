@@ -5,7 +5,10 @@ import "core:strings"
 
 TEST_ENV_STRIP_PREFIXES :: [2]string{"ACTOD_TEST_RUN=", "ACTOD_TEST_NODE="}
 
-make_test_env :: proc(test_vars: []string, allocator := context.temp_allocator) -> []string {
+make_test_env :: proc(
+	test_vars: []string,
+	allocator := context.temp_allocator,
+) -> []string {
 	sys_env, env_err := os.environ(allocator)
 	if env_err != nil {
 		return test_vars
@@ -19,7 +22,12 @@ make_test_env :: proc(test_vars: []string, allocator := context.temp_allocator) 
 	}
 
 	strip_prefixes := TEST_ENV_STRIP_PREFIXES
-	merged := make([dynamic]string, 0, len(sys_env) + len(test_vars), allocator)
+	merged := make(
+		[dynamic]string,
+		0,
+		len(sys_env) + len(test_vars),
+		allocator,
+	)
 	for v in sys_env {
 		skip := false
 		for key in overridden {

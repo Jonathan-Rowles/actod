@@ -21,7 +21,11 @@ repeating_timer_init :: proc(data: ^Repeating_Timer_Data) {
 	data.timer_id, _ = actod.set_timer(10 * time.Millisecond, true)
 }
 
-repeating_timer_handle :: proc(data: ^Repeating_Timer_Data, from: actod.PID, msg: any) {
+repeating_timer_handle :: proc(
+	data: ^Repeating_Timer_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case actod.Timer_Tick:
 		if v.id == data.timer_id {
@@ -65,7 +69,11 @@ one_shot_timer_init :: proc(data: ^One_Shot_Timer_Data) {
 	data.timer_id, _ = actod.set_timer(10 * time.Millisecond, false)
 }
 
-one_shot_timer_handle :: proc(data: ^One_Shot_Timer_Data, from: actod.PID, msg: any) {
+one_shot_timer_handle :: proc(
+	data: ^One_Shot_Timer_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case actod.Timer_Tick:
 		if v.id == data.timer_id {
@@ -95,11 +103,17 @@ test_timer_one_shot :: proc(t: ^testing.T) {
 
 	time.sleep(50 * time.Millisecond)
 
-	actor, got := actod.get_actor_from_pointer(actod.get(&actod.NODE.actor_registry, pid))
+	actor, got := actod.get_actor_from_pointer(
+		actod.get(&actod.NODE.actor_registry, pid),
+	)
 	expect(t, got, "timer actor must still be alive")
 	if got {
 		data := cast(^One_Shot_Timer_Data)actor.data
-		expect(t, data.tick_count == 1, "One-shot timer should fire exactly once")
+		expect(
+			t,
+			data.tick_count == 1,
+			"One-shot timer should fire exactly once",
+		)
 	}
 }
 
@@ -119,7 +133,11 @@ cancel_timer_init :: proc(data: ^Cancel_Timer_Data) {
 	data.timer_id, _ = actod.set_timer(10 * time.Millisecond, true)
 }
 
-cancel_timer_handle :: proc(data: ^Cancel_Timer_Data, from: actod.PID, msg: any) {
+cancel_timer_handle :: proc(
+	data: ^Cancel_Timer_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case actod.Timer_Tick:
 		if v.id == data.timer_id {
@@ -154,7 +172,9 @@ test_timer_cancel :: proc(t: ^testing.T) {
 
 	_ = actod.send_message(pid, "cancel")
 
-	actor, got := actod.get_actor_from_pointer(actod.get(&actod.NODE.actor_registry, pid))
+	actor, got := actod.get_actor_from_pointer(
+		actod.get(&actod.NODE.actor_registry, pid),
+	)
 	expect(t, got, "timer actor must still be alive")
 	if got {
 		data := cast(^Cancel_Timer_Data)actor.data
@@ -166,7 +186,11 @@ test_timer_cancel :: proc(t: ^testing.T) {
 		count_after := data.tick_count
 		time.sleep(100 * time.Millisecond)
 		count_later := data.tick_count
-		expect(t, count_later - count_after <= 1, "Timer should stop firing after cancel")
+		expect(
+			t,
+			count_later - count_after <= 1,
+			"Timer should stop firing after cancel",
+		)
 	}
 }
 
@@ -188,7 +212,11 @@ multi_timer_init :: proc(data: ^Multi_Timer_Data) {
 	_, _ = actod.set_timer(25 * time.Millisecond, false)
 }
 
-multi_timer_handle :: proc(data: ^Multi_Timer_Data, from: actod.PID, msg: any) {
+multi_timer_handle :: proc(
+	data: ^Multi_Timer_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case actod.Timer_Tick:
 		data.tick_count += 1
@@ -249,7 +277,11 @@ wait_for_live_timer_count :: proc(expected: int) -> bool {
 	return false
 }
 
-cleanup_timer_handle :: proc(data: ^Cleanup_Timer_Data, from: actod.PID, msg: any) {
+cleanup_timer_handle :: proc(
+	data: ^Cleanup_Timer_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	// no-op
 }
 
@@ -266,7 +298,11 @@ test_timer_cleanup_on_termination :: proc(t: ^testing.T) {
 	repeating_timers_registered := timers_before + 2
 	expect(
 		t,
-		poll_until(live_timer_count_at_least, &repeating_timers_registered, 2 * time.Second),
+		poll_until(
+			live_timer_count_at_least,
+			&repeating_timers_registered,
+			2 * time.Second,
+		),
 		"actor timers should be registered",
 	)
 
@@ -301,7 +337,9 @@ test_timers_fire_on_a_second_node_in_one_process :: proc(t: ^testing.T) {
 	heap := actod.NODE.timer_registry.heap.queue
 	expectf(
 		t,
-		raw_data(heap) == nil && cap(heap) == 0 && heap.allocator.procedure == nil,
+		raw_data(heap) == nil &&
+		cap(heap) == 0 &&
+		heap.allocator.procedure == nil,
 		"a stopped node leaves the timer heap empty, it left data %p, cap %d, allocator %p",
 		raw_data(heap),
 		cap(heap),
@@ -355,12 +393,20 @@ duplicate_timer_init :: proc(data: ^Duplicate_Timer_Data) {
 	parked_id, _ := actod.set_timer(time.Hour, false)
 	_ = actod.send_message(
 		actod.NODE.timer_pid,
-		actod.Start_Timer{id = parked_id, interval = time.Hour, repeat = false},
+		actod.Start_Timer {
+			id = parked_id,
+			interval = time.Hour,
+			repeat = false,
+		},
 	)
 	data.repeating_id, _ = actod.set_timer(10 * time.Millisecond, true)
 }
 
-duplicate_timer_handle :: proc(data: ^Duplicate_Timer_Data, from: actod.PID, msg: any) {
+duplicate_timer_handle :: proc(
+	data: ^Duplicate_Timer_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case actod.Timer_Tick:
 		if v.id == data.repeating_id {
@@ -384,7 +430,10 @@ test_timer_duplicate_id_keeps_timer_thread_firing :: proc(t: ^testing.T) {
 		actod.wait_for_pids([]actod.PID{pid})
 	}
 
-	fired := sync.sema_wait_with_timeout(&done, scaled_timeout(2 * time.Second))
+	fired := sync.sema_wait_with_timeout(
+		&done,
+		scaled_timeout(2 * time.Second),
+	)
 	expect(
 		t,
 		fired,

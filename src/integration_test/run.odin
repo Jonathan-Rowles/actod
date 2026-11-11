@@ -14,7 +14,8 @@ import "core:time"
 import "network/shared"
 
 INTEGRATION_TEST_BIN ::
-	"bin/integration_test" when ODIN_OS != .Windows else "bin\\integration_test.exe"
+	"bin/integration_test" when ODIN_OS !=
+	.Windows else "bin\\integration_test.exe"
 
 
 Test_Entry :: struct {
@@ -48,9 +49,15 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_same_type_name_in_two_packages",
 		test_proc = test_same_type_name_in_two_packages,
 	},
-	{name = "test_request_reply_pattern", test_proc = test_request_reply_pattern},
+	{
+		name = "test_request_reply_pattern",
+		test_proc = test_request_reply_pattern,
+	},
 	{name = "test_ask_reply_roundtrip", test_proc = test_ask_reply_roundtrip},
-	{name = "test_ask_timeout_and_late_reply", test_proc = test_ask_timeout_and_late_reply},
+	{
+		name = "test_ask_timeout_and_late_reply",
+		test_proc = test_ask_timeout_and_late_reply,
+	},
 	{name = "test_pipeline_pattern", test_proc = test_pipeline_pattern},
 	{name = "test_broadcast_pattern", test_proc = test_broadcast_pattern},
 	{
@@ -71,7 +78,11 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_stress_message_throughput,
 		worker_count = ALL_CORES_WORKERS,
 	},
-	{name = "test_worker_contention", test_proc = test_worker_contention, worker_count = 2},
+	{
+		name = "test_worker_contention",
+		test_proc = test_worker_contention,
+		worker_count = 2,
+	},
 	{
 		name = "test_sim_pump_basic",
 		test_proc = test_sim_pump_basic,
@@ -256,7 +267,12 @@ ALL_TESTS :: []Test_Entry {
 		sim_mode = true,
 		worker_count = 2,
 	},
-	{name = "test_sim_vopr", test_proc = test_sim_vopr, sim_mode = true, worker_count = 2},
+	{
+		name = "test_sim_vopr",
+		test_proc = test_sim_vopr,
+		sim_mode = true,
+		worker_count = 2,
+	},
 	{
 		name = "test_sim_scale_up_race",
 		test_proc = test_sim_scale_up_race,
@@ -312,7 +328,11 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_timer_wakes_its_owner_outside_the_registry_lock",
 		test_proc = test_timer_wakes_its_owner_outside_the_registry_lock,
 	},
-	{name = "test_spawn_sized_mailbox", test_proc = test_spawn_sized_mailbox, worker_count = 2},
+	{
+		name = "test_spawn_sized_mailbox",
+		test_proc = test_spawn_sized_mailbox,
+		worker_count = 2,
+	},
 	{
 		name = "test_supervisor_survives_many_child_terminations",
 		test_proc = test_supervisor_survives_many_child_terminations,
@@ -393,7 +413,10 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_init_death_does_not_wedge_name_pooled,
 		expects_error_logs = true,
 	},
-	{name = "test_remove_child_then_restart_all", test_proc = test_remove_child_then_restart_all},
+	{
+		name = "test_remove_child_then_restart_all",
+		test_proc = test_remove_child_then_restart_all,
+	},
 	{
 		name = "test_declared_child_spawning_a_helper_restarts_one_for_one",
 		test_proc = test_declared_child_spawning_a_helper_restarts_one_for_one,
@@ -482,7 +505,10 @@ ALL_TESTS :: []Test_Entry {
 	},
 	{name = "test_string_handling", test_proc = test_string_handling},
 	{name = "test_byte_slice_handling", test_proc = test_byte_slice_handling},
-	{name = "test_union_message_handling", test_proc = test_union_message_handling},
+	{
+		name = "test_union_message_handling",
+		test_proc = test_union_message_handling,
+	},
 
 	// Behaviour registry tests
 	{name = "test_spawn_by_name", test_proc = test_spawn_by_name},
@@ -510,7 +536,10 @@ ALL_TESTS :: []Test_Entry {
 	{name = "test_timer_one_shot", test_proc = test_timer_one_shot},
 	{name = "test_timer_cancel", test_proc = test_timer_cancel},
 	{name = "test_timer_multiple", test_proc = test_timer_multiple},
-	{name = "test_timer_cleanup_on_termination", test_proc = test_timer_cleanup_on_termination},
+	{
+		name = "test_timer_cleanup_on_termination",
+		test_proc = test_timer_cleanup_on_termination,
+	},
 	{
 		name = "test_timers_fire_on_a_second_node_in_one_process",
 		test_proc = test_timers_fire_on_a_second_node_in_one_process,
@@ -564,7 +593,10 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_restart_limit_within_window,
 		expects_error_logs = true,
 	},
-	{name = "test_restart_limit_window_reset", test_proc = test_restart_limit_window_reset},
+	{
+		name = "test_restart_limit_window_reset",
+		test_proc = test_restart_limit_window_reset,
+	},
 
 	// Distributed tests - each gets a unique base port range for parallel execution
 	{
@@ -800,7 +832,10 @@ ALL_TESTS :: []Test_Entry {
 	},
 
 	// Hot reload tests (Phase 1b, file watcher + dev workflow)
-	{name = "test_file_watcher_detection", test_proc = test_file_watcher_detection},
+	{
+		name = "test_file_watcher_detection",
+		test_proc = test_file_watcher_detection,
+	},
 	{
 		name = "test_hot_reload_under_load",
 		test_proc = test_hot_reload_under_load,
@@ -821,12 +856,17 @@ ALL_TESTS :: []Test_Entry {
 test_base_port: int
 
 run_single_test :: proc(test_name: string) -> bool {
-	_, in_subprocess := os.lookup_env("ACTOD_TEST_SUBPROCESS", context.temp_allocator)
+	_, in_subprocess := os.lookup_env(
+		"ACTOD_TEST_SUBPROCESS",
+		context.temp_allocator,
+	)
 	for entry in ALL_TESTS {
 		if entry.name == test_name {
 			if entry.expected_stderr != "" && !in_subprocess {
 				result: Test_Result
-				test_thread_proc(&Test_Thread_Context{entry = entry, result = &result})
+				test_thread_proc(
+					&Test_Thread_Context{entry = entry, result = &result},
+				)
 				return result.success
 			}
 			return run_test_entry(entry)
@@ -862,7 +902,8 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 		return false
 	}
 
-	port := entry.port if entry.port != 0 else (8080 if entry.is_networked else 0)
+	port :=
+		entry.port if entry.port != 0 else (8080 if entry.is_networked else 0)
 	node_name := entry.node_name if entry.node_name != "" else entry.name
 
 	if entry.is_networked {
@@ -901,7 +942,11 @@ run_test_entry :: proc(entry: Test_Entry) -> bool {
 	entry.test_proc(&t)
 	failed := testing.failed(&t)
 	if failed {
-		fmt.eprintf("Test %s: %d failed expectation(s)\n", entry.name, t.error_count)
+		fmt.eprintf(
+			"Test %s: %d failed expectation(s)\n",
+			entry.name,
+			t.error_count,
+		)
 	}
 
 	if actod.NODE.started {
@@ -972,14 +1017,21 @@ run_test_in_subprocess :: proc(entry: Test_Entry) -> Test_Result {
 		os.O_WRONLY | os.O_CREATE | os.O_TRUNC | os.File_Flags{.Inheritable},
 	)
 	if stderr_open_err != nil {
-		fmt.eprintf("Failed to capture stderr for %s: %v\n", test_name, stderr_open_err)
+		fmt.eprintf(
+			"Failed to capture stderr for %s: %v\n",
+			test_name,
+			stderr_open_err,
+		)
 		return result
 	}
 
 	proc_desc := os.Process_Desc {
 		command = []string{INTEGRATION_TEST_BIN},
 		env     = make_test_env(
-			[]string{fmt.tprintf("ACTOD_TEST_RUN=%s", test_name), "ACTOD_TEST_SUBPROCESS=1"},
+			[]string {
+				fmt.tprintf("ACTOD_TEST_RUN=%s", test_name),
+				"ACTOD_TEST_SUBPROCESS=1",
+			},
 		),
 		stdout  = os.stdout,
 		stderr  = stderr_f,
@@ -988,14 +1040,21 @@ run_test_in_subprocess :: proc(entry: Test_Entry) -> Test_Result {
 	process, err := os.process_start(proc_desc)
 	os.close(stderr_f)
 	if err != nil {
-		fmt.eprintf("Failed to start test process for %s: %v\n", test_name, err)
+		fmt.eprintf(
+			"Failed to start test process for %s: %v\n",
+			test_name,
+			err,
+		)
 		return result
 	}
 
 	watchdog_data := Watchdog_Data {
 		process = process,
 	}
-	watchdog := thread.create_and_start_with_data(&watchdog_data, test_watchdog_proc)
+	watchdog := thread.create_and_start_with_data(
+		&watchdog_data,
+		test_watchdog_proc,
+	)
 
 	state, wait_err := os.process_wait(process)
 
@@ -1003,7 +1062,10 @@ run_test_in_subprocess :: proc(entry: Test_Entry) -> Test_Result {
 	thread.join(watchdog)
 	thread.destroy(watchdog)
 
-	captured, read_err := os.read_entire_file(stderr_path, context.temp_allocator)
+	captured, read_err := os.read_entire_file(
+		stderr_path,
+		context.temp_allocator,
+	)
 	if read_err == nil && len(captured) > 0 && entry.expected_stderr == "" {
 		os.write(os.stderr, captured)
 		result.logged_err = first_logged_error(string(captured))
@@ -1022,16 +1084,20 @@ run_test_in_subprocess :: proc(entry: Test_Entry) -> Test_Result {
 	result.exit_code = state.exit_code
 	if entry.expects_panic != "" {
 		result.success =
-			state.exit_code != 0 && strings.contains(string(captured), entry.expects_panic)
+			state.exit_code != 0 &&
+			strings.contains(string(captured), entry.expects_panic)
 		return result
 	}
 	if entry.expected_stderr != "" {
 		result.success =
-			state.exit_code != 0 && strings.contains(string(captured), entry.expected_stderr)
+			state.exit_code != 0 &&
+			strings.contains(string(captured), entry.expected_stderr)
 		if !result.success do os.write(os.stderr, captured)
 		return result
 	}
-	result.success = state.exit_code == 0 && (entry.expects_error_logs || result.logged_err == "")
+	result.success =
+		state.exit_code == 0 &&
+		(entry.expects_error_logs || result.logged_err == "")
 
 	return result
 }
@@ -1039,7 +1105,8 @@ run_test_in_subprocess :: proc(entry: Test_Entry) -> Test_Result {
 first_logged_error :: proc(output: string) -> string {
 	remaining := output
 	for line in strings.split_lines_iterator(&remaining) {
-		if strings.contains(line, "[ERROR]") || strings.contains(line, "[FATAL]") {
+		if strings.contains(line, "[ERROR]") ||
+		   strings.contains(line, "[FATAL]") {
 			return strings.trim_space(line)
 		}
 	}
@@ -1052,7 +1119,11 @@ test_thread_proc :: proc(data: rawptr) {
 	if ctx.result.success {
 		fmt.printf("  PASS: %s\n", ctx.result.name)
 	} else if ctx.result.exit_code == 0 && ctx.result.logged_err != "" {
-		fmt.printf("  FAIL: %s (logged error: %s)\n", ctx.result.name, ctx.result.logged_err)
+		fmt.printf(
+			"  FAIL: %s (logged error: %s)\n",
+			ctx.result.name,
+			ctx.result.logged_err,
+		)
 	} else if ctx.result.exit_code == -1 {
 		fmt.printf(
 			"  TIMEOUT: %s (killed after %ds)\n",
@@ -1060,7 +1131,11 @@ test_thread_proc :: proc(data: rawptr) {
 			TEST_TIMEOUT_SECONDS * timeout_scale(),
 		)
 	} else {
-		fmt.printf("  FAIL: %s (exit code: %d)\n", ctx.result.name, ctx.result.exit_code)
+		fmt.printf(
+			"  FAIL: %s (exit code: %d)\n",
+			ctx.result.name,
+			ctx.result.exit_code,
+		)
 	}
 }
 
@@ -1084,14 +1159,19 @@ run_tests_parallel :: proc(t: ^testing.T) {
 	}
 
 	worker_budget := max(threads_act.get_cpu_count(), 2)
-	fmt.printf("Running %d tests in parallel (worker budget %d)...\n", len(tests), worker_budget)
+	fmt.printf(
+		"Running %d tests in parallel (worker budget %d)...\n",
+		len(tests),
+		worker_budget,
+	)
 
 	for batch_start := 0; batch_start < len(tests); {
 		batch_end := batch_start
 		batch_weight := 0
 		for batch_end < len(tests) {
 			weight := test_worker_weight(tests[batch_end])
-			if batch_end > batch_start && batch_weight + weight > worker_budget {
+			if batch_end > batch_start &&
+			   batch_weight + weight > worker_budget {
 				break
 			}
 			batch_weight += weight
@@ -1103,7 +1183,10 @@ run_tests_parallel :: proc(t: ^testing.T) {
 				entry  = tests[i],
 				result = &results[i],
 			}
-			threads[i] = thread.create_and_start_with_data(&contexts[i], test_thread_proc)
+			threads[i] = thread.create_and_start_with_data(
+				&contexts[i],
+				test_thread_proc,
+			)
 		}
 
 		for i in batch_start ..< batch_end {
@@ -1135,7 +1218,10 @@ run_tests_parallel :: proc(t: ^testing.T) {
 
 @(test)
 run_integration_tests :: proc(t: ^testing.T) {
-	if test_name, ok := os.lookup_env("ACTOD_TEST_RUN", context.temp_allocator); ok {
+	if test_name, ok := os.lookup_env(
+		"ACTOD_TEST_RUN",
+		context.temp_allocator,
+	); ok {
 		success := run_single_test(test_name)
 		if success {
 			os.exit(0)
@@ -1144,7 +1230,10 @@ run_integration_tests :: proc(t: ^testing.T) {
 		}
 	}
 
-	if node_cmd, ok := os.lookup_env("ACTOD_TEST_NODE", context.temp_allocator); ok {
+	if node_cmd, ok := os.lookup_env(
+		"ACTOD_TEST_NODE",
+		context.temp_allocator,
+	); ok {
 		start_parent_monitor()
 		run_node_role(node_cmd)
 		os.exit(0)

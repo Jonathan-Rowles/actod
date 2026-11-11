@@ -42,8 +42,14 @@ Scale_Race_Counter_Data :: struct {
 	slot: int,
 }
 
-Scale_Race_Counter_Behaviour := actod.Actor_Behaviour(Scale_Race_Counter_Data) {
-	handle_message = proc(data: ^Scale_Race_Counter_Data, from: actod.PID, msg: any) {
+Scale_Race_Counter_Behaviour := actod.Actor_Behaviour(
+	Scale_Race_Counter_Data,
+) {
+	handle_message = proc(
+		data: ^Scale_Race_Counter_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		if m, is_test_msg := msg.(Integration_Test_Message); is_test_msg {
 			g_scale_race_counts[data.slot] += 1
 			if m.id >= 0 && m.id < SCALE_RACE_MAX_IDS do g_scale_race_seen[data.slot][m.id] += 1
@@ -73,7 +79,11 @@ Scale_Race_Sender_Data :: struct {
 }
 
 Scale_Race_Sender_Behaviour := actod.Actor_Behaviour(Scale_Race_Sender_Data) {
-	handle_message = proc(data: ^Scale_Race_Sender_Data, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Scale_Race_Sender_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		if m, is_burst := msg.(Scale_Race_Burst); is_burst {
 			for k in 0 ..< m.count {
 				id := m.base + k
@@ -110,7 +120,12 @@ scale_race_conn_pid :: proc(peer_name: string) -> (actod.PID, actod.Node_ID) {
 }
 
 @(private = "file")
-scale_race_stranded_slots :: proc(peer_name: string) -> (stranded: int, ring_label: string) {
+scale_race_stranded_slots :: proc(
+	peer_name: string,
+) -> (
+	stranded: int,
+	ring_label: string,
+) {
 	peer_id, known := actod.get_node_by_name(peer_name)
 	if !known do return 0, ""
 	pool := actod.get_connection_pool(peer_id)
@@ -154,7 +169,12 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 	g_scale_race_order_violations = {}
 	g_scale_race_first_violation = {}
 
-	mesh := actod.sim_mesh_create(2, seed = seed, base_port = 29500, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		2,
+		seed = seed,
+		base_port = 29500,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	names := [2]string{"mesh0", "mesh1"}
@@ -216,10 +236,14 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		case 4:
 			actod.sim_mesh_advance_clock(
 				mesh,
-				time.Duration(5 + scale_race_pick(&rng, 250)) * time.Millisecond,
+				time.Duration(5 + scale_race_pick(&rng, 250)) *
+				time.Millisecond,
 			)
 		case 5:
-			actod.sim_mesh_advance_clock(mesh, time.Duration(1 + scale_race_pick(&rng, 5)) * time.Second)
+			actod.sim_mesh_advance_clock(
+				mesh,
+				time.Duration(1 + scale_race_pick(&rng, 5)) * time.Second,
+			)
 			_ = actod.sim_mesh_run_until_idle(mesh, 2000)
 		}
 		extra := scale_race_pick(&rng, 4)
@@ -228,7 +252,8 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		}
 	}
 
-	if actod.sim_mesh_run_until_idle(mesh, SCALE_RACE_STEP_CAP) >= SCALE_RACE_STEP_CAP {
+	if actod.sim_mesh_run_until_idle(mesh, SCALE_RACE_STEP_CAP) >=
+	   SCALE_RACE_STEP_CAP {
 		return false, "pump did not go idle (livelock)"
 	}
 	if !actod.sim_mesh_settle_pools(mesh) do return false, "pool scale-down did not settle"
@@ -276,7 +301,8 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 
 	for i in 0 ..< 2 {
 		_ = actod.sim_mesh_bind(mesh, i)
-		if stranded, label := scale_race_stranded_slots(names[1 - i]); stranded > 0 {
+		if stranded, label := scale_race_stranded_slots(names[1 - i]);
+		   stranded > 0 {
 			append(
 				&failures,
 				fmt.tprintf(
@@ -340,7 +366,11 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		for f, i in failures do joined = i == 0 ? f : fmt.tprintf("%s; %s", joined, f)
 		return false, joined
 	}
-	if (os.lookup_env("ACTOD_SCALE_RACE_DEBUG", context.temp_allocator) or_else "") != "" {
+	if (os.lookup_env(
+			   "ACTOD_SCALE_RACE_DEBUG",
+			   context.temp_allocator,
+		   ) or_else "") !=
+	   "" {
 		fmt.eprintfln(
 			"seed %d: sent %v received %v violations %v next_id %d",
 			seed,
@@ -356,10 +386,16 @@ scale_race_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 test_sim_scale_up_race :: proc(t: ^testing.T) {
 	sweep := SCALE_RACE_DEFAULT_SWEEP
 	base := SCALE_RACE_BASE_SEED
-	if v, has := os.lookup_env("ACTOD_SCALE_RACE_COUNT", context.temp_allocator); has {
+	if v, has := os.lookup_env(
+		"ACTOD_SCALE_RACE_COUNT",
+		context.temp_allocator,
+	); has {
 		if n, parsed := strconv.parse_int(v); parsed && n > 0 do sweep = n
 	}
-	if v, has := os.lookup_env("ACTOD_SCALE_RACE_SEED", context.temp_allocator); has {
+	if v, has := os.lookup_env(
+		"ACTOD_SCALE_RACE_SEED",
+		context.temp_allocator,
+	); has {
 		if n, parsed := strconv.parse_u64(v); parsed {
 			base = n
 			sweep = 1

@@ -3,10 +3,18 @@ package network_benchmark
 
 import "core:os"
 
-make_bench_env :: proc(test_vars: []string, allocator := context.temp_allocator) -> []string {
+make_bench_env :: proc(
+	test_vars: []string,
+	allocator := context.temp_allocator,
+) -> []string {
 	sys_env, env_err := os.environ(allocator)
 	if env_err != nil do return test_vars
-	merged := make([dynamic]string, 0, len(sys_env) + len(test_vars), allocator)
+	merged := make(
+		[dynamic]string,
+		0,
+		len(sys_env) + len(test_vars),
+		allocator,
+	)
 	strip_prefixes := [1]string{"ACTOD_BENCH_NODE="}
 	for v in sys_env {
 		skip := false

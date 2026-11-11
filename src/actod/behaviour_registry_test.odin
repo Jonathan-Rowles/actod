@@ -47,7 +47,11 @@ test_register_spawn_func_duplicate :: proc(t: ^testing.T) {
 	register_test_spawn_funcs()
 
 	ok := register_spawn_func("test_spawn_a", test_spawn_func_a)
-	testing.expect(t, ok, "Duplicate registration should succeed (returns existing index)")
+	testing.expect(
+		t,
+		ok,
+		"Duplicate registration should succeed (returns existing index)",
+	)
 }
 
 @(test)
@@ -62,8 +66,16 @@ test_get_nonexistent_spawn_func :: proc(t: ^testing.T) {
 test_has_spawn_func :: proc(t: ^testing.T) {
 	register_test_spawn_funcs()
 
-	testing.expect(t, has_spawn_func("test_spawn_a"), "Should find registered function")
-	testing.expect(t, !has_spawn_func("test_missing"), "Should not find unregistered function")
+	testing.expect(
+		t,
+		has_spawn_func("test_spawn_a"),
+		"Should find registered function",
+	)
+	testing.expect(
+		t,
+		!has_spawn_func("test_missing"),
+		"Should not find unregistered function",
+	)
 }
 
 @(test)
@@ -108,7 +120,11 @@ test_get_registered_spawn_funcs :: proc(t: ^testing.T) {
 	names := get_registered_spawn_funcs()
 	defer delete(names)
 
-	testing.expect(t, len(names) >= 2, "Should have at least 2 registered functions")
+	testing.expect(
+		t,
+		len(names) >= 2,
+		"Should have at least 2 registered functions",
+	)
 
 	found_a := false
 	found_b := false

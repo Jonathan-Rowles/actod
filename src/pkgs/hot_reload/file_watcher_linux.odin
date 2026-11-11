@@ -82,7 +82,11 @@ make_watcher :: proc(
 	return w, true
 }
 
-add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> bool {
+add_watch :: proc(
+	watcher: ^File_Watcher,
+	path: string,
+	actor_name: string,
+) -> bool {
 	if watcher.watch_count >= MAX_WATCHES do return false
 
 	if is_tmp_watch_path(path) do return true
@@ -143,7 +147,8 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 							if event.len > 0 {
 								name_ptr := cast([^]u8)&buf[offset - int(event.len)]
 								name_len := 0
-								for name_len < int(event.len) && name_ptr[name_len] != 0 {
+								for name_len < int(event.len) &&
+								    name_ptr[name_len] != 0 {
 									name_len += 1
 								}
 								file_name = string(name_ptr[:name_len])
@@ -168,20 +173,18 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 				}
 			}
 
-			collect_events(
-				buf[:],
-				int(n),
-				w,
-				&changed_actors,
-				&changed_count,
-			)
+			collect_events(buf[:], int(n), w, &changed_actors, &changed_count)
 
 			if changed_count == 0 do continue
 
 			if w.debounce_ms > 0 {
 				time.sleep(time.Duration(w.debounce_ms) * time.Millisecond)
 				for {
-					drain_n := posix.read(posix.FD(w.fd), raw_data(&buf), len(buf))
+					drain_n := posix.read(
+						posix.FD(w.fd),
+						raw_data(&buf),
+						len(buf),
+					)
 					if drain_n <= 0 do break
 					collect_events(
 						buf[:],
@@ -196,7 +199,10 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 			if sync.atomic_load_explicit(&w.should_stop, .Acquire) do break
 
 			for i in 0 ..< changed_count {
-				w.callback(Watch_Event{actor_name = changed_actors[i]}, w.user_data)
+				w.callback(
+					Watch_Event{actor_name = changed_actors[i]},
+					w.user_data,
+				)
 			}
 		}
 	}

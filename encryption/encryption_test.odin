@@ -11,7 +11,11 @@ test_cluster_psk_derivation_fails_closed :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "cluster PSK derivation must report success")
 
 	zero: [CLUSTER_PSK_SIZE]byte
-	testing.expect(t, psk != zero, "a derived cluster PSK must never be all zero")
+	testing.expect(
+		t,
+		psk != zero,
+		"a derived cluster PSK must never be all zero",
+	)
 }
 
 @(test)
@@ -20,40 +24,80 @@ test_noise_handshake_and_envelope :: proc(t: ^testing.T) {
 	prologue := []byte{'a', 'c', 't', 'o', 'd', '/', '2'}
 
 	dialer, listener: Noise_Handshake
-	testing.expect(t, noise_handshake_begin(&dialer, true, prologue, psk[:]), "dialer init")
-	testing.expect(t, noise_handshake_begin(&listener, false, prologue, psk[:]), "listener init")
+	testing.expect(
+		t,
+		noise_handshake_begin(&dialer, true, prologue, psk[:]),
+		"dialer init",
+	)
+	testing.expect(
+		t,
+		noise_handshake_begin(&listener, false, prologue, psk[:]),
+		"listener init",
+	)
 
 	msg1, done1, ok1 := noise_handshake_step(&dialer, nil)
 	defer delete(msg1)
-	testing.expect(t, ok1 && !done1 && msg1 != nil, "dialer step 1 should produce msg1")
+	testing.expect(
+		t,
+		ok1 && !done1 && msg1 != nil,
+		"dialer step 1 should produce msg1",
+	)
 
 	msg2, done2, ok2 := noise_handshake_step(&listener, msg1)
 	defer delete(msg2)
-	testing.expect(t, ok2 && done2 && msg2 != nil, "listener step should complete with msg2")
+	testing.expect(
+		t,
+		ok2 && done2 && msg2 != nil,
+		"listener step should complete with msg2",
+	)
 
 	out3, done3, ok3 := noise_handshake_step(&dialer, msg2)
-	testing.expect(t, ok3 && done3 && out3 == nil, "dialer step 2 should complete with no output")
+	testing.expect(
+		t,
+		ok3 && done3 && out3 == nil,
+		"dialer step 2 should complete with no output",
+	)
 
 	dialer_keys, listener_keys: actod.Noise_Transport
-	testing.expect(t, noise_handshake_finish(&dialer, &dialer_keys), "dialer split")
-	testing.expect(t, noise_handshake_finish(&listener, &listener_keys), "listener split")
+	testing.expect(
+		t,
+		noise_handshake_finish(&dialer, &dialer_keys),
+		"dialer split",
+	)
+	testing.expect(
+		t,
+		noise_handshake_finish(&listener, &listener_keys),
+		"listener split",
+	)
 
 	payload := transmute([]byte)string("ping over sealed channel")
 	sealed: [256]byte
 	n, seal_ok := envelope_seal(&dialer_keys, payload, sealed[:])
 	testing.expect(t, seal_ok, "seal should succeed")
-	testing.expect(t, n == ENVELOPE_OVERHEAD + len(payload), "sealed size mismatch")
+	testing.expect(
+		t,
+		n == ENVELOPE_OVERHEAD + len(payload),
+		"sealed size mismatch",
+	)
 
 	opened: [256]byte
 	pt, open_ok := envelope_open(&listener_keys, sealed[4:n], opened[:])
 	testing.expect(t, open_ok, "open should succeed")
-	testing.expect(t, string(pt) == string(payload), "roundtrip payload mismatch")
+	testing.expect(
+		t,
+		string(pt) == string(payload),
+		"roundtrip payload mismatch",
+	)
 
 	reply := transmute([]byte)string("pong")
 	n2, seal2_ok := envelope_seal(&listener_keys, reply, sealed[:])
 	testing.expect(t, seal2_ok, "reverse seal should succeed")
 	pt2, open2_ok := envelope_open(&dialer_keys, sealed[4:n2], opened[:])
-	testing.expect(t, open2_ok && string(pt2) == string(reply), "reverse roundtrip mismatch")
+	testing.expect(
+		t,
+		open2_ok && string(pt2) == string(reply),
+		"reverse roundtrip mismatch",
+	)
 }
 
 @(test)
@@ -63,15 +107,27 @@ test_noise_handshake_wrong_psk_fails :: proc(t: ^testing.T) {
 	prologue := []byte{'a', 'c', 't', 'o', 'd', '/', '2'}
 
 	dialer, listener: Noise_Handshake
-	testing.expect(t, noise_handshake_begin(&dialer, true, prologue, good[:]), "dialer init")
-	testing.expect(t, noise_handshake_begin(&listener, false, prologue, bad[:]), "listener init")
+	testing.expect(
+		t,
+		noise_handshake_begin(&dialer, true, prologue, good[:]),
+		"dialer init",
+	)
+	testing.expect(
+		t,
+		noise_handshake_begin(&listener, false, prologue, bad[:]),
+		"listener init",
+	)
 
 	msg1, _, ok1 := noise_handshake_step(&dialer, nil)
 	defer delete(msg1)
 	testing.expect(t, ok1, "dialer step 1")
 
 	_, _, ok2 := noise_handshake_step(&listener, msg1)
-	testing.expect(t, !ok2, "listener must reject msg1 sealed under a different psk")
+	testing.expect(
+		t,
+		!ok2,
+		"listener must reject msg1 sealed under a different psk",
+	)
 }
 
 @(test)
@@ -79,8 +135,16 @@ test_noise_handshake_prologue_mismatch_fails :: proc(t: ^testing.T) {
 	psk, _ := derive_cluster_psk("cluster-secret")
 
 	dialer, listener: Noise_Handshake
-	testing.expect(t, noise_handshake_begin(&dialer, true, []byte{1}, psk[:]), "dialer init")
-	testing.expect(t, noise_handshake_begin(&listener, false, []byte{2}, psk[:]), "listener init")
+	testing.expect(
+		t,
+		noise_handshake_begin(&dialer, true, []byte{1}, psk[:]),
+		"dialer init",
+	)
+	testing.expect(
+		t,
+		noise_handshake_begin(&listener, false, []byte{2}, psk[:]),
+		"listener init",
+	)
 
 	msg1, _, ok1 := noise_handshake_step(&dialer, nil)
 	defer delete(msg1)
@@ -127,7 +191,12 @@ seeded_noise_handshake_is_deterministic :: proc(t: ^testing.T) {
 		for &b, i in psk do b = u8(i)
 
 		hs: Noise_Handshake
-		if !noise_handshake_begin(&hs, true, transmute([]byte)string("dst-test"), psk[:]) {
+		if !noise_handshake_begin(
+			&hs,
+			true,
+			transmute([]byte)string("dst-test"),
+			psk[:],
+		) {
 			return nil
 		}
 		msg, _, ok := noise_handshake_step(&hs, nil, context.temp_allocator)

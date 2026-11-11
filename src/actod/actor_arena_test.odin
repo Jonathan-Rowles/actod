@@ -34,7 +34,8 @@ test_actor_arena_keeps_small_allocations_in_its_slot :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		raw_data(data) >= raw_data(slot) && raw_data(data) < raw_data(slot[len(slot):]),
+		raw_data(data) >= raw_data(slot) &&
+		raw_data(data) < raw_data(slot[len(slot):]),
 		"a small allocation should come from the slot",
 	)
 }
@@ -54,8 +55,16 @@ test_actor_arena_spills_past_its_slot :: proc(t: ^testing.T) {
 	small[len(small) - 1] = 0xCD
 
 	big, big_err := mem.alloc_bytes(ARENA_TEST_SLOT * 4, allocator = allocator)
-	testing.expect(t, big_err == nil, "an allocation larger than the slot should spill, not fail")
-	testing.expect(t, arena.overflow.curr_block != nil, "the spill arena should be open")
+	testing.expect(
+		t,
+		big_err == nil,
+		"an allocation larger than the slot should spill, not fail",
+	)
+	testing.expect(
+		t,
+		arena.overflow.curr_block != nil,
+		"the spill arena should be open",
+	)
 
 	big[0] = 0x11
 	big[len(big) - 1] = 0x22
@@ -72,7 +81,9 @@ test_actor_arena_spills_past_its_slot :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_actor_arena_resize_across_the_slot_boundary_keeps_contents :: proc(t: ^testing.T) {
+test_actor_arena_resize_across_the_slot_boundary_keeps_contents :: proc(
+	t: ^testing.T,
+) {
 	slot := make([]byte, ARENA_TEST_SLOT)
 	defer delete(slot)
 
@@ -86,8 +97,16 @@ test_actor_arena_resize_across_the_slot_boundary_keeps_contents :: proc(t: ^test
 		data[i] = u8(i)
 	}
 
-	grown, grow_err := mem.resize_bytes(data, ARENA_TEST_SLOT * 4, allocator = allocator)
-	testing.expect(t, grow_err == nil, "growing past the slot should spill, not fail")
+	grown, grow_err := mem.resize_bytes(
+		data,
+		ARENA_TEST_SLOT * 4,
+		allocator = allocator,
+	)
+	testing.expect(
+		t,
+		grow_err == nil,
+		"growing past the slot should spill, not fail",
+	)
 	testing.expect(
 		t,
 		len(grown) == ARENA_TEST_SLOT * 4,
@@ -101,7 +120,11 @@ test_actor_arena_resize_across_the_slot_boundary_keeps_contents :: proc(t: ^test
 			break
 		}
 	}
-	testing.expect(t, intact, "growing across the slot boundary should copy the old contents")
+	testing.expect(
+		t,
+		intact,
+		"growing across the slot boundary should copy the old contents",
+	)
 }
 
 @(test)
@@ -123,20 +146,35 @@ test_actor_arena_free_all_resets_both_tiers :: proc(t: ^testing.T) {
 
 	free_all(allocator)
 
-	testing.expect(t, arena.primary.total_used == 0, "free_all should reset the slot")
-	testing.expect(t, arena.overflow.total_used == 0, "free_all should reset the spill arena")
-
-	again, err := mem.alloc_bytes(1024, allocator = allocator)
-	testing.expect(t, err == nil, "the arena should be reusable after free_all")
 	testing.expect(
 		t,
-		raw_data(again) >= raw_data(slot) && raw_data(again) < raw_data(slot[len(slot):]),
+		arena.primary.total_used == 0,
+		"free_all should reset the slot",
+	)
+	testing.expect(
+		t,
+		arena.overflow.total_used == 0,
+		"free_all should reset the spill arena",
+	)
+
+	again, err := mem.alloc_bytes(1024, allocator = allocator)
+	testing.expect(
+		t,
+		err == nil,
+		"the arena should be reusable after free_all",
+	)
+	testing.expect(
+		t,
+		raw_data(again) >= raw_data(slot) &&
+		raw_data(again) < raw_data(slot[len(slot):]),
 		"after free_all the slot should be used again before spilling",
 	)
 }
 
 @(test)
-test_get_children_returns_nil_when_the_caller_arena_is_exhausted :: proc(t: ^testing.T) {
+test_get_children_returns_nil_when_the_caller_arena_is_exhausted :: proc(
+	t: ^testing.T,
+) {
 	sync.lock(&global_registry_swap_mutex)
 	defer sync.unlock(&global_registry_swap_mutex)
 	saved_registry := NODE.actor_registry
@@ -150,11 +188,21 @@ test_get_children_returns_nil_when_the_caller_arena_is_exhausted :: proc(t: ^tes
 	parent.state = .RUNNING
 	parent.children = make([dynamic]Supervised_Child)
 	defer delete(parent.children)
-	parent_pid, added := add(&NODE.actor_registry, rawptr(&parent), "exhausted-parent")
+	parent_pid, added := add(
+		&NODE.actor_registry,
+		rawptr(&parent),
+		"exhausted-parent",
+	)
 	testing.expect(t, added, "the parent should register")
 	parent.pid = parent_pid
-	append(&parent.children, Supervised_Child{pid = pack_pid(Handle{idx = 91, gen = 1})})
-	append(&parent.children, Supervised_Child{pid = pack_pid(Handle{idx = 92, gen = 1})})
+	append(
+		&parent.children,
+		Supervised_Child{pid = pack_pid(Handle{idx = 91, gen = 1})},
+	)
+	append(
+		&parent.children,
+		Supervised_Child{pid = pack_pid(Handle{idx = 92, gen = 1})},
+	)
 
 	slot := make([]byte, ARENA_TEST_SLOT)
 	defer delete(slot)
@@ -178,7 +226,9 @@ test_get_children_returns_nil_when_the_caller_arena_is_exhausted :: proc(t: ^tes
 }
 
 @(test)
-test_rename_keeps_the_old_name_when_the_arena_is_exhausted :: proc(t: ^testing.T) {
+test_rename_keeps_the_old_name_when_the_arena_is_exhausted :: proc(
+	t: ^testing.T,
+) {
 	slot := make([]byte, ARENA_TEST_SLOT)
 	defer delete(slot)
 	arena: Actor_Arena
@@ -202,7 +252,9 @@ test_rename_keeps_the_old_name_when_the_arena_is_exhausted :: proc(t: ^testing.T
 	context.logger = log.nil_logger()
 	handle_rename_actor(
 		&actor,
-		Rename_Actor{new_name = "after-rename-that-the-full-arena-cannot-hold"},
+		Rename_Actor {
+			new_name = "after-rename-that-the-full-arena-cannot-hold",
+		},
 	)
 
 	testing.expect_value(t, actor.name, "before-rename")

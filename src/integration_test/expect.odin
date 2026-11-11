@@ -31,7 +31,13 @@ atomic_flag_raised :: proc(state: rawptr) -> bool {
 @(private = "file")
 report :: proc(t: ^testing.T, loc: runtime.Source_Code_Location, msg: string) {
 	t.error_count += 1
-	fmt.eprintf("[ASSERT] %s(%d:%d) %s\n", loc.file_path, loc.line, loc.column, msg)
+	fmt.eprintf(
+		"[ASSERT] %s(%d:%d) %s\n",
+		loc.file_path,
+		loc.line,
+		loc.column,
+		msg,
+	)
 	os.flush(os.stderr)
 }
 
@@ -71,9 +77,19 @@ expect_value :: proc(
 	loc := #caller_location,
 	value_expr := #caller_expression(value),
 ) -> bool where intrinsics.type_is_comparable(V) {
-	ok := value == expected || reflect.is_nil(value) && reflect.is_nil(expected)
+	ok :=
+		value == expected || reflect.is_nil(value) && reflect.is_nil(expected)
 	if !ok {
-		report(t, loc, fmt.tprintf("expected %v to be %v, got %v", value_expr, expected, value))
+		report(
+			t,
+			loc,
+			fmt.tprintf(
+				"expected %v to be %v, got %v",
+				value_expr,
+				expected,
+				value,
+			),
+		)
 	}
 	return ok
 }

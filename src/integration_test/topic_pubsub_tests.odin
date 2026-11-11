@@ -42,7 +42,10 @@ Topic_Count_Probe :: struct {
 
 topic_count_is :: proc(state: rawptr) -> bool {
 	probe := cast(^Topic_Count_Probe)state
-	return sync.atomic_load_explicit(&probe.topic.count, .Acquire) == probe.expected
+	return(
+		sync.atomic_load_explicit(&probe.topic.count, .Acquire) ==
+		probe.expected \
+	)
 }
 
 wait_for_topic_count :: proc(topic: ^actod.Topic, expected: u32) {
@@ -74,7 +77,8 @@ test_topic_publish :: proc(t: ^testing.T) {
 
 	expectf(
 		t,
-		sync.atomic_load_explicit(&shared_topic.count, .Acquire) == SUBSCRIBER_COUNT,
+		sync.atomic_load_explicit(&shared_topic.count, .Acquire) ==
+		SUBSCRIBER_COUNT,
 		"Should have %d topic subscribers, got %d",
 		SUBSCRIBER_COUNT,
 		sync.atomic_load_explicit(&shared_topic.count, .Acquire),
@@ -88,7 +92,10 @@ test_topic_publish :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Pub_Data, from: actod.PID, msg: any) {
 			switch _ in msg {
 			case string:
-				actod.publish(data.topic, Topic_Price_Update{symbol = 1, bid = 100.5, ask = 101.0})
+				actod.publish(
+					data.topic,
+					Topic_Price_Update{symbol = 1, bid = 100.5, ask = 101.0},
+				)
 			}
 		},
 	}
@@ -102,7 +109,8 @@ test_topic_publish :: proc(t: ^testing.T) {
 
 	_ = actod.send_message(pub_pid, "go")
 
-	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
+	for wait_start := time.tick_now();
+	    time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= SUBSCRIBER_COUNT {
 			break
 		}
@@ -134,7 +142,9 @@ lists_exactly :: proc(listed: []actod.PID, want: []actod.PID) -> bool {
 	return true
 }
 
-test_topic_subscribers_listed_before_and_after_termination :: proc(t: ^testing.T) {
+test_topic_subscribers_listed_before_and_after_termination :: proc(
+	t: ^testing.T,
+) {
 	shared_topic = {}
 
 	received_count: i32 = 0
@@ -190,7 +200,11 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 	sub_data := Topic_Sub_Data {
 		received = &received_count,
 	}
-	sub_pid, sub_ok := actod.spawn("topic_cleanup_sub", sub_data, Topic_Sub_Behaviour)
+	sub_pid, sub_ok := actod.spawn(
+		"topic_cleanup_sub",
+		sub_data,
+		Topic_Sub_Behaviour,
+	)
 	expect(t, sub_ok, "Should spawn subscriber")
 
 	wait_for_topic_count(&shared_topic, 1)
@@ -219,7 +233,10 @@ test_topic_auto_cleanup :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Pub_Data, from: actod.PID, msg: any) {
 			switch _ in msg {
 			case string:
-				actod.publish(data.topic, Topic_Price_Update{symbol = 2, bid = 50.0, ask = 51.0})
+				actod.publish(
+					data.topic,
+					Topic_Price_Update{symbol = 2, bid = 50.0, ask = 51.0},
+				)
 			}
 		},
 	}
@@ -295,7 +312,10 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 		handle_message = proc(data: ^Pub_Data, from: actod.PID, msg: any) {
 			switch _ in msg {
 			case string:
-				actod.publish(data.topic, Topic_Price_Update{symbol = 3, bid = 200.0, ask = 201.0})
+				actod.publish(
+					data.topic,
+					Topic_Price_Update{symbol = 3, bid = 200.0, ask = 201.0},
+				)
 			}
 		},
 	}
@@ -308,13 +328,18 @@ test_topic_unsubscribe :: proc(t: ^testing.T) {
 	expect(t, pub_ok, "Should spawn publisher")
 
 	_ = actod.send_message(pub_pid, "go")
-	for wait_start := time.tick_now(); time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
+	for wait_start := time.tick_now();
+	    time.tick_since(wait_start) < INTEGRATION_TEST_TIMEOUT; {
 		if sync.atomic_load(&received_count) >= 1 {
 			break
 		}
 		time.sleep(time.Millisecond)
 	}
-	expect(t, sync.atomic_load(&received_count) == 1, "Should receive first publish")
+	expect(
+		t,
+		sync.atomic_load(&received_count) == 1,
+		"Should receive first publish",
+	)
 
 	_ = actod.send_message(sub_pid, "unsub")
 	wait_for_topic_count(&shared_topic, 0)
@@ -399,16 +424,25 @@ Topic_Churn_Publisher :: struct {
 	published: int,
 }
 
-topic_churn_publisher_behaviour := actod.Actor_Behaviour(Topic_Churn_Publisher) {
+topic_churn_publisher_behaviour := actod.Actor_Behaviour(
+	Topic_Churn_Publisher,
+) {
 	handle_message = topic_churn_publisher_handle,
 }
 
-topic_churn_publisher_handle :: proc(data: ^Topic_Churn_Publisher, from: actod.PID, msg: any) {
+topic_churn_publisher_handle :: proc(
+	data: ^Topic_Churn_Publisher,
+	from: actod.PID,
+	msg: any,
+) {
 	round, is_round := msg.(Topic_Churn_Round)
 	if !is_round do return
 
 	for _ in 0 ..< TOPIC_CHURN_PUBLISHES_PER_ROUND {
-		actod.publish(&churn_topic, Topic_Price_Update{symbol = u64(round.round)})
+		actod.publish(
+			&churn_topic,
+			Topic_Price_Update{symbol = u64(round.round)},
+		)
 		data.published += 1
 	}
 
@@ -456,7 +490,11 @@ test_topic_churn_keeps_subscribers_dense :: proc(t: ^testing.T) {
 		"failed to start the publisher",
 	)
 	for pid in churners {
-		expect(t, actod.send_message(pid, Topic_Churn_Round{}) == .OK, "failed to start a churner")
+		expect(
+			t,
+			actod.send_message(pid, Topic_Churn_Round{}) == .OK,
+			"failed to start a churner",
+		)
 	}
 
 	finished := poll_until(topic_churners_all_done, nil, TOPIC_CHURN_BUDGET)
@@ -487,10 +525,19 @@ test_topic_churn_keeps_subscribers_dense :: proc(t: ^testing.T) {
 
 	for i in 0 ..< actod.MAX_TOPIC_SUBSCRIBERS {
 		pid := actod.PID(
-			sync.atomic_load_explicit(cast(^u64)&churn_topic.subscribers[i], .Acquire),
+			sync.atomic_load_explicit(
+				cast(^u64)&churn_topic.subscribers[i],
+				.Acquire,
+			),
 		)
 		if u32(i) < count {
-			expectf(t, pid != 0, "slot %d inside the counted range %d is zero", i, count)
+			expectf(
+				t,
+				pid != 0,
+				"slot %d inside the counted range %d is zero",
+				i,
+				count,
+			)
 		} else {
 			expectf(
 				t,

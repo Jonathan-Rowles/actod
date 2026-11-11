@@ -12,7 +12,10 @@ HOT_EXAMPLE_DIR :: #directory + "../docs/hot_reload_example/hot_reload_actors"
 @(test)
 test_hot_shim_exercises_every_exported_proc :: proc(t: ^testing.T) {
 	fixture_path := fmt.tprintf("%s/hot_check.odin", HOT_CHECK_DIR)
-	fixture_bytes, read_err := os.read_entire_file_from_path(fixture_path, context.allocator)
+	fixture_bytes, read_err := os.read_entire_file_from_path(
+		fixture_path,
+		context.allocator,
+	)
 	if !testing.expect(t, read_err == nil, "could not read hot_check fixture") do return
 	defer delete(fixture_bytes)
 	fixture := string(fixture_bytes)
@@ -66,7 +69,11 @@ test_hot_shim_modules_compile :: proc(t: ^testing.T) {
 		if !testing.expect(
 			t,
 			start_err == nil,
-			fmt.tprintf("could not start odin check for '%s': %v", pkg_name, start_err),
+			fmt.tprintf(
+				"could not start odin check for '%s': %v",
+				pkg_name,
+				start_err,
+			),
 		) {
 			continue
 		}

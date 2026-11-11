@@ -30,7 +30,11 @@ crash_test_init :: proc(data: ^Crash_Test_Data) {
 	}
 }
 
-crash_test_handle_message :: proc(data: ^Crash_Test_Data, from: actod.PID, msg: any) {
+crash_test_handle_message :: proc(
+	data: ^Crash_Test_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	data.message_count += 1
 
 	switch m in msg {
@@ -93,7 +97,11 @@ g_last_stop_name: [64]u8
 @(private = "file")
 g_last_stop_name_len: int
 
-supervisor_test_handle_message :: proc(data: ^Supervisor_Test_Data, from: actod.PID, msg: any) {
+supervisor_test_handle_message :: proc(
+	data: ^Supervisor_Test_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch m in msg {
 	case actod.Actor_Stopped:
 		data.restarts_seen += 1
@@ -183,7 +191,10 @@ child_restarted_in_slot :: proc(state: rawptr) -> bool {
 	return true
 }
 
-wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
+wait_for_condition :: proc(
+	condition: proc() -> bool,
+	timeout_ms: int,
+) -> bool {
 	held := condition
 	return poll_until(
 		plain_condition_holds,
@@ -193,14 +204,31 @@ wait_for_condition :: proc(condition: proc() -> bool, timeout_ms: int) -> bool {
 	)
 }
 
-wait_for_child_count :: proc(parent: actod.PID, expected: int, timeout_ms: int) -> bool {
-	probe := Child_Count_Probe{parent = parent, expected = expected}
-	return poll_until(child_count_matches, &probe, time.Duration(timeout_ms) * time.Millisecond)
+wait_for_child_count :: proc(
+	parent: actod.PID,
+	expected: int,
+	timeout_ms: int,
+) -> bool {
+	probe := Child_Count_Probe {
+		parent   = parent,
+		expected = expected,
+	}
+	return poll_until(
+		child_count_matches,
+		&probe,
+		time.Duration(timeout_ms) * time.Millisecond,
+	)
 }
 
 wait_for_actor_invalid :: proc(pid: actod.PID, timeout_ms: int) -> bool {
-	probe := Registry_Probe{pid = pid}
-	return poll_until(actor_gone, &probe, time.Duration(timeout_ms) * time.Millisecond)
+	probe := Registry_Probe {
+		pid = pid,
+	}
+	return poll_until(
+		actor_gone,
+		&probe,
+		time.Duration(timeout_ms) * time.Millisecond,
+	)
 }
 
 wait_for_child_pid_change :: proc(
@@ -212,8 +240,16 @@ wait_for_child_pid_change :: proc(
 	new_pid: actod.PID,
 	success: bool,
 ) {
-	probe := Child_Change_Probe{parent = parent, old_pid = old_pid, index = index}
-	changed := poll_until(child_pid_changed, &probe, time.Duration(timeout_ms) * time.Millisecond)
+	probe := Child_Change_Probe {
+		parent  = parent,
+		old_pid = old_pid,
+		index   = index,
+	}
+	changed := poll_until(
+		child_pid_changed,
+		&probe,
+		time.Duration(timeout_ms) * time.Millisecond,
+	)
 	if changed do return probe.new_pid, true
 	return 0, false
 }
@@ -227,8 +263,16 @@ wait_for_child_restart :: proc(
 	new_pid: actod.PID,
 	success: bool,
 ) {
-	probe := Slot_Restart_Probe{parent = parent, previous = previous, index = index}
-	restarted := poll_until(child_restarted_in_slot, &probe, time.Duration(timeout_ms) * time.Millisecond)
+	probe := Slot_Restart_Probe {
+		parent   = parent,
+		previous = previous,
+		index    = index,
+	}
+	restarted := poll_until(
+		child_restarted_in_slot,
+		&probe,
+		time.Duration(timeout_ms) * time.Millisecond,
+	)
 	if restarted do return probe.new_pid, true
 	return 0, false
 }
@@ -250,8 +294,16 @@ wait_for_children_replaced :: proc(
 	from: int,
 	timeout_ms: int,
 ) -> bool {
-	probe := Children_Replaced_Probe{parent = parent, old = old, from = from}
-	return poll_until(children_replaced, &probe, time.Duration(timeout_ms) * time.Millisecond)
+	probe := Children_Replaced_Probe {
+		parent = parent,
+		old    = old,
+		from   = from,
+	}
+	return poll_until(
+		children_replaced,
+		&probe,
+		time.Duration(timeout_ms) * time.Millisecond,
+	)
 }
 
 verify_child_count :: proc(t: ^testing.T, parent: actod.PID, expected: int) {
@@ -263,7 +315,9 @@ verify_child_count :: proc(t: ^testing.T, parent: actod.PID, expected: int) {
 create_crash_child :: proc(parent: actod.PID) -> actod.SPAWN {
 	return proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
 			data := Crash_Test_Data {
-				id           = int(sync.atomic_add(&global_test_state.actors_spawned, 1)),
+				id           = int(
+					sync.atomic_add(&global_test_state.actors_spawned, 1),
+				),
 				crash_on_msg = "crash",
 				crash_reason = .INTERNAL_ERROR,
 			}
@@ -279,7 +333,9 @@ create_crash_child :: proc(parent: actod.PID) -> actod.SPAWN {
 create_temporary_crash_child :: proc() -> actod.SPAWN {
 	return proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
 			data := Crash_Test_Data {
-				id           = int(sync.atomic_add(&global_test_state.actors_spawned, 1)),
+				id           = int(
+					sync.atomic_add(&global_test_state.actors_spawned, 1),
+				),
 				crash_on_msg = "crash",
 				crash_reason = .INTERNAL_ERROR,
 			}
@@ -316,14 +372,24 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 	)
 	expect(t, ok, "Failed to spawn supervisor")
 
-	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 1, 500),
+		"Child should be spawned",
+	)
 
 	for i in 0 ..< 4 {
 		children := actod.get_children(supervisor_pid)
 		defer delete(children)
 
 		child_expected := i < 3
-		if child_expected && !expectf(t, len(children) > 0, "child missing before crash %d", i + 1) {
+		if child_expected &&
+		   !expectf(
+				   t,
+				   len(children) > 0,
+				   "child missing before crash %d",
+				   i + 1,
+			   ) {
 			break
 		}
 		if len(children) > 0 {
@@ -334,8 +400,18 @@ test_restart_limit_within_window :: proc(t: ^testing.T) {
 					err == .OK,
 					fmt.tprintf("Failed to crash child attempt %d", i + 1),
 				)
-				_, restarted := wait_for_child_pid_change(supervisor_pid, children[0], 0, 1000)
-				expectf(t, restarted, "child should restart after crash %d", i + 1)
+				_, restarted := wait_for_child_pid_change(
+					supervisor_pid,
+					children[0],
+					0,
+					1000,
+				)
+				expectf(
+					t,
+					restarted,
+					"child should restart after crash %d",
+					i + 1,
+				)
 
 				new_children := actod.get_children(supervisor_pid)
 				defer delete(new_children)
@@ -394,13 +470,22 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 	)
 	expect(t, ok, "Failed to spawn supervisor")
 
-	expect(t, wait_for_child_count(supervisor_pid, 1, 500), "Child should be spawned")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 1, 500),
+		"Child should be spawned",
+	)
 
 	for i in 0 ..< 2 {
 		children := actod.get_children(supervisor_pid)
 		defer delete(children)
 
-		if !expectf(t, len(children) > 0, "child missing before crash %d", i + 1) {
+		if !expectf(
+			t,
+			len(children) > 0,
+			"child missing before crash %d",
+			i + 1,
+		) {
 			break
 		}
 		if len(children) > 0 {
@@ -441,7 +526,12 @@ test_restart_limit_window_reset :: proc(t: ^testing.T) {
 	}
 }
 
-spawn_policy_child :: proc(restart_policy: actod.Restart_Policy) -> (actod.PID, bool) {
+spawn_policy_child :: proc(
+	restart_policy: actod.Restart_Policy,
+) -> (
+	actod.PID,
+	bool,
+) {
 	data := Crash_Test_Data {
 		id = int(sync.atomic_add(&global_test_state.actors_spawned, 1)),
 	}
@@ -453,15 +543,33 @@ spawn_policy_child :: proc(restart_policy: actod.Restart_Policy) -> (actod.PID, 
 	)
 }
 
-spawn_permanent_policy_child :: proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+spawn_permanent_policy_child :: proc(
+	_name: string,
+	_parent_pid: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return spawn_policy_child(.PERMANENT)
 }
 
-spawn_transient_policy_child :: proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+spawn_transient_policy_child :: proc(
+	_name: string,
+	_parent_pid: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return spawn_policy_child(.TRANSIENT)
 }
 
-spawn_temporary_policy_child :: proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+spawn_temporary_policy_child :: proc(
+	_name: string,
+	_parent_pid: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return spawn_policy_child(.TEMPORARY)
 }
 
@@ -489,14 +597,23 @@ test_children_restart_by_their_own_policy :: proc(t: ^testing.T) {
 	)
 	expect(t, ok, "Failed to spawn supervisor")
 	if !ok do return
-	expect(t, wait_for_child_count(supervisor_pid, 4, 500), "Children should be spawned")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 4, 500),
+		"Children should be spawned",
+	)
 
 	initial := actod.get_children(supervisor_pid)
 	defer delete(initial)
 	if !expectf(t, len(initial) == 4, "expected 4 children, got %d", len(initial)) do return
 
 	_ = actod.send_message(initial[0], actod.Terminate{reason = .NORMAL})
-	new_permanent, permanent_restarted := wait_for_child_restart(supervisor_pid, initial, 0, 1000)
+	new_permanent, permanent_restarted := wait_for_child_restart(
+		supervisor_pid,
+		initial,
+		0,
+		1000,
+	)
 	expect(
 		t,
 		permanent_restarted,
@@ -506,7 +623,12 @@ test_children_restart_by_their_own_policy :: proc(t: ^testing.T) {
 	after_permanent := actod.get_children(supervisor_pid)
 	defer delete(after_permanent)
 	_ = actod.send_message(initial[1], actod.Terminate{reason = .ABNORMAL})
-	new_transient, transient_restarted := wait_for_child_restart(supervisor_pid, after_permanent, 1, 1000)
+	new_transient, transient_restarted := wait_for_child_restart(
+		supervisor_pid,
+		after_permanent,
+		1,
+		1000,
+	)
 	expect(
 		t,
 		transient_restarted,
@@ -514,9 +636,19 @@ test_children_restart_by_their_own_policy :: proc(t: ^testing.T) {
 	)
 
 	transient_name_buf: [64]u8
-	transient_name := string(transient_name_buf[:copy(transient_name_buf[:], actod.get_actor_name(initial[2]))])
+	transient_name := string(
+		transient_name_buf[:copy(
+			transient_name_buf[:],
+			actod.get_actor_name(initial[2]),
+		)],
+	)
 	temporary_name_buf: [64]u8
-	temporary_name := string(temporary_name_buf[:copy(temporary_name_buf[:], actod.get_actor_name(initial[3]))])
+	temporary_name := string(
+		temporary_name_buf[:copy(
+			temporary_name_buf[:],
+			actod.get_actor_name(initial[3]),
+		)],
+	)
 
 	_ = actod.send_message(initial[2], actod.Terminate{reason = .NORMAL})
 	expect(
@@ -524,8 +656,16 @@ test_children_restart_by_their_own_policy :: proc(t: ^testing.T) {
 		wait_for_child_count(supervisor_pid, 3, 1000),
 		"a TRANSIENT child must not restart after a NORMAL exit",
 	)
-	expect_value(t, actod.Termination_Reason(sync.atomic_load(&g_last_stop_reason)), actod.Termination_Reason.NORMAL)
-	expect_value(t, string(g_last_stop_name[:g_last_stop_name_len]), transient_name)
+	expect_value(
+		t,
+		actod.Termination_Reason(sync.atomic_load(&g_last_stop_reason)),
+		actod.Termination_Reason.NORMAL,
+	)
+	expect_value(
+		t,
+		string(g_last_stop_name[:g_last_stop_name_len]),
+		transient_name,
+	)
 
 	_ = actod.send_message(initial[3], actod.Terminate{reason = .ABNORMAL})
 	expect(
@@ -533,18 +673,35 @@ test_children_restart_by_their_own_policy :: proc(t: ^testing.T) {
 		wait_for_child_count(supervisor_pid, 2, 1000),
 		"a TEMPORARY child must not restart even after an ABNORMAL exit",
 	)
-	expect_value(t, actod.Termination_Reason(sync.atomic_load(&g_last_stop_reason)), actod.Termination_Reason.ABNORMAL)
-	expect_value(t, string(g_last_stop_name[:g_last_stop_name_len]), temporary_name)
+	expect_value(
+		t,
+		actod.Termination_Reason(sync.atomic_load(&g_last_stop_reason)),
+		actod.Termination_Reason.ABNORMAL,
+	)
+	expect_value(
+		t,
+		string(g_last_stop_name[:g_last_stop_name_len]),
+		temporary_name,
+	)
 
 	final := actod.get_children(supervisor_pid)
 	defer delete(final)
-	if expectf(t, len(final) == 2, "expected 2 children left, got %d", len(final)) {
+	if expectf(
+		t,
+		len(final) == 2,
+		"expected 2 children left, got %d",
+		len(final),
+	) {
 		expect_value(t, final[0], new_permanent)
 		expect_value(t, final[1], new_transient)
 	}
 
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
-	expect(t, wait_for_actor_invalid(supervisor_pid, 1000), "supervisor should stop")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 1000),
+		"supervisor should stop",
+	)
 }
 
 ORDER_CHILD_COUNT :: 5
@@ -583,7 +740,11 @@ Order_Supervisor_Behaviour :: actod.Actor_Behaviour(Order_Supervisor_Data) {
 	},
 }
 
-order_supervisor_handle_message :: proc(data: ^Order_Supervisor_Data, from: actod.PID, msg: any) {
+order_supervisor_handle_message :: proc(
+	data: ^Order_Supervisor_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch m in msg {
 	case string:
 		switch m {
@@ -596,7 +757,10 @@ order_supervisor_handle_message :: proc(data: ^Order_Supervisor_Data, from: acto
 				actod.make_actor_config(restart_policy = .TEMPORARY),
 			)
 		case "read_tables":
-			self := cast(^actod.Actor)actod.get(&actod.NODE.actor_registry, actod.get_self_pid())
+			self := cast(^actod.Actor)actod.get(
+				&actod.NODE.actor_registry,
+				actod.get_self_pid(),
+			)
 			sync.atomic_store(&g_order_children_len, len(self.children))
 			sync.atomic_add(&g_order_table_reads, 1)
 		}
@@ -608,8 +772,14 @@ order_tables_read :: proc(state: rawptr) -> bool {
 	return sync.atomic_load(&g_order_table_reads) > before
 }
 
-test_temporary_direct_child_leaves_permanent_supervisor :: proc(t: ^testing.T) {
-	strategies := []actod.Supervision_Strategy{.ONE_FOR_ONE, .ONE_FOR_ALL, .REST_FOR_ONE}
+test_temporary_direct_child_leaves_permanent_supervisor :: proc(
+	t: ^testing.T,
+) {
+	strategies := []actod.Supervision_Strategy {
+		.ONE_FOR_ONE,
+		.ONE_FOR_ALL,
+		.REST_FOR_ONE,
+	}
 	for strategy in strategies {
 		reset_test_state()
 		sync.atomic_store(&g_order_restarts, 0)
@@ -630,7 +800,12 @@ test_temporary_direct_child_leaves_permanent_supervisor :: proc(t: ^testing.T) {
 		)
 		expectf(t, ok, "%v: failed to spawn supervisor", strategy)
 		if !ok do continue
-		expectf(t, wait_for_child_count(supervisor_pid, 1, 500), "%v: declared child should start", strategy)
+		expectf(
+			t,
+			wait_for_child_count(supervisor_pid, 1, 500),
+			"%v: declared child should start",
+			strategy,
+		)
 
 		initial := actod.get_children(supervisor_pid)
 		declared_pid := initial[0] if len(initial) > 0 else 0
@@ -671,7 +846,13 @@ test_temporary_direct_child_leaves_permanent_supervisor :: proc(t: ^testing.T) {
 		expect_value(t, sync.atomic_load(&g_order_restarts), 0)
 
 		remaining := actod.get_children(supervisor_pid)
-		if expectf(t, len(remaining) == 1, "%v: expected only the declared child, got %d", strategy, len(remaining)) {
+		if expectf(
+			t,
+			len(remaining) == 1,
+			"%v: expected only the declared child, got %d",
+			strategy,
+			len(remaining),
+		) {
 			expectf(
 				t,
 				remaining[0] == declared_pid,
@@ -681,7 +862,15 @@ test_temporary_direct_child_leaves_permanent_supervisor :: proc(t: ^testing.T) {
 		}
 		delete(remaining)
 
-		_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
-		expectf(t, wait_for_actor_invalid(supervisor_pid, 1000), "%v: supervisor should stop", strategy)
+		_ = actod.send_message(
+			supervisor_pid,
+			actod.Terminate{reason = .NORMAL},
+		)
+		expectf(
+			t,
+			wait_for_actor_invalid(supervisor_pid, 1000),
+			"%v: supervisor should stop",
+			strategy,
+		)
 	}
 }

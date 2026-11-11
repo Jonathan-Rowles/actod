@@ -27,7 +27,9 @@ Observer_Memory :: struct {
 	heap_allocations: int,
 }
 
-observer_leak_chatter_behaviour := actod.Actor_Behaviour(Observer_Leak_Chatter) {
+observer_leak_chatter_behaviour := actod.Actor_Behaviour(
+	Observer_Leak_Chatter,
+) {
 	handle_message = observer_leak_chatter_handle_message,
 }
 
@@ -58,7 +60,9 @@ observer_actor :: proc() -> ^actod.Actor {
 observer_collection_count :: proc() -> int {
 	observer := observer_actor()
 	if observer == nil do return 0
-	return sync.atomic_load(&(cast(^actod.Observer_Data)observer.data).collection_count)
+	return sync.atomic_load(
+		&(cast(^actod.Observer_Data)observer.data).collection_count,
+	)
 }
 
 @(private = "file")
@@ -76,14 +80,19 @@ observer_mailbox_empty :: proc(state: rawptr) -> bool {
 observer_arena_bytes_outside_message_pool :: proc() -> int {
 	observer := observer_actor()
 	if observer == nil do return 0
-	arena_used := int(observer.arena.primary.total_used + observer.arena.overflow.total_used)
+	arena_used := int(
+		observer.arena.primary.total_used + observer.arena.overflow.total_used,
+	)
 	pool_pages := sync.atomic_load(&observer.pool.allocated_count)
 	return arena_used - pool_pages * observer.pool.page_size
 }
 
 @(private = "file")
 settle_observer :: proc(t: ^testing.T) -> Observer_Memory {
-	_ = actod.send_message(actod.NODE.observer_pid, actod.Set_Collection_Interval{})
+	_ = actod.send_message(
+		actod.NODE.observer_pid,
+		actod.Set_Collection_Interval{},
+	)
 	time.sleep(OBSERVER_LEAK_SETTLE)
 	expect(
 		t,
@@ -104,8 +113,17 @@ run_observer_until_tick :: proc(t: ^testing.T, target_tick: int) -> bool {
 		actod.Set_Collection_Interval{interval = OBSERVER_LEAK_INTERVAL},
 	)
 	target := target_tick
-	reached := poll_until(observer_reached_tick, &target, OBSERVER_LEAK_TICK_BUDGET)
-	expectf(t, reached, "observer never reached collection tick %d", target_tick)
+	reached := poll_until(
+		observer_reached_tick,
+		&target,
+		OBSERVER_LEAK_TICK_BUDGET,
+	)
+	expectf(
+		t,
+		reached,
+		"observer never reached collection tick %d",
+		target_tick,
+	)
 	return reached
 }
 
@@ -127,7 +145,10 @@ test_observer_memory_flat_across_collection_ticks :: proc(t: ^testing.T) {
 	if !started do return
 
 	for pid, i in chatters {
-		_ = actod.send_message(pid, Observer_Leak_Peer{peer = chatters[(i + 1) % len(chatters)]})
+		_ = actod.send_message(
+			pid,
+			Observer_Leak_Peer{peer = chatters[(i + 1) % len(chatters)]},
+		)
 	}
 
 	if !run_observer_until_tick(t, OBSERVER_LEAK_WARMUP_TICKS) do return
@@ -147,7 +168,8 @@ test_observer_memory_flat_across_collection_ticks :: proc(t: ^testing.T) {
 	)
 	expectf(
 		t,
-		after.heap_allocations - baseline.heap_allocations <= OBSERVER_HEAP_SLACK_ALLOCATIONS,
+		after.heap_allocations - baseline.heap_allocations <=
+		OBSERVER_HEAP_SLACK_ALLOCATIONS,
 		"system heap holds %d more live allocations after %d collection ticks",
 		after.heap_allocations - baseline.heap_allocations,
 		measured_ticks,

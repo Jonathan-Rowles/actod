@@ -130,7 +130,11 @@ test_duplicate_detection :: proc(t: ^testing.T) {
 	add_timer(1, 100, make_time(1000), time.Second, false)
 
 	key := Timer_Key{1, 100}
-	testing.expect(t, key in NODE.timer_registry.index_map, "timer should exist")
+	testing.expect(
+		t,
+		key in NODE.timer_registry.index_map,
+		"timer should exist",
+	)
 }
 
 @(test)
@@ -143,7 +147,10 @@ test_repeating_timer_repush :: proc(t: ^testing.T) {
 	add_timer(3, 100, make_time(3000), time.Second, false)
 
 	entry, _ := pq.pop_safe(&NODE.timer_registry.heap)
-	delete_key(&NODE.timer_registry.index_map, Timer_Key{entry.id, entry.owner})
+	delete_key(
+		&NODE.timer_registry.index_map,
+		Timer_Key{entry.id, entry.owner},
+	)
 	testing.expect_value(t, entry.id, u32(1))
 
 	entry.next_fire = time.time_add(entry.next_fire, entry.interval)
@@ -169,7 +176,10 @@ test_drift_free_repeat :: proc(t: ^testing.T) {
 	add_timer(1, 100, scheduled_fire, interval, true)
 
 	entry, _ := pq.pop_safe(&NODE.timer_registry.heap)
-	delete_key(&NODE.timer_registry.index_map, Timer_Key{entry.id, entry.owner})
+	delete_key(
+		&NODE.timer_registry.index_map,
+		Timer_Key{entry.id, entry.owner},
+	)
 
 	entry.next_fire = time.time_add(entry.next_fire, entry.interval)
 
@@ -187,7 +197,10 @@ test_catchup_when_behind :: proc(t: ^testing.T) {
 	add_timer(1, 100, scheduled_fire, interval, true)
 
 	entry, _ := pq.pop_safe(&NODE.timer_registry.heap)
-	delete_key(&NODE.timer_registry.index_map, Timer_Key{entry.id, entry.owner})
+	delete_key(
+		&NODE.timer_registry.index_map,
+		Timer_Key{entry.id, entry.owner},
+	)
 
 	now := make_time(1_500_000_000)
 
@@ -236,7 +249,13 @@ test_same_id_different_owners :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-set_timer_quietly :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error) {
+set_timer_quietly :: proc(
+	interval: time.Duration,
+	repeat: bool,
+) -> (
+	u32,
+	Send_Error,
+) {
 	context.logger = log.nil_logger()
 	return set_timer(interval, repeat)
 }
@@ -253,7 +272,10 @@ test_set_timer_refuses_non_positive_repeating_interval :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-make_repeating_entry :: proc(due: time.Time, interval: time.Duration) -> Timer_Entry {
+make_repeating_entry :: proc(
+	due: time.Time,
+	interval: time.Duration,
+) -> Timer_Entry {
 	return Timer_Entry {
 		id = 1,
 		owner = 100,
@@ -268,10 +290,24 @@ make_repeating_entry :: proc(due: time.Time, interval: time.Duration) -> Timer_E
 test_backlogged_repeating_timer_keeps_its_phase :: proc(t: ^testing.T) {
 	entry := make_repeating_entry(make_time(3_000_000_000), time.Second)
 
-	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(3_000_000_000)))
+	testing.expect(
+		t,
+		reschedule_timer(
+			&entry,
+			.RECEIVER_BACKLOGGED,
+			make_time(3_000_000_000),
+		),
+	)
 	testing.expect_value(t, entry.next_fire, make_time(3_001_000_000))
 
-	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(3_001_000_000)))
+	testing.expect(
+		t,
+		reschedule_timer(
+			&entry,
+			.RECEIVER_BACKLOGGED,
+			make_time(3_001_000_000),
+		),
+	)
 	testing.expect(t, reschedule_timer(&entry, .OK, make_time(3_005_000_000)))
 	testing.expect_value(t, entry.next_fire, make_time(4_000_000_000))
 
@@ -281,9 +317,19 @@ test_backlogged_repeating_timer_keeps_its_phase :: proc(t: ^testing.T) {
 
 @(test)
 test_backlogged_repeating_timer_merges_missed_periods :: proc(t: ^testing.T) {
-	entry := make_repeating_entry(make_time(1_000_000_000), 100 * time.Millisecond)
+	entry := make_repeating_entry(
+		make_time(1_000_000_000),
+		100 * time.Millisecond,
+	)
 
-	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(1_000_000_000)))
+	testing.expect(
+		t,
+		reschedule_timer(
+			&entry,
+			.RECEIVER_BACKLOGGED,
+			make_time(1_000_000_000),
+		),
+	)
 	testing.expect(t, reschedule_timer(&entry, .OK, make_time(1_350_000_000)))
 	testing.expect_value(t, entry.next_fire, make_time(1_400_000_000))
 
@@ -300,12 +346,18 @@ test_backlogged_one_shot_timer_stays_until_delivered :: proc(t: ^testing.T) {
 		due       = make_time(1000),
 	}
 
-	testing.expect(t, reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(1000)))
+	testing.expect(
+		t,
+		reschedule_timer(&entry, .RECEIVER_BACKLOGGED, make_time(1000)),
+	)
 	testing.expect_value(
 		t,
 		entry.next_fire,
 		time.time_add(make_time(1000), TIMER_TICK_RETRY_DELAY),
 	)
 	testing.expect(t, !reschedule_timer(&entry, .OK, entry.next_fire))
-	testing.expect(t, !reschedule_timer(&entry, .ACTOR_NOT_FOUND, entry.next_fire))
+	testing.expect(
+		t,
+		!reschedule_timer(&entry, .ACTOR_NOT_FOUND, entry.next_fire),
+	)
 }

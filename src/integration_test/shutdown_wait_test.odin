@@ -52,13 +52,20 @@ retire_list_nonempty :: proc(_: rawptr) -> bool {
 }
 
 test_shutdown_waits_for_pinned_sender :: proc(t: ^testing.T) {
-	pid, ok := actod.spawn("pinned_target", Shutdown_Probe{}, shutdown_probe_behaviour)
+	pid, ok := actod.spawn(
+		"pinned_target",
+		Shutdown_Probe{},
+		shutdown_probe_behaviour,
+	)
 	if !expect(t, ok, "spawn pinned_target") do return
 
 	sender := Pinned_Sender {
 		pid = pid,
 	}
-	sender_thread := thread.create_and_start_with_data(&sender, pinned_sender_proc)
+	sender_thread := thread.create_and_start_with_data(
+		&sender,
+		pinned_sender_proc,
+	)
 	sync.sema_wait(&sender.pinned)
 	if !expect(t, sender.actor_ptr != nil, "the pinned sender read the actor pointer") do return
 
@@ -70,7 +77,10 @@ test_shutdown_waits_for_pinned_sender :: proc(t: ^testing.T) {
 	)
 
 	shutdown_done: bool
-	shutdown_thread := thread.create_and_start_with_data(&shutdown_done, shutdown_node_proc)
+	shutdown_thread := thread.create_and_start_with_data(
+		&shutdown_done,
+		shutdown_node_proc,
+	)
 
 	time.sleep(scaled_timeout(500 * time.Millisecond))
 	expect(
@@ -159,13 +169,20 @@ test_shutdown_waits_for_stuck_actor :: proc(t: ^testing.T) {
 
 	sync.atomic_store(&sleepy_handler_entered, false)
 	expect_value(t, actod.send_message(pid, Sleepy_Nap{}), actod.Send_Error.OK)
-	handler_entered := poll_until(atomic_flag_raised, &sleepy_handler_entered, 5 * time.Second)
+	handler_entered := poll_until(
+		atomic_flag_raised,
+		&sleepy_handler_entered,
+		5 * time.Second,
+	)
 	if !expect(t, handler_entered, "the sleepy handler was entered before shutdown began") do return
 
 	count_shutdown_stuck_reports()
 
 	shutdown_done: bool
-	shutdown_thread := thread.create_and_start_with_data(&shutdown_done, shutdown_node_proc)
+	shutdown_thread := thread.create_and_start_with_data(
+		&shutdown_done,
+		shutdown_node_proc,
+	)
 
 	time.sleep(REMOVED_SHUTDOWN_CAPS_EXPIRED_WALL_CLOCK_UNSCALED)
 	expect(
@@ -175,7 +192,8 @@ test_shutdown_waits_for_stuck_actor :: proc(t: ^testing.T) {
 	)
 	expectf(
 		t,
-		sync.atomic_load(&stuck_report_count) >= STUCK_REPORTS_EXPECTED_BEFORE_REMOVED_CAPS_EXPIRED,
+		sync.atomic_load(&stuck_report_count) >=
+		STUCK_REPORTS_EXPECTED_BEFORE_REMOVED_CAPS_EXPIRED,
 		"shutdown logged %d stuck-actor reports in 6.5 s, wanted at least %d",
 		sync.atomic_load(&stuck_report_count),
 		STUCK_REPORTS_EXPECTED_BEFORE_REMOVED_CAPS_EXPIRED,

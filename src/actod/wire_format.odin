@@ -45,12 +45,19 @@ write_network_header :: proc(
 }
 
 // Wire format: [flags:u16][type_hash:u64][from:Handle(8)][to:Handle(8)][to_name?][payload]
-parse_network_header :: proc(raw_data: []byte) -> (header: Parsed_Network_Header, ok: bool) {
+parse_network_header :: proc(
+	raw_data: []byte,
+) -> (
+	header: Parsed_Network_Header,
+	ok: bool,
+) {
 	if len(raw_data) < NETWORK_HEADER_SIZE {
 		return {}, false
 	}
 
-	header.flags = transmute(Network_Message_Flags)endian.unchecked_get_u16le(raw_data[0:2])
+	header.flags = transmute(Network_Message_Flags)endian.unchecked_get_u16le(
+		raw_data[0:2],
+	)
 	header.type_hash = endian.unchecked_get_u64le(raw_data[2:10])
 	header.from_handle = (cast(^Handle)&raw_data[10])^
 	header.to_handle = (cast(^Handle)&raw_data[18])^
@@ -77,9 +84,16 @@ parse_network_header :: proc(raw_data: []byte) -> (header: Parsed_Network_Header
 	return header, true
 }
 
-wire_format_exact_size :: #force_inline proc(content: $T, name_len: int) -> u32 {
+wire_format_exact_size :: #force_inline proc(
+	content: $T,
+	name_len: int,
+) -> u32 {
 	v := content
-	return wire_format_exact_size_impl(&v, get_validated_message_info_ptr(T), name_len)
+	return wire_format_exact_size_impl(
+		&v,
+		get_validated_message_info_ptr(T),
+		name_len,
+	)
 }
 
 build_wire_format_into_buffer :: #force_inline proc(
@@ -130,7 +144,10 @@ process_recv_frames :: proc(
 		if msg_size > MAX_MESSAGE_SIZE do return read_pos, .Too_Large
 		if read_pos + 4 + msg_size > write_pos do break
 
-		keep_going := process_msg(ctx, data[read_pos + 4:read_pos + 4 + msg_size])
+		keep_going := process_msg(
+			ctx,
+			data[read_pos + 4:read_pos + 4 + msg_size],
+		)
 		read_pos += 4 + msg_size
 		if !keep_going do break
 	}

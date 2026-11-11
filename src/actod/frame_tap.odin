@@ -40,7 +40,9 @@ g_frame_fault_mutex: sync.Mutex
 
 frame_tap_add :: proc(rule: Frame_Fault_Rule) {
 	assert(
-		!(rule.dir == .In && rule.type_hash == FRAME_TAP_HANDSHAKE && rule.action == .Duplicate),
+		!(rule.dir == .In &&
+			rule.type_hash == FRAME_TAP_HANDSHAKE &&
+			rule.action == .Duplicate),
 		"frame_tap: Duplicate is not implementable on the inbound handshake path (exactly one frame is returned to the caller); use Drop or Corrupt",
 	)
 	sync.mutex_lock(&g_frame_fault_mutex)
@@ -109,7 +111,10 @@ frame_tap_type_hash :: proc($T: typeid) -> u64 {
 }
 
 frame_tap_out_hash :: #force_inline proc(msg_data: []byte) -> u64 {
-	return frame_tap_hash_at(msg_data, WIRE_SIZE_PREFIX_SIZE + WIRE_TYPE_HASH_OFFSET)
+	return frame_tap_hash_at(
+		msg_data,
+		WIRE_SIZE_PREFIX_SIZE + WIRE_TYPE_HASH_OFFSET,
+	)
 }
 
 frame_tap_in_hash :: #force_inline proc(msg_data: []byte) -> u64 {

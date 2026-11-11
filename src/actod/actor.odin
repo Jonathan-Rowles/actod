@@ -14,11 +14,13 @@ import "core:time"
 
 DEFAULT_MAIL_BOX_SIZE :: #config(ACTOD_MAILBOX_SIZE, 32)
 #assert(
-	DEFAULT_MAIL_BOX_SIZE > 0 && (DEFAULT_MAIL_BOX_SIZE & (DEFAULT_MAIL_BOX_SIZE - 1)) == 0,
+	DEFAULT_MAIL_BOX_SIZE > 0 &&
+	(DEFAULT_MAIL_BOX_SIZE & (DEFAULT_MAIL_BOX_SIZE - 1)) == 0,
 	"-define:ACTOD_MAILBOX_SIZE must be a power of two",
 )
 SEND_RETRY_DELAY :: 1 * time.Microsecond
-SEND_STALL_TIMEOUT :: #config(ACTOD_SEND_STALL_TIMEOUT_MS, 100) * time.Millisecond
+SEND_STALL_TIMEOUT ::
+	#config(ACTOD_SEND_STALL_TIMEOUT_MS, 100) * time.Millisecond
 SEND_MAX_BLOCK_TIMEOUT :: 100 * time.Millisecond
 THREAD_SEND_SPIN_TRIES :: 4096
 BATCH_SIZE :: LOCAL_MAILBOX_SIZE
@@ -98,8 +100,17 @@ Actor_Behaviour :: struct($T: typeid) {
 		reason: Termination_Reason,
 		will_restart: bool,
 	),
-	on_child_restarted:       proc(data: ^T, old_pid: PID, new_pid: PID, restart_count: int),
-	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID, child_name: string),
+	on_child_restarted:       proc(
+		data: ^T,
+		old_pid: PID,
+		new_pid: PID,
+		restart_count: int,
+	),
+	on_max_restarts_exceeded: proc(
+		data: ^T,
+		child_pid: PID,
+		child_name: string,
+	),
 }
 
 Erased_Behaviour :: struct {
@@ -117,8 +128,17 @@ Erased_Behaviour :: struct {
 		reason: Termination_Reason,
 		will_restart: bool,
 	),
-	on_child_restarted:       proc(data: rawptr, old_pid: PID, new_pid: PID, restart_count: int),
-	on_max_restarts_exceeded: proc(data: rawptr, child_pid: PID, child_name: string),
+	on_child_restarted:       proc(
+		data: rawptr,
+		old_pid: PID,
+		new_pid: PID,
+		restart_count: int,
+	),
+	on_max_restarts_exceeded: proc(
+		data: rawptr,
+		child_pid: PID,
+		child_name: string,
+	),
 }
 
 @(private)
@@ -264,12 +284,18 @@ ARENA_COMMIT_SIZE :: mem.Kilobyte * 64
 ARENA_FIXED_OVERHEAD :: mem.Kilobyte * 64
 
 @(private)
-actor_arena_reserve :: proc(data_size: int, mailbox_size: int, opts: Actor_Config) -> uint {
+actor_arena_reserve :: proc(
+	data_size: int,
+	mailbox_size: int,
+	opts: Actor_Config,
+) -> uint {
 	max_pages := pool_max_pages(mailbox_size)
 	pool_pages := max_pages * opts.page_size
 	pool_bookkeeping :=
-		next_power_of_two(max_pages) * size_of(Pool_Entry) + max_pages * size_of(rawptr)
-	mailbox_bytes := (mailbox_size + SYSTEM_MAILBOX_SIZE) * size_of(Entry(Message))
+		next_power_of_two(max_pages) * size_of(Pool_Entry) +
+		max_pages * size_of(rawptr)
+	mailbox_bytes :=
+		(mailbox_size + SYSTEM_MAILBOX_SIZE) * size_of(Entry(Message))
 	local_bytes := size_of([LOCAL_MAILBOX_SIZE]Message)
 	static_worst :=
 		data_size +
@@ -296,7 +322,11 @@ actor_arena_slot_size :: proc(opts: Actor_Config) -> uint {
 }
 
 @(private)
-reconstruct_msg :: #force_inline proc(msg: ^Message, data: ^any, header: ^^Type_Header) {
+reconstruct_msg :: #force_inline proc(
+	msg: ^Message,
+	data: ^any,
+	header: ^^Type_Header,
+) {
 	if msg.content == nil {
 		data.data = &msg.inline_data
 		data.id = msg.inline_type
@@ -316,21 +346,44 @@ reconstruct_msg :: #force_inline proc(msg: ^Message, data: ^any, header: ^^Type_
 }
 
 @(require_results)
-send_self :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
+send_self :: #force_inline proc(
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_self(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
+	CLASS ::
+		Msg_Class.System when intrinsics.type_is_variant_of(
+			SYSTEM_MSG,
+			T,
+		) else Msg_Class.User
 	return send_self_impl(&v, size_of(T), typeid_of(T), info, CLASS, loc)
 }
 
 @(require_results)
-send_message :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
+send_message :: #force_inline proc(
+	to: PID,
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message(u64(to), content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
-	return send_message_impl(to, &v, size_of(T), typeid_of(T), info, CLASS, loc)
+	CLASS ::
+		Msg_Class.System when intrinsics.type_is_variant_of(
+			SYSTEM_MSG,
+			T,
+		) else Msg_Class.User
+	return send_message_impl(
+		to,
+		&v,
+		size_of(T),
+		typeid_of(T),
+		info,
+		CLASS,
+		loc,
+	)
 }
 
 // Send message by actor name. Supports both local and remote actors.
@@ -341,7 +394,11 @@ send_message :: #force_inline proc(to: PID, content: $T, loc := #caller_location
 // For dynamic node/actor names, use send_to(actor, node, msg) instead.
 // For performance with known PIDs, use send_message(to: PID, content) instead.
 @(require_results)
-send_message_name :: proc(to: string, content: $T, loc := #caller_location) -> Send_Error {
+send_message_name :: proc(
+	to: string,
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_name(to, content); ok do return Send_Error(r)}
 
@@ -408,17 +465,42 @@ send_message_to_children :: #force_inline proc(
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_children(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
-	return send_message_to_children_impl(&v, size_of(T), typeid_of(T), info, CLASS, loc)
+	CLASS ::
+		Msg_Class.System when intrinsics.type_is_variant_of(
+			SYSTEM_MSG,
+			T,
+		) else Msg_Class.User
+	return send_message_to_children_impl(
+		&v,
+		size_of(T),
+		typeid_of(T),
+		info,
+		CLASS,
+		loc,
+	)
 }
 
 @(require_results)
-send_message_to_parent :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
+send_message_to_parent :: #force_inline proc(
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	when ODIN_TEST {if r, ok := ti.intercept_send_message_to_parent(content); ok do return Send_Error(r)}
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
-	return send_message_to_parent_impl(&v, size_of(T), typeid_of(T), info, CLASS, loc)
+	CLASS ::
+		Msg_Class.System when intrinsics.type_is_variant_of(
+			SYSTEM_MSG,
+			T,
+		) else Msg_Class.User
+	return send_message_to_parent_impl(
+		&v,
+		size_of(T),
+		typeid_of(T),
+		info,
+		CLASS,
+		loc,
+	)
 }
 
 @(private)
@@ -473,9 +555,13 @@ retry_local_send_loop :: proc(
 		}
 		if target.local_write - target.local_read < LOCAL_MAILBOX_SIZE {
 			ensure_local_buf(target)
-			target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
+			target.local_buf[target.local_write & (LOCAL_MAILBOX_SIZE - 1)] =
+				msg
 			target.local_write += 1
-			if !sync.atomic_load_explicit(&target.pool_handle.in_ready_queue, .Relaxed) {
+			if !sync.atomic_load_explicit(
+				&target.pool_handle.in_ready_queue,
+				.Relaxed,
+			) {
 				wake_actor(target)
 			}
 			handle_set_message_stats(msg.from, to)
@@ -533,7 +619,10 @@ push_to_mailbox :: #force_inline proc(
 			ensure_local_buf(actor)
 			actor.local_buf[actor.local_write & (LOCAL_MAILBOX_SIZE - 1)] = msg
 			actor.local_write += 1
-			if !sync.atomic_load_explicit(&actor.pool_handle.in_ready_queue, .Relaxed) {
+			if !sync.atomic_load_explicit(
+				&actor.pool_handle.in_ready_queue,
+				.Relaxed,
+			) {
 				wake_actor(actor)
 			}
 			handle_set_message_stats(msg.from, to)
@@ -549,7 +638,17 @@ push_to_mailbox :: #force_inline proc(
 	}
 
 	blocked_msg := msg
-	return send_user_backpressure(to, &blocked_msg, true, nil, 0, nil, nil, 0, loc)
+	return send_user_backpressure(
+		to,
+		&blocked_msg,
+		true,
+		nil,
+		0,
+		nil,
+		nil,
+		0,
+		loc,
+	)
 }
 
 @(private)
@@ -616,8 +715,21 @@ send :: #force_inline proc(
 ) -> Send_Error {
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	CLASS :: Msg_Class.System when intrinsics.type_is_variant_of(SYSTEM_MSG, T) else Msg_Class.User
-	return send_to_actor_impl(to, actor, &v, size_of(T), typeid_of(T), info, CLASS, loc)
+	CLASS ::
+		Msg_Class.System when intrinsics.type_is_variant_of(
+			SYSTEM_MSG,
+			T,
+		) else Msg_Class.User
+	return send_to_actor_impl(
+		to,
+		actor,
+		&v,
+		size_of(T),
+		typeid_of(T),
+		info,
+		CLASS,
+		loc,
+	)
 }
 
 @(require_results)
@@ -642,7 +754,8 @@ terminate_actor :: proc(
 
 	if actor_ptr == nil do return true
 
-	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
+	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) +
+		offset_of(Actor, state))
 	state := sync.atomic_load(state_ptr)
 	if state == .STOPPING || state == .THREAD_STOPPED || state == .TERMINATED do return true
 
@@ -673,14 +786,24 @@ terminate_actor :: proc(
 
 // Dynamically add a child to a supervisor
 @(require_results)
-add_child :: proc(parent: PID, child_spawn: SPAWN, loc := #caller_location) -> bool {
+add_child :: proc(
+	parent: PID,
+	child_spawn: SPAWN,
+	loc := #caller_location,
+) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	if child_spawn == nil {
-		panic_at(loc, "add_child(parent=%v): child_spawn must not be nil", parent)
+		panic_at(
+			loc,
+			"add_child(parent=%v): child_spawn must not be nil",
+			parent,
+		)
 	}
 
 	supervisor := supervising_parent(parent)
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervisor))
+	parent_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, supervisor),
+	)
 	if !ok {
 		log.errorf(
 			"add_child failed: supervisor %v is not a live actor (never spawned, already terminated, or a stale PID)",
@@ -731,7 +854,9 @@ add_child_existing :: proc(
 	}
 
 	supervisor := supervising_parent(parent)
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervisor))
+	parent_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, supervisor),
+	)
 	if !ok {
 		log.errorf(
 			"add_child_existing failed: supervisor %v is not a live actor (never spawned, already terminated, or a stale PID)",
@@ -763,10 +888,16 @@ add_child_existing :: proc(
 
 // Remove a child from a supervisor
 @(require_results)
-remove_child :: proc(parent: PID, child: PID, loc := #caller_location) -> bool {
+remove_child :: proc(
+	parent: PID,
+	child: PID,
+	loc := #caller_location,
+) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	supervisor := supervising_parent(parent)
-	parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, supervisor))
+	parent_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, supervisor),
+	)
 	if !ok {
 		log.errorf(
 			"remove_child(child=%v) failed: supervisor %v is not a live actor",
@@ -815,7 +946,9 @@ get_children :: proc(parent: PID) -> []PID {
 }
 
 get_parent_pid :: proc() -> PID {
-	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, get_self_pid()),
+	)
 	if !ok do return 0
 	return actor.parent
 }
@@ -830,7 +963,9 @@ get_actor_name :: #force_inline proc(pid: PID) -> string {
 }
 
 @(private)
-load_published_name :: #force_inline proc "contextless" (actor: ^Actor) -> string {
+load_published_name :: #force_inline proc "contextless" (
+	actor: ^Actor,
+) -> string {
 	return intrinsics.atomic_load_explicit(&actor.published_name, .Acquire)^
 }
 
@@ -874,11 +1009,17 @@ get_self_pid :: #force_inline proc() -> PID {
 	return pack_pid(Handle{idx = 0, gen = 0, actor_type = 0}, NODE.node_id)
 }
 
-self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_location) -> bool {
+self_terminate :: proc(
+	reason: Termination_Reason = .NORMAL,
+	loc := #caller_location,
+) -> bool {
 	when ODIN_TEST {if ti.intercept_self_terminate(ti.Termination_Reason(reason)) do return true}
 
 	if current_actor_context == nil {
-		log.error("self_terminate failed: must be called from inside an actor", location = loc)
+		log.error(
+			"self_terminate failed: must be called from inside an actor",
+			location = loc,
+		)
 		return false
 	}
 	pid := get_self_pid()
@@ -887,7 +1028,11 @@ self_terminate :: proc(reason: Termination_Reason = .NORMAL, loc := #caller_loca
 
 
 @(require_results)
-rename_actor :: proc(pid: PID, new_name: string, loc := #caller_location) -> bool {
+rename_actor :: proc(
+	pid: PID,
+	new_name: string,
+	loc := #caller_location,
+) -> bool {
 	context.logger = diagnostic_logger(context.logger)
 	when ODIN_TEST {if ti.intercept_rename_actor(u64(pid), new_name) do return true}
 
@@ -1036,7 +1181,12 @@ send_system_from_payload :: #force_inline proc(
 	msg: Message
 	msg.from = from_pid
 
-	alloc_err, attempted_size := create_message_from_payload(&msg, &actor.pool, payload, info)
+	alloc_err, attempted_size := create_message_from_payload(
+		&msg,
+		&actor.pool,
+		payload,
+		info,
+	)
 	if alloc_err != .OK do return report_alloc_error(alloc_err, attempted_size, &actor.pool, to_pid)
 
 	if !mpsc_push(&actor.system_mailbox, msg) {
@@ -1165,8 +1315,12 @@ collect_actor_stats :: proc(actor: ^Actor) -> Actor_Stats {
 		context.allocator = actor_system_allocator
 		defer context.allocator = saved_allocator
 
-		stats.received_from = take_traffic_histogram(&current_actor_context.stats.received)
-		stats.sent_to = take_traffic_histogram(&current_actor_context.stats.sent)
+		stats.received_from = take_traffic_histogram(
+			&current_actor_context.stats.received,
+		)
+		stats.sent_to = take_traffic_histogram(
+			&current_actor_context.stats.sent,
+		)
 	}
 
 	return stats
@@ -1196,7 +1350,9 @@ handle_get_stats_request :: proc(actor: ^Actor, request: Get_Stats) {
 		stats = stats,
 	}
 
-	requester_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, request.requester))
+	requester_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, request.requester),
+	)
 	if ok && send(request.requester, response, requester_actor) == .OK do return
 	delete(stats.received_from)
 	delete(stats.sent_to)
@@ -1223,7 +1379,13 @@ handle_rename_actor :: proc(actor: ^Actor, msg: Rename_Actor) {
 	pid_map_rename(&NODE.actor_registry, actor.pid, msg.new_name)
 
 	h, _ := unpack_pid(current_actor_context.pid)
-	log.infof("Actor [%s|%v:%v] renamed to '%s'", old_name, h.idx, h.gen, msg.new_name)
+	log.infof(
+		"Actor [%s|%v:%v] renamed to '%s'",
+		old_name,
+		h.idx,
+		h.gen,
+		msg.new_name,
+	)
 }
 
 cleanup_actor_thread :: proc(actor_ptr: rawptr) {
@@ -1236,7 +1398,11 @@ cleanup_actor_thread :: proc(actor_ptr: rawptr) {
 	}
 }
 
-try_transition_state :: proc(state_ptr: ^Actor_State, from: Actor_State, to: Actor_State) -> bool {
+try_transition_state :: proc(
+	state_ptr: ^Actor_State,
+	from: Actor_State,
+	to: Actor_State,
+) -> bool {
 	_, swapped := sync.atomic_compare_exchange_strong(state_ptr, from, to)
 	return swapped
 }

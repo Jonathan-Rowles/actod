@@ -19,7 +19,11 @@ Ready_Queue_Probe :: struct {
 }
 
 ready_queue_behaviour := actod.Actor_Behaviour(Ready_Queue_Probe) {
-	handle_message = proc(data: ^Ready_Queue_Probe, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Ready_Queue_Probe,
+		from: actod.PID,
+		msg: any,
+	) {
 		if _, ok := msg.(u64); ok {
 			sync.atomic_add(&ready_queue_received, 1)
 		}
@@ -31,7 +35,11 @@ Ready_Queue_Blocker :: struct {
 }
 
 ready_queue_blocker_behaviour := actod.Actor_Behaviour(Ready_Queue_Blocker) {
-	handle_message = proc(data: ^Ready_Queue_Blocker, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Ready_Queue_Blocker,
+		from: actod.PID,
+		msg: any,
+	) {
 		if _, ok := msg.(u64); ok {
 			time.sleep(READY_QUEUE_BLOCK)
 			sync.atomic_add(&ready_queue_blockers_done, 1)
@@ -78,7 +86,11 @@ test_all_actors_run_when_woken_at_once :: proc(t: ^testing.T) {
 	}
 
 	for pid in blockers {
-		expect(t, actod.send_message(pid, u64(1)) == .OK, "failed to occupy a worker")
+		expect(
+			t,
+			actod.send_message(pid, u64(1)) == .OK,
+			"failed to occupy a worker",
+		)
 	}
 	time.sleep(50 * time.Millisecond)
 

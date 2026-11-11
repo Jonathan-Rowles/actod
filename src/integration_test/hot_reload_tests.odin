@@ -21,17 +21,29 @@ HR_TEST_SRC_DIR :: "src/pkgs/hot_reload/mocks"
 @(private)
 hr_build_counter: u64
 
-hr_build_test_module :: proc(name: string) -> (so_path: string, tmp_dir: string, ok: bool) {
+hr_build_test_module :: proc(
+	name: string,
+) -> (
+	so_path: string,
+	tmp_dir: string,
+	ok: bool,
+) {
 	uid := sync.atomic_add(&hr_build_counter, 1)
 	sys_tmp, _ := os.temp_directory(context.temp_allocator)
 	tmp, _ := filepath.join(
-		{sys_tmp, fmt.tprintf("actod_hr_integration_%d_%d", os.get_pid(), uid)},
+		{
+			sys_tmp,
+			fmt.tprintf("actod_hr_integration_%d_%d", os.get_pid(), uid),
+		},
 		context.temp_allocator,
 	)
 	os.make_directory(tmp)
 
 	src, _ := filepath.join({HR_TEST_SRC_DIR, name}, context.temp_allocator)
-	out, _ := filepath.join({tmp, fmt.tprintf("%s%s", name, hot_reload.SHARED_LIB_EXT)}, context.temp_allocator)
+	out, _ := filepath.join(
+		{tmp, fmt.tprintf("%s%s", name, hot_reload.SHARED_LIB_EXT)},
+		context.temp_allocator,
+	)
 
 	result := hot_reload.compile_module(src, out)
 	if !result.ok {
@@ -41,7 +53,11 @@ hr_build_test_module :: proc(name: string) -> (so_path: string, tmp_dir: string,
 	return out, tmp, true
 }
 
-hr_handle_message_v1 :: proc(data: ^HR_Counter_State, from: actod.PID, content: any) {
+hr_handle_message_v1 :: proc(
+	data: ^HR_Counter_State,
+	from: actod.PID,
+	content: any,
+) {
 	data.count += 1
 }
 
@@ -60,7 +76,8 @@ hr_read_count :: proc(pid: actod.PID) -> (i32, bool) {
 		return 0, false
 	}
 
-	data_ptr := cast(^rawptr)(uintptr(actor_ptr) + offset_of(actod.Actor, data))
+	data_ptr := cast(^rawptr)(uintptr(actor_ptr) +
+		offset_of(actod.Actor, data))
 	if data_ptr^ == nil {
 		return 0, false
 	}
@@ -79,13 +96,28 @@ hr_count_reached :: proc(state: rawptr) -> bool {
 	return ok && count >= probe.expected
 }
 
-hr_wait_for_count :: proc(pid: actod.PID, expected: i32, max_ms: int = 500) -> bool {
-	probe := HR_Count_Probe{pid = pid, expected = expected}
-	return poll_until(hr_count_reached, &probe, time.Duration(max_ms) * time.Millisecond)
+hr_wait_for_count :: proc(
+	pid: actod.PID,
+	expected: i32,
+	max_ms: int = 500,
+) -> bool {
+	probe := HR_Count_Probe {
+		pid      = pid,
+		expected = expected,
+	}
+	return poll_until(
+		hr_count_reached,
+		&probe,
+		time.Duration(max_ms) * time.Millisecond,
+	)
 }
 
 test_hot_reload_basic :: proc(t: ^testing.T) {
-	pid, spawned := actod.spawn("hr-counter", HR_Counter_State{}, HR_V1_Behaviour)
+	pid, spawned := actod.spawn(
+		"hr-counter",
+		HR_Counter_State{},
+		HR_V1_Behaviour,
+	)
 	expect(t, spawned, "Failed to spawn counter actor")
 	if !spawned do return
 
@@ -113,7 +145,9 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 	expect(t, built, "Failed to build counter_v2.so")
 	if !built do return
 
-	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
+	specs := []hot_reload.Symbol_Spec {
+		{name = "handle_message", required = true},
+	}
 	load_err: hot_reload.Load_Error
 	mod, load_err = hot_reload.load_module(
 		v2_path,
@@ -144,7 +178,11 @@ test_hot_reload_basic :: proc(t: ^testing.T) {
 }
 
 test_rollback :: proc(t: ^testing.T) {
-	pid, spawned := actod.spawn("hr-rollback-test", HR_Counter_State{}, HR_V1_Behaviour)
+	pid, spawned := actod.spawn(
+		"hr-rollback-test",
+		HR_Counter_State{},
+		HR_V1_Behaviour,
+	)
 	expect(t, spawned, "Failed to spawn")
 	if !spawned do return
 
@@ -179,7 +217,9 @@ test_rollback :: proc(t: ^testing.T) {
 		return
 	}
 
-	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
+	specs := []hot_reload.Symbol_Spec {
+		{name = "handle_message", required = true},
+	}
 
 	v1_err: hot_reload.Load_Error
 	v1_mod, v1_err = hot_reload.load_module(
@@ -221,7 +261,11 @@ test_rollback :: proc(t: ^testing.T) {
 	time.sleep(20 * time.Millisecond)
 
 	_ = actod.send_message(pid, "tick")
-	expect(t, hr_wait_for_count(pid, 13), "after rollback should increment by 1 to 13")
+	expect(
+		t,
+		hr_wait_for_count(pid, 13),
+		"after rollback should increment by 1 to 13",
+	)
 
 	count, ok := hr_read_count(pid)
 	expect(t, ok, "should read count")
@@ -232,7 +276,10 @@ test_rollback :: proc(t: ^testing.T) {
 test_file_watcher_detection :: proc(t: ^testing.T) {
 	uid := sync.atomic_add(&hr_build_counter, 1)
 	sys_tmp, _ := os.temp_directory(context.temp_allocator)
-	dir, _ := filepath.join({sys_tmp, fmt.tprintf("actod_test_file_watcher_%d", uid)}, context.temp_allocator)
+	dir, _ := filepath.join(
+		{sys_tmp, fmt.tprintf("actod_test_file_watcher_%d", uid)},
+		context.temp_allocator,
+	)
 	os.make_directory(dir)
 	defer os.remove_all(dir)
 
@@ -277,7 +324,10 @@ test_file_watcher_detection :: proc(t: ^testing.T) {
 			{dir, fmt.tprintf("test_%d.odin", attempt)},
 			context.temp_allocator,
 		)
-		_ = os.write_entire_file(test_file, transmute([]u8)string("package test\n"))
+		_ = os.write_entire_file(
+			test_file,
+			transmute([]u8)string("package test\n"),
+		)
 
 		for _ in 0 ..< 5 {
 			if sync.atomic_load_explicit(&callback_fired, .Acquire) {
@@ -297,7 +347,11 @@ test_file_watcher_detection :: proc(t: ^testing.T) {
 }
 
 test_hot_reload_under_load :: proc(t: ^testing.T) {
-	pid, spawned := actod.spawn("hr-load-test", HR_Counter_State{}, HR_V1_Behaviour)
+	pid, spawned := actod.spawn(
+		"hr-load-test",
+		HR_Counter_State{},
+		HR_V1_Behaviour,
+	)
 	expect(t, spawned, "Failed to spawn counter actor")
 	if !spawned do return
 
@@ -356,7 +410,9 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 		return
 	}
 
-	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
+	specs := []hot_reload.Symbol_Spec {
+		{name = "handle_message", required = true},
+	}
 	load_err: hot_reload.Load_Error
 	mod, load_err = hot_reload.load_module(
 		v2_path,
@@ -386,7 +442,11 @@ test_hot_reload_under_load :: proc(t: ^testing.T) {
 	expect(t, count_before > 0, "should have processed messages")
 
 	_ = actod.send_message(pid, "tick")
-	expect(t, hr_wait_for_count(pid, count_before + 10), "post-reload tick should add 10")
+	expect(
+		t,
+		hr_wait_for_count(pid, count_before + 10),
+		"post-reload tick should add 10",
+	)
 
 	count_after, ok2 := hr_read_count(pid)
 	expect(t, ok2, "should read count after")
@@ -404,7 +464,11 @@ test_hot_reload_delivers_package_qualified_type :: proc(t: ^testing.T) {
 	if !registered do return
 	expect_value(t, info.name, "hot_reload_shared.Bump")
 
-	pid, spawned := actod.spawn("hr-named", HR_Counter_State{}, HR_V1_Behaviour)
+	pid, spawned := actod.spawn(
+		"hr-named",
+		HR_Counter_State{},
+		HR_V1_Behaviour,
+	)
 	expect(t, spawned, "Failed to spawn counter actor")
 	if !spawned do return
 
@@ -423,7 +487,9 @@ test_hot_reload_delivers_package_qualified_type :: proc(t: ^testing.T) {
 	expect(t, built, "Failed to build counter_named.so")
 	if !built do return
 
-	specs := []hot_reload.Symbol_Spec{{name = "handle_message", required = true}}
+	specs := []hot_reload.Symbol_Spec {
+		{name = "handle_message", required = true},
+	}
 	load_err: hot_reload.Load_Error
 	mod, load_err = hot_reload.load_module(
 		so_path,
@@ -442,11 +508,21 @@ test_hot_reload_delivers_package_qualified_type :: proc(t: ^testing.T) {
 	time.sleep(20 * time.Millisecond)
 
 	for _ in 0 ..< 3 {
-		err := actod.send_message(pid, hot_reload_shared.Bump{amount = 7, label = hot_reload_shared.BUMP_LABEL})
+		err := actod.send_message(
+			pid,
+			hot_reload_shared.Bump {
+				amount = 7,
+				label = hot_reload_shared.BUMP_LABEL,
+			},
+		)
 		expect(t, err == .OK, "Failed to send Bump after reload")
 	}
 
-	expect(t, hr_wait_for_count(pid, 21), "the reloaded handler should match hot_reload_shared.Bump three times")
+	expect(
+		t,
+		hr_wait_for_count(pid, 21),
+		"the reloaded handler should match hot_reload_shared.Bump three times",
+	)
 	count, ok := hr_read_count(pid)
 	expect(t, ok, "should read count")
 	expect_value(t, count, i32(21))

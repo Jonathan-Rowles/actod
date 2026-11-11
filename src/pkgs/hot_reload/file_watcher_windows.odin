@@ -29,7 +29,13 @@ File_Watcher :: struct {
 	thread:       ^thread.Thread,
 }
 
-make_watcher :: proc(callback: Watch_Callback, user_data: rawptr) -> (^File_Watcher, bool) {
+make_watcher :: proc(
+	callback: Watch_Callback,
+	user_data: rawptr,
+) -> (
+	^File_Watcher,
+	bool,
+) {
 	w := new(File_Watcher)
 	w.callback = callback
 	w.user_data = user_data
@@ -37,7 +43,11 @@ make_watcher :: proc(callback: Watch_Callback, user_data: rawptr) -> (^File_Watc
 	return w, true
 }
 
-add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> bool {
+add_watch :: proc(
+	watcher: ^File_Watcher,
+	path: string,
+	actor_name: string,
+) -> bool {
 	if watcher.watch_count >= MAX_WATCHES do return false
 
 	if is_tmp_watch_path(path) do return true
@@ -46,7 +56,9 @@ add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> b
 	handle := win32.CreateFileW(
 		wide_path,
 		win32.FILE_LIST_DIRECTORY,
-		win32.FILE_SHARE_READ | win32.FILE_SHARE_WRITE | win32.FILE_SHARE_DELETE,
+		win32.FILE_SHARE_READ |
+		win32.FILE_SHARE_WRITE |
+		win32.FILE_SHARE_DELETE,
 		nil,
 		win32.OPEN_EXISTING,
 		win32.FILE_FLAG_BACKUP_SEMANTICS | win32.FILE_FLAG_OVERLAPPED,
@@ -105,12 +117,18 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 
 			if sync.atomic_load_explicit(&w.should_stop, .Acquire) do return
 
-			if result >= win32.WAIT_OBJECT_0 && result < win32.WAIT_OBJECT_0 + win32.DWORD(count) {
+			if result >= win32.WAIT_OBJECT_0 &&
+			   result < win32.WAIT_OBJECT_0 + win32.DWORD(count) {
 				changed_actors: [MAX_WATCHES]string
 				changed_count: int = 0
 
 				for wi in 0 ..< count {
-					check := win32.WaitForMultipleObjects(1, &events[wi], win32.FALSE, 0)
+					check := win32.WaitForMultipleObjects(
+						1,
+						&events[wi],
+						win32.FALSE,
+						0,
+					)
 					if check != win32.WAIT_OBJECT_0 do continue
 
 					bytes_returned: win32.DWORD
@@ -136,13 +154,18 @@ start_watcher :: proc(watcher: ^File_Watcher) {
 
 				if changed_count > 0 {
 					if w.debounce_ms > 0 {
-						time.sleep(time.Duration(w.debounce_ms) * time.Millisecond)
+						time.sleep(
+							time.Duration(w.debounce_ms) * time.Millisecond,
+						)
 					}
 
 					if sync.atomic_load_explicit(&w.should_stop, .Acquire) do return
 
 					for i in 0 ..< changed_count {
-						w.callback(Watch_Event{actor_name = changed_actors[i]}, w.user_data)
+						w.callback(
+							Watch_Event{actor_name = changed_actors[i]},
+							w.user_data,
+						)
 					}
 				}
 			}

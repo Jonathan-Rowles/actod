@@ -35,7 +35,11 @@ claim_main_reclaim_slot_after_every_worker :: proc(t: ^testing.T) {
 			actod.make_actor_config(home_worker = i % DEFAULT_TEST_WORKERS),
 		)
 		if !expect(t, ok, "spawn restart_warmup") do return
-		expect_value(t, actod.send_message(pid, Integration_Test_Message{}), actod.Send_Error.OK)
+		expect_value(
+			t,
+			actod.send_message(pid, Integration_Test_Message{}),
+			actod.Send_Error.OK,
+		)
 	}
 	expect(
 		t,
@@ -62,7 +66,11 @@ test_reclaim_pin_survives_node_restart :: proc(t: ^testing.T) {
 	claim_main_reclaim_slot_after_every_worker(t)
 	restart_node_with_one_worker()
 
-	pid, ok := actod.spawn("restart_target", Shutdown_Probe{}, shutdown_probe_behaviour)
+	pid, ok := actod.spawn(
+		"restart_target",
+		Shutdown_Probe{},
+		shutdown_probe_behaviour,
+	)
 	if !expect(t, ok, "spawn restart_target on the restarted node") do return
 
 	actod.reclaim_pin()
@@ -72,12 +80,20 @@ test_reclaim_pin_survives_node_restart :: proc(t: ^testing.T) {
 		"the main thread pin is visible to the scanner after a node restart",
 	)
 	actor_ptr, _ := actod.get(&actod.NODE.actor_registry, pid)
-	if !expect(t, actor_ptr != nil, "the pinned main thread read the target pointer") {
+	if !expect(
+		t,
+		actor_ptr != nil,
+		"the pinned main thread read the target pointer",
+	) {
 		actod.reclaim_unpin()
 		return
 	}
 
-	expect(t, actod.terminate_actor(pid, .SHUTDOWN), "terminate restart_target")
+	expect(
+		t,
+		actod.terminate_actor(pid, .SHUTDOWN),
+		"terminate restart_target",
+	)
 	expect(
 		t,
 		poll_until(retire_list_nonempty, nil, 2 * time.Second),

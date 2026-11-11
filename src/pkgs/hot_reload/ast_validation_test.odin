@@ -11,11 +11,17 @@ import "core:testing"
 make_test_package :: proc(name: string, source: string) -> string {
 	uid := sync.atomic_add(&test_build_counter, 1)
 	tmp, _ := os.temp_directory(context.temp_allocator)
-	base, _ := filepath.join({tmp, fmt.tprintf("actod_test_ast_%d", uid)}, context.temp_allocator)
+	base, _ := filepath.join(
+		{tmp, fmt.tprintf("actod_test_ast_%d", uid)},
+		context.temp_allocator,
+	)
 	dir, _ := filepath.join({base, name}, context.temp_allocator)
 	os.make_directory(base)
 	os.make_directory(dir)
-	pkg_file, _ := filepath.join({dir, fmt.tprintf("%s.odin", name)}, context.temp_allocator)
+	pkg_file, _ := filepath.join(
+		{dir, fmt.tprintf("%s.odin", name)},
+		context.temp_allocator,
+	)
 	_ = os.write_entire_file(pkg_file, transmute([]u8)source)
 	return dir
 }
@@ -45,7 +51,9 @@ handle_message :: proc(data: ^Counter_State, from: PID, content: any) {
 			field_names = []string{"count"},
 			field_types = []string{"i32"},
 		},
-		[]Proc_Expectation{{name = "handle_message", param_count = 3, required = true}},
+		[]Proc_Expectation {
+			{name = "handle_message", param_count = 3, required = true},
+		},
 	)
 
 	testing.expect(t, result.ok, "valid package should pass validation")
@@ -78,7 +86,11 @@ Counter_State :: struct {
 	testing.expect(t, !result.ok, "changed state should fail validation")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.State_Layout_Changed)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.State_Layout_Changed,
+		)
 		testing.expect(t, result.errors[0].line > 0, "should have line number")
 	}
 	destroy_validation_result(result)
@@ -98,13 +110,19 @@ handle_message :: proc(data: rawptr) {
 	result := validate_package(
 		dir,
 		State_Expectation{},
-		[]Proc_Expectation{{name = "handle_message", param_count = 3, required = true}},
+		[]Proc_Expectation {
+			{name = "handle_message", param_count = 3, required = true},
+		},
 	)
 
 	testing.expect(t, !result.ok, "mismatched signature should fail")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.Signature_Mismatch)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.Signature_Mismatch,
+		)
 	}
 	destroy_validation_result(result)
 }
@@ -123,7 +141,11 @@ setup :: proc "contextless" () {
 
 	result := validate_package(dir, State_Expectation{}, nil)
 
-	testing.expect(t, result.ok, "@(init) should pass validation (stripped at build time)")
+	testing.expect(
+		t,
+		result.ok,
+		"@(init) should pass validation (stripped at build time)",
+	)
 	destroy_validation_result(result)
 }
 
@@ -138,12 +160,20 @@ handle_message :: proc() {
 	dir := make_test_package("no_state", source)
 	defer os.remove_all(filepath.dir(dir))
 
-	result := validate_package(dir, State_Expectation{name = "Missing_State"}, nil)
+	result := validate_package(
+		dir,
+		State_Expectation{name = "Missing_State"},
+		nil,
+	)
 
 	testing.expect(t, !result.ok, "missing state should fail")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.State_Not_Found)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.State_Not_Found,
+		)
 	}
 	destroy_validation_result(result)
 }
@@ -163,8 +193,16 @@ this is not valid odin !!!
 	testing.expect(t, !result.ok, "bad syntax should fail validation")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.Parse_Error)
-		testing.expect(t, len(result.errors[0].message) > 0, "should have compiler error message")
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.Parse_Error,
+		)
+		testing.expect(
+			t,
+			len(result.errors[0].message) > 0,
+			"should have compiler error message",
+		)
 	}
 	destroy_validation_result(result)
 }
@@ -195,7 +233,11 @@ My_State :: struct {
 	testing.expect(t, !result.ok, "added field should fail validation")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.State_Layout_Changed)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.State_Layout_Changed,
+		)
 		testing.expect(
 			t,
 			strings.contains(result.errors[0].message, "Field count changed"),
@@ -230,7 +272,11 @@ My_State :: struct {
 	testing.expect(t, !result.ok, "removed field should fail validation")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.State_Layout_Changed)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.State_Layout_Changed,
+		)
 		testing.expect(
 			t,
 			strings.contains(result.errors[0].message, "Field count changed"),
@@ -265,7 +311,11 @@ My_State :: struct {
 	testing.expect(t, !result.ok, "changed field type should fail validation")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.State_Layout_Changed)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.State_Layout_Changed,
+		)
 		testing.expect(
 			t,
 			strings.contains(result.errors[0].message, "i32"),
@@ -306,7 +356,11 @@ handle_message :: proc(data: rawptr, from: i32, content: any) {
 	testing.expect(t, !result.ok, "param type mismatch should fail")
 	testing.expect(t, len(result.errors) > 0, "should have errors")
 	if len(result.errors) > 0 {
-		testing.expect_value(t, result.errors[0].kind, Validation_Error_Kind.Signature_Mismatch)
+		testing.expect_value(
+			t,
+			result.errors[0].kind,
+			Validation_Error_Kind.Signature_Mismatch,
+		)
 	}
 	destroy_validation_result(result)
 }

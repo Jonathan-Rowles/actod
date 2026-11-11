@@ -20,7 +20,11 @@ survival_probe_init :: proc(data: ^Survival_Probe_Data) {
 	_ = actod.send_message(data.target, "get_stats")
 }
 
-survival_probe_handle_message :: proc(data: ^Survival_Probe_Data, from: actod.PID, msg: any) {
+survival_probe_handle_message :: proc(
+	data: ^Survival_Probe_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch reply in msg {
 	case string:
 		if from == data.target && strings.has_prefix(reply, "restarts=") do sync.atomic_store(data.replied, true)
@@ -50,7 +54,11 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 		),
 	)
 	expect(t, ok, "Failed to spawn supervisor")
-	expect(t, wait_for_child_count(supervisor_pid, 3, 500), "Children should be spawned")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 3, 500),
+		"Children should be spawned",
+	)
 
 	initial_children := actod.get_children(supervisor_pid)
 	defer delete(initial_children)
@@ -87,7 +95,10 @@ test_remove_child_then_restart_all :: proc(t: ^testing.T) {
 	supervisor_replied: bool
 	probe_pid, probe_ok := actod.spawn(
 		"remove-oob-survival-probe",
-		Survival_Probe_Data{target = supervisor_pid, replied = &supervisor_replied},
+		Survival_Probe_Data {
+			target = supervisor_pid,
+			replied = &supervisor_replied,
+		},
 		Survival_Probe_Behaviour,
 	)
 	expect(t, probe_ok, "Failed to spawn survival probe")

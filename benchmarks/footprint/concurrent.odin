@@ -74,12 +74,20 @@ per_second :: proc(n: int, d: time.Duration) -> f64 {
 	return f64(n) / (ns / 1e9)
 }
 
-run_concurrent_spawn :: proc(total: int, spawner_count: int, baseline_live: int) {
+run_concurrent_spawn :: proc(
+	total: int,
+	spawner_count: int,
+	baseline_live: int,
+) {
 	spawners := make([dynamic]actod.PID, 0, spawner_count)
 	defer delete(spawners)
 
 	for i in 0 ..< spawner_count {
-		pid, ok := actod.spawn(fmt.tprintf("spawner_%d", i), Spawner{id = i}, spawner_behaviour)
+		pid, ok := actod.spawn(
+			fmt.tprintf("spawner_%d", i),
+			Spawner{id = i},
+			spawner_behaviour,
+		)
 		if !ok {
 			fmt.printf("failed to spawn spawner %d\n", i)
 			return

@@ -29,11 +29,18 @@ make_message_impl :: proc(
 		if size <= INLINE_MESSAGE_SIZE && token == 0 {
 			msg.inline_type = tid
 			msg.content = nil
-			intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
+			intrinsics.mem_copy_non_overlapping(
+				&msg.inline_data[0],
+				data,
+				size,
+			)
 			return .OK, 0
 		}
 
-		aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size, CACHE_LINE_SIZE)
+		aligned_size := mem.align_forward_int(
+			TYPE_HEADER_SIZE + size,
+			CACHE_LINE_SIZE,
+		)
 
 		buffer, alloc_err := message_alloc(pool, aligned_size)
 		if alloc_err != .OK do return alloc_err, aligned_size
@@ -58,11 +65,20 @@ make_message_impl :: proc(
 		msg.inline_type = tid
 		msg.content = INLINE_NEEDS_FIXUP
 		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], data, size)
-		copy_variable_data(&msg.inline_data[0], &msg.inline_data[0], data, info, size)
+		copy_variable_data(
+			&msg.inline_data[0],
+			&msg.inline_data[0],
+			data,
+			info,
+			size,
+		)
 		return .OK, 0
 	}
 
-	aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + size + variable_size, CACHE_LINE_SIZE)
+	aligned_size := mem.align_forward_int(
+		TYPE_HEADER_SIZE + size + variable_size,
+		CACHE_LINE_SIZE,
+	)
 
 	buffer, alloc_err := message_alloc(pool, aligned_size)
 	if alloc_err != .OK do return alloc_err, aligned_size
@@ -82,7 +98,11 @@ make_message_impl :: proc(
 }
 
 @(private)
-release_undelivered :: #force_inline proc(target: ^Actor, msg: ^Message, msg_ready: bool) {
+release_undelivered :: #force_inline proc(
+	target: ^Actor,
+	msg: ^Message,
+	msg_ready: bool,
+) {
 	if msg_ready && message_owns_page(msg.content) {
 		free_message(&target.pool, msg.content)
 	}
@@ -109,7 +129,17 @@ send_user_backpressure :: #force_no_inline proc(
 		reclaim_unpin()
 	}
 
-	result := send_user_backpressure_loop(to, msg, msg_ready, data, size, tid, info, token, loc)
+	result := send_user_backpressure_loop(
+		to,
+		msg,
+		msg_ready,
+		data,
+		size,
+		tid,
+		info,
+		token,
+		loc,
+	)
 
 	reclaim_repin_levels(released_depth)
 	if parked_pooled_pin do reclaim_pin()
@@ -160,14 +190,26 @@ send_user_backpressure_loop :: proc(
 			return .ACTOR_NOT_FOUND
 		}
 
-		current_read := sync.atomic_load_explicit(&target.mailbox.read_index, .Relaxed)
-		current_frees := sync.atomic_load_explicit(&target.pool.write_index, .Relaxed)
+		current_read := sync.atomic_load_explicit(
+			&target.mailbox.read_index,
+			.Relaxed,
+		)
+		current_frees := sync.atomic_load_explicit(
+			&target.pool.write_index,
+			.Relaxed,
+		)
 
 		if !msg_ready {
-			pool_allocs := sync.atomic_load_explicit(&target.pool.read_index, .Relaxed)
+			pool_allocs := sync.atomic_load_explicit(
+				&target.pool.read_index,
+				.Relaxed,
+			)
 			pool_has_room :=
 				current_frees != pool_allocs ||
-				sync.atomic_load_explicit(&target.pool.allocated_count, .Relaxed) <
+				sync.atomic_load_explicit(
+					&target.pool.allocated_count,
+					.Relaxed,
+				) <
 					target.pool.max_pages
 			if pool_has_room {
 				alloc_err, attempted_size := make_message_impl(
@@ -181,8 +223,15 @@ send_user_backpressure_loop :: proc(
 				)
 				if alloc_err == .OK {
 					msg_ready = true
-				} else if alloc_err != .POOL_EXHAUSTED && alloc_err != .ALLOC_CONTENDED {
-					err := report_alloc_error(alloc_err, attempted_size, &target.pool, to, loc)
+				} else if alloc_err != .POOL_EXHAUSTED &&
+				   alloc_err != .ALLOC_CONTENDED {
+					err := report_alloc_error(
+						alloc_err,
+						attempted_size,
+						&target.pool,
+						to,
+						loc,
+					)
 					reclaim_unpin()
 					return err
 				}
@@ -190,7 +239,10 @@ send_user_backpressure_loop :: proc(
 		}
 
 		if msg_ready {
-			write_idx := sync.atomic_load_explicit(&target.mailbox.write_index, .Relaxed)
+			write_idx := sync.atomic_load_explicit(
+				&target.mailbox.write_index,
+				.Relaxed,
+			)
 			spin_budget := THREAD_SEND_SPIN_TRIES if co == nil else 1
 			for spin := 0; spin < spin_budget; spin += 1 {
 				if write_idx - current_read <= target.mailbox.w_mask &&
@@ -201,8 +253,14 @@ send_user_backpressure_loop :: proc(
 					return .OK
 				}
 				intrinsics.cpu_relax()
-				write_idx = sync.atomic_load_explicit(&target.mailbox.write_index, .Relaxed)
-				current_read = sync.atomic_load_explicit(&target.mailbox.read_index, .Relaxed)
+				write_idx = sync.atomic_load_explicit(
+					&target.mailbox.write_index,
+					.Relaxed,
+				)
+				current_read = sync.atomic_load_explicit(
+					&target.mailbox.read_index,
+					.Relaxed,
+				)
 			}
 		}
 
@@ -271,7 +329,9 @@ send_to_actor_impl :: proc(
 			return .ACTOR_NOT_FOUND
 		}
 	} else {
-		if current_state != .RUNNING && current_state != .IDLE && current_state != .INIT {
+		if current_state != .RUNNING &&
+		   current_state != .IDLE &&
+		   current_state != .INIT {
 			return .ACTOR_NOT_FOUND
 		}
 	}
@@ -295,11 +355,27 @@ send_to_actor_impl :: proc(
 		)
 		when class == .User {
 			if alloc_err == .POOL_EXHAUSTED || alloc_err == .ALLOC_CONTENDED {
-				return send_user_backpressure(to, &msg, false, data, size, tid, info, token, loc)
+				return send_user_backpressure(
+					to,
+					&msg,
+					false,
+					data,
+					size,
+					tid,
+					info,
+					token,
+					loc,
+				)
 			}
 		}
 		if alloc_err != .OK {
-			return report_alloc_error(alloc_err, attempted_size, &actor.pool, to, loc)
+			return report_alloc_error(
+				alloc_err,
+				attempted_size,
+				&actor.pool,
+				to,
+				loc,
+			)
 		}
 	}
 
@@ -373,11 +449,25 @@ send_message_impl :: proc(
 
 	pinned := reclaim_pin_if_unpinned()
 	defer if pinned do reclaim_unpin()
-	return send_to_actor_impl(to, cast(^Actor)actor_ptr, data, size, tid, info, class, loc, token)
+	return send_to_actor_impl(
+		to,
+		cast(^Actor)actor_ptr,
+		data,
+		size,
+		tid,
+		info,
+		class,
+		loc,
+		token,
+	)
 }
 
 @(private)
-log_send_outside_actor :: proc(send_proc: string, tid: typeid, loc: runtime.Source_Code_Location) {
+log_send_outside_actor :: proc(
+	send_proc: string,
+	tid: typeid,
+	loc: runtime.Source_Code_Location,
+) {
 	context.logger = diagnostic_logger(context.logger)
 	log.errorf(
 		"%s(%v) failed: must be called from inside an actor",
@@ -400,9 +490,20 @@ send_self_impl :: proc(
 		log_send_outside_actor("send_self", tid, loc)
 		return .ACTOR_NOT_FOUND
 	}
-	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, get_self_pid()),
+	)
 	if !ok do return .ACTOR_NOT_FOUND
-	return send_to_actor_impl(actor.pid, actor, data, size, tid, info, class, loc)
+	return send_to_actor_impl(
+		actor.pid,
+		actor,
+		data,
+		size,
+		tid,
+		info,
+		class,
+		loc,
+	)
 }
 
 @(private)
@@ -418,7 +519,9 @@ send_message_to_parent_impl :: proc(
 		log_send_outside_actor("send_message_to_parent", tid, loc)
 		return .ACTOR_NOT_FOUND
 	}
-	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, get_self_pid()),
+	)
 	if !ok do return .ACTOR_NOT_FOUND
 	if actor.parent == 0 {
 		log.errorf(
@@ -430,11 +533,21 @@ send_message_to_parent_impl :: proc(
 		return .ACTOR_NOT_FOUND
 	}
 	if !is_local_pid(actor.parent) {
-		return send_message_impl(actor.parent, data, size, tid, info, class, loc)
+		return send_message_impl(
+			actor.parent,
+			data,
+			size,
+			tid,
+			info,
+			class,
+			loc,
+		)
 	}
 	pinned := reclaim_pin_unless_coroutine()
 	defer if pinned do reclaim_unpin()
-	parent_actor, got_parent := get_actor_from_pointer(get(&NODE.actor_registry, actor.parent))
+	parent_actor, got_parent := get_actor_from_pointer(
+		get(&NODE.actor_registry, actor.parent),
+	)
 	if !got_parent {
 		log.errorf(
 			"send_message_to_parent(%v) failed: parent %v of actor '%s' is no longer alive",
@@ -445,7 +558,16 @@ send_message_to_parent_impl :: proc(
 		)
 		return .ACTOR_NOT_FOUND
 	}
-	return send_to_actor_impl(actor.parent, parent_actor, data, size, tid, info, class, loc)
+	return send_to_actor_impl(
+		actor.parent,
+		parent_actor,
+		data,
+		size,
+		tid,
+		info,
+		class,
+		loc,
+	)
 }
 
 @(private)
@@ -461,18 +583,30 @@ send_message_to_children_impl :: proc(
 		log_send_outside_actor("send_message_to_children", tid, loc)
 		return .ACTOR_NOT_FOUND
 	}
-	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, get_self_pid()))
+	actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, get_self_pid()),
+	)
 	if !ok do return .ACTOR_NOT_FOUND
 	for child in actor.children {
 		child_pid := child.pid
 		if !is_local_pid(child_pid) {
-			err := send_message_impl(child_pid, data, size, tid, info, class, loc)
+			err := send_message_impl(
+				child_pid,
+				data,
+				size,
+				tid,
+				info,
+				class,
+				loc,
+			)
 			if err != .OK do return err
 			continue
 		}
 		pinned := reclaim_pin_unless_coroutine()
 		defer if pinned do reclaim_unpin()
-		child_actor, child_ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
+		child_actor, child_ok := get_actor_from_pointer(
+			get(&NODE.actor_registry, child_pid),
+		)
 		if !child_ok {
 			log.errorf(
 				"send_message_to_children(%v) stopped: child %v of actor '%s' is no longer alive",
@@ -483,14 +617,26 @@ send_message_to_children_impl :: proc(
 			)
 			return .ACTOR_NOT_FOUND
 		}
-		err := send_to_actor_impl(child_pid, child_actor, data, size, tid, info, class, loc)
+		err := send_to_actor_impl(
+			child_pid,
+			child_actor,
+			data,
+			size,
+			tid,
+			info,
+			class,
+			loc,
+		)
 		if err != .OK do return err
 	}
 	return .OK
 }
 
 @(private)
-fixup_inline_pointers :: proc(inline_data: ^[INLINE_MESSAGE_SIZE]byte, type_id: typeid) {
+fixup_inline_pointers :: proc(
+	inline_data: ^[INLINE_MESSAGE_SIZE]byte,
+	type_id: typeid,
+) {
 	info, ok := get_type_info_ptr(type_id)
 	if !ok || info.flags == {} do return
 
@@ -584,12 +730,17 @@ copy_variable_data :: #force_inline proc(
 			variant, ok := get_active_union_variant(src_value_ptr, uf)
 			if !ok do continue
 			for field in variant.var_fields {
-				src := cast(^mem.Raw_Slice)(uintptr(src_value_ptr) + field.offset)
+				src := cast(^mem.Raw_Slice)(uintptr(src_value_ptr) +
+					field.offset)
 				dst := cast(^mem.Raw_Slice)(uintptr(struct_ptr) + field.offset)
 
 				if src.len > 0 {
 					dest := rawptr(uintptr(dest_base) + uintptr(offset))
-					intrinsics.mem_copy_non_overlapping(dest, src.data, src.len)
+					intrinsics.mem_copy_non_overlapping(
+						dest,
+						src.data,
+						src.len,
+					)
 					dst^ = mem.Raw_Slice {
 						data = dest,
 						len  = src.len,
@@ -631,7 +782,10 @@ create_message_from_payload :: #force_inline proc(
 			return .OK, 0
 		}
 
-		aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + struct_size, CACHE_LINE_SIZE)
+		aligned_size := mem.align_forward_int(
+			TYPE_HEADER_SIZE + struct_size,
+			CACHE_LINE_SIZE,
+		)
 		buffer, alloc_err := message_alloc(pool, aligned_size)
 		if alloc_err != .OK do return alloc_err, aligned_size
 
@@ -657,7 +811,11 @@ create_message_from_payload :: #force_inline proc(
 	if total_message_size <= INLINE_MESSAGE_SIZE && token == 0 {
 		msg.inline_type = info.type_id
 		msg.content = INLINE_NEEDS_FIXUP
-		intrinsics.mem_copy_non_overlapping(&msg.inline_data[0], raw_data(payload), struct_size)
+		intrinsics.mem_copy_non_overlapping(
+			&msg.inline_data[0],
+			raw_data(payload),
+			struct_size,
+		)
 		if !copy_variable_data_from_payload(
 			&msg.inline_data[0],
 			&msg.inline_data[0],
@@ -670,7 +828,10 @@ create_message_from_payload :: #force_inline proc(
 		return .OK, 0
 	}
 
-	aligned_size := mem.align_forward_int(TYPE_HEADER_SIZE + total_message_size, CACHE_LINE_SIZE)
+	aligned_size := mem.align_forward_int(
+		TYPE_HEADER_SIZE + total_message_size,
+		CACHE_LINE_SIZE,
+	)
 	buffer, alloc_err := message_alloc(pool, aligned_size)
 	if alloc_err != .OK do return alloc_err, aligned_size
 
@@ -679,7 +840,11 @@ create_message_from_payload :: #force_inline proc(
 	header.size = i32(aligned_size)
 
 	data_ptr := rawptr(uintptr(buffer) + TYPE_HEADER_SIZE)
-	intrinsics.mem_copy_non_overlapping(data_ptr, raw_data(payload), struct_size)
+	intrinsics.mem_copy_non_overlapping(
+		data_ptr,
+		raw_data(payload),
+		struct_size,
+	)
 	if !copy_variable_data_from_payload(
 		buffer,
 		data_ptr,

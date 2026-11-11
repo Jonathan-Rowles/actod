@@ -13,7 +13,9 @@ when ODIN_TEST {
 	counted_system_live_allocations: int
 
 	@(private)
-	counted_system_allocator :: proc(backing: runtime.Allocator) -> runtime.Allocator {
+	counted_system_allocator :: proc(
+		backing: runtime.Allocator,
+	) -> runtime.Allocator {
 		counted_system_backing = backing
 		return runtime.Allocator{procedure = counted_system_allocator_proc}
 	}

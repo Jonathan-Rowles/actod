@@ -31,7 +31,9 @@ stop_returned :: proc(data: rawptr) -> bool {
 	return sync.atomic_load(cast(^bool)data)
 }
 
-test_a_listener_stopped_right_after_start_listening_ends :: proc(t: ^testing.T) {
+test_a_listener_stopped_right_after_start_listening_ends :: proc(
+	t: ^testing.T,
+) {
 	actod.shutdown_node()
 	for round in 0 ..< START_LISTENING_STOP_ROUNDS {
 		restart_node_without_a_port()
@@ -44,7 +46,10 @@ test_a_listener_stopped_right_after_start_listening_ends :: proc(t: ^testing.T) 
 			return
 		}
 		done: bool
-		stop_thread := thread.create_and_start_with_data(&done, stop_the_listener_proc)
+		stop_thread := thread.create_and_start_with_data(
+			&done,
+			stop_the_listener_proc,
+		)
 		if !expectf(
 			t,
 			poll_until(stop_returned, &done, scaled_timeout(5 * time.Second)),
@@ -57,7 +62,8 @@ test_a_listener_stopped_right_after_start_listening_ends :: proc(t: ^testing.T) 
 		thread.destroy(stop_thread)
 		expectf(
 			t,
-			sync.atomic_load(&actod.NODE.network_listener_running) == actod.LISTENER_STOPPED,
+			sync.atomic_load(&actod.NODE.network_listener_running) ==
+			actod.LISTENER_STOPPED,
 			"round %d: the listener is stopped",
 			round,
 		)

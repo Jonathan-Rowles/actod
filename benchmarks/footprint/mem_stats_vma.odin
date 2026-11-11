@@ -10,7 +10,11 @@ Vma_Bucket :: struct {
 	count:   int,
 }
 
-accumulate_vma_bucket :: proc(buckets: ^[dynamic]Vma_Bucket, size_kb: int, perms: string) {
+accumulate_vma_bucket :: proc(
+	buckets: ^[dynamic]Vma_Bucket,
+	size_kb: int,
+	perms: string,
+) {
 	for &b in buckets {
 		if b.size_kb == size_kb && b.perms == perms {
 			b.count += 1
@@ -25,8 +29,12 @@ print_vma_breakdown :: proc(top: int) {
 	defer delete(buckets)
 
 	vma_regions(proc(size_kb: int, perms: string, user: rawptr) {
-		accumulate_vma_bucket(cast(^[dynamic]Vma_Bucket)user, size_kb, perms)
-	}, &buckets)
+			accumulate_vma_bucket(
+				cast(^[dynamic]Vma_Bucket)user,
+				size_kb,
+				perms,
+			)
+		}, &buckets)
 
 	slice.sort_by(buckets[:], proc(a: Vma_Bucket, b: Vma_Bucket) -> bool {
 		return a.count > b.count

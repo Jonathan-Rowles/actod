@@ -96,7 +96,11 @@ removed_sibling_reaped_as_it_is_stopped :: proc(
 	sibling.name = "direct-sibling"
 	sibling.published_name = &sibling.name
 	sibling.opts.restart_policy = sibling_policy
-	sibling_pid, added := add(&NODE.actor_registry, rawptr(sibling), sibling.name)
+	sibling_pid, added := add(
+		&NODE.actor_registry,
+		rawptr(sibling),
+		sibling.name,
+	)
 	if !testing.expect(t, added, "the sibling should register") do return
 
 	supervisor := new(Actor)
@@ -110,7 +114,10 @@ removed_sibling_reaped_as_it_is_stopped :: proc(
 	append(
 		&supervisor.children,
 		Supervised_Child{pid = dying_pid},
-		Supervised_Child{pid = sibling_pid, restart = {spawn_func = sibling_spawn}},
+		Supervised_Child {
+			pid = sibling_pid,
+			restart = {spawn_func = sibling_spawn},
+		},
 	)
 	g_pruned_sibling_pid = 0
 	g_pruned_sibling_name_len = 0
@@ -122,7 +129,10 @@ removed_sibling_reaped_as_it_is_stopped :: proc(
 	}
 	captured := make(
 		[dynamic]ti.Captured_Terminate,
-		runtime.Allocator{procedure = reap_on_stop_allocator_proc, data = &reaper},
+		runtime.Allocator {
+			procedure = reap_on_stop_allocator_proc,
+			data = &reaper,
+		},
 	)
 	defer delete(captured)
 	intercept := ti.Test_Intercept {
@@ -134,7 +144,11 @@ removed_sibling_reaped_as_it_is_stopped :: proc(
 	if sync.atomic_load(&NODE.reclaim.epoch) == 0 do sync.atomic_store(&NODE.reclaim.epoch, 1)
 	stop_and_restart_children_from(supervisor, 0, dying_pid)
 
-	testing.expect(t, reaper.reaped, "stopping the sibling must reap it from the registry")
+	testing.expect(
+		t,
+		reaper.reaped,
+		"stopping the sibling must reap it from the registry",
+	)
 	if testing.expect_value(t, len(captured), 1) do testing.expect_value(t, PID(captured[0].pid), sibling_pid)
 	testing.expect_value(t, g_pruned_sibling_pid, sibling_pid)
 	testing.expect_value(
@@ -147,12 +161,16 @@ removed_sibling_reaped_as_it_is_stopped :: proc(
 }
 
 @(test)
-unrestartable_sibling_reaped_as_it_is_stopped_keeps_its_name_test :: proc(t: ^testing.T) {
+unrestartable_sibling_reaped_as_it_is_stopped_keeps_its_name_test :: proc(
+	t: ^testing.T,
+) {
 	removed_sibling_reaped_as_it_is_stopped(t, .PERMANENT, nil)
 }
 
 @(test)
-temporary_sibling_reaped_as_it_is_stopped_is_not_restarted_test :: proc(t: ^testing.T) {
+temporary_sibling_reaped_as_it_is_stopped_is_not_restarted_test :: proc(
+	t: ^testing.T,
+) {
 	removed_sibling_reaped_as_it_is_stopped(t, .TEMPORARY, count_sibling_spawn)
 }
 
@@ -212,13 +230,30 @@ record_terminated :: proc(
 	will_restart: bool,
 ) {
 	record_event(
-		{kind = .Terminated, pid = child_pid, reason = reason, will_restart = will_restart},
+		{
+			kind = .Terminated,
+			pid = child_pid,
+			reason = reason,
+			will_restart = will_restart,
+		},
 	)
 }
 
 @(private = "file")
-record_restarted :: proc(data: rawptr, old_pid: PID, new_pid: PID, restart_count: int) {
-	record_event({kind = .Restarted, pid = old_pid, new_pid = new_pid, count = restart_count})
+record_restarted :: proc(
+	data: rawptr,
+	old_pid: PID,
+	new_pid: PID,
+	restart_count: int,
+) {
+	record_event(
+		{
+			kind = .Restarted,
+			pid = old_pid,
+			new_pid = new_pid,
+			count = restart_count,
+		},
+	)
 }
 
 @(private = "file")
@@ -235,7 +270,9 @@ g_spawn_calls: [MAX_GROUP_CHILDREN]int
 @(private = "file")
 spawned_pid :: proc(child: int) -> PID {
 	g_spawn_calls[child] += 1
-	pid := pack_pid(Handle{idx = u32(100 + 10 * child + g_spawn_calls[child]), gen = 1})
+	pid := pack_pid(
+		Handle{idx = u32(100 + 10 * child + g_spawn_calls[child]), gen = 1},
+	)
 	record_event({kind = .Spawned, pid = pid})
 	return pid
 }
@@ -280,7 +317,10 @@ Group_Fixture :: struct {
 }
 
 @(private = "file")
-new_group_fixture :: proc(strategy: Supervision_Strategy, child_count: int) -> ^Group_Fixture {
+new_group_fixture :: proc(
+	strategy: Supervision_Strategy,
+	child_count: int,
+) -> ^Group_Fixture {
 	f := new(Group_Fixture)
 	sync.lock(&global_registry_swap_mutex)
 	f.saved_registry = NODE.actor_registry
@@ -381,7 +421,13 @@ expect_events :: proc(t: ^testing.T, expected: []Supervision_Event) {
 	got := g_events[:min(g_event_count, MAX_SUPERVISION_EVENTS)]
 	same := g_event_count == len(expected)
 	if same do for event, i in expected do if got[i] != event do same = false
-	testing.expectf(t, same, "supervision events\n got %v\nwant %v", got, expected)
+	testing.expectf(
+		t,
+		same,
+		"supervision events\n got %v\nwant %v",
+		got,
+		expected,
+	)
 }
 
 @(private = "file")
@@ -389,7 +435,13 @@ expect_table :: proc(t: ^testing.T, f: ^Group_Fixture, expected: []PID) {
 	got := make([]PID, len(f.supervisor.children))
 	defer delete(got)
 	for child, i in f.supervisor.children do got[i] = child.pid
-	testing.expectf(t, slice.equal(got, expected), "children table %v, want %v", got, expected)
+	testing.expectf(
+		t,
+		slice.equal(got, expected),
+		"children table %v, want %v",
+		got,
+		expected,
+	)
 }
 
 @(private = "file")
@@ -398,9 +450,19 @@ expect_killed :: proc(t: ^testing.T, f: ^Group_Fixture, expected: []PID) {
 	defer delete(got)
 	for capture, i in f.captured {
 		got[i] = PID(capture.pid)
-		testing.expect_value(t, Termination_Reason(capture.reason), Termination_Reason.KILLED)
+		testing.expect_value(
+			t,
+			Termination_Reason(capture.reason),
+			Termination_Reason.KILLED,
+		)
 	}
-	testing.expectf(t, slice.equal(got, expected), "killed %v, want %v", got, expected)
+	testing.expectf(
+		t,
+		slice.equal(got, expected),
+		"killed %v, want %v",
+		got,
+		expected,
+	)
 }
 
 @(test)
@@ -419,7 +481,12 @@ one_for_all_hands_a_dead_sibling_in_the_same_batch_to_the_node_before_waiting_te
 		t,
 		{
 			{kind = .Reaped, pid = a},
-			{kind = .Terminated, pid = a, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = a,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Reaped, pid = b},
 			{kind = .Spawned, pid = respawned(0, 1)},
 			{kind = .Restarted, pid = a, new_pid = respawned(0, 1), count = 1},
@@ -489,19 +556,31 @@ sibling_dying_during_the_group_wait_is_handed_to_the_node_and_the_rest_handled_i
 	}
 	f.captured = make(
 		[dynamic]ti.Captured_Terminate,
-		runtime.Allocator{procedure = die_on_kill_allocator_proc, data = &hook},
+		runtime.Allocator {
+			procedure = die_on_kill_allocator_proc,
+			data = &hook,
+		},
 	)
 
 	die(f, 1)
 	process_stop_signals(f.supervisor)
 	process_stop_signals(f.supervisor)
 
-	testing.expect(t, hook.fired, "the sibling must be stopped by the group restart")
+	testing.expect(
+		t,
+		hook.fired,
+		"the sibling must be stopped by the group restart",
+	)
 	expect_events(
 		t,
 		{
 			{kind = .Reaped, pid = a},
-			{kind = .Terminated, pid = a, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = a,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Reaped, pid = b},
 			{kind = .Spawned, pid = respawned(1, 1)},
 			{kind = .Restarted, pid = a, new_pid = respawned(1, 1), count = 1},
@@ -510,15 +589,30 @@ sibling_dying_during_the_group_wait_is_handed_to_the_node_and_the_rest_handled_i
 			{kind = .Restarted, pid = b, new_pid = respawned(2, 1), count = 0},
 			{kind = .Started, pid = respawned(2, 1)},
 			{kind = .Reaped, pid = x},
-			{kind = .Terminated, pid = x, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = x,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Spawned, pid = respawned(0, 1)},
 			{kind = .Restarted, pid = x, new_pid = respawned(0, 1), count = 1},
 			{kind = .Started, pid = respawned(0, 1)},
 			{kind = .Spawned, pid = respawned(1, 2)},
-			{kind = .Restarted, pid = respawned(1, 1), new_pid = respawned(1, 2), count = 1},
+			{
+				kind = .Restarted,
+				pid = respawned(1, 1),
+				new_pid = respawned(1, 2),
+				count = 1,
+			},
 			{kind = .Started, pid = respawned(1, 2)},
 			{kind = .Spawned, pid = respawned(2, 2)},
-			{kind = .Restarted, pid = respawned(2, 1), new_pid = respawned(2, 2), count = 0},
+			{
+				kind = .Restarted,
+				pid = respawned(2, 1),
+				new_pid = respawned(2, 2),
+				count = 0,
+			},
 			{kind = .Started, pid = respawned(2, 2)},
 		},
 	)
@@ -532,7 +626,9 @@ sibling_dying_during_the_group_wait_is_handed_to_the_node_and_the_rest_handled_i
 }
 
 @(test)
-rest_for_one_hands_over_only_the_dead_siblings_in_its_range_test :: proc(t: ^testing.T) {
+rest_for_one_hands_over_only_the_dead_siblings_in_its_range_test :: proc(
+	t: ^testing.T,
+) {
 	f := new_group_fixture(.REST_FOR_ONE, 3)
 	defer destroy_group_fixture(f)
 	x, a, b := f.pids[0], f.pids[1], f.pids[2]
@@ -546,7 +642,12 @@ rest_for_one_hands_over_only_the_dead_siblings_in_its_range_test :: proc(t: ^tes
 		t,
 		{
 			{kind = .Reaped, pid = a},
-			{kind = .Terminated, pid = a, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = a,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Reaped, pid = b},
 			{kind = .Spawned, pid = respawned(1, 1)},
 			{kind = .Restarted, pid = a, new_pid = respawned(1, 1), count = 1},
@@ -555,15 +656,30 @@ rest_for_one_hands_over_only_the_dead_siblings_in_its_range_test :: proc(t: ^tes
 			{kind = .Restarted, pid = b, new_pid = respawned(2, 1), count = 0},
 			{kind = .Started, pid = respawned(2, 1)},
 			{kind = .Reaped, pid = x},
-			{kind = .Terminated, pid = x, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = x,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Spawned, pid = respawned(0, 1)},
 			{kind = .Restarted, pid = x, new_pid = respawned(0, 1), count = 1},
 			{kind = .Started, pid = respawned(0, 1)},
 			{kind = .Spawned, pid = respawned(1, 2)},
-			{kind = .Restarted, pid = respawned(1, 1), new_pid = respawned(1, 2), count = 1},
+			{
+				kind = .Restarted,
+				pid = respawned(1, 1),
+				new_pid = respawned(1, 2),
+				count = 1,
+			},
 			{kind = .Started, pid = respawned(1, 2)},
 			{kind = .Spawned, pid = respawned(2, 2)},
-			{kind = .Restarted, pid = respawned(2, 1), new_pid = respawned(2, 2), count = 0},
+			{
+				kind = .Restarted,
+				pid = respawned(2, 1),
+				new_pid = respawned(2, 2),
+				count = 0,
+			},
 			{kind = .Started, pid = respawned(2, 2)},
 		},
 	)
@@ -605,7 +721,12 @@ stopping_parent_hands_a_dead_child_on_its_chain_to_the_node_before_waiting_test 
 }
 
 @(private = "file")
-panic_on_restart :: proc(data: rawptr, old_pid: PID, new_pid: PID, restart_count: int) {
+panic_on_restart :: proc(
+	data: rawptr,
+	old_pid: PID,
+	new_pid: PID,
+	restart_count: int,
+) {
 	panic("the restart callback panics after the group wait")
 }
 
@@ -626,7 +747,10 @@ supervisor_panicking_after_a_group_wait_hands_every_put_aside_signal_to_the_node
 	}
 	f.captured = make(
 		[dynamic]ti.Captured_Terminate,
-		runtime.Allocator{procedure = die_on_kill_allocator_proc, data = &hook},
+		runtime.Allocator {
+			procedure = die_on_kill_allocator_proc,
+			data = &hook,
+		},
 	)
 	clock_before := f.clock.virtual_tick_ns
 
@@ -647,12 +771,21 @@ supervisor_panicking_after_a_group_wait_hands_every_put_aside_signal_to_the_node
 	free_all(context.temp_allocator)
 	current_actor_context = saved_actor_context
 
-	testing.expect(t, actor_ctx.panic_recovery_done, "the restart callback must panic")
+	testing.expect(
+		t,
+		actor_ctx.panic_recovery_done,
+		"the restart callback must panic",
+	)
 	expect_events(
 		t,
 		{
 			{kind = .Reaped, pid = a},
-			{kind = .Terminated, pid = a, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = a,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Reaped, pid = b},
 			{kind = .Spawned, pid = respawned(1, 1)},
 			{kind = .Reaped, pid = x},
@@ -685,7 +818,9 @@ kill_the_rest_after_the_first_round :: proc(f: ^Group_Fixture, reaped: PID) {
 }
 
 @(test)
-signals_put_aside_across_poll_rounds_are_handled_in_arrival_order_test :: proc(t: ^testing.T) {
+signals_put_aside_across_poll_rounds_are_handled_in_arrival_order_test :: proc(
+	t: ^testing.T,
+) {
 	f := new_group_fixture(.REST_FOR_ONE, 6)
 	defer destroy_group_fixture(f)
 	early, late, a, first_waited, second_waited, spawned_in_wait :=
@@ -702,7 +837,10 @@ signals_put_aside_across_poll_rounds_are_handled_in_arrival_order_test :: proc(t
 	}
 	f.captured = make(
 		[dynamic]ti.Captured_Terminate,
-		runtime.Allocator{procedure = die_on_kill_allocator_proc, data = &hook},
+		runtime.Allocator {
+			procedure = die_on_kill_allocator_proc,
+			data = &hook,
+		},
 	)
 
 	die(f, 2)
@@ -716,15 +854,35 @@ signals_put_aside_across_poll_rounds_are_handled_in_arrival_order_test :: proc(t
 		t,
 		{
 			{kind = .Reaped, pid = a},
-			{kind = .Terminated, pid = a, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = a,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Reaped, pid = first_waited},
 			{kind = .Reaped, pid = second_waited},
 			{kind = .Reaped, pid = early},
-			{kind = .Terminated, pid = early, reason = .ABNORMAL, will_restart = false},
+			{
+				kind = .Terminated,
+				pid = early,
+				reason = .ABNORMAL,
+				will_restart = false,
+			},
 			{kind = .Reaped, pid = late},
-			{kind = .Terminated, pid = late, reason = .ABNORMAL, will_restart = false},
+			{
+				kind = .Terminated,
+				pid = late,
+				reason = .ABNORMAL,
+				will_restart = false,
+			},
 			{kind = .Reaped, pid = spawned_in_wait},
-			{kind = .Terminated, pid = spawned_in_wait, reason = .ABNORMAL, will_restart = false},
+			{
+				kind = .Terminated,
+				pid = spawned_in_wait,
+				reason = .ABNORMAL,
+				will_restart = false,
+			},
 		},
 	)
 	expect_table(t, f, {a, first_waited, second_waited})
@@ -741,7 +899,9 @@ signals_put_aside_across_poll_rounds_are_handled_in_arrival_order_test :: proc(t
 }
 
 @(test)
-remote_child_group_restart_handles_the_local_signals_it_put_aside_test :: proc(t: ^testing.T) {
+remote_child_group_restart_handles_the_local_signals_it_put_aside_test :: proc(
+	t: ^testing.T,
+) {
 	f := new_group_fixture(.REST_FOR_ONE, 3)
 	defer destroy_group_fixture(f)
 	x, b := f.pids[0], f.pids[2]
@@ -757,12 +917,19 @@ remote_child_group_restart_handles_the_local_signals_it_put_aside_test :: proc(t
 	}
 	f.captured = make(
 		[dynamic]ti.Captured_Terminate,
-		runtime.Allocator{procedure = die_on_kill_allocator_proc, data = &hook},
+		runtime.Allocator {
+			procedure = die_on_kill_allocator_proc,
+			data = &hook,
+		},
 	)
 
 	system_entries := make([]Entry(Message), 2)
 	defer delete(system_entries)
-	mpsc_init_external(&f.supervisor.system_mailbox, system_entries, entries_zeroed = true)
+	mpsc_init_external(
+		&f.supervisor.system_mailbox,
+		system_entries,
+		entries_zeroed = true,
+	)
 	f.supervisor.allocator = context.allocator
 	pool_init(&f.supervisor.pool, context.allocator)
 	defer cleanup_pool(&f.supervisor.pool)
@@ -774,7 +941,11 @@ remote_child_group_restart_handles_the_local_signals_it_put_aside_test :: proc(t
 		child_name     = "remote-child",
 		child_index    = -1,
 	}
-	testing.expect_value(t, send(f.supervisor.pid, stopped, f.supervisor), Send_Error.OK)
+	testing.expect_value(
+		t,
+		send(f.supervisor.pid, stopped, f.supervisor),
+		Send_Error.OK,
+	)
 	testing.expect(
 		t,
 		process_system_mailbox(f.supervisor, &ctx),
@@ -786,16 +957,31 @@ remote_child_group_restart_handles_the_local_signals_it_put_aside_test :: proc(t
 	expect_events(
 		t,
 		{
-			{kind = .Terminated, pid = remote, reason = .ABNORMAL, will_restart = true},
+			{
+				kind = .Terminated,
+				pid = remote,
+				reason = .ABNORMAL,
+				will_restart = true,
+			},
 			{kind = .Reaped, pid = b},
 			{kind = .Spawned, pid = respawned(1, 1)},
-			{kind = .Restarted, pid = remote, new_pid = respawned(1, 1), count = 1},
+			{
+				kind = .Restarted,
+				pid = remote,
+				new_pid = respawned(1, 1),
+				count = 1,
+			},
 			{kind = .Started, pid = respawned(1, 1)},
 			{kind = .Spawned, pid = respawned(2, 1)},
 			{kind = .Restarted, pid = b, new_pid = respawned(2, 1), count = 0},
 			{kind = .Started, pid = respawned(2, 1)},
 			{kind = .Reaped, pid = x},
-			{kind = .Terminated, pid = x, reason = .ABNORMAL, will_restart = false},
+			{
+				kind = .Terminated,
+				pid = x,
+				reason = .ABNORMAL,
+				will_restart = false,
+			},
 		},
 	)
 	expect_table(t, f, {respawned(1, 1), respawned(2, 1)})
@@ -813,7 +999,9 @@ remote_child_group_restart_handles_the_local_signals_it_put_aside_test :: proc(t
 }
 
 @(test)
-adoption_into_a_parent_that_stopped_first_keeps_the_old_parent_test :: proc(t: ^testing.T) {
+adoption_into_a_parent_that_stopped_first_keeps_the_old_parent_test :: proc(
+	t: ^testing.T,
+) {
 	sync.lock(&global_registry_swap_mutex)
 	defer sync.unlock(&global_registry_swap_mutex)
 	saved_registry := NODE.actor_registry
@@ -830,7 +1018,11 @@ adoption_into_a_parent_that_stopped_first_keeps_the_old_parent_test :: proc(t: ^
 	adopter.name = "stopped-adopter"
 	adopter.published_name = &adopter.name
 	adopter.state = .RUNNING
-	adopter_pid, adopter_added := add(&NODE.actor_registry, rawptr(adopter), adopter.name)
+	adopter_pid, adopter_added := add(
+		&NODE.actor_registry,
+		rawptr(adopter),
+		adopter.name,
+	)
 	if !testing.expect(t, adopter_added, "the adopter should register") do return
 
 	orphan := new(Actor)
@@ -838,13 +1030,21 @@ adoption_into_a_parent_that_stopped_first_keeps_the_old_parent_test :: proc(t: ^
 	orphan.name = "orphan"
 	orphan.published_name = &orphan.name
 	orphan.state = .RUNNING
-	orphan_pid, orphan_added := add(&NODE.actor_registry, rawptr(orphan), orphan.name)
+	orphan_pid, orphan_added := add(
+		&NODE.actor_registry,
+		rawptr(orphan),
+		orphan.name,
+	)
 	if !testing.expect(t, orphan_added, "the orphan should register") do return
 	orphan.pid = orphan_pid
 
 	system_entries := make([]Entry(Message), 2)
 	defer delete(system_entries)
-	mpsc_init_external(&orphan.system_mailbox, system_entries, entries_zeroed = true)
+	mpsc_init_external(
+		&orphan.system_mailbox,
+		system_entries,
+		entries_zeroed = true,
+	)
 	orphan.allocator = context.allocator
 	pool_init(&orphan.pool, context.allocator)
 	defer cleanup_pool(&orphan.pool)
@@ -862,7 +1062,11 @@ adoption_into_a_parent_that_stopped_first_keeps_the_old_parent_test :: proc(t: ^
 
 	{
 		context.logger = log.nil_logger()
-		testing.expect(t, process_system_mailbox(orphan, &ctx), "the orphan must keep running")
+		testing.expect(
+			t,
+			process_system_mailbox(orphan, &ctx),
+			"the orphan must keep running",
+		)
 	}
 	testing.expect_value(t, orphan.parent, PID(0))
 }

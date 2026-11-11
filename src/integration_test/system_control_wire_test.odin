@@ -58,14 +58,20 @@ Control_Victim_Data :: struct {
 }
 
 control_victim_behaviour := actod.Actor_Behaviour(Control_Victim_Data) {
-	handle_message = proc(data: ^Control_Victim_Data, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Control_Victim_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		text, is_text := msg.(string)
 		if !is_text do return
 		switch text {
 		case SYSTEM_CONTROL_PROBE:
 			sync.sema_post(data.probe_arrived)
 		case SYSTEM_CONTROL_FORGED_FROM_PROBE:
-			from_is_peer := !actod.is_local_pid(from) && actod.get_actor_name(from) == "<unknown>"
+			from_is_peer :=
+				!actod.is_local_pid(from) &&
+				actod.get_actor_name(from) == "<unknown>"
 			sync.atomic_store(data.forged_from_was_peer, from_is_peer)
 			sync.sema_post(data.forged_from_arrived)
 		}
@@ -83,7 +89,8 @@ test_peer_cannot_address_system_control_messages :: proc(t: ^testing.T) {
 	logging_before := actod.NODE.config.actor_config.logging
 	defer actod.NODE.config.actor_config.logging = logging_before
 	actod.NODE.config.actor_config.logging.level = .Warning
-	actod.NODE.config.actor_config.logging.custom_logger = record_refused_system_control
+	actod.NODE.config.actor_config.logging.custom_logger =
+		record_refused_system_control
 
 	probe_arrived: sync.Sema
 	forged_from_arrived: sync.Sema
@@ -118,7 +125,10 @@ test_peer_cannot_address_system_control_messages :: proc(t: ^testing.T) {
 	defer stop_node_role(&peer)
 	if !expect(t, wait_for_node_role_ready(&peer), "The sender never reported READY") do return
 
-	forged_ok := sync.sema_wait_with_timeout(&forged_from_arrived, scaled_timeout(5 * time.Second))
+	forged_ok := sync.sema_wait_with_timeout(
+		&forged_from_arrived,
+		scaled_timeout(5 * time.Second),
+	)
 	expect(t, forged_ok, "The probe with a forged from_handle never arrived")
 	expect(
 		t,
@@ -126,12 +136,19 @@ test_peer_cannot_address_system_control_messages :: proc(t: ^testing.T) {
 		"A from_handle naming a local actor must arrive as a pid of the peer node that resolves to no local actor",
 	)
 
-	probe_ok := sync.sema_wait_with_timeout(&probe_arrived, scaled_timeout(5 * time.Second))
+	probe_ok := sync.sema_wait_with_timeout(
+		&probe_arrived,
+		scaled_timeout(5 * time.Second),
+	)
 	if !expect(t, probe_ok, "The probe sent after the refused frames never arrived") do return
 
 	expect(
 		t,
-		poll_until(all_refused_wire_shapes_logged, nil, scaled_timeout(2 * time.Second)),
+		poll_until(
+			all_refused_wire_shapes_logged,
+			nil,
+			scaled_timeout(2 * time.Second),
+		),
 		"Every refused system control frame must be logged with its type and the peer",
 	)
 	for &shape in refused_wire_shapes {
@@ -161,10 +178,20 @@ test_peer_cannot_address_system_control_messages :: proc(t: ^testing.T) {
 
 run_system_control_sender :: proc() {
 	node_name :=
-		os.lookup_env("NODE_NAME", context.temp_allocator) or_else SYSTEM_CONTROL_PEER_NODE
+		os.lookup_env(
+			"NODE_NAME",
+			context.temp_allocator,
+		) or_else SYSTEM_CONTROL_PEER_NODE
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
 	node_port, node_port_ok := strconv.parse_int(
 		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "",
 	)
@@ -178,7 +205,9 @@ run_system_control_sender :: proc() {
 		os.lookup_env("TARGET_NODE_PID", context.temp_allocator) or_else "",
 	)
 	if !node_port_ok || !target_port_ok || !victim_ok || !target_node_pid_ok {
-		fmt.println("NODE_PORT, TARGET_PORT, VICTIM_PID and TARGET_NODE_PID are required")
+		fmt.println(
+			"NODE_PORT, TARGET_PORT, VICTIM_PID and TARGET_NODE_PID are required",
+		)
 		os.exit(1)
 	}
 
@@ -226,28 +255,50 @@ run_system_control_sender :: proc() {
 	}
 
 	require_sent(
-		actod.send_message(remote_victim, actod.Rename_Actor{new_name = "renamed_by_peer"}),
+		actod.send_message(
+			remote_victim,
+			actod.Rename_Actor{new_name = "renamed_by_peer"},
+		),
 		"Rename_Actor",
 	)
 	require_sent(
-		actod.send_message(remote_victim, actod.Reload_Behaviour{generation = 1}),
+		actod.send_message(
+			remote_victim,
+			actod.Reload_Behaviour{generation = 1},
+		),
 		"Reload_Behaviour",
 	)
 	require_sent(
-		actod.send_message(remote_victim, actod.Get_Stats{requester = remote_victim}),
+		actod.send_message(
+			remote_victim,
+			actod.Get_Stats{requester = remote_victim},
+		),
 		"Get_Stats",
 	)
 	require_sent(
-		actod.send_message(remote_victim, actod.Remove_Child{child_pid = remote_victim}),
+		actod.send_message(
+			remote_victim,
+			actod.Remove_Child{child_pid = remote_victim},
+		),
 		"Remove_Child",
 	)
-	require_sent(actod.send_message(remote_victim, forged_stop), "Actor_Stopped to the victim")
-	require_sent(actod.send_message(remote_node, forged_stop), "Actor_Stopped to the node")
+	require_sent(
+		actod.send_message(remote_victim, forged_stop),
+		"Actor_Stopped to the victim",
+	)
+	require_sent(
+		actod.send_message(remote_node, forged_stop),
+		"Actor_Stopped to the node",
+	)
 	require_sent(
 		actod.send_remote_by_name(
 			target_node,
 			"timer",
-			actod.Start_Timer{id = 1, interval = 10 * time.Millisecond, repeat = true},
+			actod.Start_Timer {
+				id = 1,
+				interval = 10 * time.Millisecond,
+				repeat = true,
+			},
 		),
 		"Start_Timer",
 	)
@@ -307,7 +358,10 @@ run_system_control_sender :: proc() {
 		"forged from probe",
 	)
 
-	require_sent(actod.send_message(remote_victim, SYSTEM_CONTROL_PROBE), "probe")
+	require_sent(
+		actod.send_message(remote_victim, SYSTEM_CONTROL_PROBE),
+		"probe",
+	)
 
 	print_ready_once_listening()
 
@@ -339,7 +393,8 @@ append_forged_from_frame :: proc(
 		flags,
 		"",
 	)
-	if frame_len == 0 || !actod.batch_append_message_retry(ring, frame[:frame_len]) {
+	if frame_len == 0 ||
+	   !actod.batch_append_message_retry(ring, frame[:frame_len]) {
 		fmt.printf("Appending the %s frame failed\n", what)
 		os.exit(1)
 	}

@@ -35,13 +35,28 @@ test_should_ignore_file :: proc(t: ^testing.T) {
 	testing.expect(t, should_ignore_file("src/main.go", "main.go"))
 	testing.expect(t, should_ignore_file("src/readme.md", "readme.md"))
 
-	testing.expect(t, should_ignore_file("actors/hot_exports.odin", "hot_exports.odin"))
+	testing.expect(
+		t,
+		should_ignore_file("actors/hot_exports.odin", "hot_exports.odin"),
+	)
 
-	testing.expect(t, should_ignore_file("actors/tmp_build.odin", "tmp_build.odin"))
+	testing.expect(
+		t,
+		should_ignore_file("actors/tmp_build.odin", "tmp_build.odin"),
+	)
 
-	testing.expect(t, should_ignore_file("/some/path/tmp/foo.odin", "foo.odin"))
-	testing.expect(t, should_ignore_file("C:\\actors\\tmp\\foo.odin", "foo.odin"))
+	testing.expect(
+		t,
+		should_ignore_file("/some/path/tmp/foo.odin", "foo.odin"),
+	)
+	testing.expect(
+		t,
+		should_ignore_file("C:\\actors\\tmp\\foo.odin", "foo.odin"),
+	)
 
 	testing.expect(t, !should_ignore_file("actors/main.odin", "main.odin"))
-	testing.expect(t, !should_ignore_file("/abs/path/actors/handler.odin", "handler.odin"))
+	testing.expect(
+		t,
+		!should_ignore_file("/abs/path/actors/handler.odin", "handler.odin"),
+	)
 }

@@ -20,7 +20,11 @@ panic_actor_init :: proc(data: ^Panic_Actor_Data) {
 	}
 }
 
-panic_actor_handle_message :: proc(data: ^Panic_Actor_Data, from: actod.PID, msg: any) {
+panic_actor_handle_message :: proc(
+	data: ^Panic_Actor_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	data.message_count += 1
 	switch m in msg {
 	case string:
@@ -78,14 +82,17 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 	child_spawns: [dynamic]actod.SPAWN
 	defer delete(child_spawns)
 
-	append(&child_spawns, proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
-		return actod.spawn_child(
-			"panic-child",
-			Panic_Actor_Data{},
-			Panic_Actor_Behaviour,
-			actod.make_actor_config(restart_policy = .PERMANENT),
-		)
-	})
+	append(
+		&child_spawns,
+		proc(_name: string, _parent_pid: actod.PID) -> (actod.PID, bool) {
+			return actod.spawn_child(
+				"panic-child",
+				Panic_Actor_Data{},
+				Panic_Actor_Behaviour,
+				actod.make_actor_config(restart_policy = .PERMANENT),
+			)
+		},
+	)
 
 	supervisor_pid, ok := actod.spawn(
 		"panic-supervisor",
@@ -98,7 +105,11 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 		),
 	)
 	expect(t, ok, "Failed to spawn supervisor")
-	expect(t, wait_for_child_count(supervisor_pid, 1, 1000), "Child should be spawned")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 1, 1000),
+		"Child should be spawned",
+	)
 
 	children := actod.get_children(supervisor_pid)
 	old_child := children[0]
@@ -107,7 +118,12 @@ test_actor_panic_supervisor_restart :: proc(t: ^testing.T) {
 	err := actod.send_message(old_child, "panic")
 	expect(t, err == .OK, "Failed to send panic to child")
 
-	new_pid, restarted := wait_for_child_pid_change(supervisor_pid, old_child, 0, 2000)
+	new_pid, restarted := wait_for_child_pid_change(
+		supervisor_pid,
+		old_child,
+		0,
+		2000,
+	)
 	expect(t, restarted, "Child should be restarted after panic")
 	expect(t, new_pid != old_child, "Restarted child should have new PID")
 
@@ -161,7 +177,11 @@ Crash_Teardown_Behaviour :: actod.Actor_Behaviour(Crash_Teardown_Data) {
 	terminate      = crash_teardown_terminate,
 }
 
-crash_teardown_handle_message :: proc(data: ^Crash_Teardown_Data, from: actod.PID, msg: any) {
+crash_teardown_handle_message :: proc(
+	data: ^Crash_Teardown_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	if text, ok := msg.(string); ok && text == "panic" {
 		panic("intentional panic")
 	}
@@ -186,7 +206,11 @@ test_crash_runs_terminate_and_reaps_children :: proc(t: ^testing.T) {
 
 	added := actod.add_child(parent_pid, create_crash_child(0))
 	expect(t, added, "Failed to add child")
-	expect(t, wait_for_child_count(parent_pid, 1, 2000), "Child should be registered")
+	expect(
+		t,
+		wait_for_child_count(parent_pid, 1, 2000),
+		"Child should be registered",
+	)
 
 	children := actod.get_children(parent_pid)
 	child_pid := children[0]

@@ -15,7 +15,11 @@ System_Backlog_Behaviour :: actod.Actor_Behaviour(System_Backlog_Data) {
 	handle_message = system_backlog_handle_message,
 }
 
-system_backlog_handle_message :: proc(data: ^System_Backlog_Data, from: actod.PID, msg: any) {
+system_backlog_handle_message :: proc(
+	data: ^System_Backlog_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	text, is_text := msg.(string)
 	if !is_text do return
 	switch text {
@@ -55,7 +59,8 @@ test_system_mailbox_full_returns_error :: proc(t: ^testing.T) {
 
 	backlogged := 0
 	for _ in 0 ..< actod.SYSTEM_MAILBOX_SIZE * 3 {
-		if actod.send_message(pid, actod.Get_Stats{requester = 0}) == .RECEIVER_BACKLOGGED {
+		if actod.send_message(pid, actod.Get_Stats{requester = 0}) ==
+		   .RECEIVER_BACKLOGGED {
 			backlogged += 1
 		}
 	}
@@ -66,7 +71,11 @@ test_system_mailbox_full_returns_error :: proc(t: ^testing.T) {
 		"Overflowing a system mailbox must return RECEIVER_BACKLOGGED, not panic in the sender",
 	)
 
-	expect(t, actod.send_message(pid, "ping") == .OK, "Failed to send the ping")
+	expect(
+		t,
+		actod.send_message(pid, "ping") == .OK,
+		"Failed to send the ping",
+	)
 	expect(
 		t,
 		poll_until(atomic_flag_raised, &pinged, 3 * time.Second),

@@ -33,9 +33,21 @@ register_test_actor_types :: proc() {
 test_register_actor_type :: proc(t: ^testing.T) {
 	register_test_actor_types()
 
-	testing.expect(t, TEST_WORKER_TYPE != ACTOR_TYPE_UNTYPED, "Should not be untyped")
-	testing.expect(t, TEST_AGGREGATOR_TYPE != ACTOR_TYPE_UNTYPED, "Should not be untyped")
-	testing.expect(t, TEST_AGGREGATOR_TYPE != TEST_WORKER_TYPE, "Types should be different")
+	testing.expect(
+		t,
+		TEST_WORKER_TYPE != ACTOR_TYPE_UNTYPED,
+		"Should not be untyped",
+	)
+	testing.expect(
+		t,
+		TEST_AGGREGATOR_TYPE != ACTOR_TYPE_UNTYPED,
+		"Should not be untyped",
+	)
+	testing.expect(
+		t,
+		TEST_AGGREGATOR_TYPE != TEST_WORKER_TYPE,
+		"Types should be different",
+	)
 }
 
 @(test)
@@ -44,7 +56,11 @@ test_register_actor_type_duplicate :: proc(t: ^testing.T) {
 
 	second, ok := register_actor_type("test_worker")
 	testing.expect(t, ok, "Duplicate registration should succeed")
-	testing.expect(t, second == TEST_WORKER_TYPE, "Duplicate should return same ID")
+	testing.expect(
+		t,
+		second == TEST_WORKER_TYPE,
+		"Duplicate should return same ID",
+	)
 }
 
 @(test)
@@ -79,7 +95,11 @@ test_actor_type_hash_consistency :: proc(t: ^testing.T) {
 	hash2, ok2 := get_actor_type_hash(TEST_WORKER_TYPE)
 	testing.expect(t, ok1 && ok2, "Should find hash")
 	testing.expect(t, hash1 == hash2, "Same type should produce same hash")
-	testing.expect(t, hash1 == fnv1a_hash("test_worker"), "Hash should match name hash")
+	testing.expect(
+		t,
+		hash1 == fnv1a_hash("test_worker"),
+		"Hash should match name hash",
+	)
 }
 
 @(test)

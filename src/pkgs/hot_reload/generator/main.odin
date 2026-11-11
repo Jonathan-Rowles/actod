@@ -16,12 +16,12 @@ Import_Entry :: struct {
 
 KNOWN_IMPORTS :: []Import_Entry {
 	{"runtime.", `import "base:runtime"`},
-	{"log.",     `import "core:log"`},
-	{"time.",    `import "core:time"`},
-	{"net.",     `import "core:net"`},
-	{"sync.",    `import "core:sync"`},
-	{"nbio.",    `import "core:nbio"`},
-	{"thread.",  `import "core:thread"`},
+	{"log.", `import "core:log"`},
+	{"time.", `import "core:time"`},
+	{"net.", `import "core:net"`},
+	{"sync.", `import "core:sync"`},
+	{"nbio.", `import "core:nbio"`},
+	{"thread.", `import "core:thread"`},
 }
 
 emit_needed_imports :: proc(sb: ^strings.Builder, text: string) {
@@ -85,13 +85,26 @@ main :: proc() {
 	API_SOURCE_FILE :: API_SOURCE_DIR + "/act.odin"
 
 	if !os.is_file(API_SOURCE_FILE) {
-		fmt.eprintln("Error:", API_SOURCE_FILE, "not found. Run from project root.")
+		fmt.eprintln(
+			"Error:",
+			API_SOURCE_FILE,
+			"not found. Run from project root.",
+		)
 		os.exit(1)
 	}
 
 	aliases, procs, groups, raw_src := parse_act_file(API_SOURCE_DIR)
-	types_shim, discovered_types := build_types_shim("src/actod", aliases[:], procs[:])
-	actod_shim := build_actod_shim(procs[:], aliases[:], groups[:], discovered_types)
+	types_shim, discovered_types := build_types_shim(
+		"src/actod",
+		aliases[:],
+		procs[:],
+	)
+	actod_shim := build_actod_shim(
+		procs[:],
+		aliases[:],
+		groups[:],
+		discovered_types,
+	)
 	hot_api_struct := build_hot_api_struct_text(procs[:])
 	hot_api_init := build_hot_api_init(procs[:])
 
@@ -107,7 +120,14 @@ main :: proc() {
 }
 
 
-parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, procs: [dynamic]Proc_Info, groups: [dynamic]string, raw_src: string) {
+parse_act_file :: proc(
+	source_dir: string,
+) -> (
+	aliases: [dynamic]Type_Alias,
+	procs: [dynamic]Proc_Info,
+	groups: [dynamic]string,
+	raw_src: string,
+) {
 	p := parser.default_parser()
 	pkg, parse_ok := parser.parse_package_from_path(source_dir, &p)
 	if !parse_ok || pkg == nil {
@@ -137,7 +157,8 @@ parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, pro
 		name := ident_name(v_decl.names[0])
 		if name == "" do continue
 
-		if sel, is_sel := v_decl.values[0].derived.(^ast.Selector_Expr); is_sel {
+		if sel, is_sel := v_decl.values[0].derived.(^ast.Selector_Expr);
+		   is_sel {
 			prefix := expr_to_string(sel.expr)
 			field := sel.field.name if sel.field != nil else ""
 			if prefix == "actod" && field != "" {
@@ -146,7 +167,8 @@ parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, pro
 			continue
 		}
 
-		if _, is_group := v_decl.values[0].derived.(^ast.Proc_Group); is_group {
+		if _, is_group := v_decl.values[0].derived.(^ast.Proc_Group);
+		   is_group {
 			start := decl.pos.offset
 			end := decl.end.offset
 			if start >= 0 && end > start && end <= len(file.src) {
@@ -211,7 +233,10 @@ parse_act_file :: proc(source_dir: string) -> (aliases: [dynamic]Type_Alias, pro
 				if len(field.names) > 0 {
 					for name_expr in field.names {
 						rname := ident_name(name_expr)
-						append(&info.results, Result_Info{name = rname, type_str = type_str})
+						append(
+							&info.results,
+							Result_Info{name = rname, type_str = type_str},
+						)
 					}
 				} else {
 					append(&info.results, Result_Info{type_str = type_str})
@@ -250,16 +275,24 @@ parse_hot_attribute :: proc(v_decl: ^ast.Value_Decl, info: ^Proc_Info) {
 				return
 			}
 			if strings.has_prefix(value_str, "host_name ") {
-				info.host_name = strings.trim_space(value_str[len("host_name "):])
+				info.host_name = strings.trim_space(
+					value_str[len("host_name "):],
+				)
 				return
 			}
 			if strings.has_prefix(value_str, "extra_param ") {
-				append(&info.extra_params, strings.trim_space(value_str[len("extra_param "):]))
+				append(
+					&info.extra_params,
+					strings.trim_space(value_str[len("extra_param "):]),
+				)
 				return
 			}
 			if strings.has_prefix(value_str, "compose") {
 				info.kind = .Compose
-				body_text := strings.trim_left(value_str[len("compose"):], "\n")
+				body_text := strings.trim_left(
+					value_str[len("compose"):],
+					"\n",
+				)
 
 				body_lines: [dynamic]string
 				for line in strings.split_lines(body_text) {
@@ -273,8 +306,12 @@ parse_hot_attribute :: proc(v_decl: ^ast.Value_Decl, info: ^Proc_Info) {
 							append(
 								&info.default_overrides,
 								Default_Override {
-									param_name = strings.trim_space(rest[:eq_idx]),
-									value = strings.trim_space(rest[eq_idx + 1:]),
+									param_name = strings.trim_space(
+										rest[:eq_idx],
+									),
+									value = strings.trim_space(
+										rest[eq_idx + 1:],
+									),
 								},
 							)
 						}
@@ -307,7 +344,12 @@ needs_hot_api_entry :: proc(p: Proc_Info) -> bool {
 	return false
 }
 
-split_trailing_loc :: proc(params: []Param_Info) -> (leading: []Param_Info, loc: Maybe(Param_Info)) {
+split_trailing_loc :: proc(
+	params: []Param_Info,
+) -> (
+	leading: []Param_Info,
+	loc: Maybe(Param_Info),
+) {
 	if len(params) > 0 && params[len(params) - 1].name == "loc" {
 		return params[:len(params) - 1], params[len(params) - 1]
 	}
@@ -380,7 +422,12 @@ build_types_shim :: proc(
 	needed: map[string]bool
 	queue: [dynamic]string
 
-	seed_name :: proc(name: string, all_decls: ^map[string]^ast.Value_Decl, needed: ^map[string]bool, queue: ^[dynamic]string) {
+	seed_name :: proc(
+		name: string,
+		all_decls: ^map[string]^ast.Value_Decl,
+		needed: ^map[string]bool,
+		queue: ^[dynamic]string,
+	) {
 		if name in needed^ do return
 		if name not_in all_decls^ do return
 		needed[name] = true
@@ -392,10 +439,20 @@ build_types_shim :: proc(
 	}
 	for p in procs {
 		for param in p.params {
-			collect_idents_from_type_str(param.type_str, &all_decls, &needed, &queue)
+			collect_idents_from_type_str(
+				param.type_str,
+				&all_decls,
+				&needed,
+				&queue,
+			)
 		}
 		for r in p.results {
-			collect_idents_from_type_str(r.type_str, &all_decls, &needed, &queue)
+			collect_idents_from_type_str(
+				r.type_str,
+				&all_decls,
+				&needed,
+				&queue,
+			)
 		}
 	}
 	seed_name("Raw_Spawn_Behaviour", &all_decls, &needed, &queue)
@@ -447,7 +504,10 @@ build_types_shim :: proc(
 	}
 
 	sb := strings.builder_make()
-	fmt.sbprint(&sb, "// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage actod\n\n")
+	fmt.sbprint(
+		&sb,
+		"// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage actod\n\n",
+	)
 	emit_needed_imports(&sb, strings.to_string(all_type_text))
 	fmt.sbprint(&sb, "\n")
 
@@ -550,7 +610,10 @@ collect_idents_from_expr :: proc(expr: ^ast.Expr, out: ^map[string]bool) {
 }
 
 @(private)
-collect_idents_from_field_list :: proc(fl: ^ast.Field_List, out: ^map[string]bool) {
+collect_idents_from_field_list :: proc(
+	fl: ^ast.Field_List,
+	out: ^map[string]bool,
+) {
 	if fl == nil do return
 	for field in fl.list {
 		collect_idents_from_expr(field.type, out)
@@ -585,7 +648,12 @@ find_comment_start :: proc(line: string) -> int {
 }
 
 
-build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []string, discovered_types: map[string]bool) -> string {
+build_actod_shim :: proc(
+	procs: []Proc_Info,
+	aliases: []Type_Alias,
+	groups: []string,
+	discovered_types: map[string]bool,
+) -> string {
 	procs_sb := strings.builder_make()
 	fmt.sbprint(&procs_sb, build_hot_api_struct_text(procs))
 	fmt.sbprint(&procs_sb, "\n@(export)\nhot_api: ^Hot_API\n\n")
@@ -596,8 +664,10 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []st
 	}
 
 	for group in groups {
-		if filtered, keep := filter_group_to_shim_members(strings.to_string(procs_sb), group);
-		   keep {
+		if filtered, keep := filter_group_to_shim_members(
+			strings.to_string(procs_sb),
+			group,
+		); keep {
 			fmt.sbprintf(&procs_sb, "%s\n\n", filtered)
 		}
 	}
@@ -605,7 +675,10 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []st
 	procs_text := strings.to_string(procs_sb)
 
 	out := strings.builder_make()
-	fmt.sbprint(&out, "// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage actod\n\n")
+	fmt.sbprint(
+		&out,
+		"// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage actod\n\n",
+	)
 	emit_needed_imports(&out, procs_text)
 	fmt.sbprint(&out, "\n")
 	fmt.sbprint(&out, procs_text)
@@ -613,7 +686,13 @@ build_actod_shim :: proc(procs: []Proc_Info, aliases: []Type_Alias, groups: []st
 	return strings.to_string(out)
 }
 
-filter_group_to_shim_members :: proc(shim_text: string, group: string) -> (string, bool) {
+filter_group_to_shim_members :: proc(
+	shim_text: string,
+	group: string,
+) -> (
+	string,
+	bool,
+) {
 	open := strings.index_byte(group, '{')
 	close := strings.last_index_byte(group, '}')
 	if open < 0 || close <= open do return "", false
@@ -645,7 +724,11 @@ emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {
 
 	leading_params, trailing_loc := split_trailing_loc(p.params[:])
 
-	emit_shim_param :: proc(sb: ^strings.Builder, p: Proc_Info, param: Param_Info) {
+	emit_shim_param :: proc(
+		sb: ^strings.Builder,
+		p: Proc_Info,
+		param: Param_Info,
+	) {
 		if param.name != "" do fmt.sbprintf(sb, "%s: ", param.name)
 		fmt.sbprint(sb, map_act_alias(param.type_str))
 
@@ -678,7 +761,10 @@ emit_shim_proc :: proc(sb: ^strings.Builder, p: Proc_Info) {
 
 	switch p.kind {
 	case .Noop:
-		fmt.sbprint(sb, "\t// no-op in hot reload shim, types are registered by the host\n")
+		fmt.sbprint(
+			sb,
+			"\t// no-op in hot reload shim, types are registered by the host\n",
+		)
 	case .Compose:
 		for line in strings.split_lines(p.compose_body) {
 			if strings.trim_space(line) == "" do continue
@@ -742,11 +828,24 @@ zero_default_for_type :: proc(type_str: string) -> string {
 	if strings.has_prefix(type_str, "^") do return "nil"
 	if strings.has_prefix(type_str, "proc") do return "nil"
 	switch type_str {
-	case "string", "cstring":             return `""`
-	case "bool":                          return "false"
-	case "int", "i8", "i16", "i32", "i64",
-	     "uint", "u8", "u16", "u32", "u64",
-	     "f32", "f64", "uintptr":         return "0"
+	case "string", "cstring":
+		return `""`
+	case "bool":
+		return "false"
+	case "int",
+	     "i8",
+	     "i16",
+	     "i32",
+	     "i64",
+	     "uint",
+	     "u8",
+	     "u16",
+	     "u32",
+	     "u64",
+	     "f32",
+	     "f64",
+	     "uintptr":
+		return "0"
 	}
 	return "{}"
 }
@@ -776,7 +875,12 @@ SPAWN_CHILD_RAW_FIELD :: `	spawn_child_raw:          proc(
 	) -> (PID, bool),
 `
 
-detect_raw_spawn_needs :: proc(procs: []Proc_Info) -> (need_spawn_raw: bool, need_spawn_child_raw: bool) {
+detect_raw_spawn_needs :: proc(
+	procs: []Proc_Info,
+) -> (
+	need_spawn_raw: bool,
+	need_spawn_child_raw: bool,
+) {
 	for p in procs {
 		if needs_hot_api_entry(p) do continue
 		if p.kind != .Compose do continue
@@ -818,7 +922,13 @@ emit_param_list :: proc(sb: ^strings.Builder, p: Proc_Info, multiline: bool) {
 	}
 	if loc_param, has_loc := trailing_loc.?; has_loc {
 		if param_count > 0 do fmt.sbprint(sb, separator)
-		fmt.sbprintf(sb, "%s%s: %s", prefix, loc_param.name, resolve_type(loc_param.type_str))
+		fmt.sbprintf(
+			sb,
+			"%s%s: %s",
+			prefix,
+			loc_param.name,
+			resolve_type(loc_param.type_str),
+		)
 		param_count += 1
 	}
 }
@@ -879,7 +989,10 @@ build_hot_api_init :: proc(procs: []Proc_Info) -> string {
 
 	if need_spawn_raw do fmt.sbprint(&sb, "\tspawn_raw              = actod.spawn_from_raw,\n")
 	if need_spawn_child_raw {
-		fmt.sbprint(&sb, "\tspawn_child_raw        = actod.spawn_child_from_raw,\n")
+		fmt.sbprint(
+			&sb,
+			"\tspawn_child_raw        = actod.spawn_child_from_raw,\n",
+		)
 	}
 
 	fmt.sbprint(&sb, "}\n")
@@ -889,10 +1002,13 @@ build_hot_api_init :: proc(procs: []Proc_Info) -> string {
 
 write_generated_shims :: proc(types_shim: string, actod_shim: string) {
 	sb := strings.builder_make()
-	fmt.sbprint(&sb, `// Code generated by tools/gen_hot_api. DO NOT EDIT
+	fmt.sbprint(
+		&sb,
+		`// Code generated by tools/gen_hot_api. DO NOT EDIT
 package hot_reload
 
-`)
+`,
+	)
 	fmt.sbprint(&sb, "TYPES_SHIM :: `")
 	fmt.sbprint(&sb, types_shim)
 	fmt.sbprint(&sb, "`\n\n")
@@ -901,7 +1017,8 @@ package hot_reload
 	fmt.sbprint(&sb, "`\n")
 
 	path := "src/pkgs/hot_reload/generated_shims.odin"
-	if err := os.write_entire_file(path, transmute([]u8)strings.to_string(sb)); err != nil {
+	if err := os.write_entire_file(path, transmute([]u8)strings.to_string(sb));
+	   err != nil {
 		fmt.eprintln("Failed to write", path, err)
 		os.exit(1)
 	}
@@ -909,23 +1026,33 @@ package hot_reload
 
 write_hot_api_generated :: proc(hot_api_struct: string, hot_api_init: string) {
 	sb := strings.builder_make()
-	fmt.sbprint(&sb, "// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage actod\n\n")
+	fmt.sbprint(
+		&sb,
+		"// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage actod\n\n",
+	)
 	emit_needed_imports(&sb, hot_api_struct)
 	fmt.sbprint(&sb, "\n")
 	fmt.sbprint(&sb, hot_api_struct)
 
 	path := "src/actod/hot_api_generated.odin"
-	if err := os.write_entire_file(path, transmute([]u8)strings.to_string(sb)); err != nil {
+	if err := os.write_entire_file(path, transmute([]u8)strings.to_string(sb));
+	   err != nil {
 		fmt.eprintln("Failed to write", path, err)
 		os.exit(1)
 	}
 
 	table := strings.builder_make()
-	fmt.sbprint(&table, "// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage hot_reload_dev\n\nimport actod \"../src/actod\"\n\n")
+	fmt.sbprint(
+		&table,
+		"// Code generated by tools/gen_hot_api. DO NOT EDIT\npackage hot_reload_dev\n\nimport actod \"../src/actod\"\n\n",
+	)
 	fmt.sbprint(&table, hot_api_init)
 
 	table_path := "hot_reload_dev/hot_api_table_generated.odin"
-	if err := os.write_entire_file(table_path, transmute([]u8)strings.to_string(table)); err != nil {
+	if err := os.write_entire_file(
+		table_path,
+		transmute([]u8)strings.to_string(table),
+	); err != nil {
 		fmt.eprintln("Failed to write", table_path, err)
 		os.exit(1)
 	}
@@ -934,7 +1061,10 @@ write_hot_api_generated :: proc(hot_api_struct: string, hot_api_init: string) {
 
 write_clean_act_odin :: proc(raw_src: string) {
 	sb := strings.builder_make()
-	fmt.sbprint(&sb, "// Code generated by gen_hot_api. DO NOT EDIT. Source: src/api/act.odin\n")
+	fmt.sbprint(
+		&sb,
+		"// Code generated by gen_hot_api. DO NOT EDIT. Source: src/api/act.odin\n",
+	)
 
 	src := raw_src
 	in_hot_attr := false
@@ -951,7 +1081,8 @@ write_clean_act_odin :: proc(raw_src: string) {
 		}
 
 		if strings.has_prefix(trimmed, "@(hot") {
-			if strings.contains(trimmed, "`)") || !strings.contains(line, "`") {
+			if strings.contains(trimmed, "`)") ||
+			   !strings.contains(line, "`") {
 				prev_was_hot = true
 				continue
 			}
@@ -969,7 +1100,8 @@ write_clean_act_odin :: proc(raw_src: string) {
 	}
 
 	path := "act.odin"
-	if err := os.write_entire_file(path, transmute([]u8)strings.to_string(sb)); err != nil {
+	if err := os.write_entire_file(path, transmute([]u8)strings.to_string(sb));
+	   err != nil {
 		fmt.eprintln("Failed to write", path, err)
 		os.exit(1)
 	}
@@ -1012,7 +1144,11 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 		return fmt.aprintf("^%s", expr_to_string(e.elem))
 	case ^ast.Array_Type:
 		if e.len != nil {
-			return fmt.aprintf("[%s]%s", expr_to_string(e.len), expr_to_string(e.elem))
+			return fmt.aprintf(
+				"[%s]%s",
+				expr_to_string(e.len),
+				expr_to_string(e.elem),
+			)
 		}
 		return fmt.aprintf("[]%s", expr_to_string(e.elem))
 	case ^ast.Dynamic_Array_Type:
@@ -1024,7 +1160,11 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 			e.field.name if e.field != nil else "?",
 		)
 	case ^ast.Map_Type:
-		return fmt.aprintf("map[%s]%s", expr_to_string(e.key), expr_to_string(e.value))
+		return fmt.aprintf(
+			"map[%s]%s",
+			expr_to_string(e.key),
+			expr_to_string(e.value),
+		)
 	case ^ast.Distinct_Type:
 		return fmt.aprintf("distinct %s", expr_to_string(e.type))
 	case ^ast.Proc_Type:
@@ -1038,7 +1178,12 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 	case ^ast.Unary_Expr:
 		return fmt.aprintf("%s%s", e.op.text, expr_to_string(e.expr))
 	case ^ast.Binary_Expr:
-		return fmt.aprintf("%s %s %s", expr_to_string(e.left), e.op.text, expr_to_string(e.right))
+		return fmt.aprintf(
+			"%s %s %s",
+			expr_to_string(e.left),
+			e.op.text,
+			expr_to_string(e.right),
+		)
 	case ^ast.Paren_Expr:
 		return fmt.aprintf("(%s)", expr_to_string(e.expr))
 	case ^ast.Call_Expr:
@@ -1047,9 +1192,17 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 			if i > 0 do fmt.sbprint(&args_sb, ", ")
 			fmt.sbprint(&args_sb, expr_to_string(arg))
 		}
-		return fmt.aprintf("%s(%s)", expr_to_string(e.expr), strings.to_string(args_sb))
+		return fmt.aprintf(
+			"%s(%s)",
+			expr_to_string(e.expr),
+			strings.to_string(args_sb),
+		)
 	case ^ast.Index_Expr:
-		return fmt.aprintf("%s(%s)", expr_to_string(e.expr), expr_to_string(e.index))
+		return fmt.aprintf(
+			"%s(%s)",
+			expr_to_string(e.expr),
+			expr_to_string(e.index),
+		)
 	case ^ast.Implicit_Selector_Expr:
 		if e.field != nil do return fmt.aprintf(".%s", e.field.name)
 		return ".?"

@@ -49,7 +49,9 @@ reclaim_sender_behaviour := actod.Actor_Behaviour(Reclaim_Sender) {
 				return
 			}
 			for slot in 0 ..< RECLAIM_NUM_SLOTS {
-				pid := actod.PID(sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire))
+				pid := actod.PID(
+					sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire),
+				)
 				if pid != 0 {
 					_ = actod.send_message(pid, Reclaim_Ping{n = d.sent})
 					d.sent += 1
@@ -71,7 +73,12 @@ reclaim_target_config :: proc() -> actod.Actor_Config {
 reclaim_spawn_target :: proc(slot: int, seq: ^u64) {
 	name := fmt.tprintf("reclaim_target_%d_%d", slot, seq^)
 	seq^ += 1
-	pid, ok := actod.spawn(name, Reclaim_Target{}, reclaim_target_behaviour, reclaim_target_config())
+	pid, ok := actod.spawn(
+		name,
+		Reclaim_Target{},
+		reclaim_target_behaviour,
+		reclaim_target_config(),
+	)
 	if ok {
 		sync.atomic_store_explicit(&reclaim_slots[slot], u64(pid), .Release)
 	} else {
@@ -84,7 +91,9 @@ reclaim_external_sender_proc :: proc(_: rawptr) {
 	for !sync.atomic_load_explicit(&reclaim_stop, .Acquire) {
 		round_start := sent
 		for slot in 0 ..< RECLAIM_NUM_SLOTS {
-			pid := actod.PID(sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire))
+			pid := actod.PID(
+				sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire),
+			)
 			if pid == 0 {
 				continue
 			}
@@ -101,7 +110,9 @@ reclaim_reaper_proc :: proc(_: rawptr) {
 	seq: u64
 	for !sync.atomic_load_explicit(&reclaim_stop, .Acquire) {
 		for slot in 0 ..< RECLAIM_NUM_SLOTS {
-			pid := actod.PID(sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire))
+			pid := actod.PID(
+				sync.atomic_load_explicit(&reclaim_slots[slot], .Acquire),
+			)
 			if pid == 0 {
 				reclaim_spawn_target(slot, &seq)
 				continue
@@ -142,13 +153,18 @@ test_reclaim_churn_under_termination :: proc(t: ^testing.T) {
 
 	externals: [RECLAIM_EXTERNAL_SENDERS]^thread.Thread
 	for i in 0 ..< RECLAIM_EXTERNAL_SENDERS {
-		externals[i] = thread.create_and_start_with_data(nil, reclaim_external_sender_proc)
+		externals[i] = thread.create_and_start_with_data(
+			nil,
+			reclaim_external_sender_proc,
+		)
 	}
 	reaper := thread.create_and_start_with_data(nil, reclaim_reaper_proc)
 
 	run_start := time.tick_now()
 	for time.tick_since(run_start) < RECLAIM_MAX_DURATION {
-		terminations_done := sync.atomic_load(&reclaim_total_terminations) >= RECLAIM_MIN_TERMINATIONS
+		terminations_done :=
+			sync.atomic_load(&reclaim_total_terminations) >=
+			RECLAIM_MIN_TERMINATIONS
 		sends_done := sync.atomic_load(&reclaim_total_sent) >= RECLAIM_MIN_SENT
 		if terminations_done && sends_done do break
 		time.sleep(time.Millisecond)

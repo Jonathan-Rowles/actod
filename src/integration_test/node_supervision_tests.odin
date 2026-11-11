@@ -12,20 +12,42 @@ NODE_DYNAMIC_CHILD_NAME :: "node-dynamic-child"
 
 blocking_child_terminated: bool
 
-spawn_node_crash_child :: proc(_name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_node_crash_child :: proc(
+	_name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	data := Crash_Test_Data {
 		crash_on_msg = "crash",
 		crash_reason = .INTERNAL_ERROR,
 	}
-	return actod.spawn(NODE_CRASH_CHILD_NAME, data, Crash_Test_Behaviour, parent_pid = parent)
+	return actod.spawn(
+		NODE_CRASH_CHILD_NAME,
+		data,
+		Crash_Test_Behaviour,
+		parent_pid = parent,
+	)
 }
 
-spawn_node_dynamic_child :: proc(_name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_node_dynamic_child :: proc(
+	_name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	data := Crash_Test_Data {
 		crash_on_msg = "crash",
 		crash_reason = .INTERNAL_ERROR,
 	}
-	return actod.spawn(NODE_DYNAMIC_CHILD_NAME, data, Crash_Test_Behaviour, parent_pid = parent)
+	return actod.spawn(
+		NODE_DYNAMIC_CHILD_NAME,
+		data,
+		Crash_Test_Behaviour,
+		parent_pid = parent,
+	)
 }
 
 Named_Pid_Probe :: struct {
@@ -42,13 +64,28 @@ named_pid_changed :: proc(state: rawptr) -> bool {
 	return true
 }
 
-wait_for_named_pid_change :: proc(name: string, old_pid: actod.PID, timeout: time.Duration) -> (actod.PID, bool) {
-	probe := Named_Pid_Probe{name = name, old_pid = old_pid}
+wait_for_named_pid_change :: proc(
+	name: string,
+	old_pid: actod.PID,
+	timeout: time.Duration,
+) -> (
+	actod.PID,
+	bool,
+) {
+	probe := Named_Pid_Probe {
+		name    = name,
+		old_pid = old_pid,
+	}
 	if poll_until(named_pid_changed, &probe, timeout, time.Millisecond) do return probe.new_pid, true
 	return 0, false
 }
 
-restart_node_with :: proc(name: string, children: [dynamic]actod.SPAWN, max_restarts: int, blocking_child: actod.SPAWN = nil) {
+restart_node_with :: proc(
+	name: string,
+	children: [dynamic]actod.SPAWN,
+	max_restarts: int,
+	blocking_child: actod.SPAWN = nil,
+) {
 	actod.shutdown_node()
 	actod.node_init(
 		name,
@@ -64,7 +101,13 @@ restart_node_with :: proc(name: string, children: [dynamic]actod.SPAWN, max_rest
 	)
 }
 
-crash_named_child :: proc(t: ^testing.T, name: string) -> (old_pid: actod.PID, ok: bool) {
+crash_named_child :: proc(
+	t: ^testing.T,
+	name: string,
+) -> (
+	old_pid: actod.PID,
+	ok: bool,
+) {
 	old_pid, ok = actod.get_actor_pid(name)
 	if !ok {
 		expectf(t, false, "%s is not running", name)
@@ -77,58 +120,119 @@ crash_named_child :: proc(t: ^testing.T, name: string) -> (old_pid: actod.PID, o
 
 test_node_child_restarts :: proc(t: ^testing.T) {
 	reset_test_state()
-	restart_node_with("node-restart", actod.make_children(spawn_node_crash_child), 10)
+	restart_node_with(
+		"node-restart",
+		actod.make_children(spawn_node_crash_child),
+		10,
+	)
 	wait_for_node()
 
 	first_pid, ok := crash_named_child(t, NODE_CRASH_CHILD_NAME)
 	if !ok do return
-	restarted_pid, restarted := wait_for_named_pid_change(NODE_CRASH_CHILD_NAME, first_pid, 2 * time.Second)
-	expect(t, restarted, "a declared node child must be restarted after an abnormal exit")
-	expect(t, restarted_pid != first_pid, "the restarted child must have a new pid")
+	restarted_pid, restarted := wait_for_named_pid_change(
+		NODE_CRASH_CHILD_NAME,
+		first_pid,
+		2 * time.Second,
+	)
+	expect(
+		t,
+		restarted,
+		"a declared node child must be restarted after an abnormal exit",
+	)
+	expect(
+		t,
+		restarted_pid != first_pid,
+		"the restarted child must have a new pid",
+	)
 
 	node_pid := actod.get_local_node_pid()
-	expect(t, actod.add_child(node_pid, spawn_node_dynamic_child), "add_child on the node pid")
-	dynamic_pid, appeared := wait_for_named_pid_change(NODE_DYNAMIC_CHILD_NAME, 0, 2 * time.Second)
+	expect(
+		t,
+		actod.add_child(node_pid, spawn_node_dynamic_child),
+		"add_child on the node pid",
+	)
+	dynamic_pid, appeared := wait_for_named_pid_change(
+		NODE_DYNAMIC_CHILD_NAME,
+		0,
+		2 * time.Second,
+	)
 	expect(t, appeared, "the dynamically added node child must start")
 
-	expect(t, wait_for_child_count(node_pid, 2, 1000), "get_children(node) must list both supervised children")
+	expect(
+		t,
+		wait_for_child_count(node_pid, 2, 1000),
+		"get_children(node) must list both supervised children",
+	)
 	children := actod.get_children(node_pid)
 	defer delete(children)
 	for child in children do expect(t, child != actod.NODE.timer_pid, "get_children(node) must list user children, not system actors")
 
 	_, crashed := crash_named_child(t, NODE_DYNAMIC_CHILD_NAME)
 	if !crashed do return
-	_, dynamic_restarted := wait_for_named_pid_change(NODE_DYNAMIC_CHILD_NAME, dynamic_pid, 2 * time.Second)
-	expect(t, dynamic_restarted, "a node child added with add_child must be restarted too")
+	_, dynamic_restarted := wait_for_named_pid_change(
+		NODE_DYNAMIC_CHILD_NAME,
+		dynamic_pid,
+		2 * time.Second,
+	)
+	expect(
+		t,
+		dynamic_restarted,
+		"a node child added with add_child must be restarted too",
+	)
 
 	actod.shutdown_node()
 }
 
 test_node_child_max_restarts_shuts_down_node :: proc(t: ^testing.T) {
 	reset_test_state()
-	restart_node_with("node-escalation", actod.make_children(spawn_node_crash_child), 1)
+	restart_node_with(
+		"node-escalation",
+		actod.make_children(spawn_node_crash_child),
+		1,
+	)
 	wait_for_node()
 
 	first_pid, ok := crash_named_child(t, NODE_CRASH_CHILD_NAME)
 	if !ok do return
-	second_pid, restarted := wait_for_named_pid_change(NODE_CRASH_CHILD_NAME, first_pid, 2 * time.Second)
+	second_pid, restarted := wait_for_named_pid_change(
+		NODE_CRASH_CHILD_NAME,
+		first_pid,
+		2 * time.Second,
+	)
 	expect(t, restarted, "the first crash is within budget and must restart")
-	expect(t, !sync.atomic_load(&actod.NODE.shutting_down), "one restart must not shut the node down")
+	expect(
+		t,
+		!sync.atomic_load(&actod.NODE.shutting_down),
+		"one restart must not shut the node down",
+	)
 
 	_ = second_pid
 	thread.create_and_start(proc() {
-		time.sleep(50 * time.Millisecond)
-		pid, ok := actod.get_actor_pid(NODE_CRASH_CHILD_NAME)
-		if ok do _ = actod.send_message(pid, "crash")
-	})
+			time.sleep(50 * time.Millisecond)
+			pid, ok := actod.get_actor_pid(NODE_CRASH_CHILD_NAME)
+			if ok do _ = actod.send_message(pid, "crash")
+		})
 
 	started := time.tick_now()
 	actod.await_signal()
 	elapsed := time.tick_since(started)
 
-	expectf(t, elapsed < 2 * time.Second, "await_signal took %v to return after escalation", elapsed)
-	expect(t, !actod.NODE.started, "await_signal must have shut the node down after the second crash")
-	expect(t, actod.node_failed(), "a node child that exhausts the root budget under await_signal must leave the node failed")
+	expectf(
+		t,
+		elapsed < 2 * time.Second,
+		"await_signal took %v to return after escalation",
+		elapsed,
+	)
+	expect(
+		t,
+		!actod.NODE.started,
+		"await_signal must have shut the node down after the second crash",
+	)
+	expect(
+		t,
+		actod.node_failed(),
+		"a node child that exhausts the root budget under await_signal must leave the node failed",
+	)
 }
 
 Blocking_Test_Data :: struct {
@@ -139,7 +243,11 @@ blocking_test_init :: proc(data: ^Blocking_Test_Data) {
 	data.on_init()
 }
 
-blocking_test_handle :: proc(data: ^Blocking_Test_Data, from: actod.PID, msg: any) {}
+blocking_test_handle :: proc(
+	data: ^Blocking_Test_Data,
+	from: actod.PID,
+	msg: any,
+) {}
 
 blocking_test_terminate :: proc(data: ^Blocking_Test_Data) {
 	sync.atomic_store(&blocking_child_terminated, true)
@@ -151,8 +259,18 @@ Blocking_Test_Behaviour :: actod.Actor_Behaviour(Blocking_Test_Data) {
 	terminate      = blocking_test_terminate,
 }
 
-spawn_blocking_signal_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
-	return actod.spawn("blocking-signal-child", Blocking_Test_Data{on_init = raise_sigint_to_self}, Blocking_Test_Behaviour)
+spawn_blocking_signal_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
+	return actod.spawn(
+		"blocking-signal-child",
+		Blocking_Test_Data{on_init = raise_sigint_to_self},
+		Blocking_Test_Behaviour,
+	)
 }
 
 crash_sibling_from_blocking_child :: proc() {
@@ -160,8 +278,18 @@ crash_sibling_from_blocking_child :: proc() {
 	if ok do _ = actod.send_message(pid, "crash")
 }
 
-spawn_blocking_escalation_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
-	return actod.spawn("blocking-escalation-child", Blocking_Test_Data{on_init = crash_sibling_from_blocking_child}, Blocking_Test_Behaviour)
+spawn_blocking_escalation_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
+	return actod.spawn(
+		"blocking-escalation-child",
+		Blocking_Test_Data{on_init = crash_sibling_from_blocking_child},
+		Blocking_Test_Behaviour,
+	)
 }
 
 test_blocking_child_stops_on_signal :: proc(t: ^testing.T) {
@@ -173,9 +301,22 @@ test_blocking_child_stops_on_signal :: proc(t: ^testing.T) {
 	restart_node_with("blocking-signal", nil, 3, spawn_blocking_signal_child)
 	elapsed := time.tick_since(started)
 
-	expectf(t, elapsed < 2 * time.Second, "node_init took %v to return after SIGINT", elapsed)
-	expect(t, sync.atomic_load(&blocking_child_terminated), "the blocking child's terminate callback must run on SIGINT")
-	expect(t, !sync.atomic_load(&actod.NODE.shutting_down), "a signal must not mark the node shutting down before node_shutdown is called")
+	expectf(
+		t,
+		elapsed < 2 * time.Second,
+		"node_init took %v to return after SIGINT",
+		elapsed,
+	)
+	expect(
+		t,
+		sync.atomic_load(&blocking_child_terminated),
+		"the blocking child's terminate callback must run on SIGINT",
+	)
+	expect(
+		t,
+		!sync.atomic_load(&actod.NODE.shutting_down),
+		"a signal must not mark the node shutting down before node_shutdown is called",
+	)
 
 	actod.shutdown_node()
 }
@@ -193,7 +334,11 @@ foreign_wait_wake :: proc "contextless" (data: ^Foreign_Wait_Data) {
 	sync.sema_post(&data.gate)
 }
 
-foreign_wait_handle :: proc(data: ^Foreign_Wait_Data, from: actod.PID, msg: any) {}
+foreign_wait_handle :: proc(
+	data: ^Foreign_Wait_Data,
+	from: actod.PID,
+	msg: any,
+) {}
 
 foreign_wait_terminate :: proc(data: ^Foreign_Wait_Data) {
 	sync.atomic_store(&blocking_child_terminated, true)
@@ -209,9 +354,19 @@ Foreign_Wait_Behaviour :: actod.Actor_Behaviour(Foreign_Wait_Data) {
 	on_wake        = foreign_wait_wake,
 }
 
-spawn_foreign_wait_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
+spawn_foreign_wait_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	raise_sigint_to_self_after(50 * time.Millisecond)
-	return actod.spawn("blocking-foreign-wait-child", Foreign_Wait_Data{}, Foreign_Wait_Behaviour)
+	return actod.spawn(
+		"blocking-foreign-wait-child",
+		Foreign_Wait_Data{},
+		Foreign_Wait_Behaviour,
+	)
 }
 
 test_blocking_child_signal_interrupts_foreign_wait :: proc(t: ^testing.T) {
@@ -221,11 +376,25 @@ test_blocking_child_signal_interrupts_foreign_wait :: proc(t: ^testing.T) {
 	sync.atomic_store(&foreign_wait_timeouts, 0)
 
 	started := time.tick_now()
-	restart_node_with("blocking-foreign-wait", nil, 3, spawn_foreign_wait_child)
+	restart_node_with(
+		"blocking-foreign-wait",
+		nil,
+		3,
+		spawn_foreign_wait_child,
+	)
 	elapsed := time.tick_since(started)
 
-	expectf(t, elapsed < 2 * time.Second, "node_init took %v to return after SIGINT into a foreign wait", elapsed)
-	expect(t, sync.atomic_load(&blocking_child_terminated), "the terminate callback must run")
+	expectf(
+		t,
+		elapsed < 2 * time.Second,
+		"node_init took %v to return after SIGINT into a foreign wait",
+		elapsed,
+	)
+	expect(
+		t,
+		sync.atomic_load(&blocking_child_terminated),
+		"the terminate callback must run",
+	)
 	expect_value(t, sync.atomic_load(&foreign_wait_timeouts), 0)
 
 	actod.shutdown_node()
@@ -236,15 +405,37 @@ test_blocking_child_stops_on_escalation :: proc(t: ^testing.T) {
 	sync.atomic_store(&blocking_child_terminated, false)
 
 	started := time.tick_now()
-	restart_node_with("blocking-escalation", actod.make_children(spawn_node_crash_child), 0, spawn_blocking_escalation_child)
+	restart_node_with(
+		"blocking-escalation",
+		actod.make_children(spawn_node_crash_child),
+		0,
+		spawn_blocking_escalation_child,
+	)
 	elapsed := time.tick_since(started)
 
-	expectf(t, elapsed < 2 * time.Second, "node_init took %v to return after escalation", elapsed)
-	expect(t, sync.atomic_load(&blocking_child_terminated), "escalation must stop the blocking child through its terminate callback")
-	expect(t, sync.atomic_load(&actod.NODE.shutting_down), "escalation must mark the node shutting down")
+	expectf(
+		t,
+		elapsed < 2 * time.Second,
+		"node_init took %v to return after escalation",
+		elapsed,
+	)
+	expect(
+		t,
+		sync.atomic_load(&blocking_child_terminated),
+		"escalation must stop the blocking child through its terminate callback",
+	)
+	expect(
+		t,
+		sync.atomic_load(&actod.NODE.shutting_down),
+		"escalation must mark the node shutting down",
+	)
 
 	actod.shutdown_node()
-	expect(t, actod.node_failed(), "a node child that exhausts the root budget under a blocking child must leave the node failed")
+	expect(
+		t,
+		actod.node_failed(),
+		"a node child that exhausts the root budget under a blocking child must leave the node failed",
+	)
 }
 
 panic_in_blocking_child :: proc() {
@@ -255,16 +446,46 @@ close_blocking_child :: proc() {
 	actod.self_terminate(.NORMAL)
 }
 
-spawn_blocking_panic_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
-	return actod.spawn("blocking-panic-child", Blocking_Test_Data{on_init = panic_in_blocking_child}, Blocking_Test_Behaviour)
+spawn_blocking_panic_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
+	return actod.spawn(
+		"blocking-panic-child",
+		Blocking_Test_Data{on_init = panic_in_blocking_child},
+		Blocking_Test_Behaviour,
+	)
 }
 
-spawn_blocking_close_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
-	return actod.spawn("blocking-close-child", Blocking_Test_Data{on_init = close_blocking_child}, Blocking_Test_Behaviour)
+spawn_blocking_close_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
+	return actod.spawn(
+		"blocking-close-child",
+		Blocking_Test_Data{on_init = close_blocking_child},
+		Blocking_Test_Behaviour,
+	)
 }
 
-spawn_blocking_sigterm_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
-	return actod.spawn("blocking-sigterm-child", Blocking_Test_Data{on_init = raise_sigterm_to_self}, Blocking_Test_Behaviour)
+spawn_blocking_sigterm_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
+	return actod.spawn(
+		"blocking-sigterm-child",
+		Blocking_Test_Data{on_init = raise_sigterm_to_self},
+		Blocking_Test_Behaviour,
+	)
 }
 
 test_blocking_child_panic_leaves_node_failed :: proc(t: ^testing.T) {
@@ -273,9 +494,17 @@ test_blocking_child_panic_leaves_node_failed :: proc(t: ^testing.T) {
 
 	restart_node_with("blocking-panic", nil, 3, spawn_blocking_panic_child)
 
-	expect(t, sync.atomic_load(&blocking_child_terminated), "the panicking blocking child's terminate callback must run")
+	expect(
+		t,
+		sync.atomic_load(&blocking_child_terminated),
+		"the panicking blocking child's terminate callback must run",
+	)
 	actod.shutdown_node()
-	expect(t, actod.node_failed(), "a blocking child that panics must leave the node failed after node_shutdown")
+	expect(
+		t,
+		actod.node_failed(),
+		"a blocking child that panics must leave the node failed after node_shutdown",
+	)
 }
 
 test_blocking_child_clean_close_leaves_node_healthy :: proc(t: ^testing.T) {
@@ -284,9 +513,17 @@ test_blocking_child_clean_close_leaves_node_healthy :: proc(t: ^testing.T) {
 
 	restart_node_with("blocking-close", nil, 3, spawn_blocking_close_child)
 
-	expect(t, sync.atomic_load(&blocking_child_terminated), "the closing blocking child's terminate callback must run")
+	expect(
+		t,
+		sync.atomic_load(&blocking_child_terminated),
+		"the closing blocking child's terminate callback must run",
+	)
 	actod.shutdown_node()
-	expect(t, !actod.node_failed(), "a blocking child that closes normally must not leave the node failed")
+	expect(
+		t,
+		!actod.node_failed(),
+		"a blocking child that closes normally must not leave the node failed",
+	)
 }
 
 test_blocking_child_sigterm_leaves_node_healthy :: proc(t: ^testing.T) {
@@ -298,8 +535,17 @@ test_blocking_child_sigterm_leaves_node_healthy :: proc(t: ^testing.T) {
 	restart_node_with("blocking-sigterm", nil, 3, spawn_blocking_sigterm_child)
 	elapsed := time.tick_since(started)
 
-	expectf(t, elapsed < 2 * time.Second, "node_init took %v to return after SIGTERM", elapsed)
-	expect(t, sync.atomic_load(&blocking_child_terminated), "the blocking child's terminate callback must run on SIGTERM")
+	expectf(
+		t,
+		elapsed < 2 * time.Second,
+		"node_init took %v to return after SIGTERM",
+		elapsed,
+	)
+	expect(
+		t,
+		sync.atomic_load(&blocking_child_terminated),
+		"the blocking child's terminate callback must run on SIGTERM",
+	)
 	actod.shutdown_node()
 	expect(t, !actod.node_failed(), "SIGTERM must not leave the node failed")
 }
@@ -323,7 +569,9 @@ node_table_size_is :: proc(state: rawptr) -> bool {
 	return node_table_size() == (cast(^int)state)^
 }
 
-test_node_table_returns_to_its_size_after_its_children_end :: proc(t: ^testing.T) {
+test_node_table_returns_to_its_size_after_its_children_end :: proc(
+	t: ^testing.T,
+) {
 	start_size := node_table_size()
 	if !expect(t, start_size > 0, "the node must record its system children") do return
 
@@ -351,9 +599,17 @@ test_node_table_returns_to_its_size_after_its_children_end :: proc(t: ^testing.T
 
 	for pid, i in pids {
 		if i % 2 == 0 {
-			expect(t, actod.send_message(pid, "crash") == .OK, "crash send failed")
+			expect(
+				t,
+				actod.send_message(pid, "crash") == .OK,
+				"crash send failed",
+			)
 		} else {
-			expect(t, actod.terminate_actor(pid, .SHUTDOWN), "terminate failed")
+			expect(
+				t,
+				actod.terminate_actor(pid, .SHUTDOWN),
+				"terminate failed",
+			)
 		}
 	}
 	for pid in pids do expectf(t, wait_for_actor_invalid(pid, 2000), "child %v was never reaped", pid)

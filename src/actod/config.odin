@@ -10,7 +10,8 @@ import "core:time"
 CACHE_LINE_SIZE :: 64
 SYSTEM_MAILBOX_SIZE :: 16
 
-DEFAULT_CORO_STACK_SIZE :: mem.Kilobyte * 56 when !coro.ASAN_FIBERS else mem.Kilobyte * 512
+DEFAULT_CORO_STACK_SIZE ::
+	mem.Kilobyte * 56 when !coro.ASAN_FIBERS else mem.Kilobyte * 512
 
 Network_Config :: struct {
 	auth_password:           string,
@@ -76,7 +77,11 @@ make_network_config :: proc(
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> Network_Config {
 	if port < 0 || port > 65535 {
-		panic_at(loc, "make_network_config: port must be 0-65535, got %d", port)
+		panic_at(
+			loc,
+			"make_network_config: port must be 0-65535, got %d",
+			port,
+		)
 	}
 	if _, bind_ok := parse_bind_address(bind_address); !bind_ok {
 		panic_at(
@@ -85,7 +90,8 @@ make_network_config :: proc(
 			bind_address,
 		)
 	}
-	if connection_ring.send_slot_count != 0 && !is_power_of_two(connection_ring.send_slot_count) {
+	if connection_ring.send_slot_count != 0 &&
+	   !is_power_of_two(connection_ring.send_slot_count) {
 		panic_at(
 			loc,
 			"make_network_config: connection_ring.send_slot_count must be a power of 2, got %d",
@@ -143,9 +149,15 @@ DEFAULT_SYSTEM_CONFIG := System_Config {
 		arena_headroom = DEFAULT_ARENA_HEADROOM,
 		logging = Log_Config {
 			level = .Info,
-			console_opts = log.Options{.Level, .Terminal_Color, .Short_File_Path, .Line} |
+			console_opts = log.Options {
+				.Level,
+				.Terminal_Color,
+				.Short_File_Path,
+				.Line,
+			} |
 			log.Full_Timestamp_Opts,
-			file_opts = log.Options{.Level, .Short_File_Path, .Line} | log.Full_Timestamp_Opts,
+			file_opts = log.Options{.Level, .Short_File_Path, .Line} |
+			log.Full_Timestamp_Opts,
 			ident = "",
 			enable_file = false,
 			log_path = "log",
@@ -275,10 +287,18 @@ make_actor_config :: proc(
 		)
 	}
 	if max_restarts < 0 {
-		panic_at(loc, "make_actor_config: max_restarts must be >= 0, got %d", max_restarts)
+		panic_at(
+			loc,
+			"make_actor_config: max_restarts must be >= 0, got %d",
+			max_restarts,
+		)
 	}
 	if arena_headroom < 0 {
-		panic_at(loc, "make_actor_config: arena_headroom must be >= 0, got %d", arena_headroom)
+		panic_at(
+			loc,
+			"make_actor_config: arena_headroom must be >= 0, got %d",
+			arena_headroom,
+		)
 	}
 	if stack_size_dedicated_os_thread < 0 {
 		panic_at(
@@ -306,7 +326,11 @@ make_actor_config :: proc(
 	}
 }
 
-Log_Callback :: proc(level: log.Level, text: string, location: runtime.Source_Code_Location)
+Log_Callback :: proc(
+	level: log.Level,
+	text: string,
+	location: runtime.Source_Code_Location,
+)
 Log_Flush :: proc()
 
 Log_Config :: struct {
@@ -350,7 +374,9 @@ make_children :: proc(spawns: ..SPAWN) -> [dynamic]SPAWN {
 	return result
 }
 
-is_power_of_two :: #force_inline proc(n: $T) -> bool where intrinsics.type_is_integer(T) {
+is_power_of_two :: #force_inline proc(
+	n: $T,
+) -> bool where intrinsics.type_is_integer(T) {
 	return n > 0 && (n & (n - 1)) == 0
 }
 

@@ -27,12 +27,19 @@ record_direct_child :: proc(actor: ^Actor, child_pid: PID) {
 	defer sync.mutex_unlock(&actor.children_lock)
 	append(
 		&actor.children,
-		Supervised_Child{pid = child_pid, restart = {first_restart = now(), last_restart = now()}},
+		Supervised_Child {
+			pid = child_pid,
+			restart = {first_restart = now(), last_restart = now()},
+		},
 	)
 }
 
 @(private)
-record_spawned_child :: proc(actor: ^Actor, child_pid: PID, spawn_func: SPAWN) -> Node_ID {
+record_spawned_child :: proc(
+	actor: ^Actor,
+	child_pid: PID,
+	spawn_func: SPAWN,
+) -> Node_ID {
 	process_spawn_signals(actor)
 
 	child_node_id: Node_ID = 0
@@ -72,7 +79,8 @@ record_spawned_child :: proc(actor: ^Actor, child_pid: PID, spawn_func: SPAWN) -
 
 @(private)
 has_restart_source :: proc(restart_info: Restart_Info) -> bool {
-	remote_child := restart_info.node_id != 0 && restart_info.node_id != NODE.node_id
+	remote_child :=
+		restart_info.node_id != 0 && restart_info.node_id != NODE.node_id
 	return(
 		restart_info.spawn_func != nil ||
 		(remote_child && restart_info.spawn_func_name_hash != 0) \
@@ -82,13 +90,19 @@ has_restart_source :: proc(restart_info: Restart_Info) -> bool {
 @(private)
 handle_remove_child :: proc(actor: ^Actor, msg: Remove_Child) {
 	if find_child(actor, msg.child_pid) == -1 {
-		log.warnf("Attempted to remove unknown child %d from parent %d", msg.child_pid, actor.pid)
+		log.warnf(
+			"Attempted to remove unknown child %d from parent %d",
+			msg.child_pid,
+			actor.pid,
+		)
 		return
 	}
 
 	remove_child_from_supervisor(actor, msg.child_pid)
 
-	child_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, msg.child_pid))
+	child_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, msg.child_pid),
+	)
 	if ok {
 		term_msg := Terminate {
 			reason = .SHUTDOWN,
@@ -108,19 +122,32 @@ handle_add_child :: proc(actor: ^Actor, msg: Add_Child) {
 		// Adopting an existing actor as a child
 		child_pid = msg.existing_pid
 
-		if existing_index := find_child(actor, child_pid); existing_index != -1 {
+		if existing_index := find_child(actor, child_pid);
+		   existing_index != -1 {
 			if is_remote_spawn_registration(msg) {
-				complete_remote_child_record(&actor.children[existing_index], msg)
+				complete_remote_child_record(
+					&actor.children[existing_index],
+					msg,
+				)
 				return
 			}
-			log.warnf("Child %d already exists in parent %d", child_pid, actor.pid)
+			log.warnf(
+				"Child %d already exists in parent %d",
+				child_pid,
+				actor.pid,
+			)
 			return
 		}
 
 		if is_local_pid(child_pid) {
-			child_actor, child_ok := get_actor_from_pointer(get(&NODE.actor_registry, child_pid))
+			child_actor, child_ok := get_actor_from_pointer(
+				get(&NODE.actor_registry, child_pid),
+			)
 			if !child_ok {
-				log.errorf("Cannot adopt child %d - actor not found", child_pid)
+				log.errorf(
+					"Cannot adopt child %d - actor not found",
+					child_pid,
+				)
 				return
 			}
 
@@ -129,7 +156,10 @@ handle_add_child :: proc(actor: ^Actor, msg: Add_Child) {
 				spawn_func = msg.spawn_func,
 			}
 			if send(child_pid, set_parent_msg, child_actor) != .OK {
-				log.errorf("Failed to send Set_Parent message to child %d", child_pid)
+				log.errorf(
+					"Failed to send Set_Parent message to child %d",
+					child_pid,
+				)
 				return
 			}
 		}
@@ -184,7 +214,10 @@ is_remote_spawn_registration :: proc(msg: Add_Child) -> bool {
 }
 
 @(private)
-complete_remote_child_record :: proc(child: ^Supervised_Child, msg: Add_Child) {
+complete_remote_child_record :: proc(
+	child: ^Supervised_Child,
+	msg: Add_Child,
+) {
 	if child.restart.node_id == 0 do child.restart.node_id = get_node_id(child.pid)
 	if !has_restart_source(child.restart) do child.restart.spawn_func_name_hash = msg.spawn_func_name_hash
 }
@@ -195,7 +228,9 @@ handle_set_parent :: proc(actor: ^Actor, msg: Set_Parent) {
 
 	// If we had an old parent, notify it to remove us
 	if old_parent != 0 {
-		old_parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, old_parent))
+		old_parent_actor, ok := get_actor_from_pointer(
+			get(&NODE.actor_registry, old_parent),
+		)
 		if ok {
 			remove_msg := Remove_Child {
 				child_pid = actor.pid,
@@ -212,7 +247,9 @@ handle_set_parent :: proc(actor: ^Actor, msg: Set_Parent) {
 	}
 
 	// If we have a new parent, notify it to add us
-	new_parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, msg.new_parent))
+	new_parent_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, msg.new_parent),
+	)
 	if !ok {
 		actor.parent = old_parent
 		log.errorf(
@@ -229,10 +266,19 @@ handle_set_parent :: proc(actor: ^Actor, msg: Set_Parent) {
 	}
 
 	if send(msg.new_parent, add_msg, new_parent_actor) == .OK {
-		log.infof("Actor %d changed parent from %d to %d", actor.pid, old_parent, msg.new_parent)
+		log.infof(
+			"Actor %d changed parent from %d to %d",
+			actor.pid,
+			old_parent,
+			msg.new_parent,
+		)
 	} else {
 		actor.parent = old_parent
-		log.errorf("Failed to notify new parent %d about child %d", msg.new_parent, actor.pid)
+		log.errorf(
+			"Failed to notify new parent %d about child %d",
+			msg.new_parent,
+			actor.pid,
+		)
 	}
 }
 
@@ -327,13 +373,19 @@ handle_child_termination :: proc(actor: ^Actor, msg: Actor_Stopped) {
 			actor.opts.restart_window,
 		)
 		if actor.behaviour.on_max_restarts_exceeded != nil {
-			actor.behaviour.on_max_restarts_exceeded(actor.data, msg.child_pid, msg.child_name)
+			actor.behaviour.on_max_restarts_exceeded(
+				actor.data,
+				msg.child_pid,
+				msg.child_name,
+			)
 		}
 		remove_child_from_supervisor(actor, msg.child_pid)
 		return
 	}
 
-	dying_child_restartable := has_restart_source(actor.children[child_index].restart)
+	dying_child_restartable := has_restart_source(
+		actor.children[child_index].restart,
+	)
 
 	if actor.behaviour.on_child_terminated != nil {
 		actor.behaviour.on_child_terminated(
@@ -382,7 +434,11 @@ local_restart_policy :: proc(child_pid: PID) -> (Restart_Policy, bool) {
 }
 
 @(private)
-remove_unrestartable_child :: proc(actor: ^Actor, child_pid: PID, child_name: string) {
+remove_unrestartable_child :: proc(
+	actor: ^Actor,
+	child_pid: PID,
+	child_name: string,
+) {
 	if find_child(actor, child_pid) == -1 do return
 	log.warnf(
 		"Child %s (PID %d) has no spawn function to restart it from, so supervisor %d removes it",
@@ -394,7 +450,11 @@ remove_unrestartable_child :: proc(actor: ^Actor, child_pid: PID, child_name: st
 }
 
 @(private)
-stop_and_restart_children_from :: proc(actor: ^Actor, first_index: int, dying_pid: PID) {
+stop_and_restart_children_from :: proc(
+	actor: ^Actor,
+	first_index: int,
+	dying_pid: PID,
+) {
 	pids_to_wait: [dynamic]PID
 	defer delete(pids_to_wait)
 	pids_to_restart: [dynamic]PID
@@ -481,19 +541,28 @@ restart_child :: proc(actor: ^Actor, old_pid: PID) {
 	new_pid: PID
 	ok: bool
 
-	remote_child := restart_info.node_id != 0 && restart_info.node_id != NODE.node_id
+	remote_child :=
+		restart_info.node_id != 0 && restart_info.node_id != NODE.node_id
 
 	if remote_child && restart_info.spawn_func_name_hash != 0 {
 		// Adopted remote child with no local spawn closure: respawn by registered name.
 		node_name, name_ok := get_node_name(restart_info.node_id)
 		if !name_ok {
-			log.errorf("Cannot restart child - unknown node %d", restart_info.node_id)
+			log.errorf(
+				"Cannot restart child - unknown node %d",
+				restart_info.node_id,
+			)
 			return
 		}
 
-		spawn_func_name, found := get_spawn_func_name_by_hash(restart_info.spawn_func_name_hash)
+		spawn_func_name, found := get_spawn_func_name_by_hash(
+			restart_info.spawn_func_name_hash,
+		)
 		if !found {
-			log.errorf("Unknown spawn function hash %x", restart_info.spawn_func_name_hash)
+			log.errorf(
+				"Unknown spawn function hash %x",
+				restart_info.spawn_func_name_hash,
+			)
 			return
 		}
 
@@ -519,7 +588,12 @@ restart_child :: proc(actor: ^Actor, old_pid: PID) {
 	if !taken do return
 
 	if actor.behaviour.on_child_restarted != nil {
-		actor.behaviour.on_child_restarted(actor.data, old_pid, new_pid, restart_info.count)
+		actor.behaviour.on_child_restarted(
+			actor.data,
+			old_pid,
+			new_pid,
+			restart_info.count,
+		)
 	}
 	if actor.behaviour.on_child_started != nil {
 		actor.behaviour.on_child_started(actor.data, new_pid)
@@ -535,7 +609,14 @@ restart_child :: proc(actor: ^Actor, old_pid: PID) {
 }
 
 @(private)
-take_restarted_pid :: proc(actor: ^Actor, old_pid: PID, new_pid: PID) -> (int, bool) {
+take_restarted_pid :: proc(
+	actor: ^Actor,
+	old_pid: PID,
+	new_pid: PID,
+) -> (
+	int,
+	bool,
+) {
 	process_spawn_signals(actor)
 
 	if new_pid == old_pid {
@@ -547,7 +628,8 @@ take_restarted_pid :: proc(actor: ^Actor, old_pid: PID, new_pid: PID) -> (int, b
 	}
 
 	registered_index := find_child(actor, new_pid)
-	if registered_index != -1 && has_restart_source(actor.children[registered_index].restart) {
+	if registered_index != -1 &&
+	   has_restart_source(actor.children[registered_index].restart) {
 		log.errorf(
 			"Spawn function of child %d returned %d, which is another supervised child, so %d is not restarted",
 			old_pid,

@@ -74,7 +74,10 @@ validate_package :: proc(
 			&errors,
 			Validation_Error {
 				kind = .Parse_Error,
-				message = strings.clone("Failed to allocate arena for parser", caller_alloc),
+				message = strings.clone(
+					"Failed to allocate arena for parser",
+					caller_alloc,
+				),
 			},
 		)
 		return Validation_Result{ok = false, errors = errors[:]}
@@ -133,14 +136,23 @@ validate_package :: proc(
 			if decl_name == "" do continue
 
 			if decl_name == expected_state.name && len(v_decl.values) > 0 {
-				if st, is_struct := v_decl.values[0].derived.(^ast.Struct_Type); is_struct {
+				if st, is_struct := v_decl.values[0].derived.(^ast.Struct_Type);
+				   is_struct {
 					state_found = true
-					validate_struct_fields(st, file, expected_state, &errors, &ok, caller_alloc)
+					validate_struct_fields(
+						st,
+						file,
+						expected_state,
+						&errors,
+						&ok,
+						caller_alloc,
+					)
 				}
 			}
 
 			if len(v_decl.values) > 0 {
-				if proc_lit, is_proc := v_decl.values[0].derived.(^ast.Proc_Lit); is_proc {
+				if proc_lit, is_proc := v_decl.values[0].derived.(^ast.Proc_Lit);
+				   is_proc {
 					for exp in expected_procs {
 						if decl_name == exp.name {
 							validate_proc_signature(
@@ -382,7 +394,10 @@ strip_package_prefix :: proc(type_str: string) -> string {
 			if c == '[' || c == '^' || c == ']' do break
 			start -= 1
 		}
-		return strings.concatenate({type_str[:start], type_str[dot + 1:]}, context.temp_allocator)
+		return strings.concatenate(
+			{type_str[:start], type_str[dot + 1:]},
+			context.temp_allocator,
+		)
 	}
 	return type_str
 }
@@ -442,7 +457,11 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 		return fmt.tprintf("^%s", expr_to_string(e.elem))
 	case ^ast.Array_Type:
 		if e.len != nil {
-			return fmt.tprintf("[%s]%s", expr_to_string(e.len), expr_to_string(e.elem))
+			return fmt.tprintf(
+				"[%s]%s",
+				expr_to_string(e.len),
+				expr_to_string(e.elem),
+			)
 		}
 		return fmt.tprintf("[]%s", expr_to_string(e.elem))
 	case ^ast.Dynamic_Array_Type:
@@ -454,7 +473,11 @@ expr_to_string :: proc(expr: ^ast.Expr) -> string {
 			e.field.name if e.field != nil else "?",
 		)
 	case ^ast.Map_Type:
-		return fmt.tprintf("map[%s]%s", expr_to_string(e.key), expr_to_string(e.value))
+		return fmt.tprintf(
+			"map[%s]%s",
+			expr_to_string(e.key),
+			expr_to_string(e.value),
+		)
 	case ^ast.Distinct_Type:
 		return fmt.tprintf("distinct %s", expr_to_string(e.type))
 	case ^ast.Proc_Type:
@@ -474,7 +497,10 @@ pos_to_line_col :: proc(pos: tokenizer.Pos) -> (line: int, col: int) {
 	return 0, 0
 }
 
-destroy_validation_result :: proc(result: Validation_Result, allocator := context.allocator) {
+destroy_validation_result :: proc(
+	result: Validation_Result,
+	allocator := context.allocator,
+) {
 	for err in result.errors {
 		delete(err.file, allocator)
 		delete(err.message, allocator)
@@ -482,11 +508,19 @@ destroy_validation_result :: proc(result: Validation_Result, allocator := contex
 	delete(result.errors, allocator)
 }
 
-format_validation_error :: proc(err: Validation_Error, actor_name: string) -> string {
+format_validation_error :: proc(
+	err: Validation_Error,
+	actor_name: string,
+) -> string {
 	loc: string
 	if err.file != "" do loc = fmt.tprintf(" (%s:%d:%d)", err.file, err.line, err.col)
 
-	return fmt.tprintf("HOT RELOAD BLOCKED [%s]: %s%s", actor_name, err.message, loc)
+	return fmt.tprintf(
+		"HOT RELOAD BLOCKED [%s]: %s%s",
+		actor_name,
+		err.message,
+		loc,
+	)
 }
 
 Proc_Name_Mapping :: struct {
@@ -494,7 +528,10 @@ Proc_Name_Mapping :: struct {
 	proc_name:  string,
 }
 
-discover_package_procs :: proc(package_path: string, allocator := context.allocator) -> []string {
+discover_package_procs :: proc(
+	package_path: string,
+	allocator := context.allocator,
+) -> []string {
 	arena: vmem.Arena
 	arena_err := vmem.arena_init_growing(&arena)
 	if arena_err != nil do return nil
@@ -517,7 +554,8 @@ discover_package_procs :: proc(package_path: string, allocator := context.alloca
 			if !is_vdecl do continue
 			if len(v_decl.names) == 0 || len(v_decl.values) == 0 do continue
 
-			if _, is_proc := v_decl.values[0].derived.(^ast.Proc_Lit); is_proc {
+			if _, is_proc := v_decl.values[0].derived.(^ast.Proc_Lit);
+			   is_proc {
 				name := ident_name(v_decl.names[0])
 				if name != "" do append(&result, strings.clone(name, allocator))
 			}
@@ -674,7 +712,10 @@ discover_proc_names :: proc(
 
 		for c in candidates {
 			if c.name in used do continue
-			suffix := strings.concatenate({"_", field_name}, context.temp_allocator)
+			suffix := strings.concatenate(
+				{"_", field_name},
+				context.temp_allocator,
+			)
 			if strings.has_suffix(c.name, suffix) ||
 			   strings.has_suffix(
 				   field_name,

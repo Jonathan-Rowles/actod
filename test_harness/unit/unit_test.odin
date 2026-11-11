@@ -129,7 +129,10 @@ send_temp_text :: proc(to: actod.PID) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	text := Test_Text {
 		text  = strings.clone("text from temp memory", context.temp_allocator),
-		bytes = transmute([]u8)strings.clone("bytes from temp memory", context.temp_allocator),
+		bytes = transmute([]u8)strings.clone(
+			"bytes from temp memory",
+			context.temp_allocator,
+		),
 	}
 	_ = actod.send_message(to, text)
 	_, _ = actod.ask(to, text)
@@ -178,7 +181,11 @@ supervisor_behaviour := actod.Actor_Behaviour(supervisor_state) {
 		s.restarted_new = new_pid
 		s.restart_count = restart_count
 	},
-	on_max_restarts_exceeded = proc(s: ^supervisor_state, pid: actod.PID, name: string) {
+	on_max_restarts_exceeded = proc(
+		s: ^supervisor_state,
+		pid: actod.PID,
+		name: string,
+	) {
 		s.max_restarts_pid = pid
 		s.max_restarts_name = name
 	},
@@ -391,18 +398,26 @@ test_topic_subscribers_are_the_declared_ones :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_topic_subscribers_of_an_undeclared_topic_fail_the_test :: proc(t: ^testing.T) {
+test_topic_subscribers_of_an_undeclared_topic_fail_the_test :: proc(
+	t: ^testing.T,
+) {
 	context.allocator = context.temp_allocator
 	h := create(test_state{}, test_behaviour)
 	defer destroy(&h)
 	add_topic_sub(&h, &other_topic, actod.PID(70))
 	testing.expect_assert_message(t, ti.UNDECLARED_TOPIC_MESSAGE)
 	send(&h, Test_List_Topic_Subscribers_Cmd{})
-	testing.expect(t, false, "listing an undeclared topic returned instead of failing the test")
+	testing.expect(
+		t,
+		false,
+		"listing an undeclared topic returned instead of failing the test",
+	)
 }
 
 @(test)
-test_a_failed_set_timer_returns_an_error_and_arms_nothing_until_cleared :: proc(t: ^testing.T) {
+test_a_failed_set_timer_returns_an_error_and_arms_nothing_until_cleared :: proc(
+	t: ^testing.T,
+) {
 	h := create(test_state{}, test_behaviour)
 	defer destroy(&h)
 	s := get_state(&h)
@@ -494,8 +509,14 @@ zero_interval_timer_state :: struct {
 	ticks:        int,
 }
 
-zero_interval_timer_behaviour := actod.Actor_Behaviour(zero_interval_timer_state) {
-	handle_message = proc(s: ^zero_interval_timer_state, from: actod.PID, msg: any) {
+zero_interval_timer_behaviour := actod.Actor_Behaviour(
+	zero_interval_timer_state,
+) {
+	handle_message = proc(
+		s: ^zero_interval_timer_state,
+		from: actod.PID,
+		msg: any,
+	) {
 		switch v in msg {
 		case actod.Timer_Tick:
 			if v.id == s.accepted_id do s.ticks += 1
@@ -503,7 +524,10 @@ zero_interval_timer_behaviour := actod.Actor_Behaviour(zero_interval_timer_state
 	},
 	init = proc(s: ^zero_interval_timer_state) {
 		s.refused_id, s.refused_err = actod.set_timer(0, repeat = true)
-		s.accepted_id, s.accepted_err = actod.set_timer(1 * time.Second, repeat = true)
+		s.accepted_id, s.accepted_err = actod.set_timer(
+			1 * time.Second,
+			repeat = true,
+		)
 	},
 }
 
@@ -699,7 +723,12 @@ test_taken_captures_stay_valid_until_destroy :: proc(t: ^testing.T) {
 		expect_sent(&h, t, Test_Text),
 		found,
 		expect_sent_to(&h, t, actod.PID(400), Test_Text),
-		expect_sent_where(&h, t, Test_Text, proc(_: Test_Text) -> bool {return true}),
+		expect_sent_where(
+			&h,
+			t,
+			Test_Text,
+			proc(_: Test_Text) -> bool {return true},
+		),
 		expect_published(&h, t, Test_Text),
 		expect_published_to(&h, t, &test_topic, Test_Text),
 		expect_broadcast(&h, t, Test_Text),

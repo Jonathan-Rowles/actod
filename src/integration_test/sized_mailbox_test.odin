@@ -14,7 +14,11 @@ Sized_Mailbox_Behaviour :: actod.Actor_Behaviour(Sized_Mailbox_Data) {
 	handle_message = sized_mailbox_handle_message,
 }
 
-sized_mailbox_handle_message :: proc(data: ^Sized_Mailbox_Data, from: actod.PID, msg: any) {
+sized_mailbox_handle_message :: proc(
+	data: ^Sized_Mailbox_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case int:
 		if v == -1 {
@@ -50,15 +54,28 @@ test_spawn_sized_mailbox :: proc(t: ^testing.T) {
 			dropped += 1
 		}
 	}
-	expect(t, dropped == 0, "backpressure must block, not drop, while the receiver drains")
+	expect(
+		t,
+		dropped == 0,
+		"backpressure must block, not drop, while the receiver drains",
+	)
 
-	expect(t, actod.send_message(tiny_pid, -1) == .OK, "Failed to send the drain sentinel")
+	expect(
+		t,
+		actod.send_message(tiny_pid, -1) == .OK,
+		"Failed to send the drain sentinel",
+	)
 	start := time.now()
-	for !sync.atomic_load(&done) && time.diff(start, time.now()) < 5 * time.Second {
+	for !sync.atomic_load(&done) &&
+	    time.diff(start, time.now()) < 5 * time.Second {
 		time.sleep(10 * time.Millisecond)
 	}
 	expect(t, sync.atomic_load(&done), "actor never drained the flood")
-	expect(t, len(received) == flood - dropped, "every accepted message must be delivered")
+	expect(
+		t,
+		len(received) == flood - dropped,
+		"every accepted message must be delivered",
+	)
 
 	inversions := 0
 	for i in 1 ..< len(received) {
@@ -66,7 +83,11 @@ test_spawn_sized_mailbox :: proc(t: ^testing.T) {
 			inversions += 1
 		}
 	}
-	expect(t, inversions == 0, "messages through a sized mailbox must stay in send order")
+	expect(
+		t,
+		inversions == 0,
+		"messages through a sized mailbox must stay in send order",
+	)
 
 	big_received := make([dynamic]int)
 	defer delete(big_received)
@@ -90,15 +111,28 @@ test_spawn_sized_mailbox :: proc(t: ^testing.T) {
 			burst_dropped += 1
 		}
 	}
-	expect(t, burst_dropped == 0, "a burst below capacity must be accepted without errors")
+	expect(
+		t,
+		burst_dropped == 0,
+		"a burst below capacity must be accepted without errors",
+	)
 
-	expect(t, actod.send_message(big_pid, -1) == .OK, "Failed to send the drain sentinel")
+	expect(
+		t,
+		actod.send_message(big_pid, -1) == .OK,
+		"Failed to send the drain sentinel",
+	)
 	start = time.now()
-	for !sync.atomic_load(&big_done) && time.diff(start, time.now()) < 5 * time.Second {
+	for !sync.atomic_load(&big_done) &&
+	    time.diff(start, time.now()) < 5 * time.Second {
 		time.sleep(10 * time.Millisecond)
 	}
 	expect(t, sync.atomic_load(&big_done), "actor never drained the burst")
-	expect(t, len(big_received) == burst, "every burst message must be delivered")
+	expect(
+		t,
+		len(big_received) == burst,
+		"every burst message must be delivered",
+	)
 
 	_ = actod.send_message(tiny_pid, actod.Terminate{reason = .NORMAL})
 	_ = actod.send_message(big_pid, actod.Terminate{reason = .NORMAL})

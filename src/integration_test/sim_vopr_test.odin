@@ -91,14 +91,20 @@ Vopr_Counter_Behaviour :: actod.Actor_Behaviour(Vopr_Counter_Data) {
 	init = proc(data: ^Vopr_Counter_Data) {
 		_, _ = actod.subscribe_type(g_vopr_publisher_type)
 	},
-	handle_message = proc(data: ^Vopr_Counter_Data, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Vopr_Counter_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		if m, ok := msg.(Integration_Test_Message); ok {
 			switch m.payload {
 			case "pub":
 				g_vopr_pub_seen[data.slot][m.id] += 1
 			case "ask":
 				g_vopr_seen[m.id] += 1
-				_ = actod.reply(Integration_Test_Message{id = m.id, payload = "re"})
+				_ = actod.reply(
+					Integration_Test_Message{id = m.id, payload = "re"},
+				)
 			case:
 				g_vopr_seen[m.id] += 1
 			}
@@ -129,8 +135,12 @@ Vopr_Asker_Behaviour :: actod.Actor_Behaviour(Vopr_Asker_Data) {
 				5 * time.Second,
 			)
 			if err == .OK {
-				g_vopr_ask_issued[m.ask_id] = {data.slot, g_vopr_crash_epoch[data.slot]}
-				g_vopr_ask_token_to_id[vopr_ask_key(data.slot, u64(token))] = m.ask_id
+				g_vopr_ask_issued[m.ask_id] = {
+					data.slot,
+					g_vopr_crash_epoch[data.slot],
+				}
+				g_vopr_ask_token_to_id[vopr_ask_key(data.slot, u64(token))] =
+					m.ask_id
 			}
 		case Integration_Test_Message:
 			if m.payload == "re" {
@@ -164,8 +174,16 @@ vopr_pick :: proc(state: ^u64, n: int) -> int {
 @(private = "file")
 vopr_spawn_actors :: proc(mesh: ^actod.Sim_Mesh, i: int) -> bool {
 	_ = actod.sim_mesh_bind(mesh, i)
-	_, counter_ok := actod.spawn("vc", Vopr_Counter_Data{slot = i}, Vopr_Counter_Behaviour)
-	_, asker_ok := actod.spawn("va", Vopr_Asker_Data{slot = i}, Vopr_Asker_Behaviour)
+	_, counter_ok := actod.spawn(
+		"vc",
+		Vopr_Counter_Data{slot = i},
+		Vopr_Counter_Behaviour,
+	)
+	_, asker_ok := actod.spawn(
+		"va",
+		Vopr_Asker_Data{slot = i},
+		Vopr_Asker_Behaviour,
+	)
 	_, pub_ok := actod.spawn("vp", Vopr_Pub_Data{}, g_vopr_pub_behaviour)
 	return counter_ok && asker_ok && pub_ok
 }
@@ -221,7 +239,8 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		}
 	}
 
-	op_count := g_vopr_max_ops * 3 / 5 + vopr_pick(&rng, g_vopr_max_ops * 2 / 5 + 1)
+	op_count :=
+		g_vopr_max_ops * 3 / 5 + vopr_pick(&rng, g_vopr_max_ops * 2 / 5 + 1)
 	for _ in 0 ..< op_count {
 		switch vopr_pick(&rng, 16) {
 		case 0 ..= 4:
@@ -235,14 +254,23 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			}
 			_ = actod.sim_mesh_bind(mesh, from)
 			burst := 1 + vopr_pick(&rng, 4)
-			vopr_log("op send: %d -> %d, burst %d (ids from %d)", from, to, burst, g_vopr_next_id + 1)
+			vopr_log(
+				"op send: %d -> %d, burst %d (ids from %d)",
+				from,
+				to,
+				burst,
+				g_vopr_next_id + 1,
+			)
 			for _ in 0 ..< burst {
 				g_vopr_next_id += 1
 				g_vopr_sent[g_vopr_next_id] = true
 				_ = actod.send_remote_by_name(
 					actod.sim_mesh_name(mesh, to),
 					"vc",
-					Integration_Test_Message{id = g_vopr_next_id, payload = "vopr"},
+					Integration_Test_Message {
+						id = g_vopr_next_id,
+						payload = "vopr",
+					},
 				)
 			}
 
@@ -329,21 +357,32 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 				continue
 			}
 			_ = actod.sim_mesh_bind(mesh, a)
-			peer_id, known := actod.get_node_by_name(actod.sim_mesh_name(mesh, b))
+			peer_id, known := actod.get_node_by_name(
+				actod.sim_mesh_name(mesh, b),
+			)
 			if !known {
 				continue
 			}
-			dir := actod.Frame_Dir.Out if vopr_pick(&rng, 2) == 0 else actod.Frame_Dir.In
+			dir :=
+				actod.Frame_Dir.Out if vopr_pick(&rng, 2) == 0 else actod.Frame_Dir.In
 			drop_count := 1 + vopr_pick(&rng, 4)
-			vopr_log("op drop-link: node %d %v peer %d, %d frames", a, dir, b, drop_count)
+			vopr_log(
+				"op drop-link: node %d %v peer %d, %d frames",
+				a,
+				dir,
+				b,
+				drop_count,
+			)
 			actod.frame_tap_add(
 				actod.Frame_Fault_Rule {
-					dir       = dir,
-					action    = .Drop,
-					type_hash = actod.frame_tap_type_hash(Integration_Test_Message),
-					node      = actod.sim_mesh_node(mesh, a),
-					peer      = peer_id,
-					count     = drop_count,
+					dir = dir,
+					action = .Drop,
+					type_hash = actod.frame_tap_type_hash(
+						Integration_Test_Message,
+					),
+					node = actod.sim_mesh_node(mesh, a),
+					peer = peer_id,
+					count = drop_count,
 				},
 			)
 			fault_rules_added += 1
@@ -359,11 +398,11 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			vopr_log("op corrupt-handshake: node %d", a)
 			actod.frame_tap_add(
 				actod.Frame_Fault_Rule {
-					dir       = .Out,
-					action    = .Corrupt,
+					dir = .Out,
+					action = .Corrupt,
 					type_hash = actod.FRAME_TAP_HANDSHAKE,
-					node      = actod.sim_mesh_node(mesh, a),
-					count     = 1,
+					node = actod.sim_mesh_node(mesh, a),
+					count = 1,
 				},
 			)
 			fault_rules_added += 1
@@ -387,7 +426,10 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			vopr_log("op ask: %d -> %d (id %d)", from, to, g_vopr_next_id)
 			_ = actod.send_message(
 				asker_pid,
-				Vopr_Do_Ask{node = actod.sim_mesh_name(mesh, to), ask_id = g_vopr_next_id},
+				Vopr_Do_Ask {
+					node = actod.sim_mesh_name(mesh, to),
+					ask_id = g_vopr_next_id,
+				},
 			)
 
 		case 13:
@@ -403,7 +445,10 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			g_vopr_next_id += 1
 			g_vopr_pub_sent[g_vopr_next_id] = true
 			vopr_log("op publish: node %d (id %d)", publisher, g_vopr_next_id)
-			_ = actod.send_message(pub_pid, Vopr_Do_Publish{pub_id = g_vopr_next_id})
+			_ = actod.send_message(
+				pub_pid,
+				Vopr_Do_Publish{pub_id = g_vopr_next_id},
+			)
 
 		case 14:
 			a := vopr_pick(&rng, node_count)
@@ -412,7 +457,9 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 				continue
 			}
 			_ = actod.sim_mesh_bind(mesh, a)
-			peer_id, known := actod.get_node_by_name(actod.sim_mesh_name(mesh, b))
+			peer_id, known := actod.get_node_by_name(
+				actod.sim_mesh_name(mesh, b),
+			)
 			if !known {
 				continue
 			}
@@ -434,11 +481,15 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			actod.sim_mesh_sever(mesh, a, b, deliver_error)
 		}
 
-		if actod.sim_mesh_run_until_idle(mesh, VOPR_STEP_CAP) >= VOPR_STEP_CAP {
+		if actod.sim_mesh_run_until_idle(mesh, VOPR_STEP_CAP) >=
+		   VOPR_STEP_CAP {
 			return false, "pump livelock: run_until_idle hit the step cap"
 		}
-		if step_ok, step_reason := vopr_check_step_invariants(mesh, node_count, crashed);
-		   !step_ok {
+		if step_ok, step_reason := vopr_check_step_invariants(
+			mesh,
+			node_count,
+			crashed,
+		); !step_ok {
 			return false, step_reason
 		}
 	}
@@ -510,7 +561,11 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 				)
 			}
 			if id not_in g_vopr_pub_sent {
-				return false, fmt.tprintf("phantom publish id %d on node %d", id, slot)
+				return false, fmt.tprintf(
+					"phantom publish id %d on node %d",
+					id,
+					slot,
+				)
 			}
 		}
 	}
@@ -519,7 +574,8 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		return false, "pool scale-down did not settle at quiesce"
 	}
 	if !actod.sim_mesh_connect_full(mesh) {
-		return false, "mesh failed to reconnect before the quiesce publish round"
+		return false,
+			"mesh failed to reconnect before the quiesce publish round"
 	}
 	if actod.sim_mesh_run_until_idle(mesh, VOPR_STEP_CAP) >= VOPR_STEP_CAP {
 		return false, "pump livelock settling before the quiesce publish round"
@@ -530,12 +586,18 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 		_ = actod.sim_mesh_bind(mesh, i)
 		pub_pid, pub_found := actod.get_actor_pid("vp")
 		if !pub_found {
-			return false, fmt.tprintf("publisher missing on node %d at quiesce", i)
+			return false, fmt.tprintf(
+				"publisher missing on node %d at quiesce",
+				i,
+			)
 		}
 		g_vopr_next_id += 1
 		final_pub_ids[i] = g_vopr_next_id
 		g_vopr_pub_sent[g_vopr_next_id] = true
-		_ = actod.send_message(pub_pid, Vopr_Do_Publish{pub_id = g_vopr_next_id})
+		_ = actod.send_message(
+			pub_pid,
+			Vopr_Do_Publish{pub_id = g_vopr_next_id},
+		)
 	}
 	if actod.sim_mesh_run_until_idle(mesh, VOPR_STEP_CAP) >= VOPR_STEP_CAP {
 		return false, "pump livelock delivering quiesce publishes"
@@ -546,12 +608,14 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 				_ = actod.sim_mesh_bind(mesh, i)
 				sub_count := -1
 				pool_rings := -1
-				if peer_id, known := actod.get_node_by_name(actod.sim_mesh_name(mesh, j));
-				   known {
+				if peer_id, known := actod.get_node_by_name(
+					actod.sim_mesh_name(mesh, j),
+				); known {
 					sub_count = int(
 						actod.NODE.type_subscribers[g_vopr_publisher_type].remote_node_sub_count[peer_id],
 					)
-					if pool := actod.get_connection_pool(peer_id); pool != nil {
+					if pool := actod.get_connection_pool(peer_id);
+					   pool != nil {
 						pool_rings = int(actod.pool_active_count(pool))
 					}
 				}
@@ -574,10 +638,17 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 
 	for id, count in g_vopr_seen {
 		if count > 1 {
-			return false, fmt.tprintf("message id %d delivered %d times", id, count)
+			return false, fmt.tprintf(
+				"message id %d delivered %d times",
+				id,
+				count,
+			)
 		}
 		if id not_in g_vopr_sent {
-			return false, fmt.tprintf("phantom message id %d was never sent", id)
+			return false, fmt.tprintf(
+				"phantom message id %d was never sent",
+				id,
+			)
 		}
 	}
 
@@ -589,7 +660,11 @@ run_vopr_scenario :: proc(seed: u64) -> (ok: bool, reason: string) {
 			}
 			name := fmt.tprintf("vc@%s", actod.sim_mesh_name(mesh, j))
 			if _, found := actod.get_actor_pid(name); !found {
-				return false, fmt.tprintf("gossip: node %d cannot see %s", i, name)
+				return false, fmt.tprintf(
+					"gossip: node %d cannot see %s",
+					i,
+					name,
+				)
 			}
 		}
 	}
@@ -702,24 +777,38 @@ test_sim_vopr :: proc(t: ^testing.T) {
 	g_vopr_publisher_type, _ = actod.register_actor_type("vopr_publisher")
 	g_vopr_pub_behaviour = actod.Actor_Behaviour(Vopr_Pub_Data) {
 		actor_type = g_vopr_publisher_type,
-		handle_message = proc(data: ^Vopr_Pub_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Vopr_Pub_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			if m, ok := msg.(Vopr_Do_Publish); ok {
-				actod.broadcast(Integration_Test_Message{id = m.pub_id, payload = "pub"})
+				actod.broadcast(
+					Integration_Test_Message{id = m.pub_id, payload = "pub"},
+				)
 			}
 		},
 	}
 
-	_, g_vopr_verbose = os.lookup_env("ACTOD_VOPR_VERBOSE", context.temp_allocator)
-	context.logger.lowest_level = .Info if g_vopr_verbose else context.logger.lowest_level
+	_, g_vopr_verbose = os.lookup_env(
+		"ACTOD_VOPR_VERBOSE",
+		context.temp_allocator,
+	)
+	context.logger.lowest_level =
+		.Info if g_vopr_verbose else context.logger.lowest_level
 
-	g_vopr_max_ops = max(10, int(vopr_env_u64("ACTOD_VOPR_OPS", VOPR_DEFAULT_MAX_OPS)))
+	g_vopr_max_ops = max(
+		10,
+		int(vopr_env_u64("ACTOD_VOPR_OPS", VOPR_DEFAULT_MAX_OPS)),
+	)
 	g_vopr_max_nodes = clamp(
 		int(vopr_env_u64("ACTOD_VOPR_NODES", VOPR_DEFAULT_MAX_NODES)),
 		2,
 		VOPR_MAX_NODES,
 	)
 
-	if s, has := os.lookup_env("ACTOD_VOPR_SEED", context.temp_allocator); has {
+	if s, has := os.lookup_env("ACTOD_VOPR_SEED", context.temp_allocator);
+	   has {
 		seed, parsed := strconv.parse_u64(s)
 		expect(t, parsed, "ACTOD_VOPR_SEED must be an unsigned integer")
 		if parsed {

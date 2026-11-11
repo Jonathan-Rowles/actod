@@ -16,8 +16,11 @@ actor_thread_entry_win :: proc "system" (t_raw: rawptr) -> win32.DWORD {
 	}
 
 	context = runtime.default_context()
-	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
-		runtime.default_temp_allocator_destroy(auto_cast context.temp_allocator.data)
+	defer if context.temp_allocator.procedure ==
+	   runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy(
+			auto_cast context.temp_allocator.data,
+		)
 	}
 
 	t.procedure(t)

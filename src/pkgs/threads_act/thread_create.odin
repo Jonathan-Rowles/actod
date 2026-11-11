@@ -17,8 +17,11 @@ actor_thread_entry :: proc "c" (t_raw: rawptr) -> rawptr {
 	}
 
 	context = runtime.default_context()
-	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
-		runtime.default_temp_allocator_destroy(auto_cast context.temp_allocator.data)
+	defer if context.temp_allocator.procedure ==
+	   runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy(
+			auto_cast context.temp_allocator.data,
+		)
 	}
 
 	t.procedure(t)
@@ -62,7 +65,8 @@ make_unstarted_thread_with_stack_size :: proc(
 	if stack_size > 0 do posix.pthread_attr_setstacksize(&attrs, stack_size)
 
 	posix.pthread_attr_setdetachstate(&attrs, .CREATE_JOINABLE)
-	if posix.pthread_create(&t.unix_thread, &attrs, actor_thread_entry, t) != nil {
+	if posix.pthread_create(&t.unix_thread, &attrs, actor_thread_entry, t) !=
+	   nil {
 		free(t)
 		return nil
 	}

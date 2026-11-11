@@ -135,7 +135,10 @@ init_system_messages :: proc "contextless" () {
 	register_internal_message_type(Rename_Actor, .Local_Only)
 	register_internal_message_type(Close_Connection, .Local_Only)
 	register_internal_message_type(Actor_Spawned_Broadcast, .Connection_Stream)
-	register_internal_message_type(Actor_Terminated_Broadcast, .Connection_Stream)
+	register_internal_message_type(
+		Actor_Terminated_Broadcast,
+		.Connection_Stream,
+	)
 	register_internal_message_type(Remote_Spawn_Request, .Connection_Stream)
 	register_internal_message_type(Remote_Spawn_Response, .Connection_Stream)
 	register_internal_message_type(Subscribe_Remote, .Connection_Stream)
@@ -354,7 +357,11 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 		)
 	}
 
-	switch network_exposure_refusal(opts.network, bind_addr, get_auth_password()) {
+	switch network_exposure_refusal(
+		opts.network,
+		bind_addr,
+		get_auth_password(),
+	) {
 	case .None:
 	case .Missing_Auth_Password:
 		panic_at(
@@ -406,7 +413,11 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 
 	if opts.actor_slab_slots > 0 {
 		slot_size := actor_arena_slot_size(opts.actor_config)
-		if !slot_slab_init(&NODE.actor_slab, slot_size, u64(opts.actor_slab_slots)) {
+		if !slot_slab_init(
+			&NODE.actor_slab,
+			slot_size,
+			u64(opts.actor_slab_slots),
+		) {
 			log.warnf(
 				"node_init('%s'): could not reserve an actor slab of %d slots x %d B, falling back to a dedicated mapping per actor",
 				name,
@@ -479,7 +490,10 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 }
 
 send_node_msg :: proc(content: SYSTEM_MSG, loc := #caller_location) -> bool {
-	actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
+	actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, NODE.pid),
+		true,
+	)
 	if !ok {
 		log.errorf(
 			"cannot deliver %v to the node actor: the node is not running, call node_init() first",
@@ -532,15 +546,31 @@ send_to_node_mailbox :: #force_inline proc(
 	msg.from = get_self_pid()
 	info := get_validated_message_info_ptr(T, loc)
 
-	alloc_err, attempted_size := create_message(&msg, &actor.pool, content, info)
+	alloc_err, attempted_size := create_message(
+		&msg,
+		&actor.pool,
+		content,
+		info,
+	)
 	if alloc_err != .OK {
-		report_alloc_error(alloc_err, attempted_size, &actor.pool, NODE.pid, loc)
+		report_alloc_error(
+			alloc_err,
+			attempted_size,
+			&actor.pool,
+			NODE.pid,
+			loc,
+		)
 		return false
 	}
 
 	result := push_to_mailbox(actor, msg, NODE.pid, loc)
 	if result != .OK {
-		log.errorf("cannot deliver %v to the node actor: %v", typeid_of(T), result, location = loc)
+		log.errorf(
+			"cannot deliver %v to the node actor: %v",
+			typeid_of(T),
+			result,
+			location = loc,
+		)
 		if message_owns_page(msg.content) {
 			free_message(&actor.pool, msg.content)
 		}
@@ -572,7 +602,8 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 			return
 		}
 
-		state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
+		state_ptr := cast(^Actor_State)(uintptr(actor_ptr) +
+			offset_of(Actor, state))
 		current_state := sync.atomic_load(state_ptr)
 
 		if current_state == .THREAD_STOPPED || current_state == .STOPPING {
@@ -585,15 +616,24 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 			)
 		}
 	case Remove_Child:
-		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(
+			get(&NODE.actor_registry, NODE.pid),
+			true,
+		)
 		handle_remove_child(a, v)
 	case Add_Child:
 		hand_add_child_to_root_supervisor(from, v)
 	case Set_Parent:
-		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(
+			get(&NODE.actor_registry, NODE.pid),
+			true,
+		)
 		handle_set_parent(a, v)
 	case Get_Stats:
-		a, _ := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
+		a, _ := get_actor_from_pointer(
+			get(&NODE.actor_registry, NODE.pid),
+			true,
+		)
 		handle_get_stats_request(a, v)
 	case Terminate:
 		log.warnf(
@@ -607,7 +647,11 @@ handle_node_message :: proc(data: ^Node_Actor_Data, from: PID, msg: any) {
 			actor_origin(from),
 		)
 	case string:
-		log.debugf("node received a string message from %s: %s", actor_origin(from), v)
+		log.debugf(
+			"node received a string message from %s: %s",
+			actor_origin(from),
+			v,
+		)
 		err := send_message(from, "received message")
 		if err != .OK do log.warnf("node could not reply to %s: %v", actor_origin(from), err)
 	case:
@@ -632,11 +676,17 @@ hand_add_child_to_root_supervisor :: proc(from: PID, msg: Add_Child) {
 }
 
 @(private)
-forward_add_child_to_root_supervisor :: proc(from: PID, msg: Add_Child) -> string {
+forward_add_child_to_root_supervisor :: proc(
+	from: PID,
+	msg: Add_Child,
+) -> string {
 	if !is_local_pid(from) do return "it came from another node, and the pids it carries are numbered by that node"
 	root := NODE.root_supervisor_pid
 	if root == 0 do return "there is no root supervisor to hand it to"
-	root_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, root), true)
+	root_actor, ok := get_actor_from_pointer(
+		get(&NODE.actor_registry, root),
+		true,
+	)
 	if !ok do return "the root supervisor is no longer running"
 	if send(root, msg, root_actor) != .OK do return "the root supervisor could not take it"
 	return ""
@@ -652,7 +702,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 	sync.atomic_store(&actor_typed.stopped_closed, true)
 	if pid != NODE.pid do drain_stop_signals_to_node(actor_typed)
 
-	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) + offset_of(Actor, state))
+	state_ptr := cast(^Actor_State)(uintptr(actor_ptr) +
+		offset_of(Actor, state))
 	current := sync.atomic_load(state_ptr)
 
 	if current == .TERMINATED do return
@@ -688,7 +739,8 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 			wait_for_pool_handle_terminated(pool_handle_ptr^)
 		} else {
 			sync.atomic_sema_post(
-				cast(^sync.Atomic_Sema)(uintptr(actor_ptr) + offset_of(Actor, wake_sema)),
+				cast(^sync.Atomic_Sema)(uintptr(actor_ptr) +
+					offset_of(Actor, wake_sema)),
 			)
 			if actor_typed.blocking {
 				wait_for_blocking_actor_finished(actor_typed)
@@ -714,7 +766,11 @@ cleanup_terminated_actor :: proc(pid: PID, actor_ptr: rawptr) {
 
 	if children_ptr != nil && len(children_ptr^) > 0 {
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-		child_pids := make([dynamic]PID, len(children_ptr^), context.temp_allocator)
+		child_pids := make(
+			[dynamic]PID,
+			len(children_ptr^),
+			context.temp_allocator,
+		)
 		for child, i in children_ptr^ do child_pids[i] = child.pid
 
 		for child_pid in child_pids {
@@ -776,7 +832,10 @@ node_failed :: proc() -> bool {
 
 @(private)
 node_has_shutdown_host :: proc() -> bool {
-	return sync.atomic_load(&NODE.awaiting_signal) || sync.atomic_load(&NODE.blocking_actor) != nil
+	return(
+		sync.atomic_load(&NODE.awaiting_signal) ||
+		sync.atomic_load(&NODE.blocking_actor) != nil \
+	)
 }
 
 @(private)
@@ -796,7 +855,10 @@ escalate_node_failure :: proc(what: string) {
 
 SERVICE_THREAD_STACK_SIZE :: 128 * 1024
 SERVICE_THREAD_MIN_USABLE_STACK :: 64 * 1024
-#assert(SERVICE_THREAD_STACK_SIZE - size_of(Net_Staging) >= SERVICE_THREAD_MIN_USABLE_STACK)
+#assert(
+	SERVICE_THREAD_STACK_SIZE - size_of(Net_Staging) >=
+	SERVICE_THREAD_MIN_USABLE_STACK,
+)
 
 @(private)
 start_signal_relay :: proc() {
@@ -906,7 +968,11 @@ terminate_user_actors_without_live_parent :: proc() {
 		if !is_local_user_actor_outside_connections(pid) do continue
 		if pid in shutdown_terminate_delivered do continue
 
-		actor_ptr, _, valid := get_valid_actor(pid, active_states, system_operation = true)
+		actor_ptr, _, valid := get_valid_actor(
+			pid,
+			active_states,
+			system_operation = true,
+		)
 		if !valid do continue
 		parent_ptr := cast(^PID)(uintptr(actor_ptr) + offset_of(Actor, parent))
 		if has_live_local_parent(parent_ptr^) do continue
@@ -935,7 +1001,10 @@ SHUTDOWN_POLL_INTERVAL :: 10 * time.Millisecond
 SHUTDOWN_REPORT_INTERVAL :: 1 * time.Second
 
 @(private)
-wait_until_actors_leave :: proc(awaited: proc(pid: PID) -> bool, on_poll: proc() = nil) {
+wait_until_actors_leave :: proc(
+	awaited: proc(pid: PID) -> bool,
+	on_poll: proc() = nil,
+) {
 	last_report := mono_now()
 	for {
 		drain_node_stop_signals()
@@ -949,7 +1018,10 @@ wait_until_actors_leave :: proc(awaited: proc(pid: PID) -> bool, on_poll: proc()
 }
 
 @(private)
-count_awaited_actors :: proc(awaited: proc(pid: PID) -> bool, report: bool) -> int {
+count_awaited_actors :: proc(
+	awaited: proc(pid: PID) -> bool,
+	report: bool,
+) -> int {
 	remaining := 0
 	it := make_iter(&NODE.actor_registry)
 	for {
@@ -1025,7 +1097,12 @@ terminate_connection_actors_and_wait :: proc() {
 	defer delete(conn_actors)
 
 	for i in 0 ..< MAX_NODES {
-		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
+		conn_pid := PID(
+			sync.atomic_load_explicit(
+				cast(^u64)&NODE.connection_actors[i],
+				.Acquire,
+			),
+		)
 		if conn_pid != 0 && terminate_actor(conn_pid, .SHUTDOWN) do append(&conn_actors, conn_pid)
 	}
 
@@ -1034,7 +1111,12 @@ terminate_connection_actors_and_wait :: proc() {
 
 is_connection_actor :: proc(pid: PID) -> bool {
 	for i in 0 ..< MAX_NODES {
-		conn_pid := PID(sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[i], .Acquire))
+		conn_pid := PID(
+			sync.atomic_load_explicit(
+				cast(^u64)&NODE.connection_actors[i],
+				.Acquire,
+			),
+		)
 		if conn_pid != 0 && conn_pid == pid do return true
 	}
 	return false
@@ -1156,8 +1238,11 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 	pool_handle_ptr := cast(^^Pooled_Actor_Handle)(uintptr(actor_ptr) +
 		offset_of(Actor, pool_handle))
 	if pool_handle_ptr^ != nil && pool_handle_ptr^.co != nil {
-		if res := coro_release(pool_handle_ptr^.co, &pool_handle_ptr^.coro_slot, true);
-		   res != .Success {
+		if res := coro_release(
+			pool_handle_ptr^.co,
+			&pool_handle_ptr^.coro_slot,
+			true,
+		); res != .Success {
 			log.errorf(
 				"leaking the coroutine stack of a terminated actor: %s",
 				coro.result_description(res),
@@ -1166,7 +1251,8 @@ cleanup_actor_arena :: proc(actor_ptr: rawptr) {
 		pool_handle_ptr^.co = nil
 	}
 
-	arena_ptr := cast(^Actor_Arena)(uintptr(actor_ptr) + offset_of(Actor, arena))
+	arena_ptr := cast(^Actor_Arena)(uintptr(actor_ptr) +
+		offset_of(Actor, arena))
 	slot_ptr := cast(^u32)(uintptr(actor_ptr) + offset_of(Actor, arena_slot))
 	actor_arena_release(arena_ptr, slot_ptr)
 }

@@ -45,7 +45,16 @@ ask :: #force_inline proc(
 	token := ctx.next_ask_token + 1
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	err := send_message_impl(to, &v, size_of(T), typeid_of(T), info, .User, loc, token)
+	err := send_message_impl(
+		to,
+		&v,
+		size_of(T),
+		typeid_of(T),
+		info,
+		.User,
+		loc,
+		token,
+	)
 	if err != .OK {
 		_ = cancel_timer(timer_id, loc)
 		return 0, err
@@ -72,13 +81,17 @@ ask_to :: #force_inline proc(
 	Send_Error,
 ) {
 	when ODIN_TEST {
-		if err, ok := ti.intercept_send_to(actor_name, node_name, content); ok {
+		if err, ok := ti.intercept_send_to(actor_name, node_name, content);
+		   ok {
 			return 0, Send_Error(err)
 		}
 	}
 	ctx := current_actor_context
 	if ctx == nil {
-		log.errorf("ask_to() must be called from within an actor", location = loc)
+		log.errorf(
+			"ask_to() must be called from within an actor",
+			location = loc,
+		)
 		return 0, .NOT_ASKED
 	}
 
@@ -88,7 +101,14 @@ ask_to :: #force_inline proc(
 	token := ctx.next_ask_token + 1
 	v := content
 	info := get_validated_message_info_ptr(T, loc)
-	err := send_remote_by_name_impl(node_name, actor_name, &v, info, loc, token)
+	err := send_remote_by_name_impl(
+		node_name,
+		actor_name,
+		&v,
+		info,
+		loc,
+		token,
+	)
 	if err != .OK {
 		_ = cancel_timer(timer_id, loc)
 		return 0, err
@@ -105,7 +125,10 @@ ask_to :: #force_inline proc(
 }
 
 @(require_results)
-reply :: #force_inline proc(content: $T, loc := #caller_location) -> Send_Error {
+reply :: #force_inline proc(
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	when ODIN_TEST {
 		if err, ok := ti.intercept_reply(content); ok do return Send_Error(err)
 	}
@@ -139,7 +162,11 @@ replying_to :: proc() -> (Ask_Token, bool) {
 }
 
 @(private)
-deliver_user_message :: #force_inline proc(actor: ^Actor, msg: ^Message, data: any) {
+deliver_user_message :: #force_inline proc(
+	actor: ^Actor,
+	msg: ^Message,
+	data: any,
+) {
 	ctx := current_actor_context
 	if ctx == nil {
 		actor.handle_message(actor.data, msg.from, data)
@@ -192,7 +219,12 @@ deliver_user_message_ask :: #force_no_inline proc(
 	if is_reply {
 		ask, pending := ctx.pending_asks[token]
 		if !pending {
-			log.debugf("dropping late reply %v for ask %d from %v", data.id, token, msg.from)
+			log.debugf(
+				"dropping late reply %v for ask %d from %v",
+				data.id,
+				token,
+				msg.from,
+			)
 			return
 		}
 		if ask.asked != 0 ? msg.from != ask.asked : get_node_id(msg.from) != ask.asked_node {

@@ -33,9 +33,14 @@ print_provenance_header :: proc() {
 	fmt.printf("cores (logical):  %d\n", threads_act.get_cpu_count())
 	fmt.printf("os/arch:          %v / %v\n", ODIN_OS, ODIN_ARCH)
 	fmt.printf("odin version:     %v\n", ODIN_VERSION)
-	fmt.printf("build:            -o:aggressive -no-bounds-check -disable-assert -microarch:native\n")
+	fmt.printf(
+		"build:            -o:aggressive -no-bounds-check -disable-assert -microarch:native\n",
+	)
 	fmt.printf("page_size:        %d KB\n", 64)
-	fmt.printf("mailboxes:        %d slots (default), backlogged sends retried\n", actod.DEFAULT_MAIL_BOX_SIZE)
+	fmt.printf(
+		"mailboxes:        %d slots (default), backlogged sends retried\n",
+		actod.DEFAULT_MAIL_BOX_SIZE,
+	)
 	fmt.printf("repeats:          %d\n", BENCH_REPEATS)
 	fmt.println()
 }

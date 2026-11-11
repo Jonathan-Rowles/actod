@@ -34,7 +34,11 @@ create_benchmark_behaviour :: proc(
 	$T: typeid,
 ) -> actod.Actor_Behaviour(shared.Benchmark_Actor_Data) {
 	return actod.Actor_Behaviour(shared.Benchmark_Actor_Data) {
-		handle_message = proc(data: ^shared.Benchmark_Actor_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^shared.Benchmark_Actor_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			data.message_count += 1
 			if data.message_count & 0xFF == 0 {
 				sync.atomic_add(&global_benchmark_state.receive_count, 256)
@@ -47,9 +51,15 @@ create_benchmark_behaviour :: proc(
 	}
 }
 
-create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_Sender_Data) {
+create_sender_behaviour :: proc(
+	$T: typeid,
+) -> actod.Actor_Behaviour(Benchmark_Sender_Data) {
 	return actod.Actor_Behaviour(Benchmark_Sender_Data) {
-		handle_message = proc(data: ^Benchmark_Sender_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Benchmark_Sender_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch _ in msg {
 			case Start_Benchmark_Send:
 				for i in 0 ..< data.warmup_messages {
@@ -59,7 +69,8 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 					}
 					target: actod.PID
 					if data.dedicated {
-						target = data.targets[data.sender_id % len(data.targets)]
+						target =
+							data.targets[data.sender_id % len(data.targets)]
 					} else {
 						target = data.targets[i % len(data.targets)]
 					}
@@ -84,7 +95,8 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 					}
 					target: actod.PID
 					if data.dedicated {
-						target = data.targets[data.sender_id % len(data.targets)]
+						target =
+							data.targets[data.sender_id % len(data.targets)]
 					} else {
 						target = data.targets[i % len(data.targets)]
 					}
@@ -108,7 +120,10 @@ create_sender_behaviour :: proc($T: typeid) -> actod.Actor_Behaviour(Benchmark_S
 	}
 }
 
-run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Benchmark_Result {
+run_benchmark :: proc(
+	$T: typeid,
+	config: shared.Benchmark_Config,
+) -> shared.Benchmark_Result {
 	sync.atomic_store(&global_benchmark_state.send_count, 0)
 	sync.atomic_store(&global_benchmark_state.receive_count, 0)
 	sync.atomic_store(&global_benchmark_state.send_failures, 0)
@@ -128,7 +143,10 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 			worker_count = wc,
 			actor_config = actod.make_actor_config(
 				page_size = mem.Kilobyte * 64,
-				logging = actod.make_log_config(enable_file = false, level = .Error),
+				logging = actod.make_log_config(
+					enable_file = false,
+					level = .Error,
+				),
 			),
 		),
 	)
@@ -143,7 +161,10 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 	for i in 0 ..< config.actor_count {
 		hw := i if config.same_worker else -1
 		actor_config := actod.make_actor_config(
-			logging = actod.make_log_config(enable_file = false, level = .Error),
+			logging = actod.make_log_config(
+				enable_file = false,
+				level = .Error,
+			),
 			home_worker = hw,
 		)
 
@@ -167,10 +188,14 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 
 	for i in 0 ..< config.sender_count {
 		target_actor := actors[i % config.actor_count]
-		aff: actod.Actor_Ref = actod.Actor_Ref(target_actor) if config.same_worker else nil
+		aff: actod.Actor_Ref =
+			actod.Actor_Ref(target_actor) if config.same_worker else nil
 		stack_size := max(mem.Kilobyte * 56, size_of(T) * 4)
 		actor_config := actod.make_actor_config(
-			logging = actod.make_log_config(enable_file = false, level = .Error),
+			logging = actod.make_log_config(
+				enable_file = false,
+				level = .Error,
+			),
 			coro_stack_size = stack_size,
 			affinity = aff,
 		)
@@ -185,7 +210,12 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 			warmup_sema      = &warmup_sema,
 			state            = &global_benchmark_state,
 		}
-		pid, ok := actod.spawn(name, sender_data, sender_behaviour, actor_config)
+		pid, ok := actod.spawn(
+			name,
+			sender_data,
+			sender_behaviour,
+			actor_config,
+		)
 		if !ok do panic("Failed to spawn sender")
 		senders[i] = pid
 	}
@@ -248,7 +278,8 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 
 	duration_sec := f64(elapsed_ns) / 1e9
 	throughput := f64(final_received) / duration_sec
-	bandwidth := (f64(final_received) * f64(size_of(T))) / (1024 * 1024) / duration_sec
+	bandwidth :=
+		(f64(final_received) * f64(size_of(T))) / (1024 * 1024) / duration_sec
 
 	return shared.Benchmark_Result {
 		config = config,
@@ -257,11 +288,15 @@ run_benchmark :: proc($T: typeid, config: shared.Benchmark_Config) -> shared.Ben
 		messages_received = final_received,
 		throughput = throughput,
 		bandwidth = bandwidth,
-		err_actor_not_found = sync.atomic_load(&global_benchmark_state.err_actor_not_found),
+		err_actor_not_found = sync.atomic_load(
+			&global_benchmark_state.err_actor_not_found,
+		),
 		err_receiver_backlogged = sync.atomic_load(
 			&global_benchmark_state.err_receiver_backlogged,
 		),
-		err_message_too_large = sync.atomic_load(&global_benchmark_state.err_message_too_large),
+		err_message_too_large = sync.atomic_load(
+			&global_benchmark_state.err_message_too_large,
+		),
 		err_system_shutting_down = sync.atomic_load(
 			&global_benchmark_state.err_system_shutting_down,
 		),

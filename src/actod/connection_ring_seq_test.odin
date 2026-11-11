@@ -54,7 +54,11 @@ Seq_Drainer_Context :: struct {
 	recorded:         int,
 }
 
-seq_validate_slot :: proc(ctx: ^Seq_Drainer_Context, data: []byte, length: u32) {
+seq_validate_slot :: proc(
+	ctx: ^Seq_Drainer_Context,
+	data: []byte,
+	length: u32,
+) {
 	offset: u32 = 0
 	for offset + 4 <= length {
 		body := endian.unchecked_get_u32le(data[offset:])
@@ -213,7 +217,10 @@ run_seq_stress :: proc(
 		starve_pause = starve_pause,
 		read_dwell   = read_dwell,
 	}
-	drainer := thread.create_and_start_with_data(&drainer_ctx, seq_drainer_proc)
+	drainer := thread.create_and_start_with_data(
+		&drainer_ctx,
+		seq_drainer_proc,
+	)
 
 	ctxs: [num_threads]Seq_Writer_Context
 	threads: [num_threads]^thread.Thread
@@ -313,12 +320,17 @@ seq_staged_writer_proc :: proc(data: rawptr) {
 		ok := false
 		for retries <= 1_000_000 {
 			if use_large {
-				if staging_flush_ring(ctx.ring) && batch_append_message(ctx.ring, frame) {
+				if staging_flush_ring(ctx.ring) &&
+				   batch_append_message(ctx.ring, frame) {
 					ok = true
 					break
 				}
 			} else {
-				if dst, _, staged := staging_reserve(ctx.ring, u32(len(frame)), 0); staged {
+				if dst, _, staged := staging_reserve(
+					ctx.ring,
+					u32(len(frame)),
+					0,
+				); staged {
 					copy(dst, frame)
 					ok = true
 					break
@@ -350,7 +362,11 @@ test_stress_staged_per_producer_order :: proc(t: ^testing.T) {
 	run_seq_stress(t, seq_staged_writer_proc)
 }
 
-seq_fill_ring :: proc(ring: ^Connection_Ring, producer: u8, frames: int) -> int {
+seq_fill_ring :: proc(
+	ring: ^Connection_Ring,
+	producer: u8,
+	frames: int,
+) -> int {
 	msg: [SEQ_FRAME_SIZE]byte
 	endian.put_u32(msg[0:4], .Little, SEQ_FRAME_SIZE - 4)
 	msg[4] = producer
@@ -409,8 +425,16 @@ test_migrate_then_reset_drops_nothing :: proc(t: ^testing.T) {
 
 	PRIMARY_FRAMES :: 400
 	SECONDARY_FRAMES :: 600
-	testing.expect_value(t, seq_fill_ring(primary, 0, PRIMARY_FRAMES), PRIMARY_FRAMES)
-	testing.expect_value(t, seq_fill_ring(secondary, 1, SECONDARY_FRAMES), SECONDARY_FRAMES)
+	testing.expect_value(
+		t,
+		seq_fill_ring(primary, 0, PRIMARY_FRAMES),
+		PRIMARY_FRAMES,
+	)
+	testing.expect_value(
+		t,
+		seq_fill_ring(secondary, 1, SECONDARY_FRAMES),
+		SECONDARY_FRAMES,
+	)
 
 	_ = ring_migrate_slots(secondary, primary)
 	testing.expect_value(t, ring_reset(secondary), 0)
@@ -424,7 +448,11 @@ test_migrate_then_reset_drops_nothing :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, primary_ctx.malformed, 0)
 	testing.expect_value(t, primary_ctx.order_violations, 0)
-	testing.expect_value(t, primary_ctx.frames_seen, PRIMARY_FRAMES + SECONDARY_FRAMES)
+	testing.expect_value(
+		t,
+		primary_ctx.frames_seen,
+		PRIMARY_FRAMES + SECONDARY_FRAMES,
+	)
 	testing.expect_value(t, primary_ctx.next_seq[0], u64(PRIMARY_FRAMES))
 	testing.expect_value(t, primary_ctx.next_seq[1], u64(SECONDARY_FRAMES))
 }

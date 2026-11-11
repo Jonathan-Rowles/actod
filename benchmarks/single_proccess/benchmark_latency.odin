@@ -132,7 +132,10 @@ record_latency :: #force_inline proc(seq_count: u64, send_time_ns: i64) {
 }
 
 compute_latency_stats :: proc() -> Latency_Stats {
-	count := min(sync.atomic_load(&global_latency_collector.count), u64(MAX_LATENCY_SAMPLES))
+	count := min(
+		sync.atomic_load(&global_latency_collector.count),
+		u64(MAX_LATENCY_SAMPLES),
+	)
 	received := sync.atomic_load(&global_latency_collector.received_count)
 
 	if count == 0 {
@@ -178,9 +181,14 @@ Latency_Actor_Data :: struct {
 	message_count: u64,
 }
 
-create_latency_behaviour :: proc() -> actod.Actor_Behaviour(Latency_Actor_Data) {
+create_latency_behaviour :: proc(
+) -> actod.Actor_Behaviour(Latency_Actor_Data) {
 	return actod.Actor_Behaviour(Latency_Actor_Data) {
-		handle_message = proc(data: ^Latency_Actor_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Latency_Actor_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			data.message_count += 1
 			if data.message_count & 0xFF == 0 {
 				sync.atomic_add(&global_latency_collector.received_count, 256)
@@ -216,7 +224,11 @@ spawn_latency_actor :: proc() -> actod.PID {
 	return pid
 }
 
-send_latency_message :: proc(target: actod.PID, size: Latency_Size, seq: u64) -> bool {
+send_latency_message :: proc(
+	target: actod.PID,
+	size: Latency_Size,
+	seq: u64,
+) -> bool {
 	ts := time.tick_now()._nsec
 
 	switch size {
@@ -291,7 +303,12 @@ producer_proc :: proc(t: ^thread.Thread) {
 	sync.wait_group_done(task.done_wg)
 }
 
-send_flood :: proc(target: actod.PID, config: Latency_Config) -> (measured_total: int) {
+send_flood :: proc(
+	target: actod.PID,
+	config: Latency_Config,
+) -> (
+	measured_total: int,
+) {
 	n := SATURATION_PRODUCERS
 	warmup_share := config.warmup_count / n
 	measured_share := config.message_count / n
@@ -331,7 +348,10 @@ send_flood :: proc(target: actod.PID, config: Latency_Config) -> (measured_total
 	sync.atomic_store(&global_latency_collector.count, 0)
 	sync.atomic_store(&global_latency_collector.received_count, 0)
 	sync.atomic_store(&global_latency_collector.warmup_done, true)
-	sync.atomic_store(&global_latency_collector.start_tick, time.tick_now()._nsec)
+	sync.atomic_store(
+		&global_latency_collector.start_tick,
+		time.tick_now()._nsec,
+	)
 
 	sync.sema_post(&go, n)
 
@@ -366,7 +386,10 @@ run_latency_benchmark :: proc(config: Latency_Config) -> Latency_Stats {
 			received,
 		)
 	}
-	sync.atomic_store(&global_latency_collector.end_tick, time.tick_now()._nsec)
+	sync.atomic_store(
+		&global_latency_collector.end_tick,
+		time.tick_now()._nsec,
+	)
 
 	return compute_latency_stats()
 }
@@ -377,7 +400,10 @@ format_latency :: proc(ns: i64) -> string {
 	} else if ns < 1_000_000 {
 		return fmt.tprintf("%5s us", fmt.tprintf("%.1f", f64(ns) / 1_000.0))
 	} else {
-		return fmt.tprintf("%5s ms", fmt.tprintf("%.2f", f64(ns) / 1_000_000.0))
+		return fmt.tprintf(
+			"%5s ms",
+			fmt.tprintf("%.2f", f64(ns) / 1_000_000.0),
+		)
 	}
 }
 
@@ -409,29 +435,46 @@ Pingpong_Sender_Data :: struct {
 	done_sema:      ^sync.Sema,
 }
 
-create_pingpong_receiver_behaviour :: proc() -> actod.Actor_Behaviour(Pingpong_Receiver_Data) {
+create_pingpong_receiver_behaviour :: proc(
+) -> actod.Actor_Behaviour(Pingpong_Receiver_Data) {
 	return actod.Actor_Behaviour(Pingpong_Receiver_Data) {
-		handle_message = proc(data: ^Pingpong_Receiver_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Pingpong_Receiver_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case Latency_Msg_32:
 				_ = actod.send_message(
 					from,
-					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
+					Pingpong_Reply {
+						send_time_ns = m.send_time_ns,
+						sequence = m.sequence,
+					},
 				)
 			case Latency_Msg_256:
 				_ = actod.send_message(
 					from,
-					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
+					Pingpong_Reply {
+						send_time_ns = m.send_time_ns,
+						sequence = m.sequence,
+					},
 				)
 			case Latency_Msg_1K:
 				_ = actod.send_message(
 					from,
-					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
+					Pingpong_Reply {
+						send_time_ns = m.send_time_ns,
+						sequence = m.sequence,
+					},
 				)
 			case Latency_Msg_4K:
 				_ = actod.send_message(
 					from,
-					Pingpong_Reply{send_time_ns = m.send_time_ns, sequence = m.sequence},
+					Pingpong_Reply {
+						send_time_ns = m.send_time_ns,
+						sequence = m.sequence,
+					},
 				)
 			}
 		},
@@ -439,9 +482,14 @@ create_pingpong_receiver_behaviour :: proc() -> actod.Actor_Behaviour(Pingpong_R
 	}
 }
 
-create_pingpong_sender_behaviour :: proc() -> actod.Actor_Behaviour(Pingpong_Sender_Data) {
+create_pingpong_sender_behaviour :: proc(
+) -> actod.Actor_Behaviour(Pingpong_Sender_Data) {
 	return actod.Actor_Behaviour(Pingpong_Sender_Data) {
-		handle_message = proc(data: ^Pingpong_Sender_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Pingpong_Sender_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case Start_Pingpong:
 				data.total_count = m.count
@@ -454,7 +502,11 @@ create_pingpong_sender_behaviour :: proc() -> actod.Actor_Behaviour(Pingpong_Sen
 				if !data.warmup_done {
 					data.warmup_replies += 1
 					if data.warmup_replies < 1000 {
-						send_latency_message(data.receiver, data.size, u64(data.warmup_replies))
+						send_latency_message(
+							data.receiver,
+							data.size,
+							u64(data.warmup_replies),
+						)
 					} else {
 						data.warmup_done = true
 						data.current_idx = 0
@@ -471,7 +523,11 @@ create_pingpong_sender_behaviour :: proc() -> actod.Actor_Behaviour(Pingpong_Sen
 					data.current_idx += 1
 
 					if data.current_idx < data.total_count {
-						send_latency_message(data.receiver, data.size, u64(data.current_idx))
+						send_latency_message(
+							data.receiver,
+							data.size,
+							u64(data.current_idx),
+						)
 					} else {
 						sync.sema_post(data.done_sema)
 					}
@@ -515,7 +571,12 @@ run_pingpong_test :: proc(size: Latency_Size, count: int) -> Latency_Stats {
 		logging = actod.make_log_config(enable_file = false, level = .Warning),
 		home_worker = 0,
 	)
-	sender, ok_s := actod.spawn("pingpong_sender", sender_data, sender_behaviour, sender_config)
+	sender, ok_s := actod.spawn(
+		"pingpong_sender",
+		sender_data,
+		sender_behaviour,
+		sender_config,
+	)
 	if !ok_s do panic("Failed to spawn pingpong sender")
 	defer _ = actod.terminate_actor(sender)
 
@@ -582,12 +643,30 @@ run_latency_pingpong :: proc() {
 			wait_for_actors_cleanup()
 		}
 
-		p50, p50_lo, p50_hi := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.p50})
-		p90, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.p90})
-		p99, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.p99})
-		p99_9, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.p99_9})
-		mx, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.max})
-		jit, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.jitter})
+		p50, p50_lo, p50_hi := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.p50},
+		)
+		p90, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.p90},
+		)
+		p99, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.p99},
+		)
+		p99_9, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.p99_9},
+		)
+		mx, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.max},
+		)
+		jit, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.jitter},
+		)
 		delete(runs)
 
 		fmt.printf(
@@ -652,9 +731,18 @@ run_saturation_test :: proc() {
 		median_tput, lo, hi := summarize_f64(tputs)
 		delete(tputs)
 
-		p50, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.p50})
-		p99, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.p99})
-		mx, _, _ := median_lo_hi_stat(runs, proc(s: Latency_Stats) -> i64 {return s.max})
+		p50, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.p50},
+		)
+		p99, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.p99},
+		)
+		mx, _, _ := median_lo_hi_stat(
+			runs,
+			proc(s: Latency_Stats) -> i64 {return s.max},
+		)
 		delete(runs)
 
 		queue_indicator: string

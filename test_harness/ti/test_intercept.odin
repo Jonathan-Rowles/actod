@@ -113,7 +113,11 @@ Captured_Topic_Subscribe :: struct {
 	topic: rawptr,
 }
 
-Message_Copier :: #type proc(content: rawptr, size: int, type_id: typeid) -> rawptr
+Message_Copier :: #type proc(
+	content: rawptr,
+	size: int,
+	type_id: typeid,
+) -> rawptr
 
 copy_message: Message_Copier
 
@@ -144,7 +148,15 @@ intercept_send_message :: proc(to: u64, content: $T) -> (Send_Error, bool) {
 	return .OK, true
 }
 
-intercept_ask :: proc(to: u64, content: $T, timeout: time.Duration) -> (u64, Send_Error, bool) {
+intercept_ask :: proc(
+	to: u64,
+	content: $T,
+	timeout: time.Duration,
+) -> (
+	u64,
+	Send_Error,
+	bool,
+) {
 	if test_intercept == nil do return 0, {}, false
 	if test_intercept.dead_pids != nil && to in test_intercept.dead_pids^ {
 		return 0, .ACTOR_NOT_FOUND, true
@@ -191,7 +203,13 @@ intercept_send_self :: proc(content: $T) -> (Send_Error, bool) {
 	return intercept_send_message(test_intercept.self_pid, content)
 }
 
-intercept_send_message_name :: proc(to: string, content: $T) -> (Send_Error, bool) {
+intercept_send_message_name :: proc(
+	to: string,
+	content: $T,
+) -> (
+	Send_Error,
+	bool,
+) {
 	if test_intercept == nil do return {}, false
 	for c in to {
 		if c == '@' do return .NODE_NOT_FOUND, true
@@ -234,7 +252,10 @@ intercept_spawn :: proc(name: string, $T: typeid) -> (u64, bool) {
 	if test_intercept == nil do return 0, false
 	test_intercept.next_spawn_pid += 1
 	pid := test_intercept.next_spawn_pid
-	append(test_intercept.spawn_capture, Captured_Spawn{name = name, type_id = T})
+	append(
+		test_intercept.spawn_capture,
+		Captured_Spawn{name = name, type_id = T},
+	)
 	return pid, true
 }
 
@@ -242,7 +263,10 @@ intercept_spawn_child :: proc(name: string, $T: typeid) -> (u64, bool) {
 	if test_intercept == nil do return 0, false
 	test_intercept.next_spawn_pid += 1
 	pid := test_intercept.next_spawn_pid
-	append(test_intercept.spawn_capture, Captured_Spawn{name = name, type_id = T})
+	append(
+		test_intercept.spawn_capture,
+		Captured_Spawn{name = name, type_id = T},
+	)
 	if test_intercept.children_pids != nil {
 		append(test_intercept.children_pids, pid)
 	}
@@ -258,9 +282,15 @@ intercept_self_terminate :: proc(reason: Termination_Reason) -> bool {
 	return true
 }
 
-intercept_terminate_actor :: proc(to: u64, reason: Termination_Reason) -> bool {
+intercept_terminate_actor :: proc(
+	to: u64,
+	reason: Termination_Reason,
+) -> bool {
 	if test_intercept == nil do return false
-	append(test_intercept.terminate_capture, Captured_Terminate{pid = to, reason = reason})
+	append(
+		test_intercept.terminate_capture,
+		Captured_Terminate{pid = to, reason = reason},
+	)
 	return true
 }
 
@@ -275,13 +305,19 @@ intercept_broadcast :: proc(content: $T) -> bool {
 
 intercept_subscribe_type :: proc(actor_type: u8) -> bool {
 	if test_intercept == nil do return false
-	append(test_intercept.subscribe_capture, Captured_Subscribe{actor_type = actor_type})
+	append(
+		test_intercept.subscribe_capture,
+		Captured_Subscribe{actor_type = actor_type},
+	)
 	return true
 }
 
 intercept_subscribe_topic :: proc(topic: rawptr) -> bool {
 	if test_intercept == nil do return false
-	append(test_intercept.topic_subscribe_capture, Captured_Topic_Subscribe{topic = topic})
+	append(
+		test_intercept.topic_subscribe_capture,
+		Captured_Topic_Subscribe{topic = topic},
+	)
 	return true
 }
 
@@ -304,7 +340,10 @@ intercept_get_topic_subscribers :: proc(
 
 intercept_rename_actor :: proc(pid: u64, new_name: string) -> bool {
 	if test_intercept == nil do return false
-	append(test_intercept.rename_capture, Captured_Rename{pid = pid, new_name = new_name})
+	append(
+		test_intercept.rename_capture,
+		Captured_Rename{pid = pid, new_name = new_name},
+	)
 	return true
 }
 
@@ -331,7 +370,14 @@ intercept_get_self_name :: proc() -> (string, bool) {
 	return test_intercept.self_name, true
 }
 
-intercept_set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send_Error, bool) {
+intercept_set_timer :: proc(
+	interval: time.Duration,
+	repeat: bool,
+) -> (
+	u32,
+	Send_Error,
+	bool,
+) {
 	if test_intercept == nil do return 0, {}, false
 	if test_intercept.fail_set_timer do return 0, .ACTOR_NOT_FOUND, true
 	if repeat && interval <= 0 do return 0, .INVALID_INTERVAL, true
@@ -339,7 +385,12 @@ intercept_set_timer :: proc(interval: time.Duration, repeat: bool) -> (u32, Send
 	id := test_intercept.next_timer_id
 	append(
 		test_intercept.timer_capture,
-		Captured_Timer{id = id, interval = interval, repeat = repeat, active = true},
+		Captured_Timer {
+			id = id,
+			interval = interval,
+			repeat = repeat,
+			active = true,
+		},
 	)
 	return id, .OK, true
 }

@@ -37,7 +37,9 @@ register_sender_messages :: proc "contextless" () {
 	actod.register_message_type(Request_PIDs_Message)
 }
 
-generate_network_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Config {
+generate_network_scaling_configs :: proc(
+	cpu_count: int,
+) -> []shared.Scaling_Config {
 	configs := make([dynamic]shared.Scaling_Config)
 
 	base_messages := 1_000_000
@@ -69,7 +71,11 @@ generate_network_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Con
 						sender_count = n,
 						message_count = n * base_messages,
 						message_size = size,
-						description = fmt.tprintf("%dx %s", n, shared.size_name(size)),
+						description = fmt.tprintf(
+							"%dx %s",
+							n,
+							shared.size_name(size),
+						),
 						category = .PARALLEL,
 						dedicated = true,
 					},
@@ -97,7 +103,11 @@ create_sender_coordinator_behaviour :: proc() -> actod.Actor_Behaviour(int) {
 					actor_name = m.type_name,
 					request_id = m.actor_count,
 				}
-				actod.send_remote_by_name("BenchmarkReceiver", m.type_name, req)
+				actod.send_remote_by_name(
+					"BenchmarkReceiver",
+					m.type_name,
+					req,
+				)
 			}
 		},
 	}
@@ -203,7 +213,11 @@ run_network_benchmark :: proc(
 	global_pid_cache = {}
 	global_pid_cache.count = config.actor_count
 
-	err := actod.send_remote_by_name("BenchmarkReceiver", "TestCoordinator", start_msg)
+	err := actod.send_remote_by_name(
+		"BenchmarkReceiver",
+		"TestCoordinator",
+		start_msg,
+	)
 	if err != .OK {
 		fmt.printf("Failed to send start test message: %v\n", err)
 		return {}
@@ -216,7 +230,11 @@ run_network_benchmark :: proc(
 			global_coordinator_pid,
 			Request_PIDs_Message {
 				actor_count = i,
-				type_name = fmt.tprintf("NetworkBenchmarkActor-%v-%d", typeid_of(T), i),
+				type_name = fmt.tprintf(
+					"NetworkBenchmarkActor-%v-%d",
+					typeid_of(T),
+					i,
+				),
 			},
 		)
 	}
@@ -306,7 +324,8 @@ run_network_benchmark :: proc(
 	duration_sec := f64(duration) / 1e9
 	throughput := f64(stats.messages_received) / duration_sec
 	bandwidth :=
-		(f64(stats.messages_received) * f64(shared.size_bytes(config.message_size))) /
+		(f64(stats.messages_received) *
+			f64(shared.size_bytes(config.message_size))) /
 		(1024 * 1024) /
 		duration_sec
 	return shared.Benchmark_Result {
@@ -345,7 +364,11 @@ run_network_benchmark_for_size :: proc(
 	case .INLINE:
 		return run_network_benchmark(shared.Inline_Message, config, test_id)
 	case .STRING:
-		return run_network_benchmark(shared.Inline_Message_string, config, test_id)
+		return run_network_benchmark(
+			shared.Inline_Message_string,
+			config,
+			test_id,
+		)
 	case .MEDIUM:
 		return run_network_benchmark(shared.Medium_Message, config, test_id)
 	case .LARGE:

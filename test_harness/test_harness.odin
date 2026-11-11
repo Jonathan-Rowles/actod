@@ -22,7 +22,10 @@ EXTERNAL_PID :: unit.EXTERNAL_PID
 // Lifecycle
 
 // Create a test harness for a single actor with the given initial state and behaviour.
-create :: proc(data: $T, behaviour: actod.Actor_Behaviour(T)) -> Test_Harness(T) {
+create :: proc(
+	data: $T,
+	behaviour: actod.Actor_Behaviour(T),
+) -> Test_Harness(T) {
 	return unit.create(data, behaviour)
 }
 
@@ -104,7 +107,13 @@ simulate_child_terminated :: proc(
 	reason: actod.Termination_Reason,
 	will_restart: bool = false,
 ) {
-	unit.simulate_child_terminated(h, child_pid, child_name, reason, will_restart)
+	unit.simulate_child_terminated(
+		h,
+		child_pid,
+		child_name,
+		reason,
+		will_restart,
+	)
 }
 
 // Invoke on_child_started callback.
@@ -123,7 +132,11 @@ simulate_child_restarted :: proc(
 }
 
 // Invoke on_max_restarts_exceeded callback.
-simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID, child_name: string) {
+simulate_max_restarts :: proc(
+	h: ^Test_Harness($T),
+	child_pid: actod.PID,
+	child_name: string,
+) {
 	unit.simulate_max_restarts(h, child_pid, child_name)
 }
 
@@ -162,7 +175,11 @@ expect_sent_where :: proc(
 }
 
 // Assert no messages were sent.
-expect_no_sends :: proc(h: ^Test_Harness($T), t: ^testing.T, loc := #caller_location) {
+expect_no_sends :: proc(
+	h: ^Test_Harness($T),
+	t: ^testing.T,
+	loc := #caller_location,
+) {
 	unit.expect_no_sends(h, t, loc)
 }
 
@@ -205,7 +222,11 @@ expect_published_to :: proc(
 }
 
 // Assert no publishes captured.
-expect_no_publishes :: proc(h: ^Test_Harness($T), t: ^testing.T, loc := #caller_location) {
+expect_no_publishes :: proc(
+	h: ^Test_Harness($T),
+	t: ^testing.T,
+	loc := #caller_location,
+) {
 	unit.expect_no_publishes(h, t, loc)
 }
 

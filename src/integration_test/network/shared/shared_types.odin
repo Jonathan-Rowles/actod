@@ -65,7 +65,11 @@ Distributed_Echo_Response :: struct {
 	from_actor: string,
 }
 
-make_two_node_message :: proc(id: int, content: string, sender: string) -> Two_Node_Message {
+make_two_node_message :: proc(
+	id: int,
+	content: string,
+	sender: string,
+) -> Two_Node_Message {
 	msg := Two_Node_Message {
 		id = id,
 	}
@@ -81,7 +85,11 @@ make_two_node_message :: proc(id: int, content: string, sender: string) -> Two_N
 	return msg
 }
 
-make_two_node_response :: proc(id: int, content: string, receiver: string) -> Two_Node_Response {
+make_two_node_response :: proc(
+	id: int,
+	content: string,
+	receiver: string,
+) -> Two_Node_Response {
 	resp := Two_Node_Response {
 		id = id,
 	}

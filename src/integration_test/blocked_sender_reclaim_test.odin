@@ -34,8 +34,14 @@ Blocked_Sender_Receiver :: struct {}
 
 Blocked_Sender :: struct {}
 
-blocked_sender_receiver_behaviour := actod.Actor_Behaviour(Blocked_Sender_Receiver) {
-	handle_message = proc(d: ^Blocked_Sender_Receiver, from: actod.PID, msg: any) {
+blocked_sender_receiver_behaviour := actod.Actor_Behaviour(
+	Blocked_Sender_Receiver,
+) {
+	handle_message = proc(
+		d: ^Blocked_Sender_Receiver,
+		from: actod.PID,
+		msg: any,
+	) {
 		if _, ok := msg.(u64); ok do spin_for(BLOCKED_SENDER_RECEIVE_DELAY)
 	},
 }
@@ -44,7 +50,10 @@ blocked_sender_behaviour := actod.Actor_Behaviour(Blocked_Sender) {
 	handle_message = proc(d: ^Blocked_Sender, from: actod.PID, msg: any) {
 		start, ok := msg.(Blocked_Sender_Start)
 		if !ok do return
-		sync.atomic_store(&blocked_sender_probe.slot, actod.reclaim_slot_of_this_thread())
+		sync.atomic_store(
+			&blocked_sender_probe.slot,
+			actod.reclaim_slot_of_this_thread(),
+		)
 		sync.atomic_store(&blocked_sender_probe.sending, true)
 		failed := 0
 		for i in 0 ..< BLOCKED_SENDER_SENDS {
@@ -106,7 +115,9 @@ test_blocked_cross_worker_sender_releases_reclaim_slot :: proc(t: ^testing.T) {
 	for sync.atomic_load(&blocked_sender_probe.sending) {
 		if time.tick_since(sampling_start) > scaled_timeout(BLOCKED_SENDER_BUDGET) do break
 		actod.reclaim_scan()
-		slot_epoch := sync.atomic_load(&actod.NODE.reclaim.slots[slot].active_epoch)
+		slot_epoch := sync.atomic_load(
+			&actod.NODE.reclaim.slots[slot].active_epoch,
+		)
 		global_epoch := sync.atomic_load(&actod.NODE.reclaim.epoch)
 		samples += 1
 		if slot_epoch != 0 {

@@ -22,7 +22,11 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 	}
 
 	parent_behaviour := actod.Actor_Behaviour(Dup_Parent_Data) {
-		handle_message = proc(data: ^Dup_Parent_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Dup_Parent_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case string:
 				if m == "go" {
@@ -52,22 +56,29 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 
 	parent_pid, parent_ok := actod.spawn(
 		"dup_probe_parent",
-		Dup_Parent_Data{child_gone_count = &child_gone_count, child_gone = &child_gone},
+		Dup_Parent_Data {
+			child_gone_count = &child_gone_count,
+			child_gone = &child_gone,
+		},
 		parent_behaviour,
 	)
 	expect(t, parent_ok, "Should spawn the local parent")
 
 	actod.frame_tap_add(
 		actod.Frame_Fault_Rule {
-			dir       = .In,
-			action    = .Duplicate,
+			dir = .In,
+			action = .Duplicate,
 			type_hash = actod.frame_tap_type_hash(actod.Actor_Stopped),
-			count     = 1,
+			count = 1,
 		},
 	)
 
 	supervision_node: Node_Role_Process
-	if !start_supervision_server(&supervision_node, test_base_port + 1, test_base_port) {
+	if !start_supervision_server(
+		&supervision_node,
+		test_base_port + 1,
+		test_base_port,
+	) {
 		expect(t, false, "Failed to start the supervision server")
 		return
 	}
@@ -78,13 +89,24 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 		"Supervision server never reported READY",
 	)
 	remote_addr := loopback_endpoint(test_base_port + 1)
-	_, reg_ok := actod.register_node("SupervisionNode", remote_addr, .TCP_Custom_Protocol)
+	_, reg_ok := actod.register_node(
+		"SupervisionNode",
+		remote_addr,
+		.TCP_Custom_Protocol,
+	)
 	expect(t, reg_ok, "Failed to register remote node")
 
 	_ = actod.send_message(parent_pid, "go")
 
-	got_term := sync.sema_wait_with_timeout(&child_gone, scaled_timeout(5 * time.Second))
-	expect(t, got_term, "on_child_terminated must fire despite the duplicated frame")
+	got_term := sync.sema_wait_with_timeout(
+		&child_gone,
+		scaled_timeout(5 * time.Second),
+	)
+	expect(
+		t,
+		got_term,
+		"on_child_terminated must fire despite the duplicated frame",
+	)
 
 	time.sleep(500 * time.Millisecond)
 	expectf(
@@ -93,7 +115,11 @@ test_frame_tap_duplicate_actor_stopped :: proc(t: ^testing.T) {
 		"A duplicated Actor_Stopped frame must not double-fire on_child_terminated, got %d",
 		sync.atomic_load(&child_gone_count),
 	)
-	expect(t, actod.frame_tap_fired() > 0, "The duplicate rule should have fired")
+	expect(
+		t,
+		actod.frame_tap_fired() > 0,
+		"The duplicate rule should have fired",
+	)
 
 	_ = actod.terminate_actor(parent_pid)
 	time.sleep(100 * time.Millisecond)
@@ -129,7 +155,11 @@ test_frame_tap_partition_heals :: proc(t: ^testing.T) {
 
 	time.sleep(scaled_timeout(2 * time.Second))
 	_, found := actod.get_node_by_name("LatecomerPublisher")
-	expect(t, !found, "The partition must prevent the handshake from completing")
+	expect(
+		t,
+		!found,
+		"The partition must prevent the handshake from completing",
+	)
 
 	actod.frame_tap_clear()
 
@@ -141,16 +171,22 @@ test_frame_tap_partition_heals :: proc(t: ^testing.T) {
 		}
 		time.sleep(100 * time.Millisecond)
 	}
-	expect(t, healed, "After healing the partition the reconnect must complete the handshake")
+	expect(
+		t,
+		healed,
+		"After healing the partition the reconnect must complete the handshake",
+	)
 }
 
 @(private = "file")
-Frame_Fault_Rule_partition :: proc(dir: actod.Frame_Dir) -> actod.Frame_Fault_Rule {
+Frame_Fault_Rule_partition :: proc(
+	dir: actod.Frame_Dir,
+) -> actod.Frame_Fault_Rule {
 	return actod.Frame_Fault_Rule {
-		dir       = dir,
-		action    = .Drop,
+		dir = dir,
+		action = .Drop,
 		type_hash = actod.FRAME_TAP_ANY,
-		count     = -1,
+		count = -1,
 	}
 }
 
@@ -169,7 +205,11 @@ test_frame_tap_drops_outbound_user_message :: proc(t: ^testing.T) {
 	}
 
 	watcher_behaviour := actod.Actor_Behaviour(Echo_Watcher_Data) {
-		handle_message = proc(data: ^Echo_Watcher_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Echo_Watcher_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch _ in msg {
 			case shared.Network_Test_Response:
 				sync.sema_post(data.echoed)
@@ -202,19 +242,27 @@ test_frame_tap_drops_outbound_user_message :: proc(t: ^testing.T) {
 		return
 	}
 	defer stop_node_role(&echo_node)
-	expect(t, wait_for_node_role_ready(&echo_node), "The echo node never reported READY")
+	expect(
+		t,
+		wait_for_node_role_ready(&echo_node),
+		"The echo node never reported READY",
+	)
 
 	echo_addr := net.Endpoint {
 		address = net.IP4_Loopback,
 		port    = test_base_port + 1,
 	}
-	_, reg_ok := actod.register_node("TapEchoNode", echo_addr, .TCP_Custom_Protocol)
+	_, reg_ok := actod.register_node(
+		"TapEchoNode",
+		echo_addr,
+		.TCP_Custom_Protocol,
+	)
 	expect(t, reg_ok, "Should register the echo node")
 
 	actod.frame_tap_add(
 		actod.Frame_Fault_Rule {
-			dir       = .Out,
-			action    = .Drop,
+			dir = .Out,
+			action = .Drop,
 			type_hash = actod.frame_tap_type_hash(shared.Network_Test_Request),
 		},
 	)
@@ -225,14 +273,28 @@ test_frame_tap_drops_outbound_user_message :: proc(t: ^testing.T) {
 	}
 	_ = actod.send_to("relay_actor", "TapEchoNode", msg)
 
-	dropped := !sync.sema_wait_with_timeout(&echoed, scaled_timeout(2 * time.Second))
-	expect(t, dropped, "An Out drop rule must suppress the outbound user message")
+	dropped := !sync.sema_wait_with_timeout(
+		&echoed,
+		scaled_timeout(2 * time.Second),
+	)
+	expect(
+		t,
+		dropped,
+		"An Out drop rule must suppress the outbound user message",
+	)
 	expect(t, actod.frame_tap_fired() > 0, "The outbound rule must have fired")
 
 	actod.frame_tap_clear()
 	_ = actod.send_to("relay_actor", "TapEchoNode", msg)
-	delivered := sync.sema_wait_with_timeout(&echoed, scaled_timeout(5 * time.Second))
-	expect(t, delivered, "After clearing the rule the same send must reach the peer")
+	delivered := sync.sema_wait_with_timeout(
+		&echoed,
+		scaled_timeout(5 * time.Second),
+	)
+	expect(
+		t,
+		delivered,
+		"After clearing the rule the same send must reach the peer",
+	)
 
 	_ = actod.terminate_actor(watcher_pid)
 	time.sleep(100 * time.Millisecond)

@@ -162,7 +162,11 @@ fire_due_timers :: proc() -> int {
 }
 
 @(private)
-reschedule_timer :: proc(entry: ^Timer_Entry, offered: Send_Error, fire_time: time.Time) -> bool {
+reschedule_timer :: proc(
+	entry: ^Timer_Entry,
+	offered: Send_Error,
+	fire_time: time.Time,
+) -> bool {
 	if offered == .RECEIVER_BACKLOGGED {
 		entry.next_fire = time.time_add(fire_time, TIMER_TICK_RETRY_DELAY)
 		return true
@@ -229,7 +233,11 @@ sim_fire_due_timers :: proc() -> int {
 	sync.mutex_unlock(&reg.lock)
 
 	for i in 0 ..< fired_count {
-		sim_trace_record(.Timer_Fire, u64(fired_buf[i].owner), u64(fired_buf[i].id))
+		sim_trace_record(
+			.Timer_Fire,
+			u64(fired_buf[i].owner),
+			u64(fired_buf[i].id),
+		)
 		_ = send_message(fired_buf[i].owner, Timer_Tick{id = fired_buf[i].id})
 	}
 	return fired_count
@@ -283,7 +291,11 @@ timer_actor_init :: proc(data: ^Timer_Actor_Data) {
 
 	prev_allocator := context.allocator
 	context.allocator = get_system_allocator()
-	t := threads_act.make_thread_with_stack_size(ctx, timer_thread_proc, SERVICE_THREAD_STACK_SIZE)
+	t := threads_act.make_thread_with_stack_size(
+		ctx,
+		timer_thread_proc,
+		SERVICE_THREAD_STACK_SIZE,
+	)
 	context.allocator = prev_allocator
 	if t != nil {
 		data.timer_thread = t
@@ -312,7 +324,11 @@ timer_actor_terminate :: proc(data: ^Timer_Actor_Data) {
 }
 
 @(private)
-timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any) {
+timer_actor_handle_message :: proc(
+	data: ^Timer_Actor_Data,
+	from: PID,
+	msg: any,
+) {
 	switch v in msg {
 	case Start_Timer:
 		sync.mutex_lock(&NODE.timer_registry.lock)
@@ -373,7 +389,10 @@ timer_actor_handle_message :: proc(data: ^Timer_Actor_Data, from: PID, msg: any)
 			entry := NODE.timer_registry.heap.queue[i]
 			if entry.owner == v.owner {
 				pq.remove(&NODE.timer_registry.heap, i)
-				delete_key(&NODE.timer_registry.index_map, Timer_Key{entry.id, entry.owner})
+				delete_key(
+					&NODE.timer_registry.index_map,
+					Timer_Key{entry.id, entry.owner},
+				)
 			} else {
 				i += 1
 			}
@@ -392,7 +411,10 @@ start_timer_actor :: proc(parent_pid: PID = 0) -> (PID, bool) {
 			init = timer_actor_init,
 			terminate = timer_actor_terminate,
 		},
-		make_actor_config(restart_policy = .PERMANENT, supervision_strategy = .ONE_FOR_ONE),
+		make_actor_config(
+			restart_policy = .PERMANENT,
+			supervision_strategy = .ONE_FOR_ONE,
+		),
 		parent_pid = parent_pid,
 	)
 	if ok {

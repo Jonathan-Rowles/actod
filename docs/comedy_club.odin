@@ -35,7 +35,8 @@ jokes := [?]string {
 comedian_behaviour := act.Actor_Behaviour(Comedian) {
 	init = proc(d: ^Comedian) {
 		log.debugf("Comedian warming up the crowd...")
-		if err := act.send_message(d.audience, Tell_Joke{joke = jokes[0]}); err != .OK {
+		if err := act.send_message(d.audience, Tell_Joke{joke = jokes[0]});
+		   err != .OK {
 			log.errorf("audience unreachable: %v", err)
 		}
 	},
@@ -45,7 +46,10 @@ comedian_behaviour := act.Actor_Behaviour(Comedian) {
 			log.warnf("Heckled: \"%s\"", m.response)
 			d.joke_index += 1
 			if d.joke_index < len(jokes) {
-				if err := act.send_message(from, Tell_Joke{joke = jokes[d.joke_index]}); err != .OK {
+				if err := act.send_message(
+					from,
+					Tell_Joke{joke = jokes[d.joke_index]},
+				); err != .OK {
 					log.errorf("audience left: %v", err)
 				}
 			} else {
@@ -79,7 +83,8 @@ audience_behaviour := act.Actor_Behaviour(Audience) {
 			log.infof("Joke: \"%s\"", m.joke)
 			response := heckles[d.jokes_heard % len(heckles)]
 			d.jokes_heard += 1
-			if err := act.send_message(from, Heckle{response = response}); err != .OK {
+			if err := act.send_message(from, Heckle{response = response});
+			   err != .OK {
 				log.errorf("comedian left: %v", err)
 			}
 		}
@@ -113,7 +118,12 @@ spawn_comedian :: proc(name: string, parent: act.PID) -> (act.PID, bool) {
 			logging = act.make_log_config(
 				level = .Debug,
 				ident = "comedian",
-				console_opts = log.Options{.Level, .Terminal_Color, .Short_File_Path, .Line} |
+				console_opts = log.Options {
+					.Level,
+					.Terminal_Color,
+					.Short_File_Path,
+					.Line,
+				} |
 				log.Full_Timestamp_Opts,
 			),
 		),

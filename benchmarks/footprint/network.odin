@@ -55,7 +55,10 @@ run_ring_footprint :: proc() {
 			"virtual/ring:       %.2f MB\n",
 			per_actor(after.virtual_kb, before.virtual_kb, n) / 1024.0,
 		)
-		fmt.printf("VMAs/ring:          %.2f\n", per_actor(after.vma_count, before.vma_count, n))
+		fmt.printf(
+			"VMAs/ring:          %.2f\n",
+			per_actor(after.vma_count, before.vma_count, n),
+		)
 	}
 	fmt.printf(
 		"arm latency:        first %.2f ms, mean %.2f ms over %d rings\n",

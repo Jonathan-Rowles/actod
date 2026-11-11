@@ -75,7 +75,10 @@ test_sim_pump_basic :: proc(t: ^testing.T) {
 
 	message_count := 100
 	for i in 0 ..< message_count {
-		err := actod.send_message(relay_pid, Integration_Test_Message{id = i, payload = "sim"})
+		err := actod.send_message(
+			relay_pid,
+			Integration_Test_Message{id = i, payload = "sim"},
+		)
 		expect(t, err == .OK, "send failed")
 	}
 
@@ -153,7 +156,11 @@ Sim_Clock_Probe_Behaviour :: actod.Actor_Behaviour(Sim_Clock_Probe_Data) {
 		data.slow_timer_id, _ = actod.set_timer(SIM_CLOCK_SLOW_PERIOD, true)
 		data.timer_id, _ = actod.set_timer(SIM_CLOCK_PERIOD, true)
 	},
-	handle_message = proc(data: ^Sim_Clock_Probe_Data, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Sim_Clock_Probe_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		v, ok := msg.(actod.Timer_Tick)
 		if !ok do return
 		if v.id == data.timer_id do append(&g_sim_clock_ticks, actod.now())
@@ -181,13 +188,25 @@ test_sim_node_clock_steps_to_each_due_timer :: proc(t: ^testing.T) {
 	defer delete(g_sim_clock_slow_ticks)
 
 	_, timer_set_after_node_init := actod.sim_next_timer_due()
-	expect(t, !timer_set_after_node_init, "no timer is set straight after node_init")
+	expect(
+		t,
+		!timer_set_after_node_init,
+		"no timer is set straight after node_init",
+	)
 
 	start := time.unix(1_700_000_000, 0)
-	expect(t, actod.sim_set_now(start), "the first set after node_init with no timer armed is accepted")
+	expect(
+		t,
+		actod.sim_set_now(start),
+		"the first set after node_init with no timer armed is accepted",
+	)
 	expect_value(t, actod.now(), start)
 
-	_, ok := actod.spawn("sim_clock_probe", Sim_Clock_Probe_Data{}, Sim_Clock_Probe_Behaviour)
+	_, ok := actod.spawn(
+		"sim_clock_probe",
+		Sim_Clock_Probe_Data{},
+		Sim_Clock_Probe_Behaviour,
+	)
 	expect(t, ok, "probe spawn failed")
 	_ = actod.sim_run_until_idle()
 
@@ -202,37 +221,75 @@ test_sim_node_clock_steps_to_each_due_timer :: proc(t: ^testing.T) {
 	expect_value(t, refused_steps, 0)
 
 	expect_value(t, len(g_sim_clock_ticks), int(time.Hour / SIM_CLOCK_PERIOD))
-	expect_value(t, count_ticks_off_their_instant(g_sim_clock_ticks[:], start, SIM_CLOCK_PERIOD), 0)
-	expect_value(t, len(g_sim_clock_slow_ticks), int(time.Hour / SIM_CLOCK_SLOW_PERIOD))
 	expect_value(
 		t,
-		count_ticks_off_their_instant(g_sim_clock_slow_ticks[:], start, SIM_CLOCK_SLOW_PERIOD),
+		count_ticks_off_their_instant(
+			g_sim_clock_ticks[:],
+			start,
+			SIM_CLOCK_PERIOD,
+		),
+		0,
+	)
+	expect_value(
+		t,
+		len(g_sim_clock_slow_ticks),
+		int(time.Hour / SIM_CLOCK_SLOW_PERIOD),
+	)
+	expect_value(
+		t,
+		count_ticks_off_their_instant(
+			g_sim_clock_slow_ticks[:],
+			start,
+			SIM_CLOCK_SLOW_PERIOD,
+		),
 		0,
 	)
 
 	tick_before_sleep := actod.mono_now()
 	actod.runtime_sleep(5 * time.Second)
 	expect_value(t, actod.now(), time.time_add(until, 5 * time.Second))
-	expect_value(t, time.tick_diff(tick_before_sleep, actod.mono_now()), 5 * time.Second)
+	expect_value(
+		t,
+		time.tick_diff(tick_before_sleep, actod.mono_now()),
+		5 * time.Second,
+	)
 }
 
 test_sim_node_clock_refuses_a_backward_set :: proc(t: ^testing.T) {
 	start := time.unix(1_700_000_000, 0)
 	later := time.time_add(start, 10 * time.Second)
-	expect(t, actod.sim_set_now(start), "the first set with no timer armed is accepted")
+	expect(
+		t,
+		actod.sim_set_now(start),
+		"the first set with no timer armed is accepted",
+	)
 	expect(t, actod.sim_set_now(later), "a forward set is accepted")
 
 	expect(t, !actod.sim_set_now(start), "a backward set is refused")
 	expect_value(t, actod.now(), later)
-	expect(t, !actod.sim_set_now({}), "a set to the zero instant on a set clock is refused")
+	expect(
+		t,
+		!actod.sim_set_now({}),
+		"a set to the zero instant on a set clock is refused",
+	)
 	expect_value(t, actod.now(), later)
 
-	expect(t, actod.sim_set_now(later), "a set equal to the current clock is accepted")
+	expect(
+		t,
+		actod.sim_set_now(later),
+		"a set equal to the current clock is accepted",
+	)
 	expect_value(t, actod.now(), later)
 }
 
-test_sim_node_clock_refuses_a_first_set_after_a_timer_is_armed :: proc(t: ^testing.T) {
-	_, ok := actod.spawn("sim_clock_probe", Sim_Clock_Probe_Data{}, Sim_Clock_Probe_Behaviour)
+test_sim_node_clock_refuses_a_first_set_after_a_timer_is_armed :: proc(
+	t: ^testing.T,
+) {
+	_, ok := actod.spawn(
+		"sim_clock_probe",
+		Sim_Clock_Probe_Data{},
+		Sim_Clock_Probe_Behaviour,
+	)
 	expect(t, ok, "probe spawn failed")
 	_ = actod.sim_run_until_idle()
 
@@ -240,9 +297,17 @@ test_sim_node_clock_refuses_a_first_set_after_a_timer_is_armed :: proc(t: ^testi
 	expect(t, armed, "the probe armed its timers on the wall clock")
 
 	start := time.unix(1_700_000_000, 0)
-	expect(t, !actod.sim_set_now(start), "the first set after a timer is armed is refused")
+	expect(
+		t,
+		!actod.sim_set_now(start),
+		"the first set after a timer is armed is refused",
+	)
 	expect(t, actod.now() != start, "the refused set left the clock unset")
-	expect(t, abs(time.diff(time.now(), actod.now())) < time.Second, "an unset clock reads the wall")
+	expect(
+		t,
+		abs(time.diff(time.now(), actod.now())) < time.Second,
+		"an unset clock reads the wall",
+	)
 
 	due_after, still_armed := actod.sim_next_timer_due()
 	expect(t, still_armed, "the armed timers are untouched")
@@ -262,7 +327,10 @@ Sim_Chain_Behaviour :: actod.Actor_Behaviour(Sim_Chain_Data) {
 		if m, ok := msg.(Integration_Test_Message); ok {
 			append(&g_sim_trace, data.index * 1000 + m.id)
 			if m.id > 0 && data.next != 0 {
-				_ = actod.send_message(data.next, Integration_Test_Message{id = m.id - 1})
+				_ = actod.send_message(
+					data.next,
+					Integration_Test_Message{id = m.id - 1},
+				)
 			}
 		}
 	},
@@ -296,7 +364,10 @@ run_chain_scenario :: proc(t: ^testing.T, seed: u64) -> []int {
 	}
 
 	for k in 0 ..< 8 {
-		_ = actod.send_message(pids[k % chain_len], Integration_Test_Message{id = 3})
+		_ = actod.send_message(
+			pids[k % chain_len],
+			Integration_Test_Message{id = 3},
+		)
 	}
 	_ = actod.sim_run_until_idle()
 
@@ -317,11 +388,19 @@ test_sim_seeded_determinism :: proc(t: ^testing.T) {
 
 	expect_value(t, len(first), 20)
 	expect_value(t, len(third), len(first))
-	expect(t, !slice.equal(first, third), "different seeds should interleave differently")
+	expect(
+		t,
+		!slice.equal(first, third),
+		"different seeds should interleave differently",
+	)
 
 	for _ in 0 ..< 10 {
 		replay := run_chain_scenario(t, 42)
-		expect(t, slice.equal(first, replay), "same seed must replay the identical schedule")
+		expect(
+			t,
+			slice.equal(first, replay),
+			"same seed must replay the identical schedule",
+		)
 		delete(replay)
 	}
 }
@@ -350,7 +429,11 @@ test_sim_two_nodes :: proc(t: ^testing.T) {
 
 	node_a := actod.NODE
 
-	pid_a, ok_a := actod.spawn("iso", Sim_Iso_Data{counter = &g_sim_node_a_count}, Sim_Iso_Behaviour)
+	pid_a, ok_a := actod.spawn(
+		"iso",
+		Sim_Iso_Data{counter = &g_sim_node_a_count},
+		Sim_Iso_Behaviour,
+	)
 	expect(t, ok_a, "spawn on node A failed")
 	for _ in 0 ..< 3 {
 		_ = actod.send_message(pid_a, Integration_Test_Message{})
@@ -365,12 +448,18 @@ test_sim_two_nodes :: proc(t: ^testing.T) {
 	opts := actod.make_node_config(
 		worker_count = 2,
 		sim_mode = true,
-		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = test_log_level())),
+		actor_config = actod.make_actor_config(
+			logging = actod.make_log_config(level = test_log_level()),
+		),
 	)
 	actod.node_init("sim_node_b", opts)
 	expect_value(t, actod.get_local_node_name(), "sim_node_b")
 
-	pid_b, ok_b := actod.spawn("iso", Sim_Iso_Data{counter = &g_sim_node_b_count}, Sim_Iso_Behaviour)
+	pid_b, ok_b := actod.spawn(
+		"iso",
+		Sim_Iso_Data{counter = &g_sim_node_b_count},
+		Sim_Iso_Behaviour,
+	)
 	expect(t, ok_b, "spawn on node B failed")
 	for _ in 0 ..< 5 {
 		_ = actod.send_message(pid_b, Integration_Test_Message{})
@@ -405,7 +494,10 @@ Vt_Pong_Behaviour :: actod.Actor_Behaviour(Vt_Pong_Data) {
 	handle_message = proc(data: ^Vt_Pong_Data, from: actod.PID, msg: any) {
 		if m, ok := msg.(Integration_Test_Message); ok {
 			g_vt_pong_received += 1
-			_ = actod.send_message(from, Integration_Test_Message{id = m.id, payload = "pong"})
+			_ = actod.send_message(
+				from,
+				Integration_Test_Message{id = m.id, payload = "pong"},
+			)
 		}
 	},
 }
@@ -477,7 +569,9 @@ test_sim_virtual_transport :: proc(t: ^testing.T) {
 			auth_password = "test_dist_password",
 			port = 18500,
 		),
-		actor_config = actod.make_actor_config(logging = actod.make_log_config(level = test_log_level())),
+		actor_config = actod.make_actor_config(
+			logging = actod.make_log_config(level = test_log_level()),
+		),
 	)
 	actod.node_init("sim_vt_b", opts)
 
@@ -499,7 +593,11 @@ test_sim_virtual_transport :: proc(t: ^testing.T) {
 	expect_value(t, g_vt_replies_received, VT_PING_COUNT)
 
 	_, gossiped := actod.get_actor_pid("vt_pong@sim_vt_b")
-	expect(t, gossiped, "registry snapshot did not reach node A over the virtual pipe")
+	expect(
+		t,
+		gossiped,
+		"registry snapshot did not reach node A over the virtual pipe",
+	)
 
 	actod.sim_set_recv_chunk(3)
 	_ = actod.send_message(ping_pid, Integration_Test_Message{payload = "go"})
@@ -526,8 +624,14 @@ Sim_Guarded_Yield_Data :: struct {
 }
 
 Sim_Guarded_Yield_Behaviour :: actod.Actor_Behaviour(Sim_Guarded_Yield_Data) {
-	handle_message = proc(data: ^Sim_Guarded_Yield_Data, from: actod.PID, msg: any) {
-		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD(ignore = data.ignore_in_coroutine && coro.running() != nil)
+	handle_message = proc(
+		data: ^Sim_Guarded_Yield_Data,
+		from: actod.PID,
+		msg: any,
+	) {
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD(
+			ignore = data.ignore_in_coroutine && coro.running() != nil,
+		)
 		actod.yield()
 		g_sim_guarded_yields_resumed += 1
 	},
@@ -541,7 +645,15 @@ run_sim_guarded_yield :: proc(t: ^testing.T, ignore_in_coroutine: bool) {
 		Sim_Guarded_Yield_Behaviour,
 	)
 	expect(t, ok, "guarded yield actor spawn failed")
-	expect(t, actod.send_message(pid, Integration_Test_Message{id = 1, payload = "yield"}) == .OK, "send failed")
+	expect(
+		t,
+		actod.send_message(
+			pid,
+			Integration_Test_Message{id = 1, payload = "yield"},
+		) ==
+		.OK,
+		"send failed",
+	)
 	actod.sim_run_until_idle()
 	expect_value(t, g_sim_guarded_yields_resumed, 1)
 }
@@ -550,6 +662,8 @@ test_sim_yield_holding_a_temp_guard_fails_the_run :: proc(t: ^testing.T) {
 	run_sim_guarded_yield(t, ignore_in_coroutine = false)
 }
 
-test_sim_yield_with_its_temp_guard_ignored_in_a_coroutine_runs_on :: proc(t: ^testing.T) {
+test_sim_yield_with_its_temp_guard_ignored_in_a_coroutine_runs_on :: proc(
+	t: ^testing.T,
+) {
 	run_sim_guarded_yield(t, ignore_in_coroutine = true)
 }

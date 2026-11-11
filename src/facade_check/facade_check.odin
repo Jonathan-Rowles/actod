@@ -33,7 +33,12 @@ probe_behaviour := act.Actor_Behaviour(Probe) {
 			_, _ = act.ask_to("probe-sized", "node", d.n, 1 * time.Second)
 			_, _ = act.replying_to()
 			_, _ = act.spawn_child("probe-child", Probe{}, probe_behaviour)
-			_, _ = act.spawn_child("probe-child-sized", Probe{}, probe_behaviour, 128)
+			_, _ = act.spawn_child(
+				"probe-child-sized",
+				Probe{},
+				probe_behaviour,
+				128,
+			)
 			_, _ = act.set_timer(1 * time.Second, false)
 			act.broadcast(d.n)
 			act.publish(&probe_topic, d.n)
@@ -57,7 +62,13 @@ exercise :: proc() {
 	sized_config := act.make_actor_config(arena_headroom = 4 * 1024 * 1024)
 	p1, _ := act.spawn("probe-default", Probe{}, probe_behaviour)
 	p2, _ := act.spawn("probe-sized", Probe{}, probe_behaviour, 256)
-	p3, _ := act.spawn("probe-sized-opts", Probe{}, probe_behaviour, 512, sized_config)
+	p3, _ := act.spawn(
+		"probe-sized-opts",
+		Probe{},
+		probe_behaviour,
+		512,
+		sized_config,
+	)
 	_ = act.send(p1, Probe_Note{text = "hello"})
 	_ = act.send_to("probe-sized", "node", 1)
 	_ = act.terminate(p2)
@@ -68,7 +79,9 @@ main :: proc() {
 	act.node_init(
 		"facade-check",
 		act.make_node_config(
-			actor_config = act.make_actor_config(children = act.make_children(spawn_probe)),
+			actor_config = act.make_actor_config(
+				children = act.make_children(spawn_probe),
+			),
 		),
 	)
 	exercise()

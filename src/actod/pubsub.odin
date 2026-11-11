@@ -43,7 +43,10 @@ Type_Subscriber_List :: struct {
 }
 
 @(private)
-alloc_subscriber_block :: proc(capacity: u32, prev: ^Subscriber_Block) -> ^Subscriber_Block {
+alloc_subscriber_block :: proc(
+	capacity: u32,
+	prev: ^Subscriber_Block,
+) -> ^Subscriber_Block {
 	raw, err := mem.alloc(
 		size_of(Subscriber_Block) + int(capacity) * size_of(u64),
 		align_of(Subscriber_Block),
@@ -58,10 +61,14 @@ alloc_subscriber_block :: proc(capacity: u32, prev: ^Subscriber_Block) -> ^Subsc
 }
 
 @(private)
-load_subscriber_block :: #force_inline proc(list: ^Type_Subscriber_List) -> ^Subscriber_Block {
+load_subscriber_block :: #force_inline proc(
+	list: ^Type_Subscriber_List,
+) -> ^Subscriber_Block {
 	return(
 		cast(^Subscriber_Block)rawptr(
-			uintptr(sync.atomic_load_explicit(cast(^u64)&list.block, .Acquire)),
+			uintptr(
+				sync.atomic_load_explicit(cast(^u64)&list.block, .Acquire),
+			),
 		) \
 	)
 }
@@ -77,7 +84,11 @@ free_subscriber_blocks :: proc(block: ^Subscriber_Block) {
 }
 
 @(private)
-add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location) -> bool {
+add_subscriber :: proc(
+	actor_type: Actor_Type,
+	pid: PID,
+	loc := #caller_location,
+) -> bool {
 	if actor_type == ACTOR_TYPE_UNTYPED {
 		log.warn(
 			"subscribe failed: actor type is ACTOR_TYPE_UNTYPED, set actor_type on the behaviour before subscribing",
@@ -123,10 +134,17 @@ add_subscriber :: proc(actor_type: Actor_Type, pid: PID, loc := #caller_location
 		}
 		if block != nil {
 			for i in 0 ..< n {
-				new_block.pids[i] = sync.atomic_load_explicit(&block.pids[i], .Relaxed)
+				new_block.pids[i] = sync.atomic_load_explicit(
+					&block.pids[i],
+					.Relaxed,
+				)
 			}
 		}
-		sync.atomic_store_explicit(cast(^u64)&list.block, u64(uintptr(new_block)), .Release)
+		sync.atomic_store_explicit(
+			cast(^u64)&list.block,
+			u64(uintptr(new_block)),
+			.Release,
+		)
 		block = new_block
 	}
 
@@ -152,7 +170,10 @@ remove_subscriber :: proc(actor_type: Actor_Type, pid: PID) -> bool {
 		if PID(sync.atomic_load_explicit(&block.pids[i], .Acquire)) == pid {
 			last := n - 1
 			if i != last {
-				last_pid := sync.atomic_load_explicit(&block.pids[last], .Acquire)
+				last_pid := sync.atomic_load_explicit(
+					&block.pids[last],
+					.Acquire,
+				)
 				sync.atomic_store_explicit(&block.pids[i], last_pid, .Release)
 			}
 			sync.atomic_store_explicit(&block.pids[last], 0, .Release)
@@ -165,10 +186,17 @@ remove_subscriber :: proc(actor_type: Actor_Type, pid: PID) -> bool {
 }
 
 @(require_results)
-subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subscription, bool) {
+subscribe_type :: proc(
+	actor_type: Actor_Type,
+	loc := #caller_location,
+) -> (
+	Subscription,
+	bool,
+) {
 	when ODIN_TEST {
 		if ti.intercept_subscribe_type(u8(actor_type)) {
-			return Subscription{actor_type = actor_type, pid = get_self_pid()}, true
+			return Subscription{actor_type = actor_type, pid = get_self_pid()},
+				true
 		}
 	}
 
@@ -208,7 +236,9 @@ subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subs
 
 	type_hash, hash_ok := get_actor_type_hash(actor_type)
 	if hash_ok {
-		broadcast_to_others(Subscribe_Remote{type_name_hash = type_hash, count = 1})
+		broadcast_to_others(
+			Subscribe_Remote{type_name_hash = type_hash, count = 1},
+		)
 	} else {
 		log.warnf(
 			"subscribe_type: no registered type name hash for actor type %d, the local subscription succeeded but remote nodes were not told, broadcasts from other nodes will not arrive",
@@ -221,7 +251,10 @@ subscribe_type :: proc(actor_type: Actor_Type, loc := #caller_location) -> (Subs
 }
 
 @(require_results)
-pubsub_unsubscribe :: proc(sub: Subscription, loc := #caller_location) -> bool {
+pubsub_unsubscribe :: proc(
+	sub: Subscription,
+	loc := #caller_location,
+) -> bool {
 	if sub.pid == 0 {
 		log.warn(
 			"pubsub_unsubscribe: subscription has no PID, it was never successfully created by subscribe_type",
@@ -253,7 +286,9 @@ pubsub_unsubscribe :: proc(sub: Subscription, loc := #caller_location) -> bool {
 
 	type_hash, hash_ok := get_actor_type_hash(sub.actor_type)
 	if hash_ok {
-		broadcast_to_others(Unsubscribe_Remote{type_name_hash = type_hash, count = 1})
+		broadcast_to_others(
+			Unsubscribe_Remote{type_name_hash = type_hash, count = 1},
+		)
 	} else {
 		log.warnf(
 			"pubsub_unsubscribe: no registered type name hash for actor type %d, the local subscription was removed but remote nodes still consider PID %v subscribed",
@@ -284,9 +319,13 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 	block := load_subscriber_block(list)
 
 	if block != nil {
-		n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
+		n := min(
+			sync.atomic_load_explicit(&list.local_count, .Acquire),
+			block.capacity,
+		)
 		sharded := false
-		if n >= FANOUT_SHARD_THRESHOLD && sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) {
+		if n >= FANOUT_SHARD_THRESHOLD &&
+		   sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) {
 			sharded = broadcast_local_sharded(self_pid, actor_type, n, msg)
 		}
 		if !sharded {
@@ -309,14 +348,22 @@ broadcast :: proc(msg: $T, loc := #caller_location) {
 
 	registered_limit := u16(sync.atomic_load(&NODE.next_node_id))
 	for node_id in 2 ..< registered_limit {
-		if sync.atomic_load_explicit(&list.remote_node_sub_count[node_id], .Acquire) > 0 {
+		if sync.atomic_load_explicit(
+			   &list.remote_node_sub_count[node_id],
+			   .Acquire,
+		   ) >
+		   0 {
 			send_broadcast_to_node(Node_ID(node_id), type_hash, msg)
 		}
 	}
 }
 
 @(private)
-send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) {
+send_broadcast_to_node :: proc(
+	node_id: Node_ID,
+	actor_type_hash: u64,
+	msg: $T,
+) {
 	from_handle, _ := unpack_pid(get_self_pid())
 	broadcast_handle := transmute(Handle)actor_type_hash
 
@@ -332,7 +379,10 @@ send_broadcast_to_node :: proc(node_id: Node_ID, actor_type_hash: u64, msg: $T) 
 				node_id,
 			)
 		} else {
-			log.warnf("Broadcast to node %d dropped, no connection ring", node_id)
+			log.warnf(
+				"Broadcast to node %d dropped, no connection ring",
+				node_id,
+			)
 		}
 		return
 	}
@@ -378,7 +428,10 @@ deliver_fan_range :: proc(task: Fan_Task, sender: PID) {
 	list := &NODE.type_subscribers[task.actor_type]
 	block := load_subscriber_block(list)
 	if block == nil do return
-	n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
+	n := min(
+		sync.atomic_load_explicit(&list.local_count, .Acquire),
+		block.capacity,
+	)
 	limit := min(task.end, n)
 	for i in task.start ..< limit {
 		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
@@ -411,7 +464,8 @@ spawn_fanout_helpers :: proc() {
 @(private)
 ensure_fanout_helpers :: proc() {
 	if sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) do return
-	if _, won := sync.atomic_compare_exchange_strong(&NODE.fanout_claim, 0, 1); won {
+	if _, won := sync.atomic_compare_exchange_strong(&NODE.fanout_claim, 0, 1);
+	   won {
 		spawn_fanout_helpers()
 	}
 }
@@ -455,23 +509,49 @@ deliver_broadcast_sharded :: proc(
 }
 
 @(private)
-broadcast_local_sharded :: proc(self_pid: PID, actor_type: Actor_Type, n: u32, msg: $T) -> bool {
+broadcast_local_sharded :: proc(
+	self_pid: PID,
+	actor_type: Actor_Type,
+	n: u32,
+	msg: $T,
+) -> bool {
 	info := get_validated_message_info_ptr(T)
 	from_handle, _ := unpack_pid(self_pid)
 	value := msg
 	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
-	needed := 4 + NETWORK_HEADER_SIZE + info.size + calculate_variable_data_size(&value, info)
+	needed :=
+		4 +
+		NETWORK_HEADER_SIZE +
+		info.size +
+		calculate_variable_data_size(&value, info)
 	if needed > len(stack_buf) do return false
-	msg_len := build_wire_format_into_buffer(stack_buf[:], msg, Handle{}, from_handle, {}, "")
+	msg_len := build_wire_format_into_buffer(
+		stack_buf[:],
+		msg,
+		Handle{},
+		from_handle,
+		{},
+		"",
+	)
 	if msg_len == 0 do return false
 	payload := stack_buf[4 + NETWORK_HEADER_SIZE:msg_len]
-	deliver_broadcast_sharded(self_pid, info.type_hash, actor_type, n, payload, exclude = self_pid)
+	deliver_broadcast_sharded(
+		self_pid,
+		info.type_hash,
+		actor_type,
+		n,
+		payload,
+		exclude = self_pid,
+	)
 	return true
 }
 
 get_subscriber_count :: proc(actor_type: Actor_Type) -> u32 {
 	if actor_type == ACTOR_TYPE_UNTYPED do return 0
-	return sync.atomic_load_explicit(&NODE.type_subscribers[actor_type].count, .Acquire)
+	return sync.atomic_load_explicit(
+		&NODE.type_subscribers[actor_type].count,
+		.Acquire,
+	)
 }
 
 announce_subscriptions_to_node :: proc(node_id: Node_ID) {
@@ -481,18 +561,27 @@ announce_subscriptions_to_node :: proc(node_id: Node_ID) {
 		list := &NODE.type_subscribers[Actor_Type(type_idx)]
 		block := load_subscriber_block(list)
 		if block == nil do continue
-		n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
+		n := min(
+			sync.atomic_load_explicit(&list.local_count, .Acquire),
+			block.capacity,
+		)
 		if n == 0 do continue
 		type_hash, hash_ok := get_actor_type_hash(Actor_Type(type_idx))
 		if !hash_ok do continue
-		send_lifecycle_message(ring, Subscribe_Remote{type_name_hash = type_hash, count = n})
+		send_lifecycle_message(
+			ring,
+			Subscribe_Remote{type_name_hash = type_hash, count = n},
+		)
 	}
 }
 
 handle_remote_subscribe :: proc(msg: Subscribe_Remote, from_node: Node_ID) {
 	local_type, found := get_actor_type_by_hash(msg.type_name_hash)
 	if !found {
-		log.warnf("Unknown actor type hash for subscribe: %x", msg.type_name_hash)
+		log.warnf(
+			"Unknown actor type hash for subscribe: %x",
+			msg.type_name_hash,
+		)
 		return
 	}
 
@@ -501,8 +590,14 @@ handle_remote_subscribe :: proc(msg: Subscribe_Remote, from_node: Node_ID) {
 	if msg.count == 0 do return
 
 	list := &NODE.type_subscribers[local_type]
-	current := sync.atomic_load_explicit(&list.remote_node_sub_count[from_node], .Acquire)
-	added := min(msg.count, MAX_SUBSCRIBERS_PER_TYPE - min(current, MAX_SUBSCRIBERS_PER_TYPE))
+	current := sync.atomic_load_explicit(
+		&list.remote_node_sub_count[from_node],
+		.Acquire,
+	)
+	added := min(
+		msg.count,
+		MAX_SUBSCRIBERS_PER_TYPE - min(current, MAX_SUBSCRIBERS_PER_TYPE),
+	)
 	if added < msg.count {
 		log.warnf(
 			"Clamped a remote subscribe from node %d for actor type %d from %d to %d: that node has %d and may hold at most %d subscribers (MAX_SUBSCRIBERS_PER_TYPE)",
@@ -515,18 +610,28 @@ handle_remote_subscribe :: proc(msg: Subscribe_Remote, from_node: Node_ID) {
 		)
 	}
 	if added == 0 do return
-	sync.atomic_add_explicit(&list.remote_node_sub_count[from_node], added, .Release)
+	sync.atomic_add_explicit(
+		&list.remote_node_sub_count[from_node],
+		added,
+		.Release,
+	)
 	sync.atomic_add_explicit(&list.count, added, .Release)
 }
 
-handle_remote_unsubscribe :: proc(msg: Unsubscribe_Remote, from_node: Node_ID) {
+handle_remote_unsubscribe :: proc(
+	msg: Unsubscribe_Remote,
+	from_node: Node_ID,
+) {
 	local_type, found := get_actor_type_by_hash(msg.type_name_hash)
 	if !found do return
 
 	if from_node == 0 || from_node >= MAX_NODES do return
 
 	list := &NODE.type_subscribers[local_type]
-	current := sync.atomic_load_explicit(&list.remote_node_sub_count[from_node], .Acquire)
+	current := sync.atomic_load_explicit(
+		&list.remote_node_sub_count[from_node],
+		.Acquire,
+	)
 	removed := min(msg.count, current)
 	if msg.count > current {
 		log.warnf(
@@ -539,7 +644,11 @@ handle_remote_unsubscribe :: proc(msg: Unsubscribe_Remote, from_node: Node_ID) {
 		)
 	}
 	if removed > 0 {
-		sync.atomic_sub_explicit(&list.remote_node_sub_count[from_node], removed, .Release)
+		sync.atomic_sub_explicit(
+			&list.remote_node_sub_count[from_node],
+			removed,
+			.Release,
+		)
 		sync.atomic_sub_explicit(&list.count, removed, .Release)
 	}
 }
@@ -549,9 +658,16 @@ clear_subscriptions_for_node :: proc(node_id: Node_ID) {
 
 	for type_idx in 0 ..< MAX_ACTOR_TYPES {
 		list := &NODE.type_subscribers[Actor_Type(type_idx)]
-		remote_count := sync.atomic_load_explicit(&list.remote_node_sub_count[node_id], .Acquire)
+		remote_count := sync.atomic_load_explicit(
+			&list.remote_node_sub_count[node_id],
+			.Acquire,
+		)
 		if remote_count > 0 {
-			sync.atomic_store_explicit(&list.remote_node_sub_count[node_id], 0, .Release)
+			sync.atomic_store_explicit(
+				&list.remote_node_sub_count[node_id],
+				0,
+				.Release,
+			)
 			sync.atomic_sub_explicit(&list.count, remote_count, .Release)
 		}
 	}
@@ -559,7 +675,9 @@ clear_subscriptions_for_node :: proc(node_id: Node_ID) {
 
 clear_all_subscriptions :: proc() {
 	for type_idx in 0 ..< MAX_ACTOR_TYPES {
-		clear_type_subscriber_list(&NODE.type_subscribers[Actor_Type(type_idx)])
+		clear_type_subscriber_list(
+			&NODE.type_subscribers[Actor_Type(type_idx)],
+		)
 	}
 }
 
@@ -575,14 +693,24 @@ clear_type_subscriber_list :: proc(list: ^Type_Subscriber_List) {
 	sync.atomic_store_explicit(&list.local_count, 0, .Release)
 	sync.atomic_store_explicit(&list.count, 0, .Release)
 	for node_id in 0 ..< MAX_NODES {
-		sync.atomic_store_explicit(&list.remote_node_sub_count[node_id], 0, .Release)
+		sync.atomic_store_explicit(
+			&list.remote_node_sub_count[node_id],
+			0,
+			.Release,
+		)
 	}
 	sync.mutex_unlock(&list.mutate_lock)
 	free_subscriber_blocks(block)
 }
 
 @(require_results)
-subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscription, bool) {
+subscribe_topic :: proc(
+	topic: ^Topic,
+	loc := #caller_location,
+) -> (
+	Topic_Subscription,
+	bool,
+) {
 	if topic == nil {
 		log.warn(
 			"subscribe_topic called with a nil topic, no subscription was created",
@@ -593,7 +721,8 @@ subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscr
 
 	when ODIN_TEST {
 		if ti.intercept_subscribe_topic(topic) {
-			return Topic_Subscription{topic = topic, pid = get_self_pid()}, true
+			return Topic_Subscription{topic = topic, pid = get_self_pid()},
+				true
 		}
 	}
 
@@ -617,7 +746,11 @@ subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscr
 		)
 		return {}, false
 	}
-	sync.atomic_store_explicit(cast(^u64)&topic.subscribers[idx], u64(pid), .Release)
+	sync.atomic_store_explicit(
+		cast(^u64)&topic.subscribers[idx],
+		u64(pid),
+		.Release,
+	)
 	sync.atomic_store_explicit(&topic.count, idx + 1, .Release)
 	sync.mutex_unlock(&topic.mutate_lock)
 
@@ -634,7 +767,10 @@ subscribe_topic :: proc(topic: ^Topic, loc := #caller_location) -> (Topic_Subscr
 }
 
 @(require_results)
-unsubscribe_topic :: proc(sub: Topic_Subscription, loc := #caller_location) -> bool {
+unsubscribe_topic :: proc(
+	sub: Topic_Subscription,
+	loc := #caller_location,
+) -> bool {
 	if sub.topic == nil || sub.pid == 0 {
 		log.warn(
 			"unsubscribe_topic: subscription has no topic or no PID, it was never successfully created by subscribe_topic",
@@ -653,7 +789,9 @@ unsubscribe_topic :: proc(sub: Topic_Subscription, loc := #caller_location) -> b
 	}
 
 	if current_actor_context != nil {
-		for i := 0; i < len(current_actor_context.topic_subscriptions); i += 1 {
+		for i := 0;
+		    i < len(current_actor_context.topic_subscriptions);
+		    i += 1 {
 			s := current_actor_context.topic_subscriptions[i]
 			if s.topic == sub.topic && s.pid == sub.pid {
 				unordered_remove(&current_actor_context.topic_subscriptions, i)
@@ -667,7 +805,10 @@ unsubscribe_topic :: proc(sub: Topic_Subscription, loc := #caller_location) -> b
 
 publish :: proc(topic: ^Topic, msg: $T, loc := #caller_location) {
 	if topic == nil {
-		log.warn("publish called with a nil topic, the message was discarded", location = loc)
+		log.warn(
+			"publish called with a nil topic, the message was discarded",
+			location = loc,
+		)
 		return
 	}
 
@@ -677,12 +818,21 @@ publish :: proc(topic: ^Topic, msg: $T, loc := #caller_location) {
 	n := sync.atomic_load_explicit(&topic.count, .Acquire)
 
 	for i in 0 ..< n {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
+		pid := PID(
+			sync.atomic_load_explicit(
+				cast(^u64)&topic.subscribers[i],
+				.Acquire,
+			),
+		)
 		if pid != 0 && pid != self_pid do _ = send_message(pid, msg)
 	}
 }
 
-get_topic_subscribers :: proc(topic: ^Topic, out: []PID, loc := #caller_location) -> int {
+get_topic_subscribers :: proc(
+	topic: ^Topic,
+	out: []PID,
+	loc := #caller_location,
+) -> int {
 	if topic == nil {
 		log.warn(
 			"get_topic_subscribers called with a nil topic, no subscribers were listed",
@@ -692,7 +842,11 @@ get_topic_subscribers :: proc(topic: ^Topic, out: []PID, loc := #caller_location
 	}
 
 	when ODIN_TEST {
-		if listed, ok := ti.intercept_get_topic_subscribers(topic, transmute([]u64)out, loc); ok {
+		if listed, ok := ti.intercept_get_topic_subscribers(
+			topic,
+			transmute([]u64)out,
+			loc,
+		); ok {
 			return listed
 		}
 	}
@@ -701,7 +855,12 @@ get_topic_subscribers :: proc(topic: ^Topic, out: []PID, loc := #caller_location
 	listed := 0
 	for i in 0 ..< n {
 		if listed == len(out) do break
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
+		pid := PID(
+			sync.atomic_load_explicit(
+				cast(^u64)&topic.subscribers[i],
+				.Acquire,
+			),
+		)
 		if pid == 0 do continue
 		out[listed] = pid
 		listed += 1

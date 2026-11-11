@@ -25,7 +25,9 @@ foreign mco_asm {
 
 makectx :: proc(co: ^Coro, stack_base: rawptr, stack_size: uint) -> Result {
 	// Windows x64 has no red zone, no size adjustment needed.
-	stack_high_ptr := cast(^rawptr)(uintptr(stack_base) + uintptr(stack_size) - size_of(uintptr))
+	stack_high_ptr := cast(^rawptr)(uintptr(stack_base) +
+		uintptr(stack_size) -
+		size_of(uintptr))
 	stack_high_ptr^ = rawptr(uintptr(0xdeaddeaddeaddead)) // Dummy return address.
 	co.coro_ctx.rip = rawptr(mco_wrap_main)
 	co.coro_ctx.rsp = rawptr(stack_high_ptr)

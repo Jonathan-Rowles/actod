@@ -294,7 +294,14 @@ spawn_default :: proc(
 	PID,
 	bool,
 ) {
-	return actod.spawn(name, data, behaviour, opts, actod.supervising_parent(parent_pid), loc)
+	return actod.spawn(
+		name,
+		data,
+		behaviour,
+		opts,
+		actod.supervising_parent(parent_pid),
+		loc,
+	)
 }
 
 // Like spawn, but with a compile-time mailbox capacity for this actor.
@@ -382,7 +389,14 @@ spawn_child_sized :: proc(
 	PID,
 	bool,
 ) {
-	return actod.spawn_child_sized(name, data, behaviour, MAILBOX_SIZE, opts, loc)
+	return actod.spawn_child_sized(
+		name,
+		data,
+		behaviour,
+		MAILBOX_SIZE,
+		opts,
+		loc,
+	)
 }
 
 spawn_child :: proc {
@@ -428,7 +442,14 @@ spawn_remote :: proc(
 	PID,
 	bool,
 ) {
-	return actod.spawn_remote(spawn_func_name, actor_name, target_node, parent_pid, timeout, loc)
+	return actod.spawn_remote(
+		spawn_func_name,
+		actor_name,
+		target_node,
+		parent_pid,
+		timeout,
+		loc,
+	)
 }
 
 // Sending messages
@@ -568,7 +589,10 @@ ask_to :: proc(
 // handle_message, like the message payload itself.
 @(hot = "skip")
 @(require_results)
-reply :: proc(content: $T, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+reply :: proc(
+	content: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
 	return actod.reply(content, loc)
 }
 
@@ -636,7 +660,10 @@ set_timer :: proc(
 	return actod.set_timer(interval, repeat, loc)
 }
 
-cancel_timer :: proc(id: u32, loc: runtime.Source_Code_Location = #caller_location) -> Send_Error {
+cancel_timer :: proc(
+	id: u32,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> Send_Error {
 	return actod.cancel_timer(id, loc)
 }
 
@@ -724,7 +751,13 @@ adopt_child :: proc(
 	child_spawn: SPAWN,
 	loc: runtime.Source_Code_Location = #caller_location,
 ) -> bool {
-	return actod.add_child_existing(parent, existing_child, child_spawn, 0, loc)
+	return actod.add_child_existing(
+		parent,
+		existing_child,
+		child_spawn,
+		0,
+		loc,
+	)
 }
 
 @(require_results)
@@ -775,7 +808,10 @@ unsubscribe_type :: proc(
 
 // Broadcast a message to all subscribers of the current actor's type.
 // Must be called from within a typed actor (actor_type set on behaviour).
-broadcast :: proc(msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
+broadcast :: proc(
+	msg: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) {
 	actod.broadcast(msg, loc)
 }
 
@@ -806,7 +842,11 @@ unsubscribe_topic :: proc(
 }
 
 // Deliver a message to all current subscribers of the topic.
-publish :: proc(topic: ^Topic, msg: $T, loc: runtime.Source_Code_Location = #caller_location) {
+publish :: proc(
+	topic: ^Topic,
+	msg: $T,
+	loc: runtime.Source_Code_Location = #caller_location,
+) {
 	actod.publish(topic, msg, loc)
 }
 
@@ -872,7 +912,10 @@ unregister_node :: proc(node_id: Node_ID) {
 
 @(require_results)
 @(hot = "skip")
-start_listening :: proc(port: int, loc: runtime.Source_Code_Location = #caller_location) -> bool {
+start_listening :: proc(
+	port: int,
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
 	return actod.start_listening(port, loc)
 }
 
@@ -897,7 +940,9 @@ stop_observer :: proc() {
 }
 
 @(hot = "skip")
-trigger_stats_collection :: proc(loc: runtime.Source_Code_Location = #caller_location) -> bool {
+trigger_stats_collection :: proc(
+	loc: runtime.Source_Code_Location = #caller_location,
+) -> bool {
 	return actod.trigger_stats_collection(loc)
 }
 

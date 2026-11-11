@@ -31,7 +31,11 @@ make_spawn_signal_fixture :: proc() -> Spawn_Signal_Fixture {
 	f.mailbox = make([]Entry(Message), 2)
 	f.system_mailbox = make([]Entry(Message), 2)
 	mpsc_init_external(&f.actor.mailbox, f.mailbox, entries_zeroed = true)
-	mpsc_init_external(&f.actor.system_mailbox, f.system_mailbox, entries_zeroed = true)
+	mpsc_init_external(
+		&f.actor.system_mailbox,
+		f.system_mailbox,
+		entries_zeroed = true,
+	)
 	f.handle = new(Pooled_Actor_Handle)
 	f.handle.actor_ptr = f.actor
 	f.handle.mailbox = &f.actor.mailbox
@@ -76,7 +80,11 @@ spawn_signal_keeps_every_idle_predicate_awake_test :: proc(t: ^testing.T) {
 		!has_pending_messages(f.handle),
 		"an empty actor must look idle to its worker",
 	)
-	testing.expect(t, idle_hook_runs(&f), "an empty dedicated-thread actor must go idle")
+	testing.expect(
+		t,
+		idle_hook_runs(&f),
+		"an empty dedicated-thread actor must go idle",
+	)
 
 	signal := new(Spawn_Signal, actor_system_allocator)
 	signal.pid = 77
@@ -107,7 +115,11 @@ spawn_signal_keeps_every_idle_predicate_awake_test :: proc(t: ^testing.T) {
 		sync.atomic_load(&f.actor.spawned_head) == nil,
 		"the drain must empty the chain",
 	)
-	testing.expect(t, !mailbox_has_messages(f.actor), "a drained actor must look idle again")
+	testing.expect(
+		t,
+		!mailbox_has_messages(f.actor),
+		"a drained actor must look idle again",
+	)
 	testing.expect(
 		t,
 		!has_pending_messages(f.handle),
@@ -141,7 +153,9 @@ spawn_signals_register_once_each_in_push_order_test :: proc(t: ^testing.T) {
 }
 
 @(test)
-spawn_signal_to_a_closed_parent_is_released_by_its_pusher_test :: proc(t: ^testing.T) {
+spawn_signal_to_a_closed_parent_is_released_by_its_pusher_test :: proc(
+	t: ^testing.T,
+) {
 	f := make_spawn_signal_fixture()
 	defer destroy_spawn_signal_fixture(&f)
 	f.actor.state = .TERMINATED
@@ -237,7 +251,11 @@ expect_only_shutdown_of :: proc(
 ) {
 	if !testing.expect_value(t, len(capture.captured), 1) do return
 	testing.expect(t, PID(capture.captured[0].pid) == child_pid, message)
-	testing.expect_value(t, capture.captured[0].reason, ti.Termination_Reason.SHUTDOWN)
+	testing.expect_value(
+		t,
+		capture.captured[0].reason,
+		ti.Termination_Reason.SHUTDOWN,
+	)
 }
 
 @(private = "file")
@@ -307,7 +325,11 @@ spawn_signal_pushed_after_the_reaper_closed_the_chain_is_released_by_its_pusher_
 	parent := new(Actor, actor_system_allocator)
 	parent.state = .THREAD_STOPPED
 	parent.pool_handle = handle
-	parent_pid, added := add(&NODE.actor_registry, rawptr(parent), "reaped_parent")
+	parent_pid, added := add(
+		&NODE.actor_registry,
+		rawptr(parent),
+		"reaped_parent",
+	)
 	if !testing.expect(t, added, "the parent should register") {
 		free(parent, actor_system_allocator)
 		return
@@ -319,8 +341,16 @@ spawn_signal_pushed_after_the_reaper_closed_the_chain_is_released_by_its_pusher_
 
 	cleanup_terminated_actor(parent_pid, rawptr(parent))
 	_, still_registered := get(&NODE.actor_registry, parent_pid)
-	testing.expect(t, !still_registered, "cleanup must remove the parent from the registry")
-	testing.expect_value(t, sync.atomic_load(&pinned_parent.state), Actor_State.TERMINATED)
+	testing.expect(
+		t,
+		!still_registered,
+		"cleanup must remove the parent from the registry",
+	)
+	testing.expect_value(
+		t,
+		sync.atomic_load(&pinned_parent.state),
+		Actor_State.TERMINATED,
+	)
 
 	child_pid := unregistered_local_pid(1)
 	signal_spawn_to_parent(pinned_parent, child_pid)
@@ -391,8 +421,16 @@ probe_foreign_get_children :: proc(t: ^testing.T) -> Copy_Probe {
 	parent.state = .RUNNING
 	parent.children = make([dynamic]Supervised_Child)
 	defer delete(parent.children)
-	append(&parent.children, Supervised_Child{pid = 21}, Supervised_Child{pid = 22})
-	parent_pid, added := add(&NODE.actor_registry, rawptr(parent), "copied_parent")
+	append(
+		&parent.children,
+		Supervised_Child{pid = 21},
+		Supervised_Child{pid = 22},
+	)
+	parent_pid, added := add(
+		&NODE.actor_registry,
+		rawptr(parent),
+		"copied_parent",
+	)
 	testing.expect(t, added, "the parent should register")
 
 	probe := Copy_Probe {
@@ -439,7 +477,9 @@ get_children_copies_under_the_reclaim_pin_test :: proc(t: ^testing.T) {
 }
 
 @(test)
-spawn_whose_parent_was_reaped_before_the_lookup_shuts_the_child_down_test :: proc(t: ^testing.T) {
+spawn_whose_parent_was_reaped_before_the_lookup_shuts_the_child_down_test :: proc(
+	t: ^testing.T,
+) {
 	swapped := swap_in_test_registry()
 	defer restore_registry(&swapped)
 
@@ -501,7 +541,9 @@ node_forgets_each_child_it_reaps_test :: proc(t: ^testing.T) {
 }
 
 @(test)
-node_reaping_off_its_own_thread_leaves_its_table_alone_test :: proc(t: ^testing.T) {
+node_reaping_off_its_own_thread_leaves_its_table_alone_test :: proc(
+	t: ^testing.T,
+) {
 	swapped := swap_in_test_registry()
 	defer restore_registry(&swapped)
 

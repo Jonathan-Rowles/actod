@@ -11,14 +11,19 @@ PANIC_MESSAGE_BUF_SIZE :: 512
 
 @(private)
 diagnostic_logger :: proc(current: log.Logger) -> log.Logger {
-	if current.procedure == nil || current.procedure == runtime.default_logger_proc {
+	if current.procedure == nil ||
+	   current.procedure == runtime.default_logger_proc {
 		return NODE.logger
 	}
 	return current
 }
 
 @(private)
-panic_at :: proc(loc: runtime.Source_Code_Location, format: string, args: ..any) -> ! {
+panic_at :: proc(
+	loc: runtime.Source_Code_Location,
+	format: string,
+	args: ..any,
+) -> ! {
 	context.logger = diagnostic_logger(context.logger)
 	message := fmt.tprintf(format, ..args)
 	log.fatal(message, location = loc)
@@ -115,7 +120,10 @@ cleanup_logger_and_context :: proc() {
 		if NODE.logger_data.log_config.custom_flush != nil {
 			NODE.logger_data.log_config.custom_flush()
 		}
-		log.destroy_console_logger(NODE.logger_data.console_logger, actor_system_allocator)
+		log.destroy_console_logger(
+			NODE.logger_data.console_logger,
+			actor_system_allocator,
+		)
 		free(NODE.logger_data, actor_system_allocator)
 		NODE.logger_data = nil
 		NODE.logger = {}
@@ -149,9 +157,16 @@ actor_logger_proc :: proc(
 		final_text = fmt.tprintf("[%s|%s] %s", data.name, data.pid, text)
 	}
 
-	data.console_logger.procedure(data.console_logger.data, level, final_text, options, location)
+	data.console_logger.procedure(
+		data.console_logger.data,
+		level,
+		final_text,
+		options,
+		location,
+	)
 
-	if current_actor_file_logger != nil && current_actor_file_logger.file_logger.procedure != nil {
+	if current_actor_file_logger != nil &&
+	   current_actor_file_logger.file_logger.procedure != nil {
 		file_options := options - {.Terminal_Color}
 		current_actor_file_logger.file_logger.procedure(
 			current_actor_file_logger.file_logger.data,
@@ -184,7 +199,10 @@ setup_actor_context :: proc(
 	actor_ctx.name = name
 
 	actor_ctx.subscriptions = make([dynamic]Subscription, actor_allocator)
-	actor_ctx.topic_subscriptions = make([dynamic]Topic_Subscription, actor_allocator)
+	actor_ctx.topic_subscriptions = make(
+		[dynamic]Topic_Subscription,
+		actor_allocator,
+	)
 	actor_ctx.used_timers = false
 	actor_ctx.pending_asks = make(map[u64]Pending_Ask, actor_allocator)
 	actor_ctx.timer_asks = make(map[u32]u64, actor_allocator)
@@ -250,10 +268,19 @@ setup_actor_context :: proc(
 
 			current_actor_file_logger = file_logger
 
-			header := fmt.tprintf("\n\n=== Actor Log Started: %s (PID: %v) ===\n\n", name, pid)
+			header := fmt.tprintf(
+				"\n\n=== Actor Log Started: %s (PID: %v) ===\n\n",
+				name,
+				pid,
+			)
 			os.write_string(handle, header)
 		} else {
-			fmt.eprintln("Failed to create log file for actor:", name, "Error:", err)
+			fmt.eprintln(
+				"Failed to create log file for actor:",
+				name,
+				"Error:",
+				err,
+			)
 			current_actor_file_logger = nil
 		}
 	}

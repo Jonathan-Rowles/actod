@@ -9,7 +9,8 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 
-COUNTER_V2_FIXTURE_DIR :: #directory + "../src/pkgs/hot_reload/mocks/counter_v2"
+COUNTER_V2_FIXTURE_DIR ::
+	#directory + "../src/pkgs/hot_reload/mocks/counter_v2"
 BACKLOGGED_ACTOR_NAME :: "backlogged_counter"
 RELOADS_PAST_UNLOAD :: 5
 LATE_RELOAD_LIMIT :: 10 * time.Second
@@ -81,7 +82,9 @@ wait_for_count :: proc(pid: actod.PID, expected: i32) -> bool {
 }
 
 @(test)
-test_late_reload_of_unloaded_generation_keeps_current_behaviour :: proc(t: ^testing.T) {
+test_late_reload_of_unloaded_generation_keeps_current_behaviour :: proc(
+	t: ^testing.T,
+) {
 	sync.mutex_lock(&node_test_mutex)
 	defer sync.mutex_unlock(&node_test_mutex)
 
@@ -93,7 +96,11 @@ test_late_reload_of_unloaded_generation_keeps_current_behaviour :: proc(t: ^test
 	os.make_directory(tmp_dir)
 	defer _ = os.remove_all(tmp_dir)
 
-	compiled_path := fmt.tprintf("%s/counter_v2%s", tmp_dir, hot_reload.SHARED_LIB_EXT)
+	compiled_path := fmt.tprintf(
+		"%s/counter_v2%s",
+		tmp_dir,
+		hot_reload.SHARED_LIB_EXT,
+	)
 	built := hot_reload.compile_module(COUNTER_V2_FIXTURE_DIR, compiled_path)
 	if !testing.expect(t, built.ok, built.error_msg) do return
 	compiled_bytes, read_err := os.read_entire_file_from_path(
@@ -134,10 +141,17 @@ test_late_reload_of_unloaded_generation_keeps_current_behaviour :: proc(t: ^test
 		hot_module_table = nil
 	}
 
-	testing.expect_value(t, actod.send_message(pid, Hold_Handler{}), actod.Send_Error.OK)
+	testing.expect_value(
+		t,
+		actod.send_message(pid, Hold_Handler{}),
+		actod.Send_Error.OK,
+	)
 	if !testing.expect(
 		t,
-		sync.sema_wait_with_timeout(&backlog_gate.handler_entered, LATE_RELOAD_LIMIT),
+		sync.sema_wait_with_timeout(
+			&backlog_gate.handler_entered,
+			LATE_RELOAD_LIMIT,
+		),
 		"the actor never entered its handler",
 	) {
 		sync.sema_post(&backlog_gate.release)
@@ -178,6 +192,14 @@ test_late_reload_of_unloaded_generation_keeps_current_behaviour :: proc(t: ^test
 		return
 	}
 
-	testing.expect_value(t, actod.send_message(pid, Late_Reload_Tick{}), actod.Send_Error.OK)
-	testing.expect(t, wait_for_count(pid, 10), "the newest generation did not handle the tick")
+	testing.expect_value(
+		t,
+		actod.send_message(pid, Late_Reload_Tick{}),
+		actod.Send_Error.OK,
+	)
+	testing.expect(
+		t,
+		wait_for_count(pid, 10),
+		"the newest generation did not handle the tick",
+	)
 }

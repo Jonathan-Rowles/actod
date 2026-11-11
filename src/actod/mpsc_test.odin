@@ -16,14 +16,22 @@ test_mpsc_basic_operations :: proc(t: ^testing.T) {
 
 		batch: [1]int
 		count := mpsc_pop_batch(&queue, batch[:])
-		testing.expect(t, count == 1, "Should be able to pop from non-empty queue")
+		testing.expect(
+			t,
+			count == 1,
+			"Should be able to pop from non-empty queue",
+		)
 		testing.expect_value(t, batch[0], 42)
 	}
 
 	{
 		batch: [1]int
 		count := mpsc_pop_batch(&queue, batch[:])
-		testing.expect(t, count == 0, "Should not be able to pop from empty queue")
+		testing.expect(
+			t,
+			count == 0,
+			"Should not be able to pop from empty queue",
+		)
 
 		empty := mpsc_is_empty_relaxed(&queue)
 		testing.expect(t, empty, "Queue should be empty")
@@ -54,7 +62,11 @@ test_mpsc_capacity :: proc(t: ^testing.T) {
 
 	for i := 0; i < CAPACITY; i += 1 {
 		ok := mpsc_push(&queue, i)
-		testing.expect(t, ok, fmt.tprintf("Should push item %d within capacity", i))
+		testing.expect(
+			t,
+			ok,
+			fmt.tprintf("Should push item %d within capacity", i),
+		)
 	}
 
 	ok := mpsc_push(&queue, CAPACITY)
@@ -81,7 +93,11 @@ test_mpsc_capacity :: proc(t: ^testing.T) {
 		}
 	}
 
-	testing.expect(t, count >= CAPACITY, "Should have popped at least CAPACITY items")
+	testing.expect(
+		t,
+		count >= CAPACITY,
+		"Should have popped at least CAPACITY items",
+	)
 }
 
 @(test)
@@ -142,7 +158,11 @@ test_mpsc_batch_operations :: proc(t: ^testing.T) {
 	testing.expect(
 		t,
 		total == ITEM_COUNT,
-		fmt.tprintf("Should pop all items: expected %d, got %d", ITEM_COUNT, total),
+		fmt.tprintf(
+			"Should pop all items: expected %d, got %d",
+			ITEM_COUNT,
+			total,
+		),
 	)
 
 	expected := 0
@@ -262,30 +282,33 @@ test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 			done_count  = &producers_done,
 		}
 
-		producers[i] = thread.create_and_start_with_data(&contexts[i], proc(data: rawptr) {
-			ctx := cast(^Producer_Context)data
-			base_value := ctx.producer_id * 1000
+		producers[i] = thread.create_and_start_with_data(
+			&contexts[i],
+			proc(data: rawptr) {
+				ctx := cast(^Producer_Context)data
+				base_value := ctx.producer_id * 1000
 
-			for i := 0; i < ctx.item_count; i += 1 {
-				value := base_value + i
-				attempts := 0
-				for !mpsc_push(ctx.queue, value) {
-					thread.yield()
-					attempts += 1
-					if attempts > 10000 {
-						fmt.printf(
-							"Producer %d failed to push value %d after %d attempts\n",
-							ctx.producer_id,
-							value,
-							attempts,
-						)
-						break
+				for i := 0; i < ctx.item_count; i += 1 {
+					value := base_value + i
+					attempts := 0
+					for !mpsc_push(ctx.queue, value) {
+						thread.yield()
+						attempts += 1
+						if attempts > 10000 {
+							fmt.printf(
+								"Producer %d failed to push value %d after %d attempts\n",
+								ctx.producer_id,
+								value,
+								attempts,
+							)
+							break
+						}
 					}
 				}
-			}
 
-			sync.atomic_add(ctx.done_count, 1)
-		})
+				sync.atomic_add(ctx.done_count, 1)
+			},
+		)
 	}
 
 	received := make(map[int]bool)
@@ -299,7 +322,10 @@ test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 				value := batch[i]
 				_, exists := received[value]
 				if exists {
-					testing.fail_now(t, fmt.tprintf("Duplicate value received: %d", value))
+					testing.fail_now(
+						t,
+						fmt.tprintf("Duplicate value received: %d", value),
+					)
 				}
 				received[value] = true
 			}
@@ -311,7 +337,10 @@ test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 					value := batch[i]
 					_, exists := received[value]
 					if exists {
-						testing.fail_now(t, fmt.tprintf("Duplicate value received: %d", value))
+						testing.fail_now(
+							t,
+							fmt.tprintf("Duplicate value received: %d", value),
+						)
 					}
 					received[value] = true
 				}
@@ -339,7 +368,11 @@ test_mpsc_multiple_producers :: proc(t: ^testing.T) {
 		for i := 0; i < ITEMS_PER_PRODUCER; i += 1 {
 			value := base_value + i
 			_, exists := received[value]
-			testing.expect(t, exists, fmt.tprintf("Missing value %d from producer %d", value, p))
+			testing.expect(
+				t,
+				exists,
+				fmt.tprintf("Missing value %d from producer %d", value, p),
+			)
 		}
 	}
 }
@@ -422,10 +455,18 @@ test_mpsc_state_functions :: proc(t: ^testing.T) {
 	queue: MPSC_Queue(int, 8)
 	mpsc_init(&queue)
 
-	testing.expect(t, mpsc_is_empty_relaxed(&queue), "New queue should be empty")
+	testing.expect(
+		t,
+		mpsc_is_empty_relaxed(&queue),
+		"New queue should be empty",
+	)
 
 	mpsc_push(&queue, 1)
-	testing.expect(t, !mpsc_is_empty_relaxed(&queue), "Queue with item should not be empty")
+	testing.expect(
+		t,
+		!mpsc_is_empty_relaxed(&queue),
+		"Queue with item should not be empty",
+	)
 
 	for i := 0; i < 7; i += 1 {
 		mpsc_push(&queue, i)
@@ -444,7 +485,11 @@ test_mpsc_state_functions :: proc(t: ^testing.T) {
 		count += n
 	}
 
-	testing.expect(t, mpsc_is_empty_relaxed(&queue), "Queue should be empty after draining")
+	testing.expect(
+		t,
+		mpsc_is_empty_relaxed(&queue),
+		"Queue should be empty after draining",
+	)
 	testing.expect(
 		t,
 		count >= 8,
@@ -484,7 +529,11 @@ test_mpsc_data_integrity :: proc(t: ^testing.T) {
 	testing.expect(
 		t,
 		popped == TEST_COUNT,
-		fmt.tprintf("Should pop all items: expected %d, got %d", TEST_COUNT, popped),
+		fmt.tprintf(
+			"Should pop all items: expected %d, got %d",
+			TEST_COUNT,
+			popped,
+		),
 	)
 
 	for i := 0; i < TEST_COUNT; i += 1 {

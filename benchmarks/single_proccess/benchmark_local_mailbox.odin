@@ -47,7 +47,10 @@ run_local_throughput :: proc(
 			worker_count = worker_count,
 			actor_config = actod.make_actor_config(
 				page_size = mem.Kilobyte * 64,
-				logging = actod.make_log_config(enable_file = false, level = .Warning),
+				logging = actod.make_log_config(
+					enable_file = false,
+					level = .Warning,
+				),
 			),
 		),
 	)
@@ -55,7 +58,11 @@ run_local_throughput :: proc(
 	sync.atomic_store(&local_received, 0)
 
 	receiver_behaviour := actod.Actor_Behaviour(Flood_Receiver_Data) {
-		handle_message = proc(data: ^Flood_Receiver_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Flood_Receiver_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			data.count += 1
 			if data.count & 0xFF == 0 do sync.atomic_add(&local_received, 256)
 		},
@@ -75,19 +82,25 @@ run_local_throughput :: proc(
 	if !ok_r do panic("Failed to spawn receiver")
 
 	sender_behaviour := actod.Actor_Behaviour(Flood_Sender_Data) {
-		handle_message = proc(data: ^Flood_Sender_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Flood_Sender_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case Start_Flood:
 				for _ in 0 ..< m.warmup_count {
 					v: T
-					for actod.send_message(m.target, v) == .RECEIVER_BACKLOGGED {}
+					for actod.send_message(m.target, v) ==
+					    .RECEIVER_BACKLOGGED {}
 				}
 
 				sync.sema_post(data.warmup_done_sema)
 
 				for _ in 0 ..< m.message_count {
 					v: T
-					for actod.send_message(m.target, v) == .RECEIVER_BACKLOGGED {}
+					for actod.send_message(m.target, v) ==
+					    .RECEIVER_BACKLOGGED {}
 				}
 
 				sync.sema_post(data.done_sema)
@@ -103,14 +116,23 @@ run_local_throughput :: proc(
 		done_sema        = &done_sema,
 		warmup_done_sema = &warmup_done_sema,
 	}
-	sender, ok_s := actod.spawn("flood_sender", sender_data, sender_behaviour, sender_config)
+	sender, ok_s := actod.spawn(
+		"flood_sender",
+		sender_data,
+		sender_behaviour,
+		sender_config,
+	)
 	if !ok_s do panic("Failed to spawn sender")
 
 	time.sleep(5 * time.Millisecond)
 
 	_ = actod.send_message(
 		sender,
-		Start_Flood{target = receiver, message_count = message_count, warmup_count = 10_000},
+		Start_Flood {
+			target = receiver,
+			message_count = message_count,
+			warmup_count = 10_000,
+		},
 	)
 
 	sync.sema_wait(&warmup_done_sema)
@@ -159,64 +181,7 @@ run_local_mailbox_benchmark :: proc() {
 			size:  int,
 			run_1: proc(_: int, _: int) -> f64,
 			run_2: proc(_: int, _: int) -> f64,
-		} {
-			{
-				name = "Empty",
-				size = 0,
-				run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Empty_Message,
-					)},
-				run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Empty_Message,
-					)},
-			},
-			{
-				name = "32B",
-				size = 32,
-				run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Inline_Message,
-					)},
-				run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Inline_Message,
-					)},
-			},
-			{
-				name = "256B",
-				size = 256,
-				run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Medium_Message,
-					)},
-				run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Medium_Message,
-					)},
-			},
-			{
-				name = "1KB",
-				size = 1024,
-				run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Large_Message,
-					)},
-				run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(
-						wc,
-						mc,
-						shared.Large_Message,
-					)},
-			},
-		}) {
+		}{{name = "Empty", size = 0, run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Empty_Message)}, run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Empty_Message)}}, {name = "32B", size = 32, run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Inline_Message)}, run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Inline_Message)}}, {name = "256B", size = 256, run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Medium_Message)}, run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Medium_Message)}}, {name = "1KB", size = 1024, run_1 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Large_Message)}, run_2 = proc(wc: int, mc: int) -> f64 {return run_local_throughput(wc, mc, shared.Large_Message)}}}) {
 		for workers in ([]int{1, 2}) {
 			tputs := make([]f64, BENCH_REPEATS)
 			for r in 0 ..< BENCH_REPEATS {

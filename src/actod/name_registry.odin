@@ -49,7 +49,10 @@ registry_verify_no_collision :: #force_inline proc(
 	}
 }
 
-registry_ensure_init :: proc(r: ^Name_Registry($T, $N), loc := #caller_location) {
+registry_ensure_init :: proc(
+	r: ^Name_Registry($T, $N),
+	loc := #caller_location,
+) {
 	if sync.atomic_load(&r.initialized) do return
 
 	sync.lock(&r.mtx)
@@ -225,7 +228,11 @@ registry_get_name_by_hash :: proc(
 	return "", false
 }
 
-registry_has :: proc(r: ^Name_Registry($T, $N), name: string, loc := #caller_location) -> bool {
+registry_has :: proc(
+	r: ^Name_Registry($T, $N),
+	name: string,
+	loc := #caller_location,
+) -> bool {
 	registry_ensure_init(r, loc)
 
 	name_hash := fnv1a_hash(name)

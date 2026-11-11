@@ -32,14 +32,24 @@ address_is_loopback_classification :: proc(t: ^testing.T) {
 	for input in loopbacks {
 		addr, ok := parse_bind_address(input)
 		testing.expect(t, ok)
-		testing.expectf(t, address_is_loopback(addr), "expected %q to be loopback", input)
+		testing.expectf(
+			t,
+			address_is_loopback(addr),
+			"expected %q to be loopback",
+			input,
+		)
 	}
 
 	open_binds := []string{"0.0.0.0", "192.168.1.5", "10.0.0.1", "::"}
 	for input in open_binds {
 		addr, ok := parse_bind_address(input)
 		testing.expect(t, ok)
-		testing.expectf(t, !address_is_loopback(addr), "expected %q to NOT be loopback", input)
+		testing.expectf(
+			t,
+			!address_is_loopback(addr),
+			"expected %q to NOT be loopback",
+			input,
+		)
 	}
 }
 
@@ -51,7 +61,9 @@ default_network_config_binds_loopback :: proc(t: ^testing.T) {
 }
 
 @(test)
-network_exposure_refusal_flags_non_loopback_bind_without_auth_password :: proc(t: ^testing.T) {
+network_exposure_refusal_flags_non_loopback_bind_without_auth_password :: proc(
+	t: ^testing.T,
+) {
 	for input in ([]string{"0.0.0.0", "192.168.1.5", "::"}) {
 		addr, _ := parse_bind_address(input)
 		network := Network_Config {
@@ -108,7 +120,9 @@ network_exposure_refusal_flags_plaintext_non_loopback_bind_without_trusted_netwo
 }
 
 @(test)
-network_exposure_refusal_allows_loopback_and_listener_free_binds :: proc(t: ^testing.T) {
+network_exposure_refusal_allows_loopback_and_listener_free_binds :: proc(
+	t: ^testing.T,
+) {
 	for input in ([]string{"127.0.0.1", "::1"}) {
 		addr, _ := parse_bind_address(input)
 		network := Network_Config {

@@ -27,7 +27,11 @@ init_panic_actor_init :: proc(data: ^Init_Panic_Actor) {
 	panic("dying in init while the spawner waits")
 }
 
-init_panic_actor_handle :: proc(data: ^Init_Panic_Actor, from: actod.PID, msg: any) {}
+init_panic_actor_handle :: proc(
+	data: ^Init_Panic_Actor,
+	from: actod.PID,
+	msg: any,
+) {}
 
 Init_Panic_Actor_Behaviour :: actod.Actor_Behaviour(Init_Panic_Actor) {
 	init           = init_panic_actor_init,
@@ -58,7 +62,11 @@ release_reused_header_blocks :: proc(held: ^Held_Spawner) {
 	}
 }
 
-hold_spawner_until_header_freed :: proc(actor: ^actod.Actor, pid: actod.PID, name: string) {
+hold_spawner_until_header_freed :: proc(
+	actor: ^actod.Actor,
+	pid: actod.PID,
+	name: string,
+) {
 	if name != SPAWNER_HEADER_ACTOR_NAME do return
 	held := &held_spawner
 	held.actor = actor
@@ -103,7 +111,11 @@ test_spawner_does_not_read_header_after_init_panic :: proc(t: ^testing.T) {
 
 	if !held_spawner.reached do actod.reclaim_unpin()
 
-	expect(t, held_spawner.reached, "the spawner must pass the hook after its start wait")
+	expect(
+		t,
+		held_spawner.reached,
+		"the spawner must pass the hook after its start wait",
+	)
 	expect(
 		t,
 		held_spawner.retired,
@@ -114,7 +126,11 @@ test_spawner_does_not_read_header_after_init_panic :: proc(t: ^testing.T) {
 		held_spawner.freed,
 		"reclaim_scan must free the retired header while the spawner is held",
 	)
-	expect(t, spawned, "spawn reports success once init has run, even when init panicked")
+	expect(
+		t,
+		spawned,
+		"spawn reports success once init has run, even when init panicked",
+	)
 	expectf(
 		t,
 		pid == held_spawner.pid,

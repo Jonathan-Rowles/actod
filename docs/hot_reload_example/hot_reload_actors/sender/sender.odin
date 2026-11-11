@@ -18,7 +18,11 @@ sender_behaviour := act.Actor_Behaviour(Sender) {
 spawn_sender :: proc(name: string, parent: act.PID) -> (act.PID, bool) {
 	responder_pid, ok := act.get_actor_pid("responder")
 	if !ok {return 0, false}
-	return act.spawn("sender", Sender{target = responder_pid}, sender_behaviour)
+	return act.spawn(
+		"sender",
+		Sender{target = responder_pid},
+		sender_behaviour,
+	)
 }
 
 sender_init :: proc(d: ^Sender) {

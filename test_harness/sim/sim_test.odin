@@ -127,7 +127,11 @@ spawner_behaviour := actod.Actor_Behaviour(spawner_state) {
 handle_spawner :: proc(s: ^spawner_state, from: actod.PID, msg: any) {
 	switch v in msg {
 	case Spawn_Child_Cmd:
-		_, _ = actod.spawn_child("child", echo_state{name = "spawned-child"}, echo_behaviour)
+		_, _ = actod.spawn_child(
+			"child",
+			echo_state{name = "spawned-child"},
+			echo_behaviour,
+		)
 		s.spawned += 1
 	}
 }
@@ -157,7 +161,10 @@ handle_note_publisher :: proc(s: ^counter_state, from: actod.PID, msg: any) {
 	switch _ in msg {
 	case Increment:
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-		actod.publish(s.topic, Note{text = strings.clone(NOTE_TEXT, context.temp_allocator)})
+		actod.publish(
+			s.topic,
+			Note{text = strings.clone(NOTE_TEXT, context.temp_allocator)},
+		)
 	}
 }
 
@@ -237,9 +244,24 @@ test_topic_publish_fans_out :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	spawn(&s, "c1", counter_state{name = "c1", topic = &topic}, counter_behaviour)
-	spawn(&s, "c2", counter_state{name = "c2", topic = &topic}, counter_behaviour)
-	spawn(&s, "c3", counter_state{name = "c3", topic = &topic}, counter_behaviour)
+	spawn(
+		&s,
+		"c1",
+		counter_state{name = "c1", topic = &topic},
+		counter_behaviour,
+	)
+	spawn(
+		&s,
+		"c2",
+		counter_state{name = "c2", topic = &topic},
+		counter_behaviour,
+	)
+	spawn(
+		&s,
+		"c3",
+		counter_state{name = "c3", topic = &topic},
+		counter_behaviour,
+	)
 
 	init_all(&s)
 
@@ -280,9 +302,24 @@ test_topic_subscribers_are_the_sims_subscriptions :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	c1 := spawn(&s, "c1", counter_state{name = "c1", topic = &topic}, counter_behaviour)
-	spawn(&s, "c2", counter_state{name = "c2", topic = &other}, counter_behaviour)
-	c3 := spawn(&s, "c3", counter_state{name = "c3", topic = &topic}, counter_behaviour)
+	c1 := spawn(
+		&s,
+		"c1",
+		counter_state{name = "c1", topic = &topic},
+		counter_behaviour,
+	)
+	spawn(
+		&s,
+		"c2",
+		counter_state{name = "c2", topic = &other},
+		counter_behaviour,
+	)
+	c3 := spawn(
+		&s,
+		"c3",
+		counter_state{name = "c3", topic = &topic},
+		counter_behaviour,
+	)
 	spawn(&s, "probe", Topic_Probe{topic = &topic}, topic_probe_behaviour)
 
 	init_all(&s)
@@ -343,8 +380,14 @@ zero_interval_timer_state :: struct {
 	stray_ticks:  int,
 }
 
-zero_interval_timer_behaviour := actod.Actor_Behaviour(zero_interval_timer_state) {
-	handle_message = proc(s: ^zero_interval_timer_state, from: actod.PID, msg: any) {
+zero_interval_timer_behaviour := actod.Actor_Behaviour(
+	zero_interval_timer_state,
+) {
+	handle_message = proc(
+		s: ^zero_interval_timer_state,
+		from: actod.PID,
+		msg: any,
+	) {
 		switch v in msg {
 		case actod.Timer_Tick:
 			if v.id == s.accepted_id {
@@ -356,7 +399,10 @@ zero_interval_timer_behaviour := actod.Actor_Behaviour(zero_interval_timer_state
 	},
 	init = proc(s: ^zero_interval_timer_state) {
 		s.refused_id, s.refused_err = actod.set_timer(0, repeat = true)
-		s.accepted_id, s.accepted_err = actod.set_timer(1 * time.Second, repeat = true)
+		s.accepted_id, s.accepted_err = actod.set_timer(
+			1 * time.Second,
+			repeat = true,
+		)
 	},
 }
 
@@ -365,7 +411,12 @@ test_repeating_timer_with_zero_interval_is_refused :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	spawn(&s, "tmr", zero_interval_timer_state{name = "tmr"}, zero_interval_timer_behaviour)
+	spawn(
+		&s,
+		"tmr",
+		zero_interval_timer_state{name = "tmr"},
+		zero_interval_timer_behaviour,
+	)
 	init_all(&s)
 
 	advance_time(&s, 3 * time.Second)
@@ -390,7 +441,11 @@ test_init_timers_get_distinct_ids_across_actors :: proc(t: ^testing.T) {
 
 	first := get_state(&s, "first", timer_state)
 	second := get_state(&s, "second", timer_state)
-	testing.expect(t, first.timer_id != second.timer_id, "each actor's init timer gets its own id")
+	testing.expect(
+		t,
+		first.timer_id != second.timer_id,
+		"each actor's init timer gets its own id",
+	)
 
 	cancel_timer(&s, second.timer_id)
 	advance_time(&s, 2 * time.Second)
@@ -441,7 +496,9 @@ cancel_probe_behaviour := actod.Actor_Behaviour(cancel_probe_state) {
 }
 
 @(test)
-test_repeating_timer_cancelled_in_a_later_step_stops_ticking :: proc(t: ^testing.T) {
+test_repeating_timer_cancelled_in_a_later_step_stops_ticking :: proc(
+	t: ^testing.T,
+) {
 	s := create()
 	defer destroy(&s)
 
@@ -475,7 +532,12 @@ test_one_shot_cancelled_by_a_later_message_never_fires :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	spawn(&s, "probe", cancel_probe_state{name = "probe"}, cancel_probe_behaviour)
+	spawn(
+		&s,
+		"probe",
+		cancel_probe_state{name = "probe"},
+		cancel_probe_behaviour,
+	)
 	init_all(&s)
 
 	send(&s, "probe", Arm_Cancel_Probe{interval = time.Second})
@@ -600,8 +662,18 @@ test_multiple_topics :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	spawn(&s, "c1", counter_state{name = "c1", topic = &topic_a}, counter_behaviour)
-	spawn(&s, "c2", counter_state{name = "c2", topic = &topic_b}, counter_behaviour)
+	spawn(
+		&s,
+		"c1",
+		counter_state{name = "c1", topic = &topic_a},
+		counter_behaviour,
+	)
+	spawn(
+		&s,
+		"c2",
+		counter_state{name = "c2", topic = &topic_b},
+		counter_behaviour,
+	)
 
 	init_all(&s)
 
@@ -646,7 +718,10 @@ test_fault_without_count_fires_forever :: proc(t: ^testing.T) {
 	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
 	init_all(&s)
 
-	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop})
+	add_fault(
+		&s,
+		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop},
+	)
 
 	for _ in 0 ..< 5 {
 		send(&s, "counter", Increment{})
@@ -665,7 +740,13 @@ test_uncapped_duplicate_drains :: proc(t: ^testing.T) {
 	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
 	init_all(&s)
 
-	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Duplicate})
+	add_fault(
+		&s,
+		Fault_Rule {
+			match = Fault_Match{to_name = "counter"},
+			action = .Duplicate,
+		},
+	)
 
 	send(&s, "counter", Increment{})
 	run_until_idle(&s)
@@ -685,7 +766,11 @@ test_uncapped_delay_still_delivers :: proc(t: ^testing.T) {
 
 	add_fault(
 		&s,
-		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Delay, delay_steps = 2},
+		Fault_Rule {
+			match = Fault_Match{to_name = "counter"},
+			action = .Delay,
+			delay_steps = 2,
+		},
 	)
 
 	send(&s, "counter", Increment{})
@@ -707,7 +792,10 @@ test_fault_drop_count_limit :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Drop,
 			count = 2, // drop first 2, allow rest
 		},
@@ -773,7 +861,10 @@ test_fault_duplicate_delivers_twice :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Duplicate,
 			count = 1,
 		},
@@ -797,14 +888,20 @@ test_fault_first_match_wins :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Drop,
 		},
 	)
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Duplicate,
 		},
 	)
@@ -827,7 +924,10 @@ test_fault_wildcard_match :: proc(t: ^testing.T) {
 	spawn(&s, "echo", echo_state{name = "echo"}, echo_behaviour)
 	init_all(&s)
 
-	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "echo"}, action = .Drop})
+	add_fault(
+		&s,
+		Fault_Rule{match = Fault_Match{to_name = "echo"}, action = .Drop},
+	)
 
 	send(&s, "echo", Ping{value = 1})
 	run_until_idle(&s)
@@ -844,7 +944,10 @@ test_fault_clear_removes_all :: proc(t: ^testing.T) {
 	spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
 	init_all(&s)
 
-	add_fault(&s, Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop})
+	add_fault(
+		&s,
+		Fault_Rule{match = Fault_Match{to_name = "counter"}, action = .Drop},
+	)
 
 	send(&s, "counter", Increment{})
 	run_until_idle(&s)
@@ -872,7 +975,10 @@ test_probabilistic_fault_zero_always_fires :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Drop,
 			probability = 0,
 		},
@@ -899,7 +1005,10 @@ test_probabilistic_fault_drops_some :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Drop,
 			probability = 0.5,
 		},
@@ -916,7 +1025,12 @@ test_probabilistic_fault_drops_some :: proc(t: ^testing.T) {
 	delivered := c.count
 
 	testing.expect_value(t, dropped + delivered, N)
-	testing.expectf(t, dropped > 20 && dropped < 80, "expected ~50 drops, got %d", dropped)
+	testing.expectf(
+		t,
+		dropped > 20 && dropped < 80,
+		"expected ~50 drops, got %d",
+		dropped,
+	)
 }
 
 @(test)
@@ -925,13 +1039,21 @@ test_same_seed_reproduces :: proc(t: ^testing.T) {
 		s := create_seeded(seed)
 		defer destroy(&s)
 
-		spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
+		spawn(
+			&s,
+			"counter",
+			counter_state{name = "counter"},
+			counter_behaviour,
+		)
 		init_all(&s)
 
 		add_fault(
 			&s,
 			Fault_Rule {
-				match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+				match = Fault_Match {
+					to_name = "counter",
+					msg_type = typeid_of(Increment),
+				},
 				action = .Drop,
 				probability = 0.5,
 			},
@@ -955,13 +1077,21 @@ test_different_seed_diverges :: proc(t: ^testing.T) {
 		s := create_seeded(seed)
 		defer destroy(&s)
 
-		spawn(&s, "counter", counter_state{name = "counter"}, counter_behaviour)
+		spawn(
+			&s,
+			"counter",
+			counter_state{name = "counter"},
+			counter_behaviour,
+		)
 		init_all(&s)
 
 		add_fault(
 			&s,
 			Fault_Rule {
-				match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+				match = Fault_Match {
+					to_name = "counter",
+					msg_type = typeid_of(Increment),
+				},
 				action = .Drop,
 				probability = 0.5,
 			},
@@ -976,7 +1106,11 @@ test_different_seed_diverges :: proc(t: ^testing.T) {
 
 	a := run_trial(1)
 	b := run_trial(2)
-	testing.expect(t, a != b, "expected different seeds to produce different results")
+	testing.expect(
+		t,
+		a != b,
+		"expected different seeds to produce different results",
+	)
 }
 
 @(test)
@@ -990,7 +1124,10 @@ test_probability_with_count :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "counter", msg_type = typeid_of(Increment)},
+			match = Fault_Match {
+				to_name = "counter",
+				msg_type = typeid_of(Increment),
+			},
 			action = .Drop,
 			count = 3,
 			probability = 0.5,
@@ -1051,7 +1188,11 @@ trader_behaviour := actod.Actor_Behaviour(trader_state) {
 handle_trader :: proc(s: ^trader_state, from: actod.PID, msg: any) {
 	switch v in msg {
 	case Ping:
-		s.token, _ = actod.ask(s.pricer, Quote{symbol = "abcd"}, 2 * time.Second)
+		s.token, _ = actod.ask(
+			s.pricer,
+			Quote{symbol = "abcd"},
+			2 * time.Second,
+		)
 	case Price:
 		token, is_reply := actod.replying_to()
 		s.matched_token = is_reply && token == s.token
@@ -1085,7 +1226,12 @@ test_ask_times_out_when_nobody_replies :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	pricer_pid := spawn(&s, "pricer", pricer_state{stay_mute = true}, pricer_behaviour)
+	pricer_pid := spawn(
+		&s,
+		"pricer",
+		pricer_state{stay_mute = true},
+		pricer_behaviour,
+	)
 	spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
 	init_all(&s)
 
@@ -1115,7 +1261,10 @@ test_late_reply_is_dropped_after_timeout :: proc(t: ^testing.T) {
 	add_fault(
 		&s,
 		Fault_Rule {
-			match = Fault_Match{to_name = "pricer", msg_type = typeid_of(Quote)},
+			match = Fault_Match {
+				to_name = "pricer",
+				msg_type = typeid_of(Quote),
+			},
 			action = .Delay,
 			delay_steps = 4,
 			count = 1,
@@ -1137,9 +1286,19 @@ test_reply_from_an_actor_that_was_not_asked_is_dropped :: proc(t: ^testing.T) {
 	s := create()
 	defer destroy(&s)
 
-	pricer_pid := spawn(&s, "pricer", pricer_state{stay_mute = true}, pricer_behaviour)
+	pricer_pid := spawn(
+		&s,
+		"pricer",
+		pricer_state{stay_mute = true},
+		pricer_behaviour,
+	)
 	impostor_pid := spawn(&s, "impostor", pricer_state{}, pricer_behaviour)
-	trader_pid := spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	trader_pid := spawn(
+		&s,
+		"trader",
+		trader_state{pricer = pricer_pid},
+		trader_behaviour,
+	)
 	init_all(&s)
 
 	send(&s, "trader", Ping{})
@@ -1148,7 +1307,15 @@ test_reply_from_an_actor_that_was_not_asked_is_dropped :: proc(t: ^testing.T) {
 	tr := get_state(&s, "trader", trader_state)
 	forged := new(Price)
 	forged.value = -7
-	enqueue_ask(&s, u64(trader_pid), u64(impostor_pid), forged, Price, u64(tr.token), true)
+	enqueue_ask(
+		&s,
+		u64(trader_pid),
+		u64(impostor_pid),
+		forged,
+		Price,
+		u64(tr.token),
+		true,
+	)
 	run_until_idle(&s)
 
 	tr = get_state(&s, "trader", trader_state)
@@ -1188,33 +1355,60 @@ test_published_copies_own_their_strings :: proc(t: ^testing.T) {
 	r2 := get_state(&s, "r2", note_reader_state)
 	testing.expect(t, r1.intact, "r1 read a garbled note")
 	testing.expect(t, r2.intact, "r2 read a garbled note")
-	testing.expect(t, r1.text != r2.text, "r1 and r2 read the same copy of the note")
+	testing.expect(
+		t,
+		r1.text != r2.text,
+		"r1 and r2 read the same copy of the note",
+	)
 }
 
 @(test)
-test_forged_reply_leaves_the_asked_actors_reply_to_arrive :: proc(t: ^testing.T) {
+test_forged_reply_leaves_the_asked_actors_reply_to_arrive :: proc(
+	t: ^testing.T,
+) {
 	s := create()
 	defer destroy(&s)
 
 	pricer_pid := spawn(&s, "pricer", pricer_state{}, pricer_behaviour)
 	impostor_pid := spawn(&s, "impostor", pricer_state{}, pricer_behaviour)
-	trader_pid := spawn(&s, "trader", trader_state{pricer = pricer_pid}, trader_behaviour)
+	trader_pid := spawn(
+		&s,
+		"trader",
+		trader_state{pricer = pricer_pid},
+		trader_behaviour,
+	)
 	init_all(&s)
 
 	send(&s, "trader", Ping{})
-	testing.expect(t, step(&s), "the trader must handle Ping and ask the pricer")
+	testing.expect(
+		t,
+		step(&s),
+		"the trader must handle Ping and ask the pricer",
+	)
 
 	asked_token := get_state(&s, "trader", trader_state).token
 	testing.expect(t, asked_token != 0, "the ask must have a token")
 
 	forged := new(Price)
 	forged.value = 999
-	enqueue_ask(&s, u64(trader_pid), u64(impostor_pid), forged, Price, u64(asked_token), true)
+	enqueue_ask(
+		&s,
+		u64(trader_pid),
+		u64(impostor_pid),
+		forged,
+		Price,
+		u64(asked_token),
+		true,
+	)
 	run_until_idle(&s)
 
 	tr := get_state(&s, "trader", trader_state)
 	testing.expect_value(t, tr.replies, 1)
 	testing.expect_value(t, tr.price, 40)
-	testing.expect(t, tr.matched_token, "the real reply must carry the ask token")
+	testing.expect(
+		t,
+		tr.matched_token,
+		"the real reply must carry the ask token",
+	)
 	testing.expect_value(t, tr.timed_out, 0)
 }

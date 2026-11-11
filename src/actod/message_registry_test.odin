@@ -73,7 +73,11 @@ test_message_registration :: proc(t: ^testing.T) {
 
 	info, ok := get_type_info_ptr(typeid_of(Test_Simple_Message))
 	testing.expect(t, ok, "Test_Simple_Message should be registered")
-	testing.expect(t, info.type_id == typeid_of(Test_Simple_Message), "Type ID mismatch")
+	testing.expect(
+		t,
+		info.type_id == typeid_of(Test_Simple_Message),
+		"Type ID mismatch",
+	)
 }
 
 @(test)
@@ -102,7 +106,11 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 		)
 
 		reconstructed := (cast(^Test_Simple_Message)raw_data(raw_bytes))^
-		testing.expect(t, reconstructed.id == original.id, "Simple message id should match")
+		testing.expect(
+			t,
+			reconstructed.id == original.id,
+			"Simple message id should match",
+		)
 		testing.expect(
 			t,
 			reconstructed.value == original.value,
@@ -128,7 +136,11 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 		raw_bytes := mem.ptr_to_bytes(&original)
 		reconstructed := (cast(^Test_Complex_Message)raw_data(raw_bytes))^
 
-		testing.expect(t, reconstructed.id == original.id, "Complex message id should match")
+		testing.expect(
+			t,
+			reconstructed.id == original.id,
+			"Complex message id should match",
+		)
 		testing.expect(
 			t,
 			reconstructed.position[0] == original.position[0],
@@ -144,14 +156,26 @@ test_raw_binary_serialization :: proc(t: ^testing.T) {
 			reconstructed.position[2] == original.position[2],
 			"Position[2] should match",
 		)
-		testing.expect(t, reconstructed.flags == original.flags, "Flags should match")
+		testing.expect(
+			t,
+			reconstructed.flags == original.flags,
+			"Flags should match",
+		)
 	}
 
 	{
 		info, ok := get_type_info_ptr(typeid_of(Test_String_Message))
 		testing.expect(t, ok, "Type info should exist")
-		testing.expect(t, .Has_Var_Fields in info.flags, "Should detect strings in message type")
-		testing.expect(t, len(info.var_fields) == 2, "Should detect 2 variable fields")
+		testing.expect(
+			t,
+			.Has_Var_Fields in info.flags,
+			"Should detect strings in message type",
+		)
+		testing.expect(
+			t,
+			len(info.var_fields) == 2,
+			"Should detect 2 variable fields",
+		)
 	}
 }
 
@@ -202,8 +226,16 @@ test_string_message_binary_format :: proc(t: ^testing.T) {
 		}
 	}
 
-	testing.expect(t, value.content == original.content, "Content should match")
-	testing.expect(t, value.description == original.description, "Description should match")
+	testing.expect(
+		t,
+		value.content == original.content,
+		"Content should match",
+	)
+	testing.expect(
+		t,
+		value.description == original.description,
+		"Description should match",
+	)
 	testing.expect(t, value.count == original.count, "Count should match")
 }
 
@@ -233,7 +265,11 @@ test_pod_payload_handling :: proc(t: ^testing.T) {
 		)
 
 		reconstructed := (cast(^Test_Simple_Message)raw_data(raw_bytes))^
-		testing.expect(t, reconstructed.id == original.id, "POD reconstructed id should match")
+		testing.expect(
+			t,
+			reconstructed.id == original.id,
+			"POD reconstructed id should match",
+		)
 		testing.expect(
 			t,
 			reconstructed.value == original.value,
@@ -258,7 +294,11 @@ test_pod_payload_handling :: proc(t: ^testing.T) {
 
 		raw_bytes := mem.ptr_to_bytes(&original)
 		reconstructed := (cast(^Test_Complex_Message)raw_data(raw_bytes))^
-		testing.expect(t, reconstructed.id == original.id, "POD reconstructed id should match")
+		testing.expect(
+			t,
+			reconstructed.id == original.id,
+			"POD reconstructed id should match",
+		)
 		testing.expect(
 			t,
 			reconstructed.position == original.position,
@@ -379,7 +419,11 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 	{
 		info, ok := get_type_info_ptr(typeid_of(Test_Mixed_Union))
 		testing.expect(t, ok, "Test_Mixed_Union should be registered")
-		testing.expect(t, .Has_Unions in info.flags, "Mixed union should have Has_Unions flag")
+		testing.expect(
+			t,
+			.Has_Unions in info.flags,
+			"Mixed union should have Has_Unions flag",
+		)
 		testing.expect(
 			t,
 			.Has_Var_Fields not_in info.flags,
@@ -390,8 +434,16 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 			len(info.var_fields) == 0,
 			"Union should have no top-level variable fields",
 		)
-		testing.expect(t, len(info.union_fields) == 1, "Should have exactly 1 union field entry")
-		testing.expect(t, len(info.union_fields[0].variants) == 2, "Should track 2 variants")
+		testing.expect(
+			t,
+			len(info.union_fields) == 1,
+			"Should have exactly 1 union field entry",
+		)
+		testing.expect(
+			t,
+			len(info.union_fields[0].variants) == 2,
+			"Should track 2 variants",
+		)
 
 		testing.expect(
 			t,
@@ -414,7 +466,11 @@ test_union_registration_flags :: proc(t: ^testing.T) {
 			.Has_Unions in info.flags,
 			"Mixed bytes union should have Has_Unions flag",
 		)
-		testing.expect(t, len(info.union_fields) == 1, "Should have exactly 1 union field entry")
+		testing.expect(
+			t,
+			len(info.union_fields) == 1,
+			"Should have exactly 1 union field entry",
+		)
 
 		testing.expect(
 			t,
@@ -446,7 +502,11 @@ test_union_struct_with_union_field :: proc(t: ^testing.T) {
 		.Has_Var_Fields not_in info.flags,
 		"Should not have top-level Has_Var_Fields",
 	)
-	testing.expect(t, len(info.union_fields) == 1, "Should have 1 union field entry")
+	testing.expect(
+		t,
+		len(info.union_fields) == 1,
+		"Should have 1 union field entry",
+	)
 }
 
 @(test)
@@ -558,7 +618,9 @@ test_union_bytes_variant_size :: proc(t: ^testing.T) {
 	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Bytes_Union))
 
 	{
-		value := Test_Mixed_Bytes_Union(Test_Bytes_Variant{data = data, tag = 7})
+		value := Test_Mixed_Bytes_Union(
+			Test_Bytes_Variant{data = data, tag = 7},
+		)
 		size := calculate_variable_data_size(&value, info)
 		testing.expect_value(t, size, 5)
 	}
@@ -582,8 +644,16 @@ test_byte_slice_message_binary_format :: proc(t: ^testing.T) {
 
 	info, ok := get_type_info_ptr(typeid_of(Test_Bytes_Message))
 	testing.expect(t, ok, "Test_Bytes_Message should be registered")
-	testing.expect(t, .Has_Var_Fields in info.flags, "Should detect byte slice as variable field")
-	testing.expect(t, len(info.var_fields) == 1, "Should detect 1 variable field")
+	testing.expect(
+		t,
+		.Has_Var_Fields in info.flags,
+		"Should detect byte slice as variable field",
+	)
+	testing.expect(
+		t,
+		len(info.var_fields) == 1,
+		"Should detect 1 variable field",
+	)
 
 	variable_size := calculate_variable_data_size(&original, info)
 	testing.expect_value(t, variable_size, 5)
@@ -601,14 +671,21 @@ test_byte_slice_message_binary_format :: proc(t: ^testing.T) {
 
 	value := (cast(^Test_Bytes_Message)raw_data(wire))^
 	storage: [128]byte
-	copied := copy_variable_data_from_payload(&storage[0], &value, wire, info, 0)
+	copied := copy_variable_data_from_payload(
+		&storage[0],
+		&value,
+		wire,
+		info,
+		0,
+	)
 	testing.expect(t, copied, "Variable data copy should succeed")
 	testing.expect_value(t, value.id, u64(7))
 	testing.expect(t, len(value.payload) == 5, "Payload length should survive")
 	testing.expect(
 		t,
 		uintptr(raw_data(value.payload)) >= uintptr(&storage[0]) &&
-		uintptr(raw_data(value.payload)) < uintptr(&storage[0]) + size_of(storage),
+		uintptr(raw_data(value.payload)) <
+			uintptr(&storage[0]) + size_of(storage),
 		"Byte slice should be re-based into receive storage",
 	)
 	for b, i in blob {
@@ -622,10 +699,26 @@ test_mixed_var_fields_declaration_order :: proc(t: ^testing.T) {
 
 	info, ok := get_type_info_ptr(typeid_of(Test_Mixed_Var_Message))
 	testing.expect(t, ok, "Test_Mixed_Var_Message should be registered")
-	testing.expect(t, len(info.var_fields) == 3, "Should track 3 variable fields")
-	testing.expect_value(t, info.var_fields[0].offset, offset_of(Test_Mixed_Var_Message, a))
-	testing.expect_value(t, info.var_fields[1].offset, offset_of(Test_Mixed_Var_Message, b))
-	testing.expect_value(t, info.var_fields[2].offset, offset_of(Test_Mixed_Var_Message, c))
+	testing.expect(
+		t,
+		len(info.var_fields) == 3,
+		"Should track 3 variable fields",
+	)
+	testing.expect_value(
+		t,
+		info.var_fields[0].offset,
+		offset_of(Test_Mixed_Var_Message, a),
+	)
+	testing.expect_value(
+		t,
+		info.var_fields[1].offset,
+		offset_of(Test_Mixed_Var_Message, b),
+	)
+	testing.expect_value(
+		t,
+		info.var_fields[2].offset,
+		offset_of(Test_Mixed_Var_Message, c),
+	)
 
 	blob := []byte{9, 8, 7}
 	original := Test_Mixed_Var_Message {
@@ -644,7 +737,11 @@ test_mixed_var_fields_declaration_order :: proc(t: ^testing.T) {
 	testing.expect(t, dst.a == "first", "a should deep-copy")
 	testing.expect(t, dst.c == "third", "c should deep-copy")
 	testing.expect(t, len(dst.b) == 3, "b length should survive")
-	testing.expect(t, dst.b[0] == 9 && dst.b[1] == 8 && dst.b[2] == 7, "b should deep-copy")
+	testing.expect(
+		t,
+		dst.b[0] == 9 && dst.b[1] == 8 && dst.b[2] == 7,
+		"b should deep-copy",
+	)
 
 	testing.expect(
 		t,
@@ -682,13 +779,25 @@ test_payload_truncated_var_data_rejected :: proc(t: ^testing.T) {
 
 	value := (cast(^Test_Bytes_Message)raw_data(wire))^
 	storage: [128]byte
-	copied := copy_variable_data_from_payload(&storage[0], &value, wire, info, 0)
+	copied := copy_variable_data_from_payload(
+		&storage[0],
+		&value,
+		wire,
+		info,
+		0,
+	)
 	testing.expect(t, !copied, "Truncated payload must be rejected")
 }
 
 @(private)
-build_bytes_message_payload :: proc(value: Test_Bytes_Message, trailing: int) -> []byte {
-	wire := make([]byte, size_of(Test_Bytes_Message) + len(value.payload) + trailing)
+build_bytes_message_payload :: proc(
+	value: Test_Bytes_Message,
+	trailing: int,
+) -> []byte {
+	wire := make(
+		[]byte,
+		size_of(Test_Bytes_Message) + len(value.payload) + trailing,
+	)
 	content_copy := value
 	mem.copy(raw_data(wire), &content_copy, size_of(Test_Bytes_Message))
 	mem.copy(
@@ -719,7 +828,12 @@ test_payload_oversized_fixed_type_rejected :: proc(t: ^testing.T) {
 	err, _ := create_message_from_payload(&msg, &pool, wire, info)
 	testing.expect_value(t, err, Alloc_Error.MALFORMED_PAYLOAD)
 
-	err, _ = create_message_from_payload(&msg, &pool, wire[:size_of(Test_Simple_Message)], info)
+	err, _ = create_message_from_payload(
+		&msg,
+		&pool,
+		wire[:size_of(Test_Simple_Message)],
+		info,
+	)
 	testing.expect_value(t, err, Alloc_Error.OK)
 	decoded := (cast(^Test_Simple_Message)&msg.inline_data[0])^
 	testing.expect_value(t, decoded.id, 3)
@@ -750,7 +864,11 @@ test_payload_oversized_var_data_rejected_inline :: proc(t: ^testing.T) {
 	defer delete(exact)
 	err, _ = create_message_from_payload(&msg, &pool, exact, info)
 	testing.expect_value(t, err, Alloc_Error.OK)
-	testing.expect(t, msg.content == INLINE_NEEDS_FIXUP, "Small payload should decode inline")
+	testing.expect(
+		t,
+		msg.content == INLINE_NEEDS_FIXUP,
+		"Small payload should decode inline",
+	)
 	decoded := cast(^Test_Bytes_Message)&msg.inline_data[0]
 	testing.expect_value(t, decoded.id, u64(9))
 	testing.expect_value(t, len(decoded.payload), 3)
@@ -788,7 +906,8 @@ test_payload_oversized_var_data_rejected_pooled :: proc(t: ^testing.T) {
 		message_owns_page(msg.content),
 		"Large payload should decode into a pool page",
 	)
-	decoded := cast(^Test_Bytes_Message)(uintptr(msg.content) + TYPE_HEADER_SIZE)
+	decoded := cast(^Test_Bytes_Message)(uintptr(msg.content) +
+		TYPE_HEADER_SIZE)
 	testing.expect_value(t, decoded.id, u64(11))
 	testing.expect_value(t, len(decoded.payload), 64)
 	for b, i in blob do testing.expect_value(t, decoded.payload[i], b)
@@ -891,14 +1010,26 @@ test_array_every_element_gets_a_var_field :: proc(t: ^testing.T) {
 
 	storage: [512]byte
 	src: Test_Array_Message
-	dst := (^Test_Array_Message)(rawptr(&storage[size_of(storage) - size_of(Test_Array_Message)]))
+	dst := (^Test_Array_Message)(
+		rawptr(&storage[size_of(storage) - size_of(Test_Array_Message)]),
+	)
 	expect_every_label_copied(
 		t,
 		info,
 		&src,
 		dst,
-		{&src.items[0].label, &src.items[1].label, &src.items[2].label, &src.items[3].label},
-		{&dst.items[0].label, &dst.items[1].label, &dst.items[2].label, &dst.items[3].label},
+		{
+			&src.items[0].label,
+			&src.items[1].label,
+			&src.items[2].label,
+			&src.items[3].label,
+		},
+		{
+			&dst.items[0].label,
+			&dst.items[1].label,
+			&dst.items[2].label,
+			&dst.items[3].label,
+		},
 		storage[:size_of(storage) - size_of(Test_Array_Message)],
 	)
 }
@@ -928,7 +1059,9 @@ test_enumerated_array_elements_get_var_fields :: proc(t: ^testing.T) {
 	storage: [512]byte
 	src: Test_Enumerated_Array_Message
 	dst := (^Test_Enumerated_Array_Message)(
-		rawptr(&storage[size_of(storage) - size_of(Test_Enumerated_Array_Message)]),
+		rawptr(
+			&storage[size_of(storage) - size_of(Test_Enumerated_Array_Message)],
+		),
 	)
 	expect_every_label_copied(
 		t,
@@ -962,7 +1095,8 @@ test_array_of_unions_gets_an_entry_per_element :: proc(t: ^testing.T) {
 		testing.expect_value(
 			t,
 			info.union_fields[i].tag_offset,
-			uintptr(i * size_of(Test_Mixed_Union)) + info.union_fields[0].tag_offset,
+			uintptr(i * size_of(Test_Mixed_Union)) +
+			info.union_fields[0].tag_offset,
 		)
 	}
 }
@@ -1029,7 +1163,11 @@ test_message_registry_refuses_types_past_cap :: proc(t: ^testing.T) {
 		context.logger = log.nil_logger()
 		register_probe_type(&r, Registry_Cap_Probe_E, refused_at)
 	}
-	testing.expect(t, false, "registering past the cap returned instead of panicking")
+	testing.expect(
+		t,
+		false,
+		"registering past the cap returned instead of panicking",
+	)
 }
 
 Wire_Probe_Procedure :: struct {
@@ -1075,9 +1213,19 @@ Wire_Probe_Fixed_Capacity_Procedures :: struct {
 }
 
 @(test)
-test_wire_safety_refuses_procedure_pointer_and_map_fields_anywhere :: proc(t: ^testing.T) {
-	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Procedure)), "procedure field")
-	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Map)), "map field")
+test_wire_safety_refuses_procedure_pointer_and_map_fields_anywhere :: proc(
+	t: ^testing.T,
+) {
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Procedure)),
+		"procedure field",
+	)
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Map)),
+		"map field",
+	)
 	testing.expect(
 		t,
 		!type_is_wire_safe(type_info_of(Wire_Probe_Union_Field)),
@@ -1088,13 +1236,21 @@ test_wire_safety_refuses_procedure_pointer_and_map_fields_anywhere :: proc(t: ^t
 		!type_is_wire_safe(type_info_of(Wire_Probe_Procedure_Array)),
 		"array of procedures",
 	)
-	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Pointer)), "pointer field")
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Pointer)),
+		"pointer field",
+	)
 	testing.expect(
 		t,
 		!type_is_wire_safe(type_info_of(Wire_Probe_Multi_Pointer)),
 		"multi-pointer field",
 	)
-	testing.expect(t, !type_is_wire_safe(type_info_of(Wire_Probe_Cstring)), "cstring field")
+	testing.expect(
+		t,
+		!type_is_wire_safe(type_info_of(Wire_Probe_Cstring)),
+		"cstring field",
+	)
 	testing.expect(
 		t,
 		!type_is_wire_safe(type_info_of(Wire_Probe_Simd_Pointers)),
@@ -1114,13 +1270,21 @@ test_wire_safety_refuses_procedure_pointer_and_map_fields_anywhere :: proc(t: ^t
 		)
 	}
 
-	testing.expect(t, type_is_wire_safe(type_info_of(Test_Simple_Message)), "plain struct")
+	testing.expect(
+		t,
+		type_is_wire_safe(type_info_of(Test_Simple_Message)),
+		"plain struct",
+	)
 	testing.expect(
 		t,
 		type_is_wire_safe(type_info_of(Test_Mixed_Var_Message)),
 		"strings and byte slices",
 	)
-	testing.expect(t, type_is_wire_safe(type_info_of(Test_Outer_With_Union)), "union of strings")
+	testing.expect(
+		t,
+		type_is_wire_safe(type_info_of(Test_Outer_With_Union)),
+		"union of strings",
+	)
 }
 
 @(test)
@@ -1139,7 +1303,10 @@ test_registration_records_wire_safety :: proc(t: ^testing.T) {
 		procedure_found && procedure_info.wire_policy == .Local_Only,
 		"a type with a procedure field is local only",
 	)
-	string_info, string_found := registry_get_by_hash(&r, fnv1a_hash("actod.Test_String_Message"))
+	string_info, string_found := registry_get_by_hash(
+		&r,
+		fnv1a_hash("actod.Test_String_Message"),
+	)
 	testing.expect(
 		t,
 		string_found && string_info.wire_policy == .Any_Actor,
@@ -1153,7 +1320,9 @@ Expected_Wire_Policy :: struct {
 }
 
 @(test)
-test_system_types_carry_the_wire_policy_their_exchange_needs :: proc(t: ^testing.T) {
+test_system_types_carry_the_wire_policy_their_exchange_needs :: proc(
+	t: ^testing.T,
+) {
 	expected := [?]Expected_Wire_Policy {
 		{PID, .Any_Actor},
 		{Stats_Snapshot, .Any_Actor},
@@ -1190,12 +1359,21 @@ test_system_types_carry_the_wire_policy_their_exchange_needs :: proc(t: ^testing
 	}
 	for entry in expected {
 		info, found := get_type_info_ptr(entry.id)
-		testing.expect(t, found, fmt.tprintf("%v must be registered", entry.id))
+		testing.expect(
+			t,
+			found,
+			fmt.tprintf("%v must be registered", entry.id),
+		)
 		if !found do continue
 		testing.expect(
 			t,
 			info.wire_policy == entry.policy,
-			fmt.tprintf("%v must be %v, got %v", entry.id, entry.policy, info.wire_policy),
+			fmt.tprintf(
+				"%v must be %v, got %v",
+				entry.id,
+				entry.policy,
+				info.wire_policy,
+			),
 		)
 	}
 }
@@ -1244,7 +1422,9 @@ fan_task_refusals_from_peer :: proc(type_id: typeid) -> Refusal_Capture {
 }
 
 @(test)
-test_fan_task_from_a_peer_cannot_deliver_a_local_only_type :: proc(t: ^testing.T) {
+test_fan_task_from_a_peer_cannot_deliver_a_local_only_type :: proc(
+	t: ^testing.T,
+) {
 	refused := fan_task_refusals_from_peer(Add_Child)
 	testing.expect_value(t, refused.refusals, 1)
 	testing.expect(t, refused.type_matched, "the refusal names Add_Child")
@@ -1283,18 +1463,33 @@ Union_In_Plain_Field_Message :: struct {
 }
 
 @(private)
-nested_union_refusal :: proc(ti: ^runtime.Type_Info) -> (safe: bool, error_msg: string) {
+nested_union_refusal :: proc(
+	ti: ^runtime.Type_Info,
+) -> (
+	safe: bool,
+	error_msg: string,
+) {
 	var_fields := make([dynamic]Var_Field_Info)
 	defer delete(var_fields)
 	union_fields := make([dynamic]Temp_Union_Info)
 	defer delete(union_fields)
 	defer cleanup_temp_union_fields(union_fields[:])
 	info: Message_Type_Info
-	return check_type_safety(ti, "", &info, 0, &var_fields, true, &union_fields)
+	return check_type_safety(
+		ti,
+		"",
+		&info,
+		0,
+		&var_fields,
+		true,
+		&union_fields,
+	)
 }
 
 @(test)
-test_union_of_strings_inside_a_union_variant_is_refused_naming_its_path :: proc(t: ^testing.T) {
+test_union_of_strings_inside_a_union_variant_is_refused_naming_its_path :: proc(
+	t: ^testing.T,
+) {
 	through_struct_safe, through_struct_msg := nested_union_refusal(
 		type_info_of(Nested_Union_Message),
 	)
@@ -1310,9 +1505,15 @@ test_union_of_strings_inside_a_union_variant_is_refused_naming_its_path :: proc(
 		fmt.tprintf("refusal names the path, got %q", through_struct_msg),
 	)
 
-	direct_safe, direct_msg := nested_union_refusal(type_info_of(Direct_Nested_Union_Message))
+	direct_safe, direct_msg := nested_union_refusal(
+		type_info_of(Direct_Nested_Union_Message),
+	)
 	defer delete(direct_msg)
-	testing.expect(t, !direct_safe, "a union of strings as a union variant must be refused")
+	testing.expect(
+		t,
+		!direct_safe,
+		"a union of strings as a union variant must be refused",
+	)
 	testing.expect(
 		t,
 		strings.has_prefix(direct_msg, "body.variant[1] "),
@@ -1321,7 +1522,9 @@ test_union_of_strings_inside_a_union_variant_is_refused_naming_its_path :: proc(
 }
 
 @(test)
-test_registering_a_union_of_strings_inside_a_union_variant_panics :: proc(t: ^testing.T) {
+test_registering_a_union_of_strings_inside_a_union_variant_panics :: proc(
+	t: ^testing.T,
+) {
 	r: Name_Registry(Message_Type_Info, 4)
 	refused_at := runtime.Source_Code_Location {
 		file_path = "nested_union_probe",
@@ -1333,11 +1536,17 @@ test_registering_a_union_of_strings_inside_a_union_variant_panics :: proc(t: ^te
 		context.allocator = context.temp_allocator
 		register_probe_type(&r, Nested_Union_Message, refused_at)
 	}
-	testing.expect(t, false, "registering a nested union of strings returned instead of panicking")
+	testing.expect(
+		t,
+		false,
+		"registering a nested union of strings returned instead of panicking",
+	)
 }
 
 @(test)
-test_union_inside_a_plain_struct_field_registers_and_deep_copies :: proc(t: ^testing.T) {
+test_union_inside_a_plain_struct_field_registers_and_deep_copies :: proc(
+	t: ^testing.T,
+) {
 	register_test_types()
 	info, ok := get_type_info_ptr(typeid_of(Union_In_Plain_Field_Message))
 	testing.expect(t, ok, "a union inside a plain struct field registers")
@@ -1349,7 +1558,10 @@ test_union_inside_a_plain_struct_field_registers_and_deep_copies :: proc(t: ^tes
 	defer delete(content_backing)
 	original := Union_In_Plain_Field_Message {
 		id = 9,
-		wrapped = {id = 4, msg = Test_Chat{name = name_backing, content = content_backing}},
+		wrapped = {
+			id = 4,
+			msg = Test_Chat{name = name_backing, content = content_backing},
+		},
 	}
 
 	pool: Pool
@@ -1362,7 +1574,9 @@ test_union_inside_a_plain_struct_field_registers_and_deep_copies :: proc(t: ^tes
 	mem.set(raw_data(name_backing), 'x', len(name_backing))
 	mem.set(raw_data(content_backing), 'x', len(content_backing))
 
-	received := (^Union_In_Plain_Field_Message)(uintptr(msg.content) + TYPE_HEADER_SIZE)
+	received := (^Union_In_Plain_Field_Message)(
+		uintptr(msg.content) + TYPE_HEADER_SIZE,
+	)
 	chat, is_chat := received.wrapped.msg.(Test_Chat)
 	testing.expect(t, is_chat, "the chat variant survives")
 	testing.expect_value(t, received.id, 9)

@@ -6,8 +6,14 @@ import "core:fmt"
 import "core:testing"
 import "core:time"
 
-test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(2, base_port = 36000, log_level = test_log_level())
+test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask :: proc(
+	t: ^testing.T,
+) {
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 36000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 1)
@@ -15,7 +21,10 @@ test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask :: proc(t: ^testing.T) 
 	remote_misuse_err := -1
 	_, remote_ok := actod.spawn(
 		"forge-remote-responder",
-		Ask_Responder_Data{reply_err = &remote_reply_err, misuse_err = &remote_misuse_err},
+		Ask_Responder_Data {
+			reply_err = &remote_reply_err,
+			misuse_err = &remote_misuse_err,
+		},
 		Ask_Responder_Behaviour,
 	)
 	expect(t, remote_ok, "the remote responder spawned")
@@ -87,14 +96,20 @@ test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask :: proc(t: ^testing.T) 
 	_ = actod.sim_mesh_bind(mesh, 0)
 	expect(
 		t,
-		actod.send_message(requester, Do_Ask{target = silent, timeout_ms = 100, x = 1}) == .OK,
+		actod.send_message(
+			requester,
+			Do_Ask{target = silent, timeout_ms = 100, x = 1},
+		) ==
+		.OK,
 		"the local ask was triggered",
 	)
 	_ = actod.sim_mesh_run_until_idle(mesh)
 	expect(t, asked_token != 0, "the local ask was issued")
 
 	_ = actod.sim_mesh_bind(mesh, 1)
-	asking_node, asking_known := actod.get_node_by_name(actod.sim_mesh_name(mesh, 0))
+	asking_node, asking_known := actod.get_node_by_name(
+		actod.sim_mesh_name(mesh, 0),
+	)
 	expect(t, asking_known, "the peer knows the asking node")
 	forged := Ask_Answer {
 		y = -7,
@@ -123,7 +138,11 @@ test_sim_link_peer_cannot_forge_a_reply_to_a_pending_ask :: proc(t: ^testing.T) 
 	_ = actod.sim_mesh_run_until_idle(mesh)
 
 	expect_value(t, answer_y, 0)
-	expect(t, !replying_ok, "a forged reply from a peer must not be taken as the reply")
+	expect(
+		t,
+		!replying_ok,
+		"a forged reply from a peer must not be taken as the reply",
+	)
 
 	actod.sim_mesh_advance_clock(mesh, 200 * time.Millisecond)
 	_ = actod.sim_mesh_run_until_idle(mesh)

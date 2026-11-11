@@ -48,7 +48,9 @@ test_traffic_tally_counts_survive_batch_folds :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_traffic_tally_folds_peers_past_the_limit_into_the_unlisted_bucket :: proc(t: ^testing.T) {
+test_traffic_tally_folds_peers_past_the_limit_into_the_unlisted_bucket :: proc(
+	t: ^testing.T,
+) {
 	recorder := Traffic_Recorder {
 		allocator = context.allocator,
 	}
@@ -65,7 +67,11 @@ test_traffic_tally_folds_peers_past_the_limit_into_the_unlisted_bucket :: proc(t
 	testing.expect_value(t, len(histogram), TRAFFIC_PEER_LIMIT + 1)
 	testing.expect_value(t, histogram[PID(1)], u64(2))
 	testing.expect_value(t, histogram[PID(TRAFFIC_PEER_LIMIT)], u64(1))
-	testing.expect_value(t, histogram[UNLISTED_TRAFFIC_PEER], u64(unlisted_peers + 1))
+	testing.expect_value(
+		t,
+		histogram[UNLISTED_TRAFFIC_PEER],
+		u64(unlisted_peers + 1),
+	)
 	testing.expect(
 		t,
 		PID(TRAFFIC_PEER_LIMIT + 1) not_in histogram,

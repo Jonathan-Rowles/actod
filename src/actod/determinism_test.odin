@@ -38,5 +38,9 @@ virtual_tick_drives_mono_now_and_sleep :: proc(t: ^testing.T) {
 	before := mono_now()
 	runtime_sleep(5 * time.Millisecond)
 	after := mono_now()
-	testing.expect_value(t, time.tick_diff(before, after), 5 * time.Millisecond)
+	testing.expect_value(
+		t,
+		time.tick_diff(before, after),
+		5 * time.Millisecond,
+	)
 }

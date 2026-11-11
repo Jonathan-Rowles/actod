@@ -35,7 +35,13 @@ Blocking_Reap_Sentinel_Behaviour :: actod.Actor_Behaviour(Blocking_Test_Data) {
 	handle_message = blocking_test_handle,
 }
 
-spawn_blocking_reap_child :: proc(_name: string, _parent: actod.PID) -> (actod.PID, bool) {
+spawn_blocking_reap_child :: proc(
+	_name: string,
+	_parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return actod.spawn(
 		BLOCKING_REAP_CHILD_NAME,
 		Blocking_Test_Data{},
@@ -49,11 +55,17 @@ blocking_actor_still_registered :: proc(touch: ^Blocking_Last_Touch) -> bool {
 }
 
 blocking_reap_sentinel_reaped :: proc(state: rawptr) -> bool {
-	_, active := actod.get(&actod.NODE.actor_registry, (cast(^Blocking_Last_Touch)state).sentinel)
+	_, active := actod.get(
+		&actod.NODE.actor_registry,
+		(cast(^Blocking_Last_Touch)state).sentinel,
+	)
 	return !active
 }
 
-hold_blocking_actor_at_last_touch :: proc(actor: ^actod.Actor, pid: actod.PID) {
+hold_blocking_actor_at_last_touch :: proc(
+	actor: ^actod.Actor,
+	pid: actod.PID,
+) {
 	touch := &blocking_last_touch
 	touch.actor = actor
 	touch.pid = pid
@@ -83,9 +95,21 @@ test_blocking_child_is_live_at_its_last_touch :: proc(t: ^testing.T) {
 
 	restart_node_with("blocking-reap", nil, 3, spawn_blocking_reap_child)
 
-	expect(t, blocking_last_touch.reached, "the blocking child must return through its last touch")
-	expect(t, blocking_last_touch.sentinel_spawned, "the sentinel must spawn from the main thread")
-	expect(t, blocking_last_touch.sentinel_terminated, "the sentinel must accept its termination")
+	expect(
+		t,
+		blocking_last_touch.reached,
+		"the blocking child must return through its last touch",
+	)
+	expect(
+		t,
+		blocking_last_touch.sentinel_spawned,
+		"the sentinel must spawn from the main thread",
+	)
+	expect(
+		t,
+		blocking_last_touch.sentinel_terminated,
+		"the sentinel must accept its termination",
+	)
 	expect(
 		t,
 		blocking_last_touch.sentinel_reaped,

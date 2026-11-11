@@ -37,7 +37,12 @@ probe_init :: proc(d: ^Probe) {
 	_, _ = act.subscribe(&probe_topic)
 	_, _ = act.subscribe_topic(&probe_topic)
 	_, _ = act.subscribe_to_stats()
-	log.info("probe started", act.get_self_name(), act.get_self_pid(), act.get_parent_pid())
+	log.info(
+		"probe started",
+		act.get_self_name(),
+		act.get_self_pid(),
+		act.get_parent_pid(),
+	)
 }
 
 probe_handle_message :: proc(d: ^Probe, from: act.PID, msg: any) {
@@ -53,7 +58,11 @@ probe_handle_message :: proc(d: ^Probe, from: act.PID, msg: any) {
 		_ = act.send_children(d.n)
 		_, _ = act.replying_to()
 		_, _ = act.spawn_child("probe-child", Probe{}, probe_behaviour)
-		_, _ = act.spawn_child_default("probe-child-2", Probe{}, probe_behaviour)
+		_, _ = act.spawn_child_default(
+			"probe-child-2",
+			Probe{},
+			probe_behaviour,
+		)
 		act.broadcast(d.n)
 		act.publish(&probe_topic, d.n)
 		act.yield()
@@ -73,7 +82,9 @@ exercise_node_api :: proc() {
 	act.node_init(
 		"hot-check",
 		act.make_node_config(
-			actor_config = act.make_actor_config(logging = act.make_log_config()),
+			actor_config = act.make_actor_config(
+				logging = act.make_log_config(),
+			),
 			network = act.make_network_config(),
 		),
 	)
@@ -119,7 +130,11 @@ exercise_node_api :: proc() {
 	_ = act.get_topic_subscribers(&probe_topic, topic_subscribers[:])
 
 	transport: act.Transport_Strategy
-	remote_node, _ := act.register_node("other-node", net.Endpoint{}, transport)
+	remote_node, _ := act.register_node(
+		"other-node",
+		net.Endpoint{},
+		transport,
+	)
 	_, _ = act.get_node_info(remote_node)
 	_, _ = act.get_node_by_name("other-node")
 	act.unregister_node(remote_node)

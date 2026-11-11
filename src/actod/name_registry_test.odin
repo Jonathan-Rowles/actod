@@ -185,7 +185,11 @@ test_registry_clear :: proc(t: ^testing.T) {
 	registry_clear(&r)
 
 	testing.expect(t, registry_count(&r) == 0, "Count should be 0 after clear")
-	testing.expect(t, !registry_has(&r, "to_clear"), "Should not find entry after clear")
+	testing.expect(
+		t,
+		!registry_has(&r, "to_clear"),
+		"Should not find entry after clear",
+	)
 
 	val2 := Test_Registry_Value {
 		id   = 2,
@@ -209,7 +213,11 @@ test_registry_get_hash_and_name :: proc(t: ^testing.T) {
 
 	hash, hash_ok := registry_get_hash(&r, idx)
 	testing.expect(t, hash_ok, "Should get hash by index")
-	testing.expect(t, hash == fnv1a_hash("hash_name_test"), "Hash should match fnv1a")
+	testing.expect(
+		t,
+		hash == fnv1a_hash("hash_name_test"),
+		"Hash should match fnv1a",
+	)
 
 	name, name_ok := registry_get_name(&r, idx)
 	testing.expect(t, name_ok, "Should get name by index")
@@ -227,7 +235,11 @@ test_registry_has :: proc(t: ^testing.T) {
 	r: Name_Registry(Test_Registry_Value, MAX_TEST_ENTRIES)
 	defer registry_destroy(&r)
 
-	testing.expect(t, !registry_has(&r, "missing"), "Should not have unregistered name")
+	testing.expect(
+		t,
+		!registry_has(&r, "missing"),
+		"Should not have unregistered name",
+	)
 
 	val := Test_Registry_Value {
 		id   = 1,
@@ -235,8 +247,16 @@ test_registry_has :: proc(t: ^testing.T) {
 	}
 	registry_register(&r, "exists", val)
 
-	testing.expect(t, registry_has(&r, "exists"), "Should have registered name")
-	testing.expect(t, !registry_has(&r, "still_missing"), "Should not have other name")
+	testing.expect(
+		t,
+		registry_has(&r, "exists"),
+		"Should have registered name",
+	)
+	testing.expect(
+		t,
+		!registry_has(&r, "still_missing"),
+		"Should not have other name",
+	)
 }
 
 NAME_REG_CONCURRENT_THREADS :: 8
@@ -295,10 +315,15 @@ test_registry_concurrent_registration :: proc(t: ^testing.T) {
 		thread.destroy(threads[i])
 	}
 
-	testing.expect(t, sync.atomic_load(&errors) == 0, "No errors during concurrent registration")
 	testing.expect(
 		t,
-		registry_count(&r) == NAME_REG_CONCURRENT_THREADS * NAME_REG_OPS_PER_THREAD,
+		sync.atomic_load(&errors) == 0,
+		"No errors during concurrent registration",
+	)
+	testing.expect(
+		t,
+		registry_count(&r) ==
+		NAME_REG_CONCURRENT_THREADS * NAME_REG_OPS_PER_THREAD,
 		"All unique entries should be registered",
 	)
 }
@@ -334,7 +359,10 @@ test_registry_concurrent_lookup_during_registration :: proc(t: ^testing.T) {
 		for _ in 0 ..< 100 {
 			for i in 0 ..< 50 {
 				n := write_thread_key(lbuf[:], 0, i)
-				_, found := registry_get_by_name(ctx.registry, string(lbuf[:n]))
+				_, found := registry_get_by_name(
+					ctx.registry,
+					string(lbuf[:n]),
+				)
 				if !found {
 					sync.atomic_add(ctx.errors, 1)
 				}
@@ -369,7 +397,10 @@ test_registry_concurrent_lookup_during_registration :: proc(t: ^testing.T) {
 			registry = &r,
 			errors   = &errors,
 		}
-		reader_threads[i] = thread.create_and_start_with_data(&reader_contexts[i], reader_worker)
+		reader_threads[i] = thread.create_and_start_with_data(
+			&reader_contexts[i],
+			reader_worker,
+		)
 	}
 
 	for i in 0 ..< WRITERS {
@@ -378,7 +409,10 @@ test_registry_concurrent_lookup_during_registration :: proc(t: ^testing.T) {
 			errors   = &errors,
 			id       = i + 1,
 		}
-		writer_threads[i] = thread.create_and_start_with_data(&writer_contexts[i], writer_worker)
+		writer_threads[i] = thread.create_and_start_with_data(
+			&writer_contexts[i],
+			writer_worker,
+		)
 	}
 
 	for i in 0 ..< WRITERS {
@@ -405,10 +439,18 @@ test_fnv1a_hash_consistency :: proc(t: ^testing.T) {
 	testing.expect(t, h1 == h2, "Same string should produce same hash")
 
 	h3 := fnv1a_hash("different_string")
-	testing.expect(t, h1 != h3, "Different strings should produce different hashes")
+	testing.expect(
+		t,
+		h1 != h3,
+		"Different strings should produce different hashes",
+	)
 
 	h4 := fnv1a_hash("")
-	testing.expect(t, h4 == 14695981039346656037, "Empty string should return FNV offset basis")
+	testing.expect(
+		t,
+		h4 == 14695981039346656037,
+		"Empty string should return FNV offset basis",
+	)
 }
 
 @(private)

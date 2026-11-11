@@ -21,8 +21,22 @@ Encryption_Hooks :: struct {
 		keys: ^Noise_Transport,
 		deadline: time.Time,
 	) -> bool,
-	seal:      proc(keys: ^Noise_Transport, plaintext: []byte, dst: []byte) -> (int, bool),
-	open:      proc(keys: ^Noise_Transport, ciphertext: []byte, dst: []byte) -> ([]byte, bool),
+	seal:      proc(
+		keys: ^Noise_Transport,
+		plaintext: []byte,
+		dst: []byte,
+	) -> (
+		int,
+		bool,
+	),
+	open:      proc(
+		keys: ^Noise_Transport,
+		ciphertext: []byte,
+		dst: []byte,
+	) -> (
+		[]byte,
+		bool,
+	),
 }
 
 encryption_hooks: Encryption_Hooks

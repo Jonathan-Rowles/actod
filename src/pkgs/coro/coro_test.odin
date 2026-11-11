@@ -16,7 +16,11 @@ test_simple :: proc(t: ^testing.T) {
 
 	res = resume(co)
 	testing.expect(t, res == .Success, "resume 1 failed")
-	testing.expect(t, status(co) == .Suspended, "should be suspended after yield")
+	testing.expect(
+		t,
+		status(co) == .Suspended,
+		"should be suspended after yield",
+	)
 
 	res = resume(co)
 	testing.expect(t, res == .Success, "resume 2 failed")
@@ -39,10 +43,22 @@ test_nested_coroutines :: proc(t: ^testing.T) {
 
 		testing.expect(t, running() == co2, "running() should be co2")
 		testing.expect(t, status(co2) == .Running, "co2 should be Running")
-		testing.expect(t, get_user_data(co2) != nil, "user_data should not be nil")
+		testing.expect(
+			t,
+			get_user_data(co2) != nil,
+			"user_data should not be nil",
+		)
 		co := (cast(^^Coro)get_user_data(co2))^
-		testing.expect(t, co != nil, "coro pointer via user_data should not be nil")
-		testing.expect(t, co == running_test_co, "coro pointer should match the outer coroutine")
+		testing.expect(
+			t,
+			co != nil,
+			"coro pointer via user_data should not be nil",
+		)
+		testing.expect(
+			t,
+			co == running_test_co,
+			"coro pointer should match the outer coroutine",
+		)
 		testing.expect(t, status(co) == .Normal, "outer co should be Normal")
 
 		yield(running())
@@ -61,13 +77,25 @@ test_nested_coroutines :: proc(t: ^testing.T) {
 		desc.user_data = &co_ptr
 		co2, res := create(&desc)
 		testing.expect(t, res == .Success, "create inner failed")
-		testing.expect(t, get_user_data(co2) == &co_ptr, "user_data co ptr mismatch before resume")
+		testing.expect(
+			t,
+			get_user_data(co2) == &co_ptr,
+			"user_data co ptr mismatch before resume",
+		)
 
 		testing.expect(t, resume(co2) == .Success, "resume inner 1 failed")
 		testing.expect(t, resume(co2) == .Success, "resume inner 2 failed")
-		testing.expect(t, get_user_data(co2) == &co_ptr, "user_data co ptr should persist after resume")
+		testing.expect(
+			t,
+			get_user_data(co2) == &co_ptr,
+			"user_data co ptr should persist after resume",
+		)
 		testing.expect(t, status(co2) == .Dead, "inner should be Dead")
-		testing.expect(t, status(co) == .Running, "outer should still be Running")
+		testing.expect(
+			t,
+			status(co) == .Running,
+			"outer should still be Running",
+		)
 		testing.expect(t, running() == co, "running() should be outer co")
 		testing.expect(t, destroy(co2) == .Success, "destroy inner failed")
 	}
@@ -102,7 +130,11 @@ test_user_data :: proc(t: ^testing.T) {
 	desc.user_data = &dummy
 	co, res := create(&desc)
 	testing.expect(t, res == .Success, "create failed")
-	testing.expect(t, get_user_data(co) == &dummy, "user_data mismatch before resume")
+	testing.expect(
+		t,
+		get_user_data(co) == &dummy,
+		"user_data mismatch before resume",
+	)
 
 	resume(co)
 	destroy(co)
@@ -181,7 +213,9 @@ test_fibonacci :: proc(t: ^testing.T) {
 		1134903170,
 	}
 
-	data := Fibonacci_Data{max = 1000000000}
+	data := Fibonacci_Data {
+		max = 1000000000,
+	}
 	desc := desc_init(fib_entry)
 	desc.user_data = &data
 	co, res := create(&desc)
@@ -191,7 +225,11 @@ test_fibonacci :: proc(t: ^testing.T) {
 	for status(co) == .Suspended {
 		res = resume(co)
 		testing.expect(t, res == .Success, "resume failed")
-		testing.expect(t, get_user_data(co) == &data, "user_data mismatch during iteration")
+		testing.expect(
+			t,
+			get_user_data(co) == &data,
+			"user_data mismatch during iteration",
+		)
 
 		if i < len(expected) {
 			testing.expect_value(t, data.value, expected[i])
@@ -227,7 +265,11 @@ test_mem_stress :: proc(t: ^testing.T) {
 		co := coros^[i]
 		res := resume(co)
 		testing.expect(t, res == .Success, fmt.tprintf("resume2 %d failed", i))
-		testing.expect(t, status(co) == .Dead, fmt.tprintf("co %d should be dead", i))
+		testing.expect(
+			t,
+			status(co) == .Dead,
+			fmt.tprintf("co %d should be dead", i),
+		)
 		destroy(co)
 	}
 }
@@ -251,7 +293,11 @@ test_error_cases :: proc(t: ^testing.T) {
 	testing.expect(t, status(co) == .Dead, "should be dead")
 
 	res = resume(co)
-	testing.expect(t, res == .Not_Suspended, "resume dead should return Not_Suspended")
+	testing.expect(
+		t,
+		res == .Not_Suspended,
+		"resume dead should return Not_Suspended",
+	)
 
 	destroy(co)
 }
@@ -269,10 +315,22 @@ test_combined_testsuite :: proc(t: ^testing.T) {
 
 		testing.expect(t, running() == co2, "running() should be co2")
 		testing.expect(t, status(co2) == .Running, "co2 should be Running")
-		testing.expect(t, get_user_data(co2) != nil, "user_data should not be nil")
+		testing.expect(
+			t,
+			get_user_data(co2) != nil,
+			"user_data should not be nil",
+		)
 		co := (cast(^^Coro)get_user_data(co2))^
-		testing.expect(t, co != nil, "coro pointer via user_data should not be nil")
-		testing.expect(t, co == running_test_co, "coro pointer should match the outer coroutine")
+		testing.expect(
+			t,
+			co != nil,
+			"coro pointer via user_data should not be nil",
+		)
+		testing.expect(
+			t,
+			co == running_test_co,
+			"coro pointer should match the outer coroutine",
+		)
 		testing.expect(t, status(co) == .Normal, "outer co should be Normal")
 
 		yield(running())
@@ -304,13 +362,25 @@ test_combined_testsuite :: proc(t: ^testing.T) {
 		inner_desc.user_data = &co_ptr
 		co2, res := create(&inner_desc)
 		testing.expect(t, res == .Success, "create inner failed")
-		testing.expect(t, get_user_data(co2) == &co_ptr, "user_data co ptr mismatch before resume")
+		testing.expect(
+			t,
+			get_user_data(co2) == &co_ptr,
+			"user_data co ptr mismatch before resume",
+		)
 
 		testing.expect(t, resume(co2) == .Success, "resume inner 1 failed")
 		testing.expect(t, resume(co2) == .Success, "resume inner 2 failed")
-		testing.expect(t, get_user_data(co2) == &co_ptr, "user_data co ptr should persist after resume")
+		testing.expect(
+			t,
+			get_user_data(co2) == &co_ptr,
+			"user_data co ptr should persist after resume",
+		)
 		testing.expect(t, status(co2) == .Dead, "inner should be Dead")
-		testing.expect(t, status(co) == .Running, "outer should still be Running")
+		testing.expect(
+			t,
+			status(co) == .Running,
+			"outer should still be Running",
+		)
 		testing.expect(t, running() == co, "running() should be outer co")
 		testing.expect(t, destroy(co2) == .Success, "destroy inner failed")
 	}
@@ -343,6 +413,14 @@ test_combined_testsuite :: proc(t: ^testing.T) {
 
 @(test)
 test_result_description :: proc(t: ^testing.T) {
-	testing.expect(t, result_description(.Success) == "No error", "Success desc")
-	testing.expect(t, result_description(.Out_Of_Memory) == "Out of memory", "Out_Of_Memory desc")
+	testing.expect(
+		t,
+		result_description(.Success) == "No error",
+		"Success desc",
+	)
+	testing.expect(
+		t,
+		result_description(.Out_Of_Memory) == "Out of memory",
+		"Out_Of_Memory desc",
+	)
 }

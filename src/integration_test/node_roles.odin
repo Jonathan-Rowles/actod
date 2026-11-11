@@ -50,13 +50,29 @@ run_node_role :: proc(command: string) {
 }
 
 run_send_once :: proc() {
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
-	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "dist_receiver"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+	target_actor :=
+		os.lookup_env(
+			"TARGET_ACTOR",
+			context.temp_allocator,
+		) or_else "dist_receiver"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
 	enable_encryption :=
-		(os.lookup_env("ENABLE_ENCRYPTION", context.temp_allocator) or_else "0") == "1"
+		(os.lookup_env(
+				"ENABLE_ENCRYPTION",
+				context.temp_allocator,
+			) or_else "0") ==
+		"1"
 
 	target_port := 16001
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -84,7 +100,11 @@ run_send_once :: proc() {
 		port    = target_port,
 	}
 
-	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, ok := actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+	)
 	if !ok {
 		fmt.println("Failed to register target node")
 		os.exit(1)
@@ -92,7 +112,11 @@ run_send_once :: proc() {
 
 	time.sleep(250 * time.Millisecond)
 
-	msg := shared.make_two_node_message(1, "Hello from send-once mode", "SendOnceNode")
+	msg := shared.make_two_node_message(
+		1,
+		"Hello from send-once mode",
+		"SendOnceNode",
+	)
 
 	err := actod.send_to(target_actor, target_node, msg)
 	if err != .OK {
@@ -107,16 +131,36 @@ run_send_once :: proc() {
 }
 
 run_send_burst :: proc() {
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
-	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "burst_receiver"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+	target_actor :=
+		os.lookup_env(
+			"TARGET_ACTOR",
+			context.temp_allocator,
+		) or_else "burst_receiver"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	message_count_str := os.lookup_env("MESSAGE_COUNT", context.temp_allocator) or_else "1000"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	message_count_str :=
+		os.lookup_env("MESSAGE_COUNT", context.temp_allocator) or_else "1000"
 	enable_encryption :=
-		(os.lookup_env("ENABLE_ENCRYPTION", context.temp_allocator) or_else "0") == "1"
+		(os.lookup_env(
+				"ENABLE_ENCRYPTION",
+				context.temp_allocator,
+			) or_else "0") ==
+		"1"
 	scale_threshold_str :=
-		os.lookup_env("RING_SCALE_THRESHOLD", context.temp_allocator) or_else "0"
+		os.lookup_env(
+			"RING_SCALE_THRESHOLD",
+			context.temp_allocator,
+		) or_else "0"
 
 	target_port := 16001
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -130,7 +174,8 @@ run_send_burst :: proc() {
 
 	ring_config := actod.DEFAULT_CONNECTION_RING_CONFIG
 	sender_count := 1
-	if threshold_val, ok := strconv.parse_int(scale_threshold_str); ok && threshold_val > 0 {
+	if threshold_val, ok := strconv.parse_int(scale_threshold_str);
+	   ok && threshold_val > 0 {
 		ring_config.scale_up_contention_threshold = u32(threshold_val)
 		ring_config.max_pool_rings = 4
 		sender_count = 4
@@ -155,7 +200,12 @@ run_send_burst :: proc() {
 		port    = target_port,
 	}
 
-	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, ok := actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
 	if !ok {
 		fmt.println("Failed to register target node")
 		os.exit(1)
@@ -175,12 +225,20 @@ run_send_burst :: proc() {
 		init = proc(data: ^Burst_Sender_Data) {
 			for i in 0 ..< data.message_count {
 				msg_content := fmt.tprintf("Burst msg %d", i)
-				msg := shared.make_two_node_message(i, msg_content, "BurstSenderNode")
+				msg := shared.make_two_node_message(
+					i,
+					msg_content,
+					"BurstSenderNode",
+				)
 				delete(msg_content)
 
 				sent := false
 				for _ in 0 ..< 500 {
-					err := actod.send_to(data.target_actor, data.target_node, msg)
+					err := actod.send_to(
+						data.target_actor,
+						data.target_node,
+						msg,
+					)
 					if err == .OK {
 						sent = true
 						break
@@ -207,11 +265,19 @@ run_send_burst :: proc() {
 				sync.sema_post(data.done)
 			}
 		},
-		handle_message = proc(data: ^Burst_Sender_Data, from: actod.PID, msg: any) {},
+		handle_message = proc(
+			data: ^Burst_Sender_Data,
+			from: actod.PID,
+			msg: any,
+		) {},
 	}
 
 	if sender_count > 1 {
-		warmup := shared.make_two_node_message(0, "scale warmup", "BurstSenderNode")
+		warmup := shared.make_two_node_message(
+			0,
+			"scale warmup",
+			"BurstSenderNode",
+		)
 		if actod.send_to(target_actor, target_node, warmup) != .OK {
 			fmt.println("Failed to send scale warmup message")
 			os.exit(1)
@@ -226,7 +292,9 @@ run_send_burst :: proc() {
 			time.sleep(10 * time.Millisecond)
 		}
 
-		conn_pid := actod.PID(sync.atomic_load(cast(^u64)&actod.NODE.connection_actors[node_id]))
+		conn_pid := actod.PID(
+			sync.atomic_load(cast(^u64)&actod.NODE.connection_actors[node_id]),
+		)
 		if conn_pid != 0 {
 			_ = actod.send_message(conn_pid, actod.Scale_Up_Request{})
 			time.sleep(50 * time.Millisecond)
@@ -264,7 +332,10 @@ run_send_burst :: proc() {
 
 	if node_id, node_ok := actod.get_node_by_name(target_node); node_ok {
 		if pool := actod.get_connection_pool(node_id); pool != nil {
-			fmt.printf("[burst] active rings: %d\n", actod.pool_active_count(pool))
+			fmt.printf(
+				"[burst] active rings: %d\n",
+				actod.pool_active_count(pool),
+			)
 		}
 	}
 
@@ -276,12 +347,22 @@ run_send_burst :: proc() {
 }
 
 run_relay_node :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "RelayNode2"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16002"
+	node_name :=
+		os.lookup_env("NODE_NAME", context.temp_allocator) or_else "RelayNode2"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16002"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "RelayNode3"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16003"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "RelayNode3"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16003"
 
 	node_port := 16002
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -323,7 +404,11 @@ run_relay_node :: proc() {
 	}
 
 	Relay_Actor_Behaviour :: actod.Actor_Behaviour(Relay_Actor_Data) {
-		handle_message = proc(data: ^Relay_Actor_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Relay_Actor_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Network_Test_Request:
 				new_req := shared.Network_Test_Request {
@@ -332,7 +417,11 @@ run_relay_node :: proc() {
 				}
 				err := actod.send_to("relay_actor", data.target_node, new_req)
 				if err == .OK {
-					fmt.printf("[%s] Forwarded request to %s\n", data.node_name, data.target_node)
+					fmt.printf(
+						"[%s] Forwarded request to %s\n",
+						data.node_name,
+						data.target_node,
+					)
 				}
 			}
 		},
@@ -356,13 +445,27 @@ run_relay_node :: proc() {
 }
 
 run_echo_back :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "RelayNode3"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16003"
+	node_name :=
+		os.lookup_env("NODE_NAME", context.temp_allocator) or_else "RelayNode3"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16003"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	echo_to_node := os.lookup_env("ECHO_TO_NODE", context.temp_allocator) or_else "TestNode1"
-	echo_to_port_str := os.lookup_env("ECHO_TO_PORT", context.temp_allocator) or_else "16001"
-	echo_to_actor := os.lookup_env("ECHO_TO_ACTOR", context.temp_allocator) or_else "origin_actor"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	echo_to_node :=
+		os.lookup_env(
+			"ECHO_TO_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	echo_to_port_str :=
+		os.lookup_env("ECHO_TO_PORT", context.temp_allocator) or_else "16001"
+	echo_to_actor :=
+		os.lookup_env(
+			"ECHO_TO_ACTOR",
+			context.temp_allocator,
+		) or_else "origin_actor"
 
 	node_port := 16003
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -405,7 +508,11 @@ run_echo_back :: proc() {
 	}
 
 	Echo_Back_Behaviour :: actod.Actor_Behaviour(Echo_Back_Data) {
-		handle_message = proc(data: ^Echo_Back_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Echo_Back_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Network_Test_Request:
 				echo_msg := fmt.tprintf("Echo: %s", m.message)
@@ -416,7 +523,11 @@ run_echo_back :: proc() {
 					message   = echo_msg,
 					from_node = data.node_name,
 				}
-				err := actod.send_to(data.echo_to_actor, data.echo_to_node, echo_resp)
+				err := actod.send_to(
+					data.echo_to_actor,
+					data.echo_to_node,
+					echo_resp,
+				)
 				if err == .OK {
 					fmt.printf(
 						"[%s] Sent echo back to %s/%s\n",
@@ -448,20 +559,44 @@ run_echo_back :: proc() {
 }
 
 run_lifecycle_server :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "LifecycleNode"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16010"
-	auth_password := os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_password"
+	node_name :=
+		os.lookup_env(
+			"NODE_NAME",
+			context.temp_allocator,
+		) or_else "LifecycleNode"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16010"
+	auth_password :=
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_password"
 	heartbeat_interval_str :=
-		os.lookup_env("HEARTBEAT_INTERVAL_MS", context.temp_allocator) or_else "1000"
+		os.lookup_env(
+			"HEARTBEAT_INTERVAL_MS",
+			context.temp_allocator,
+		) or_else "1000"
 	heartbeat_timeout_str :=
-		os.lookup_env("HEARTBEAT_TIMEOUT_MS", context.temp_allocator) or_else "3000"
+		os.lookup_env(
+			"HEARTBEAT_TIMEOUT_MS",
+			context.temp_allocator,
+		) or_else "3000"
 	reconnect_initial_str :=
-		os.lookup_env("RECONNECT_INITIAL_MS", context.temp_allocator) or_else "2000"
+		os.lookup_env(
+			"RECONNECT_INITIAL_MS",
+			context.temp_allocator,
+		) or_else "2000"
 	reconnect_retry_str :=
-		os.lookup_env("RECONNECT_RETRY_MS", context.temp_allocator) or_else "3000"
-	reply_to_actor := os.lookup_env("REPLY_TO_ACTOR", context.temp_allocator) or_else ""
-	reply_to_node := os.lookup_env("REPLY_TO_NODE", context.temp_allocator) or_else ""
-	reply_to_port_str := os.lookup_env("REPLY_TO_PORT", context.temp_allocator) or_else "16001"
+		os.lookup_env(
+			"RECONNECT_RETRY_MS",
+			context.temp_allocator,
+		) or_else "3000"
+	reply_to_actor :=
+		os.lookup_env("REPLY_TO_ACTOR", context.temp_allocator) or_else ""
+	reply_to_node :=
+		os.lookup_env("REPLY_TO_NODE", context.temp_allocator) or_else ""
+	reply_to_port_str :=
+		os.lookup_env("REPLY_TO_PORT", context.temp_allocator) or_else "16001"
 
 	node_port := 16010
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -501,10 +636,14 @@ run_lifecycle_server :: proc() {
 			network = actod.make_network_config(
 				port = node_port,
 				auth_password = auth_password,
-				heartbeat_interval = time.Duration(heartbeat_interval) * time.Millisecond,
-				heartbeat_timeout = time.Duration(heartbeat_timeout) * time.Millisecond,
-				reconnect_initial_delay = time.Duration(reconnect_initial) * time.Millisecond,
-				reconnect_retry_delay = time.Duration(reconnect_retry) * time.Millisecond,
+				heartbeat_interval = time.Duration(heartbeat_interval) *
+				time.Millisecond,
+				heartbeat_timeout = time.Duration(heartbeat_timeout) *
+				time.Millisecond,
+				reconnect_initial_delay = time.Duration(reconnect_initial) *
+				time.Millisecond,
+				reconnect_retry_delay = time.Duration(reconnect_retry) *
+				time.Millisecond,
 			),
 			actor_config = actod.make_actor_config(
 				logging = actod.make_log_config(level = test_log_level()),
@@ -518,7 +657,11 @@ run_lifecycle_server :: proc() {
 			address = net.IP4_Loopback,
 			port    = reply_to_port,
 		}
-		_, _ = actod.register_node(reply_to_node, reply_addr, .TCP_Custom_Protocol)
+		_, _ = actod.register_node(
+			reply_to_node,
+			reply_addr,
+			.TCP_Custom_Protocol,
+		)
 	}
 
 	Lifecycle_Echo_Data :: struct {
@@ -529,7 +672,11 @@ run_lifecycle_server :: proc() {
 	}
 
 	Lifecycle_Echo_Behaviour :: actod.Actor_Behaviour(Lifecycle_Echo_Data) {
-		handle_message = proc(data: ^Lifecycle_Echo_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Lifecycle_Echo_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Network_Test_Request:
 				data.received_count += 1
@@ -539,7 +686,11 @@ run_lifecycle_server :: proc() {
 					from_node = data.name,
 				}
 				if data.reply_to_actor != "" && data.reply_to_node != "" {
-					_ = actod.send_to(data.reply_to_actor, data.reply_to_node, response)
+					_ = actod.send_to(
+						data.reply_to_actor,
+						data.reply_to_node,
+						response,
+					)
 				} else {
 					_ = actod.send_message(from, response)
 				}
@@ -566,12 +717,25 @@ run_lifecycle_server :: proc() {
 }
 
 run_lifecycle_broadcast :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "BroadcastNode"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16050"
+	node_name :=
+		os.lookup_env(
+			"NODE_NAME",
+			context.temp_allocator,
+		) or_else "BroadcastNode"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16050"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
 
 	node_port := 16050
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -605,7 +769,12 @@ run_lifecycle_broadcast :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
 
 	_ = wait_for_connection_ready(target_node)
 
@@ -614,7 +783,11 @@ run_lifecycle_broadcast :: proc() {
 	}
 
 	Broadcast_Test_Behaviour :: actod.Actor_Behaviour(Broadcast_Test_Data) {
-		handle_message = proc(data: ^Broadcast_Test_Data, from: actod.PID, msg: any) {},
+		handle_message = proc(
+			data: ^Broadcast_Test_Data,
+			from: actod.PID,
+			msg: any,
+		) {},
 	}
 
 	_, ok := actod.spawn(
@@ -635,12 +808,25 @@ run_lifecycle_broadcast :: proc() {
 }
 
 run_registry_exchange :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "RegistryNode"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16060"
+	node_name :=
+		os.lookup_env(
+			"NODE_NAME",
+			context.temp_allocator,
+		) or_else "RegistryNode"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "16060"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
 
 	node_port := 16060
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -674,8 +860,14 @@ run_registry_exchange :: proc() {
 		name: string,
 	}
 
-	Registry_Exchange_Behaviour :: actod.Actor_Behaviour(Registry_Exchange_Data) {
-		handle_message = proc(data: ^Registry_Exchange_Data, from: actod.PID, msg: any) {},
+	Registry_Exchange_Behaviour :: actod.Actor_Behaviour(
+		Registry_Exchange_Data,
+	) {
+		handle_message = proc(
+			data: ^Registry_Exchange_Data,
+			from: actod.PID,
+			msg: any,
+		) {},
 	}
 
 	_, ok1 := actod.spawn(
@@ -702,7 +894,12 @@ run_registry_exchange :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
 
 	fmt.println("READY")
 
@@ -715,8 +912,14 @@ Supervision_Worker_Data :: struct {
 	name: string,
 }
 
-Supervision_Worker_Behaviour :: actod.Actor_Behaviour(Supervision_Worker_Data) {
-	handle_message = proc(data: ^Supervision_Worker_Data, from: actod.PID, msg: any) {
+Supervision_Worker_Behaviour :: actod.Actor_Behaviour(
+	Supervision_Worker_Data,
+) {
+	handle_message = proc(
+		data: ^Supervision_Worker_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		switch m in msg {
 		case shared.Supervision_Crash_Command:
 			actod.self_terminate(m.reason)
@@ -730,7 +933,13 @@ Supervision_Worker_Behaviour :: actod.Actor_Behaviour(Supervision_Worker_Data) {
 	},
 }
 
-spawn_supervision_worker :: proc(name: string, parent_pid: actod.PID) -> (actod.PID, bool) {
+spawn_supervision_worker :: proc(
+	name: string,
+	parent_pid: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	data := Supervision_Worker_Data {
 		name = name,
 	}
@@ -744,12 +953,25 @@ spawn_supervision_worker :: proc(name: string, parent_pid: actod.PID) -> (actod.
 }
 
 run_supervision_server :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "SupervisionNode"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "17100"
+	node_name :=
+		os.lookup_env(
+			"NODE_NAME",
+			context.temp_allocator,
+		) or_else "SupervisionNode"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "17100"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17090"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17090"
 
 	node_port := 17100
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -779,7 +1001,10 @@ run_supervision_server :: proc() {
 	)
 	defer actod.shutdown_node()
 
-	_ = actod.register_spawn_func("supervision_worker", spawn_supervision_worker)
+	_ = actod.register_spawn_func(
+		"supervision_worker",
+		spawn_supervision_worker,
+	)
 	_ = actod.register_spawn_func("hello_probe", spawn_hello_probe)
 
 	target_addr := net.Endpoint {
@@ -799,16 +1024,33 @@ Hello_Probe_Data :: struct {
 	die_timer: u32,
 }
 
-spawn_hello_probe :: proc(name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_hello_probe :: proc(
+	name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	behaviour := actod.Actor_Behaviour(Hello_Probe_Data) {
 		init = proc(d: ^Hello_Probe_Data) {
-			msg := shared.make_two_node_message(77, "hello from remote child", "hello_probe")
+			msg := shared.make_two_node_message(
+				77,
+				"hello from remote child",
+				"hello_probe",
+			)
 			if err := actod.send_message_to_parent(msg); err != .OK {
-				fmt.printf("hello_probe: send_message_to_parent failed: %v\n", err)
+				fmt.printf(
+					"hello_probe: send_message_to_parent failed: %v\n",
+					err,
+				)
 			}
 			d.die_timer, _ = actod.set_timer(150 * time.Millisecond, false)
 		},
-		handle_message = proc(d: ^Hello_Probe_Data, from: actod.PID, content: any) {
+		handle_message = proc(
+			d: ^Hello_Probe_Data,
+			from: actod.PID,
+			content: any,
+		) {
 			switch _ in content {
 			case actod.Timer_Tick:
 				actod.self_terminate()
@@ -825,10 +1067,18 @@ spawn_hello_probe :: proc(name: string, parent: actod.PID) -> (actod.PID, bool) 
 }
 
 run_latecomer_publisher :: proc() {
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17190"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17190"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
 
 	target_port := 17190
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -851,13 +1101,20 @@ run_latecomer_publisher :: proc() {
 	)
 	defer actod.shutdown_node()
 
-	publisher_type, _ := actod.register_actor_type("pubsub_broadcast_publisher")
+	publisher_type, _ := actod.register_actor_type(
+		"pubsub_broadcast_publisher",
+	)
 
 	target_addr := net.Endpoint {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
 
 	Latecomer_Pub_Data :: struct {
 		tick: u32,
@@ -869,16 +1126,26 @@ run_latecomer_publisher :: proc() {
 		init = proc(d: ^Latecomer_Pub_Data) {
 			d.tick, _ = actod.set_timer(100 * time.Millisecond, true)
 		},
-		handle_message = proc(d: ^Latecomer_Pub_Data, from: actod.PID, content: any) {
+		handle_message = proc(
+			d: ^Latecomer_Pub_Data,
+			from: actod.PID,
+			content: any,
+		) {
 			switch _ in content {
 			case actod.Timer_Tick:
 				d.seq += 1
-				actod.broadcast(shared.Pubsub_Broadcast_Msg{value = 42, timestamp = d.seq})
+				actod.broadcast(
+					shared.Pubsub_Broadcast_Msg{value = 42, timestamp = d.seq},
+				)
 			}
 		},
 	}
 
-	_, spawn_ok := actod.spawn("latecomer_publisher", Latecomer_Pub_Data{}, behaviour)
+	_, spawn_ok := actod.spawn(
+		"latecomer_publisher",
+		Latecomer_Pub_Data{},
+		behaviour,
+	)
 	if !spawn_ok {
 		fmt.println("Failed to spawn latecomer publisher")
 		os.exit(1)
@@ -892,12 +1159,22 @@ run_latecomer_publisher :: proc() {
 }
 
 run_mesh_middle :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "MeshNodeB"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "17152"
+	node_name :=
+		os.lookup_env("NODE_NAME", context.temp_allocator) or_else "MeshNodeB"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "17152"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17151"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17151"
 
 	node_port := 17152
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -931,7 +1208,12 @@ run_mesh_middle :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
 
 	print_ready_once_listening()
 
@@ -941,12 +1223,22 @@ run_mesh_middle :: proc() {
 }
 
 run_mesh_leaf :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else "MeshNodeC"
-	node_port_str := os.lookup_env("NODE_PORT", context.temp_allocator) or_else "17153"
+	node_name :=
+		os.lookup_env("NODE_NAME", context.temp_allocator) or_else "MeshNodeC"
+	node_port_str :=
+		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "17153"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "MeshNodeB"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17152"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "MeshNodeB"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17152"
 
 	node_port := 17153
 	if port_val, ok := strconv.parse_int(node_port_str); ok {
@@ -980,7 +1272,12 @@ run_mesh_leaf :: proc() {
 		address = net.IP4_Loopback,
 		port    = target_port,
 	}
-	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol, connect = true)
+	_, _ = actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+		connect = true,
+	)
 
 	_ = wait_for_connection_ready(target_node)
 
@@ -989,7 +1286,11 @@ run_mesh_leaf :: proc() {
 	}
 
 	Mesh_Leaf_Behaviour :: actod.Actor_Behaviour(Mesh_Leaf_Data) {
-		handle_message = proc(data: ^Mesh_Leaf_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Mesh_Leaf_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Network_Test_Request:
 				response := shared.Network_Test_Response {
@@ -1002,7 +1303,11 @@ run_mesh_leaf :: proc() {
 		},
 	}
 
-	_, ok := actod.spawn("mesh_actor", Mesh_Leaf_Data{name = node_name}, Mesh_Leaf_Behaviour)
+	_, ok := actod.spawn(
+		"mesh_actor",
+		Mesh_Leaf_Data{name = node_name},
+		Mesh_Leaf_Behaviour,
+	)
 	if !ok {
 		fmt.println("Failed to spawn mesh_actor")
 		os.exit(1)
@@ -1016,12 +1321,25 @@ run_mesh_leaf :: proc() {
 }
 
 run_pubsub_subscriber :: proc() {
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17160"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "17160"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	ack_actor := os.lookup_env("ACK_ACTOR", context.temp_allocator) or_else "pubsub_ack_collector"
-	subscriber_count_str := os.lookup_env("SUBSCRIBER_COUNT", context.temp_allocator) or_else "5"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	ack_actor :=
+		os.lookup_env(
+			"ACK_ACTOR",
+			context.temp_allocator,
+		) or_else "pubsub_ack_collector"
+	subscriber_count_str :=
+		os.lookup_env("SUBSCRIBER_COUNT", context.temp_allocator) or_else "5"
 
 	target_port := 17160
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -1055,9 +1373,15 @@ run_pubsub_subscriber :: proc() {
 	}
 	_, _ = actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
 
-	PUBLISHER_TYPE, _ := actod.register_actor_type("pubsub_broadcast_publisher")
+	PUBLISHER_TYPE, _ := actod.register_actor_type(
+		"pubsub_broadcast_publisher",
+	)
 
-	_ = actod.send_to("connection_warmup", target_node, shared.Pubsub_Broadcast_Msg{})
+	_ = actod.send_to(
+		"connection_warmup",
+		target_node,
+		shared.Pubsub_Broadcast_Msg{},
+	)
 	for _ in 0 ..< 50 {
 		target_node_id, found := actod.get_node_by_name(target_node)
 		if found {
@@ -1080,7 +1404,11 @@ run_pubsub_subscriber :: proc() {
 		init = proc(data: ^Pubsub_Sub_Data) {
 			_, _ = actod.subscribe_type(data.publisher_type)
 		},
-		handle_message = proc(data: ^Pubsub_Sub_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Pubsub_Sub_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Pubsub_Broadcast_Msg:
 				ack := shared.Pubsub_Broadcast_Ack {
@@ -1099,7 +1427,11 @@ run_pubsub_subscriber :: proc() {
 			target_node    = target_node,
 			publisher_type = PUBLISHER_TYPE,
 		}
-		_, spawn_ok := actod.spawn(fmt.tprintf("pubsub_sub_%d", i), sub_data, Pubsub_Sub_Behaviour)
+		_, spawn_ok := actod.spawn(
+			fmt.tprintf("pubsub_sub_%d", i),
+			sub_data,
+			Pubsub_Sub_Behaviour,
+		)
 		if !spawn_ok {
 			fmt.printf("Failed to spawn pubsub subscriber %d\n", i)
 			os.exit(1)
@@ -1114,11 +1446,23 @@ run_pubsub_subscriber :: proc() {
 }
 
 run_union_sender :: proc() {
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
-	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "union_receiver"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+	target_actor :=
+		os.lookup_env(
+			"TARGET_ACTOR",
+			context.temp_allocator,
+		) or_else "union_receiver"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
 
 	target_port := 16001
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -1145,7 +1489,11 @@ run_union_sender :: proc() {
 		port    = target_port,
 	}
 
-	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, ok := actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+	)
 	if !ok {
 		fmt.println("Failed to register target node")
 		os.exit(1)
@@ -1153,7 +1501,9 @@ run_union_sender :: proc() {
 
 	time.sleep(250 * time.Millisecond)
 
-	ping_msg := shared.Network_Union_Message(shared.Network_Union_Ping{seq = 42})
+	ping_msg := shared.Network_Union_Message(
+		shared.Network_Union_Ping{seq = 42},
+	)
 	err := actod.send_to(target_actor, target_node, ping_msg)
 	if err != .OK {
 		fmt.printf("Failed to send ping union message: %v\n", err)
@@ -1161,7 +1511,10 @@ run_union_sender :: proc() {
 	}
 
 	chat_msg := shared.Network_Union_Message(
-		shared.Network_Union_Chat{name = "alice", content = "hello from remote"},
+		shared.Network_Union_Chat {
+			name = "alice",
+			content = "hello from remote",
+		},
 	)
 	err2 := actod.send_to(target_actor, target_node, chat_msg)
 	if err2 != .OK {
@@ -1169,7 +1522,9 @@ run_union_sender :: proc() {
 		os.exit(1)
 	}
 
-	ping_msg2 := shared.Network_Union_Message(shared.Network_Union_Ping{seq = 99})
+	ping_msg2 := shared.Network_Union_Message(
+		shared.Network_Union_Ping{seq = 99},
+	)
 	err3 := actod.send_to(target_actor, target_node, ping_msg2)
 	if err3 != .OK {
 		fmt.printf("Failed to send second ping union message: %v\n", err3)
@@ -1183,11 +1538,23 @@ run_union_sender :: proc() {
 }
 
 run_bytes_sender :: proc() {
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
-	target_port_str := os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
-	target_actor := os.lookup_env("TARGET_ACTOR", context.temp_allocator) or_else "bytes_receiver"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
+	target_port_str :=
+		os.lookup_env("TARGET_PORT", context.temp_allocator) or_else "16001"
+	target_actor :=
+		os.lookup_env(
+			"TARGET_ACTOR",
+			context.temp_allocator,
+		) or_else "bytes_receiver"
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
 
 	target_port := 16001
 	if port_val, ok := strconv.parse_int(target_port_str); ok {
@@ -1214,7 +1581,11 @@ run_bytes_sender :: proc() {
 		port    = target_port,
 	}
 
-	_, ok := actod.register_node(target_node, target_addr, .TCP_Custom_Protocol)
+	_, ok := actod.register_node(
+		target_node,
+		target_addr,
+		.TCP_Custom_Protocol,
+	)
 	if !ok {
 		fmt.println("Failed to register target node")
 		os.exit(1)
@@ -1255,13 +1626,19 @@ connection_ready :: proc(state: rawptr) -> bool {
 	return ring != nil && sync.atomic_load(&ring.state) == .Ready
 }
 
-wait_for_connection_ready :: proc(node_name: string, budget := 5 * time.Second) -> bool {
+wait_for_connection_ready :: proc(
+	node_name: string,
+	budget := 5 * time.Second,
+) -> bool {
 	name := node_name
 	return poll_until(connection_ready, &name, budget)
 }
 
 listener_running :: proc(_: rawptr) -> bool {
-	return sync.atomic_load(&actod.NODE.network_listener_running) == actod.LISTENER_RUNNING
+	return(
+		sync.atomic_load(&actod.NODE.network_listener_running) ==
+		actod.LISTENER_RUNNING \
+	)
 }
 
 print_ready_once_listening :: proc() {

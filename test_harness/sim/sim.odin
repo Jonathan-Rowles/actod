@@ -12,7 +12,10 @@ MAX_SIM_TIMERS :: 128
 MAX_SIM_TOPICS :: 64
 MAX_SIM_TOPIC_SUBS :: ti.MAX_TOPIC_SUBSCRIBERS
 MAX_SIM_FAULTS :: 16
-#assert(MAX_SIM_FAULTS <= 16, "Sim_Message.faults_applied is a u16, one bit per fault rule")
+#assert(
+	MAX_SIM_FAULTS <= 16,
+	"Sim_Message.faults_applied is a u16, one bit per fault rule",
+)
 
 EXTERNAL_PID :: u64(999)
 
@@ -182,7 +185,12 @@ drain_queue :: proc(s: ^Sim) {
 	}
 }
 
-spawn :: proc(s: ^Sim, name: string, data: $T, behaviour: actod.Actor_Behaviour(T)) -> actod.PID {
+spawn :: proc(
+	s: ^Sim,
+	name: string,
+	data: $T,
+	behaviour: actod.Actor_Behaviour(T),
+) -> actod.PID {
 	assert(s.actor_count < MAX_SIM_ACTORS, "sim: too many actors")
 
 	pid := s.next_pid
@@ -195,7 +203,11 @@ spawn :: proc(s: ^Sim, name: string, data: $T, behaviour: actod.Actor_Behaviour(
 	actor.pid = pid
 	actor.data = new(T)
 	(cast(^T)actor.data)^ = data
-	actor.handle_message = transmute(proc(_: rawptr, _: u64, _: any))behaviour.handle_message
+	actor.handle_message = transmute(proc(
+		_: rawptr,
+		_: u64,
+		_: any,
+	))behaviour.handle_message
 	actor.init_fn = transmute(proc(_: rawptr))behaviour.init
 	actor.terminate_fn = transmute(proc(_: rawptr))behaviour.terminate
 	actor.alive = true
@@ -301,7 +313,12 @@ register_pending_ask :: proc(
 	)
 }
 
-consume_pending_ask :: proc(s: ^Sim, token: u64, asker_pid: u64, replier_pid: u64) -> bool {
+consume_pending_ask :: proc(
+	s: ^Sim,
+	token: u64,
+	asker_pid: u64,
+	replier_pid: u64,
+) -> bool {
 	for &p in s.pending_asks {
 		if !p.active || p.token != token || p.asker_pid != asker_pid do continue
 		if p.asked_pid != replier_pid do return false
@@ -357,7 +374,10 @@ step :: proc(s: ^Sim) -> bool {
 			if msg.data != nil do free(msg.data)
 			return true
 		case .Delay:
-			append(&s.delayed, Delayed_Message{msg = msg, steps_remaining = rule.delay_steps})
+			append(
+				&s.delayed,
+				Delayed_Message{msg = msg, steps_remaining = rule.delay_steps},
+			)
 			return true
 		case .Duplicate:
 			clone := msg
@@ -372,7 +392,8 @@ step :: proc(s: ^Sim) -> bool {
 		return true
 	}
 
-	if msg.is_reply && !consume_pending_ask(s, msg.ask_token, msg.to, msg.from) {
+	if msg.is_reply &&
+	   !consume_pending_ask(s, msg.ask_token, msg.to, msg.from) {
 		if msg.data != nil do free(msg.data)
 		return true
 	}
@@ -412,9 +433,23 @@ run_until_idle :: proc(s: ^Sim) {
 
 process_captures :: proc(s: ^Sim, sender_pid: u64) {
 	for &cap in s.send_capture {
-		enqueue_ask(s, cap.to, sender_pid, cap.data, cap.type_id, cap.ask_token, cap.is_reply)
+		enqueue_ask(
+			s,
+			cap.to,
+			sender_pid,
+			cap.data,
+			cap.type_id,
+			cap.ask_token,
+			cap.is_reply,
+		)
 		if cap.ask_token != 0 && !cap.is_reply {
-			register_pending_ask(s, cap.ask_token, sender_pid, cap.to, cap.ask_timeout)
+			register_pending_ask(
+				s,
+				cap.ask_token,
+				sender_pid,
+				cap.to,
+				cap.ask_timeout,
+			)
 		}
 		cap.data = nil // ownership transferred
 	}
@@ -490,7 +525,10 @@ add_topic_sub :: proc(s: ^Sim, topic: rawptr, pid: u64) {
 	for i in 0 ..< s.topic_sub_count {
 		if s.topic_subs[i].topic == topic {
 			ts := &s.topic_subs[i]
-			assert(ts.count < MAX_SIM_TOPIC_SUBS, "sim: too many topic subscribers")
+			assert(
+				ts.count < MAX_SIM_TOPIC_SUBS,
+				"sim: too many topic subscribers",
+			)
 			ts.pids[ts.count] = pid
 			ts.count += 1
 			return
@@ -504,7 +542,13 @@ add_topic_sub :: proc(s: ^Sim, topic: rawptr, pid: u64) {
 	ts.count = 1
 }
 
-route_publish :: proc(s: ^Sim, sender_pid: u64, topic: rawptr, data: rawptr, type_id: typeid) {
+route_publish :: proc(
+	s: ^Sim,
+	sender_pid: u64,
+	topic: rawptr,
+	data: rawptr,
+	type_id: typeid,
+) {
 	for i in 0 ..< s.topic_sub_count {
 		if s.topic_subs[i].topic != topic do continue
 		ts := &s.topic_subs[i]
@@ -531,7 +575,13 @@ clone_msg :: proc(data: rawptr, type_id: typeid) -> rawptr {
 	return ti.copy_message(data, type_info_of(type_id).size, type_id)
 }
 
-add_timer :: proc(s: ^Sim, id: u32, owner: u64, interval: time.Duration, repeat: bool) {
+add_timer :: proc(
+	s: ^Sim,
+	id: u32,
+	owner: u64,
+	interval: time.Duration,
+	repeat: bool,
+) {
 	assert(s.timer_count < MAX_SIM_TIMERS, "sim: too many timers")
 	s.timers[s.timer_count] = Sim_Timer {
 		id        = id,
@@ -576,7 +626,12 @@ fire_expired_timers :: proc(s: ^Sim) {
 			t := &s.timers[i]
 			if !t.active do continue
 			if time.diff(t.next_fire, s.clock) >= 0 {
-				enqueue_clone(s, t.owner_pid, t.owner_pid, actod.Timer_Tick{id = t.id})
+				enqueue_clone(
+					s,
+					t.owner_pid,
+					t.owner_pid,
+					actod.Timer_Tick{id = t.id},
+				)
 				if t.repeat {
 					t.next_fire = time.time_add(t.next_fire, t.interval)
 				} else {
@@ -651,7 +706,13 @@ expect_spawned :: proc(
 	loc := #caller_location,
 ) -> ti.Captured_Spawn {
 	result, ok := find_spawn(s, T)
-	testing.expectf(t, ok, "expected spawn of type %v, but none found", typeid_of(T), loc = loc)
+	testing.expectf(
+		t,
+		ok,
+		"expected spawn of type %v, but none found",
+		typeid_of(T),
+		loc = loc,
+	)
 	return result
 }
 
@@ -665,19 +726,53 @@ expect_idle :: proc(s: ^Sim, t: ^testing.T, loc := #caller_location) {
 	)
 }
 
-expect_alive :: proc(s: ^Sim, t: ^testing.T, name: string, loc := #caller_location) {
+expect_alive :: proc(
+	s: ^Sim,
+	t: ^testing.T,
+	name: string,
+	loc := #caller_location,
+) {
 	actor := find_actor_by_name(s, name)
-	testing.expectf(t, actor != nil, "expected actor %v to exist", name, loc = loc)
+	testing.expectf(
+		t,
+		actor != nil,
+		"expected actor %v to exist",
+		name,
+		loc = loc,
+	)
 	if actor != nil {
-		testing.expectf(t, actor.alive, "expected actor %v to be alive", name, loc = loc)
+		testing.expectf(
+			t,
+			actor.alive,
+			"expected actor %v to be alive",
+			name,
+			loc = loc,
+		)
 	}
 }
 
-expect_dead :: proc(s: ^Sim, t: ^testing.T, name: string, loc := #caller_location) {
+expect_dead :: proc(
+	s: ^Sim,
+	t: ^testing.T,
+	name: string,
+	loc := #caller_location,
+) {
 	actor := find_actor_by_name(s, name)
-	testing.expectf(t, actor != nil, "expected actor %v to exist", name, loc = loc)
+	testing.expectf(
+		t,
+		actor != nil,
+		"expected actor %v to exist",
+		name,
+		loc = loc,
+	)
 	if actor != nil {
-		testing.expectf(t, !actor.alive, "expected actor %v to be dead", name, loc = loc)
+		testing.expectf(
+			t,
+			!actor.alive,
+			"expected actor %v to be dead",
+			name,
+			loc = loc,
+		)
 	}
 }
 

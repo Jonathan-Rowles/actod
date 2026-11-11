@@ -38,7 +38,11 @@ platform_setsockopt :: #force_inline proc(
 ) -> i32 {
 	return libc_setsockopt(i32(sock), level, optname, optval, u32(optlen))
 }
-platform_poll :: #force_inline proc(fds: ^Poll_Fd, nfds: u32, timeout: i32) -> i32 {
+platform_poll :: #force_inline proc(
+	fds: ^Poll_Fd,
+	nfds: u32,
+	timeout: i32,
+) -> i32 {
 	return libc_poll(([^]Poll_Fd)(fds), u64(nfds), timeout)
 }
 platform_socket_fd :: #force_inline proc(sock: net.TCP_Socket) -> i32 {
@@ -51,7 +55,11 @@ platform_return_pages :: proc(data: rawptr, size: uint) {
 platform_gen_random :: proc(buf: rawptr, len: uint) {
 	filled: uint
 	for filled < len {
-		n := libc_getrandom(rawptr(uintptr(buf) + uintptr(filled)), len - filled, 0)
+		n := libc_getrandom(
+			rawptr(uintptr(buf) + uintptr(filled)),
+			len - filled,
+			0,
+		)
 		if n <= 0 do panic("getrandom failed, cannot generate secure random bytes")
 		filled += uint(n)
 	}
@@ -67,5 +75,14 @@ platform_set_recv_timeout :: proc(sock: net.TCP_Socket, seconds: i64) -> bool {
 		tv_sec  = seconds,
 		tv_usec = 0,
 	}
-	return platform_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, size_of(Timeval)) == 0
+	return(
+		platform_setsockopt(
+			sock,
+			SOL_SOCKET,
+			SO_RCVTIMEO,
+			&tv,
+			size_of(Timeval),
+		) ==
+		0 \
+	)
 }

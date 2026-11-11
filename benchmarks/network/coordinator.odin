@@ -23,7 +23,8 @@ run_network_benchmark_suite :: proc() {
 	defer cleanup_process(receiver)
 
 	fmt.println("Waiting for receiver to start...")
-	startup_wait :: 5 * time.Second when ODIN_OS == .Windows else 2 * time.Second
+	startup_wait ::
+		5 * time.Second when ODIN_OS == .Windows else 2 * time.Second
 	time.sleep(startup_wait)
 
 	run_benchmark_tests()
@@ -32,7 +33,9 @@ run_network_benchmark_suite :: proc() {
 }
 
 spawn_benchmark_node :: proc(role: string, port: int) -> Benchmark_Process {
-	exe_path := "bin/network_benchmark" when ODIN_OS != .Windows else "bin\\network_benchmark.exe"
+	exe_path :=
+		"bin/network_benchmark" when ODIN_OS !=
+		.Windows else "bin\\network_benchmark.exe"
 
 	proc_desc := os.Process_Desc {
 		command = []string{exe_path},
@@ -92,13 +95,21 @@ run_benchmark_tests :: proc() {
 		address = net.IP4_Loopback,
 		port    = 17200,
 	}
-	_, ok := actod.register_node("BenchmarkReceiver", remote_addr, .TCP_Custom_Protocol)
+	_, ok := actod.register_node(
+		"BenchmarkReceiver",
+		remote_addr,
+		.TCP_Custom_Protocol,
+	)
 	if !ok do panic("Failed to register remote receiver node")
 
 	coordinator_data := 0
 	coordinator_behaviour := create_sender_coordinator_behaviour()
 	coordinator_pid: actod.PID
-	coordinator_pid, ok = actod.spawn("TestCoordinator", coordinator_data, coordinator_behaviour)
+	coordinator_pid, ok = actod.spawn(
+		"TestCoordinator",
+		coordinator_data,
+		coordinator_behaviour,
+	)
 	if !ok do panic("Failed to spawn test coordinator")
 	global_coordinator_pid = coordinator_pid
 
@@ -131,10 +142,18 @@ run_benchmark_tests :: proc() {
 
 	for config in configs {
 		test_id += 1
-		result := run_network_benchmark_for_size(config.message_size, config, test_id)
+		result := run_network_benchmark_for_size(
+			config.message_size,
+			config,
+			test_id,
+		)
 
 		if result.messages_received == 0 {
-			fmt.printf("  %-18s │ %-11s │ FAILED\n", config.description, "ERROR")
+			fmt.printf(
+				"  %-18s │ %-11s │ FAILED\n",
+				config.description,
+				"ERROR",
+			)
 			continue
 		}
 

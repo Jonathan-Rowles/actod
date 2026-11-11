@@ -3,9 +3,9 @@ package footprint
 import "../../src/actod"
 import "../../src/pkgs/threads_act/"
 import "core:fmt"
-import "core:os"
 import "core:mem"
 import vmem "core:mem/virtual"
+import "core:os"
 import "core:strconv"
 import "core:time"
 
@@ -48,8 +48,10 @@ live_actor_count :: proc() -> int {
 }
 
 slab_in_use :: proc() -> i64 {
-	return actod.slot_slab_in_use(&actod.NODE.actor_slab) +
-		actod.slot_slab_in_use(&actod.NODE.coro_slab)
+	return(
+		actod.slot_slab_in_use(&actod.NODE.actor_slab) +
+		actod.slot_slab_in_use(&actod.NODE.coro_slab) \
+	)
 }
 
 wait_for_slab_release :: proc(target: i64) -> bool {
@@ -70,7 +72,12 @@ wait_for_reap :: proc(target: int) -> (elapsed: time.Duration, ok: bool) {
 	return time.since(start), false
 }
 
-spawn_cohort :: proc(count: int, pids: ^[dynamic]actod.PID) -> (elapsed: time.Duration) {
+spawn_cohort :: proc(
+	count: int,
+	pids: ^[dynamic]actod.PID,
+) -> (
+	elapsed: time.Duration,
+) {
 	start := time.now()
 	for i in 0 ..< count {
 		name := fmt.tprintf("idle_%d", i)
@@ -121,7 +128,9 @@ main :: proc() {
 		opts = actod.make_node_config(
 			actor_registry_size = registry_size,
 			enable_observer = false,
-			actor_config = actod.make_actor_config(logging = actod.make_log_config(level = .Error)),
+			actor_config = actod.make_actor_config(
+				logging = actod.make_log_config(level = .Error),
+			),
 		),
 	)
 
@@ -139,8 +148,14 @@ main :: proc() {
 	fmt.println("--- idle footprint ---")
 	fmt.printf("actors alive:       %d\n", n)
 	if MEM_STATS_AVAILABLE {
-		fmt.printf("RSS/actor:          %.2f KB\n", per_actor(loaded.rss_kb, baseline.rss_kb, n))
-		fmt.printf("VMAs/actor:         %.3f\n", per_actor(loaded.vma_count, baseline.vma_count, n))
+		fmt.printf(
+			"RSS/actor:          %.2f KB\n",
+			per_actor(loaded.rss_kb, baseline.rss_kb, n),
+		)
+		fmt.printf(
+			"VMAs/actor:         %.3f\n",
+			per_actor(loaded.vma_count, baseline.vma_count, n),
+		)
 		fmt.printf(
 			"virtual/actor:      %.2f MB\n",
 			per_actor(loaded.virtual_kb, baseline.virtual_kb, n) / 1024.0,
@@ -160,17 +175,29 @@ main :: proc() {
 
 	terminate_issue := terminate_cohort(pids[:])
 	reap_elapsed, reaped := wait_for_reap(baseline_live)
-	fmt.printf("terminate call:     %.2f us/actor\n", us_per(terminate_issue, n))
+	fmt.printf(
+		"terminate call:     %.2f us/actor\n",
+		us_per(terminate_issue, n),
+	)
 	if reaped {
-		fmt.printf("reap to idle:       %.2f us/actor\n", us_per(reap_elapsed, n))
+		fmt.printf(
+			"reap to idle:       %.2f us/actor\n",
+			us_per(reap_elapsed, n),
+		)
 	} else {
-		fmt.printf("reap to idle:       TIMED OUT after %v (%d still live)\n", reap_elapsed, live_actor_count())
+		fmt.printf(
+			"reap to idle:       TIMED OUT after %v (%d still live)\n",
+			reap_elapsed,
+			live_actor_count(),
+		)
 	}
 
 	slots_returned := wait_for_slab_release(baseline_slab)
 	after_reap := take_snapshot()
 	if !slots_returned {
-		fmt.printf("slab slots not returned within timeout, residual below is not settled\n")
+		fmt.printf(
+			"slab slots not returned within timeout, residual below is not settled\n",
+		)
 	}
 	if MEM_STATS_AVAILABLE {
 		fmt.printf(
@@ -186,7 +213,10 @@ main :: proc() {
 	clear(&pids)
 	warm_spawn := spawn_cohort(count, &pids)
 	warm_n := len(pids)
-	fmt.printf("warm respawn:       %.2f us/actor\n", us_per(warm_spawn, warm_n))
+	fmt.printf(
+		"warm respawn:       %.2f us/actor\n",
+		us_per(warm_spawn, warm_n),
+	)
 
 	_ = terminate_cohort(pids[:])
 	_, _ = wait_for_reap(baseline_live)
@@ -214,7 +244,9 @@ print_provenance_header :: proc(count: int) {
 	fmt.printf("cores (logical):    %d\n", threads_act.get_cpu_count())
 	fmt.printf("os/arch:            %v / %v\n", ODIN_OS, ODIN_ARCH)
 	fmt.printf("odin version:       %v\n", ODIN_VERSION)
-	fmt.printf("build:              -o:aggressive -no-bounds-check -disable-assert -microarch:native\n")
+	fmt.printf(
+		"build:              -o:aggressive -no-bounds-check -disable-assert -microarch:native\n",
+	)
 	fmt.printf("actors:             %d\n", count)
 	fmt.printf("mailbox default:    %d slots\n", actod.DEFAULT_MAIL_BOX_SIZE)
 	if mmc := read_max_map_count(); mmc > 0 do fmt.printf("vm.max_map_count:   %d\n", mmc)
@@ -233,8 +265,15 @@ print_slab_rss :: proc(actors: int) {
 	}
 	for slab in slabs {
 		if len(slab.memory) > 0 {
-			rss := read_mapping_rss_kb(uintptr(raw_data(slab.memory)), uint(len(slab.memory)))
-			fmt.printf("%s%.2f KB/actor\n", slab.prefix, f64(rss) / f64(actors))
+			rss := read_mapping_rss_kb(
+				uintptr(raw_data(slab.memory)),
+				uint(len(slab.memory)),
+			)
+			fmt.printf(
+				"%s%.2f KB/actor\n",
+				slab.prefix,
+				f64(rss) / f64(actors),
+			)
 		}
 	}
 }
@@ -262,7 +301,9 @@ print_arena_usage :: proc(actors: int) {
 	total: uint
 	sampled := 0
 	for i in 0 ..< min(actors, int(slab.slot_count)) {
-		block := cast(^vmem.Memory_Block)raw_data(actod.slot_slab_slot(slab, u32(i)))
+		block := cast(^vmem.Memory_Block)raw_data(
+			actod.slot_slab_slot(slab, u32(i)),
+		)
 		if block.used == 0 || block.used > slab.slot_size do continue
 		total += block.used
 		sampled += 1

@@ -106,7 +106,11 @@ sim_resume_next :: proc(w: ^Worker) {
 		handle = ready_pop(w)
 		if handle == nil do return
 	}
-	sim_trace_record(.Actor_Resume, u64(w.id), u64((cast(^Actor)handle.actor_ptr).pid))
+	sim_trace_record(
+		.Actor_Resume,
+		u64(w.id),
+		u64((cast(^Actor)handle.actor_ptr).pid),
+	)
 	worker_resume_handle(w, handle)
 	sim_refuse_a_yield_holding_a_temp_guard(handle)
 	worker_flush_staging()

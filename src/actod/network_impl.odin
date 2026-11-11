@@ -33,7 +33,11 @@ append_variable_data :: proc(
 		for field in info.var_fields {
 			f := cast(^mem.Raw_Slice)(uintptr(data) + field.offset)
 			if f.len > 0 {
-				intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), f.data, f.len)
+				intrinsics.mem_copy_non_overlapping(
+					rawptr(&buffer[offset]),
+					f.data,
+					f.len,
+				)
 				offset += f.len
 			}
 		}
@@ -46,7 +50,11 @@ append_variable_data :: proc(
 			for field in variant.var_fields {
 				f := cast(^mem.Raw_Slice)(uintptr(data) + field.offset)
 				if f.len > 0 {
-					intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), f.data, f.len)
+					intrinsics.mem_copy_non_overlapping(
+						rawptr(&buffer[offset]),
+						f.data,
+						f.len,
+					)
 					offset += f.len
 				}
 			}
@@ -86,12 +94,19 @@ build_wire_format_into_buffer_impl :: proc(
 	}
 
 	if info.flags == {} {
-		message_size := NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size
+		message_size :=
+			NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size
 		total_buffer_size := 4 + message_size
 		if total_buffer_size > len(buffer) do return 0
 
 		endian.put_u32(buffer[0:4], .Little, u32(message_size))
-		write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
+		write_network_header(
+			buffer[4:],
+			flags,
+			info.type_hash,
+			from_handle,
+			actual_to_handle,
+		)
 
 		offset := 4 + NETWORK_HEADER_SIZE
 		if token != 0 {
@@ -104,7 +119,11 @@ build_wire_format_into_buffer_impl :: proc(
 		}
 
 		if struct_size > 0 {
-			intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), data, struct_size)
+			intrinsics.mem_copy_non_overlapping(
+				rawptr(&buffer[offset]),
+				data,
+				struct_size,
+			)
 		}
 		return u32(total_buffer_size)
 	}
@@ -112,12 +131,22 @@ build_wire_format_into_buffer_impl :: proc(
 	total_variable_size := calculate_variable_data_size(data, info)
 
 	message_size :=
-		NETWORK_HEADER_SIZE + token_len + int(to_name_len) + struct_size + total_variable_size
+		NETWORK_HEADER_SIZE +
+		token_len +
+		int(to_name_len) +
+		struct_size +
+		total_variable_size
 	total_buffer_size := 4 + message_size
 	if total_buffer_size > len(buffer) do return 0
 
 	endian.put_u32(buffer[0:4], .Little, u32(message_size))
-	write_network_header(buffer[4:], flags, info.type_hash, from_handle, actual_to_handle)
+	write_network_header(
+		buffer[4:],
+		flags,
+		info.type_hash,
+		from_handle,
+		actual_to_handle,
+	)
 
 	offset := 4 + NETWORK_HEADER_SIZE
 	if token != 0 {
@@ -130,7 +159,11 @@ build_wire_format_into_buffer_impl :: proc(
 	}
 
 	if struct_size > 0 {
-		intrinsics.mem_copy_non_overlapping(rawptr(&buffer[offset]), data, struct_size)
+		intrinsics.mem_copy_non_overlapping(
+			rawptr(&buffer[offset]),
+			data,
+			struct_size,
+		)
 	}
 	offset += struct_size
 
@@ -149,14 +182,46 @@ send_to_connection_ring_impl :: proc(
 	token: u64 = 0,
 ) -> Send_Error {
 	when ODIN_TEST {
-		drop, dup, corrupt := frame_tap(.Out, info.type_hash, nil, ring != nil ? ring.node_id : 0)
+		drop, dup, corrupt := frame_tap(
+			.Out,
+			info.type_hash,
+			nil,
+			ring != nil ? ring.node_id : 0,
+		)
 		if drop do return .OK
 		if dup {
-			_ = send_to_connection_ring_body(ring, to, data, info, base_flags, false, loc, token)
+			_ = send_to_connection_ring_body(
+				ring,
+				to,
+				data,
+				info,
+				base_flags,
+				false,
+				loc,
+				token,
+			)
 		}
-		return send_to_connection_ring_body(ring, to, data, info, base_flags, corrupt, loc, token)
+		return send_to_connection_ring_body(
+			ring,
+			to,
+			data,
+			info,
+			base_flags,
+			corrupt,
+			loc,
+			token,
+		)
 	} else {
-		return send_to_connection_ring_body(ring, to, data, info, base_flags, false, loc, token)
+		return send_to_connection_ring_body(
+			ring,
+			to,
+			data,
+			info,
+			base_flags,
+			false,
+			loc,
+			token,
+		)
 	}
 }
 
@@ -205,7 +270,8 @@ send_to_connection_ring_body :: proc(
 		target := ring
 		if pool != nil {
 			epoch = sync.atomic_load_explicit(&pool.epoch, .Acquire)
-			if current_worker != nil && !staging_flush_stale_node(ring.node_id, epoch) {
+			if current_worker != nil &&
+			   !staging_flush_stale_node(ring.node_id, epoch) {
 				return .NETWORK_RING_FULL
 			}
 			target = pool_pick_ring(pool, key)
@@ -214,7 +280,11 @@ send_to_connection_ring_body :: proc(
 
 		if current_worker != nil {
 			if exact_size <= STAGE_FRAME_MAX {
-				staged_dst, staged_entry, staged := staging_reserve(target, exact_size, epoch)
+				staged_dst, staged_entry, staged := staging_reserve(
+					target,
+					exact_size,
+					epoch,
+				)
 				if !staged do return .NETWORK_RING_FULL
 				staged_len := build_wire_format_into_buffer_impl(
 					staged_dst,
@@ -297,7 +367,12 @@ send_to_connection_ring_by_name_impl :: proc(
 	token: u64 = 0,
 ) -> Send_Error {
 	when ODIN_TEST {
-		drop, dup, corrupt := frame_tap(.Out, info.type_hash, nil, ring != nil ? ring.node_id : 0)
+		drop, dup, corrupt := frame_tap(
+			.Out,
+			info.type_hash,
+			nil,
+			ring != nil ? ring.node_id : 0,
+		)
 		if drop do return .OK
 		if dup {
 			_ = send_to_connection_ring_by_name_body(
@@ -364,7 +439,12 @@ send_to_connection_ring_by_name_body :: proc(
 
 	flags := base_flags | {.BY_NAME}
 
-	exact_size := wire_format_exact_size_impl(data, info, len(actor_name), token)
+	exact_size := wire_format_exact_size_impl(
+		data,
+		info,
+		len(actor_name),
+		token,
+	)
 	if exact_size > ring.usable_slot_size {
 		log.errorf(
 			"Message '%s' addressed to '%s' is %d bytes on the wire but the connection ring slot holds %d; raise connection_ring.send_slot_size in make_network_config or split the message",
@@ -386,7 +466,8 @@ send_to_connection_ring_by_name_body :: proc(
 		target := ring
 		if pool != nil {
 			epoch = sync.atomic_load_explicit(&pool.epoch, .Acquire)
-			if current_worker != nil && !staging_flush_stale_node(ring.node_id, epoch) {
+			if current_worker != nil &&
+			   !staging_flush_stale_node(ring.node_id, epoch) {
 				return .NETWORK_RING_FULL
 			}
 			target = pool_pick_ring(pool, key)
@@ -470,7 +551,15 @@ send_remote_impl :: proc(
 	}
 
 	for retry in 0 ..< RING_SEND_SPIN_RETRIES + RING_SEND_YIELD_RETRIES {
-		result := send_to_connection_ring_impl(ring, to, data, info, base_flags, loc, token)
+		result := send_to_connection_ring_impl(
+			ring,
+			to,
+			data,
+			info,
+			base_flags,
+			loc,
+			token,
+		)
 		if result != .NETWORK_RING_FULL do return result
 		ring_full_backoff(retry)
 	}

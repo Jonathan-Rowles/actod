@@ -50,7 +50,12 @@ Cluster_Psk_State :: struct {
 	mutex: sync.Mutex,
 }
 
-derive_cluster_psk :: proc(password: string) -> ([CLUSTER_PSK_SIZE]byte, bool) {
+derive_cluster_psk :: proc(
+	password: string,
+) -> (
+	[CLUSTER_PSK_SIZE]byte,
+	bool,
+) {
 	cache_key: [32]byte
 	hash.hash_string_to_buffer(.SHA256, password, cache_key[:])
 
@@ -96,7 +101,16 @@ noise_handshake_begin :: proc(
 	if !ecdh.private_key_set_bytes(&eph, .X25519, eph_bytes[:]) do return false
 	crypto.zero_explicit(raw_data(eph_bytes[:]), len(eph_bytes))
 	return(
-		noise.handshake_init(hs, initiator, prologue, nil, nil, NOISE_PROTOCOL_NAME, psk, &eph) ==
+		noise.handshake_init(
+			hs,
+			initiator,
+			prologue,
+			nil,
+			nil,
+			NOISE_PROTOCOL_NAME,
+			psk,
+			&eph,
+		) ==
 		.Ok \
 	)
 }
@@ -113,9 +127,21 @@ noise_handshake_step :: proc(
 	msg: []byte
 	status: noise.Status
 	if hs.initiator {
-		msg, _, status = noise.handshake_initiator_step(hs, input, nil, nil, allocator)
+		msg, _, status = noise.handshake_initiator_step(
+			hs,
+			input,
+			nil,
+			nil,
+			allocator,
+		)
 	} else {
-		msg, _, status = noise.handshake_responder_step(hs, input, nil, nil, allocator)
+		msg, _, status = noise.handshake_responder_step(
+			hs,
+			input,
+			nil,
+			nil,
+			allocator,
+		)
 	}
 	#partial switch status {
 	case .Handshake_Pending:
@@ -127,26 +153,53 @@ noise_handshake_step :: proc(
 	return nil, false, false
 }
 
-noise_handshake_finish :: proc(hs: ^Noise_Handshake, keys: ^actod.Noise_Transport) -> bool {
+noise_handshake_finish :: proc(
+	hs: ^Noise_Handshake,
+	keys: ^actod.Noise_Transport,
+) -> bool {
 	ok := noise.handshake_split(hs, cast(^Noise_Transport)keys) == .Ok
 	noise.handshake_reset(hs)
 	return ok
 }
 
-envelope_seal :: proc(keys: ^actod.Noise_Transport, plaintext: []byte, dst: []byte) -> (int, bool) {
+envelope_seal :: proc(
+	keys: ^actod.Noise_Transport,
+	plaintext: []byte,
+	dst: []byte,
+) -> (
+	int,
+	bool,
+) {
 	if len(plaintext) == 0 || len(plaintext) > MAX_ENVELOPE_PLAINTEXT do return 0, false
 	total := ENVELOPE_OVERHEAD + len(plaintext)
 	if total > len(dst) do return 0, false
 	endian.put_u32(dst[0:4], .Little, u32(len(plaintext) + ENVELOPE_TAG_SIZE))
-	_, status := noise.seal_message(cast(^Noise_Transport)keys, nil, plaintext, dst[4:total])
+	_, status := noise.seal_message(
+		cast(^Noise_Transport)keys,
+		nil,
+		plaintext,
+		dst[4:total],
+	)
 	return total, status == .Ok
 }
 
-envelope_open :: proc(keys: ^actod.Noise_Transport, ciphertext: []byte, dst: []byte) -> ([]byte, bool) {
+envelope_open :: proc(
+	keys: ^actod.Noise_Transport,
+	ciphertext: []byte,
+	dst: []byte,
+) -> (
+	[]byte,
+	bool,
+) {
 	if len(ciphertext) <= ENVELOPE_TAG_SIZE do return nil, false
 	pt_len := len(ciphertext) - ENVELOPE_TAG_SIZE
 	if pt_len > len(dst) do return nil, false
-	_, status := noise.open_message(cast(^Noise_Transport)keys, nil, ciphertext, dst[:pt_len])
+	_, status := noise.open_message(
+		cast(^Noise_Transport)keys,
+		nil,
+		ciphertext,
+		dst[:pt_len],
+	)
 	return dst[:pt_len], status == .Ok
 }
 
@@ -161,7 +214,9 @@ run_noise_handshake :: proc(
 ) -> bool {
 	psk, psk_ok := derive_cluster_psk(auth_password)
 	if !psk_ok {
-		log.error("Refusing encrypted handshake: cluster PSK derivation failed")
+		log.error(
+			"Refusing encrypted handshake: cluster PSK derivation failed",
+		)
 		return false
 	}
 
@@ -185,7 +240,11 @@ run_noise_handshake :: proc(
 		delete(msg1)
 		if !sent1 do return false
 
-		raw2, payload2 := actod.handshake_recv_ctrl(sock, actod.CTRL_MSG_NOISE_2, deadline)
+		raw2, payload2 := actod.handshake_recv_ctrl(
+			sock,
+			actod.CTRL_MSG_NOISE_2,
+			deadline,
+		)
 		if raw2 == nil {
 			log.warn("Did not receive noise response from peer")
 			return false
@@ -199,7 +258,11 @@ run_noise_handshake :: proc(
 			return false
 		}
 	} else {
-		raw1, payload1 := actod.handshake_recv_ctrl(sock, actod.CTRL_MSG_NOISE_1, deadline)
+		raw1, payload1 := actod.handshake_recv_ctrl(
+			sock,
+			actod.CTRL_MSG_NOISE_1,
+			deadline,
+		)
 		if raw1 == nil {
 			log.warn("Did not receive noise initiation from peer")
 			return false
@@ -219,7 +282,11 @@ run_noise_handshake :: proc(
 	return noise_handshake_finish(&hs, keys)
 }
 
-send_noise_ctrl :: proc(sock: net.TCP_Socket, ctrl_type: u8, msg: []byte) -> bool {
+send_noise_ctrl :: proc(
+	sock: net.TCP_Socket,
+	ctrl_type: u8,
+	msg: []byte,
+) -> bool {
 	body := make([]byte, 1 + len(msg))
 	defer delete(body)
 	body[0] = ctrl_type

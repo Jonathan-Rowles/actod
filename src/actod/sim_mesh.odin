@@ -117,7 +117,9 @@ sim_mesh_boot_node :: proc(mesh: ^Sim_Mesh, i: int) -> ^Node_State {
 				scale_down_idle_seconds = DEFAULT_CONNECTION_RING_CONFIG.scale_down_idle_seconds,
 			},
 		),
-		actor_config = make_actor_config(logging = make_log_config(level = mesh.log_level)),
+		actor_config = make_actor_config(
+			logging = make_log_config(level = mesh.log_level),
+		),
 	)
 	node_init(mesh.names[i], opts)
 	return node
@@ -169,7 +171,10 @@ sim_mesh_pump :: proc(mesh: ^Sim_Mesh) -> bool {
 	return false
 }
 
-sim_mesh_run_until_idle :: proc(mesh: ^Sim_Mesh, max_steps: int = 1_000_000) -> int {
+sim_mesh_run_until_idle :: proc(
+	mesh: ^Sim_Mesh,
+	max_steps: int = 1_000_000,
+) -> int {
 	steps := 0
 	for steps < max_steps && sim_mesh_pump(mesh) {
 		steps += 1

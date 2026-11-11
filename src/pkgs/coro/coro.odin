@@ -41,7 +41,7 @@ ASAN_FIBERS :: .Address in ODIN_SANITIZER_FLAGS
 
 when ASAN_FIBERS {
 	@(default_calling_convention = "c")
-	foreign {
+	foreign _ {
 		__sanitizer_start_switch_fiber :: proc(save: ^rawptr, bottom: rawptr, size: uint) ---
 		__sanitizer_finish_switch_fiber :: proc(save: rawptr, bottom_old: ^rawptr, size_old: ^uint) ---
 		__asan_handle_no_return :: proc() ---
@@ -55,7 +55,11 @@ asan_before_longjmp :: #force_inline proc "contextless" () {
 }
 
 @(private)
-asan_leaving :: #force_inline proc "contextless" (save: ^rawptr, bottom: rawptr, size: uint) {
+asan_leaving :: #force_inline proc "contextless" (
+	save: ^rawptr,
+	bottom: rawptr,
+	size: uint,
+) {
 	when ASAN_FIBERS {
 		__sanitizer_start_switch_fiber(save, bottom, size)
 	}
@@ -73,18 +77,18 @@ asan_arrived :: #force_inline proc "contextless" (
 }
 
 Coro :: struct #align (64) {
-	state:        State,
-	prev_co:      ^Coro,
-	magic_number: uint,
-	stack_base:   rawptr,
-	stack_size:   uint,
-	user_data:    rawptr,
-	func:         Func,
-	mapping_base: rawptr,
-	mapping_size: uint,
-	canary_base:  rawptr,
-	coro_ctx:     Ctx_Buf,
-	back_ctx:     Ctx_Buf,
+	state:             State,
+	prev_co:           ^Coro,
+	magic_number:      uint,
+	stack_base:        rawptr,
+	stack_size:        uint,
+	user_data:         rawptr,
+	func:              Func,
+	mapping_base:      rawptr,
+	mapping_size:      uint,
+	canary_base:       rawptr,
+	coro_ctx:          Ctx_Buf,
+	back_ctx:          Ctx_Buf,
 	caller_stack:      rawptr,
 	caller_stack_size: uint,
 	asan_save_caller:  rawptr,
@@ -92,9 +96,9 @@ Coro :: struct #align (64) {
 }
 
 Desc :: struct {
-	func:         Func,
-	user_data:    rawptr,
-	stack_size:   uint,
+	func:       Func,
+	user_data:  rawptr,
+	stack_size: uint,
 }
 
 @(thread_local)
@@ -180,7 +184,10 @@ desc_init :: proc(func: Func, stack_size: uint = 0) -> Desc {
 
 uninit :: proc(co: ^Coro) -> Result {
 	if co == nil do return .Invalid_Coroutine
-	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow, stale pointer, or double destroy")
+	assert(
+		co.magic_number == MAGIC_NUMBER,
+		"coro header corrupted, stack overflow, stale pointer, or double destroy",
+	)
 	if !(co.state == .Suspended || co.state == .Dead) do return .Invalid_Operation
 	co.state = .Dead
 	return .Success
@@ -282,7 +289,9 @@ create_in :: proc(desc: ^Desc, region: []byte) -> (^Coro, Result) {
 destroy :: proc(co: ^Coro) -> Result {
 	if co == nil do return .Invalid_Coroutine
 	if !stack_canary_intact(co) {
-		panic("coro stack overflow: the canary below the stack was overwritten")
+		panic(
+			"coro stack overflow: the canary below the stack was overwritten",
+		)
 	}
 	res := uninit(co)
 	if res != .Success do return res
@@ -292,7 +301,10 @@ destroy :: proc(co: ^Coro) -> Result {
 
 resume :: proc(co: ^Coro) -> Result {
 	if co == nil do return .Invalid_Coroutine
-	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
+	assert(
+		co.magic_number == MAGIC_NUMBER,
+		"coro header corrupted, stack overflow or stale pointer",
+	)
 	if co.state != .Suspended do return .Not_Suspended
 	co.state = .Running
 	jumpin(co)
@@ -300,7 +312,10 @@ resume :: proc(co: ^Coro) -> Result {
 }
 
 resume_top_level :: proc(co: ^Coro) {
-	assert(co.magic_number == MAGIC_NUMBER, "coro header corrupted, stack overflow or stale pointer")
+	assert(
+		co.magic_number == MAGIC_NUMBER,
+		"coro header corrupted, stack overflow or stale pointer",
+	)
 	when ODIN_DEBUG {
 		assert(co != nil)
 		assert(co.state == .Suspended)
@@ -321,7 +336,9 @@ yield :: proc(co: ^Coro) -> Result {
 		stack_addr := uint(uintptr(&dummy))
 		stack_min := uint(uintptr(co.stack_base))
 		stack_max := stack_min + co.stack_size
-		if co.magic_number != MAGIC_NUMBER || stack_addr < stack_min || stack_addr > stack_max {
+		if co.magic_number != MAGIC_NUMBER ||
+		   stack_addr < stack_min ||
+		   stack_addr > stack_max {
 			return .Stack_Overflow
 		}
 	}

@@ -12,6 +12,8 @@ handle_message :: proc(data: ^Big_State, from: PID, content: any) {
 }
 
 @(export)
-hot_Counter_State_handle_message :: proc "c" () -> rawptr {return rawptr(handle_message)}
+hot_Counter_State_handle_message :: proc "c" () -> rawptr {return rawptr(
+		handle_message,
+	)}
 @(export)
 hot_Counter_State_state_size :: proc "c" () -> int {return size_of(Big_State)}

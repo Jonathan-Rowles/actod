@@ -56,7 +56,13 @@ cleanup_message_registry :: proc "contextless" () {
 	registry_destroy(&g_message_registry)
 }
 
-get_type_info_ptr :: proc(id: typeid, loc := #caller_location) -> (^Message_Type_Info, bool) {
+get_type_info_ptr :: proc(
+	id: typeid,
+	loc := #caller_location,
+) -> (
+	^Message_Type_Info,
+	bool,
+) {
 	registry_ensure_init(&g_message_registry, loc)
 
 	for i in 0 ..< g_message_registry.count {
@@ -129,7 +135,10 @@ Temp_Variant_Info :: struct {
 	var_fields: [dynamic]Var_Field_Info,
 }
 
-register_message_type :: #force_inline proc "contextless" ($T: typeid, loc := #caller_location) {
+register_message_type :: #force_inline proc "contextless" (
+	$T: typeid,
+	loc := #caller_location,
+) {
 	assert_message_fits_page(T)
 	register_message_type_info(T, size_of(T), type_info_of(T), loc)
 }
@@ -141,7 +150,13 @@ register_internal_message_type :: #force_inline proc "contextless" (
 	loc := #caller_location,
 ) {
 	assert_message_fits_page(T)
-	register_message_type_info(T, size_of(T), type_info_of(T), loc, wire_policy)
+	register_message_type_info(
+		T,
+		size_of(T),
+		type_info_of(T),
+		loc,
+		wire_policy,
+	)
 }
 
 @(private)
@@ -153,7 +168,14 @@ register_message_type_info :: proc "contextless" (
 	wire_policy := Wire_Policy.Any_Actor,
 ) {
 	context = runtime.default_context()
-	register_message_type_into(&g_message_registry, type_id, size, ti, loc, wire_policy)
+	register_message_type_into(
+		&g_message_registry,
+		type_id,
+		size,
+		ti,
+		loc,
+		wire_policy,
+	)
 }
 
 @(private)
@@ -219,12 +241,20 @@ register_message_type_into :: proc(
 	}
 
 	if len(temp_var_fields) > 0 {
-		info.var_fields = make([]Var_Field_Info, len(temp_var_fields), r.allocator)
+		info.var_fields = make(
+			[]Var_Field_Info,
+			len(temp_var_fields),
+			r.allocator,
+		)
 		copy(info.var_fields, temp_var_fields[:])
 	}
 
 	if len(temp_union_fields) > 0 {
-		info.union_fields = make([]Union_Field_Info, len(temp_union_fields), r.allocator)
+		info.union_fields = make(
+			[]Union_Field_Info,
+			len(temp_union_fields),
+			r.allocator,
+		)
 		for &uf, ui in temp_union_fields {
 			info.union_fields[ui] = Union_Field_Info {
 				tag_offset = uf.tag_offset,
@@ -243,7 +273,10 @@ register_message_type_into :: proc(
 						len(vf.var_fields),
 						r.allocator,
 					)
-					copy(info.union_fields[ui].variants[vi].var_fields, vf.var_fields[:])
+					copy(
+						info.union_fields[ui].variants[vi].var_fields,
+						vf.var_fields[:],
+					)
 				}
 			}
 		}
@@ -338,7 +371,10 @@ largest_registered_message :: proc() -> (name: string, page_bytes: int) {
 	return
 }
 
-get_type_name :: proc(ti: ^runtime.Type_Info, allocator := context.allocator) -> string {
+get_type_name :: proc(
+	ti: ^runtime.Type_Info,
+	allocator := context.allocator,
+) -> string {
 	if ti == nil do return ""
 	if named, ok := ti.variant.(runtime.Type_Info_Named); ok && named.pkg != "" do return fmt.aprintf("%s.%v", named.pkg, ti.id, allocator = allocator)
 	return fmt.aprintf("%v", ti.id, allocator = allocator)
@@ -584,8 +620,10 @@ check_array_elements :: proc(
 	)
 	if !first_safe do return false, first_msg
 
-	recorded_var_fields := var_fields != nil && len(var_fields) > var_fields_before
-	recorded_union_fields := union_fields != nil && len(union_fields) > union_fields_before
+	recorded_var_fields :=
+		var_fields != nil && len(var_fields) > var_fields_before
+	recorded_union_fields :=
+		union_fields != nil && len(union_fields) > union_fields_before
 	if !recorded_var_fields && !recorded_union_fields do return true, ""
 
 	for i in 1 ..< count {

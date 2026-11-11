@@ -21,7 +21,11 @@ test_hot_shim_spawn_carries_foreign_wait_hooks :: proc(t: ^testing.T) {
 
 	build_pkg, prepared := prepare_build_dir(HOOKED_FIXTURE_DIR, "hooked")
 	if !testing.expect(t, prepared, "prepare_build_dir failed for the hooked fixture") do return
-	so_path := fmt.tprintf("%s/tmp/hooked%s", HOOKED_FIXTURE_DIR, hot_reload.SHARED_LIB_EXT)
+	so_path := fmt.tprintf(
+		"%s/tmp/hooked%s",
+		HOOKED_FIXTURE_DIR,
+		hot_reload.SHARED_LIB_EXT,
+	)
 	built := hot_reload.compile_module(build_pkg, so_path)
 	if !testing.expect(t, built.ok, built.error_msg) do return
 

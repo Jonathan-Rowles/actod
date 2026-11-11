@@ -34,7 +34,10 @@ Benchmark_Actor_Data :: struct {
 	last_msg_time:  time.Time,
 }
 
-track_send_error :: #force_inline proc(state: ^Benchmark_State, err: actod.Send_Error) {
+track_send_error :: #force_inline proc(
+	state: ^Benchmark_State,
+	err: actod.Send_Error,
+) {
 	sync.atomic_add(&state.retry_count, 1)
 
 	switch err {

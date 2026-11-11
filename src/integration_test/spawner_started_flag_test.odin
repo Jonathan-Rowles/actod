@@ -16,7 +16,11 @@ started_flag_actor_init :: proc(data: ^Started_Flag_Actor) {
 	data.initialised = true
 }
 
-started_flag_actor_handle :: proc(data: ^Started_Flag_Actor, from: actod.PID, msg: any) {
+started_flag_actor_handle :: proc(
+	data: ^Started_Flag_Actor,
+	from: actod.PID,
+	msg: any,
+) {
 	if text, ok := msg.(string); ok && text == "panic" do panic("panic after the spawner returned")
 }
 
@@ -30,7 +34,9 @@ spawn_started_flag_actor :: #force_no_inline proc() -> (actod.PID, bool) {
 		STARTED_FLAG_ACTOR_NAME,
 		Started_Flag_Actor{},
 		Started_Flag_Actor_Behaviour,
-		actod.make_actor_config(logging = actod.make_log_config(level = test_log_level())),
+		actod.make_actor_config(
+			logging = actod.make_log_config(level = test_log_level()),
+		),
 	)
 }
 

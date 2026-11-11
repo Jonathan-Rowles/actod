@@ -13,7 +13,11 @@ when ODIN_TEST {
 }
 
 @(private)
-copy_message_for_capture :: proc(content: rawptr, size: int, type_id: typeid) -> rawptr {
+copy_message_for_capture :: proc(
+	content: rawptr,
+	size: int,
+	type_id: typeid,
+) -> rawptr {
 	info, registered := get_type_info_ptr(type_id)
 	variable_size := 0
 	if registered do variable_size = calculate_variable_data_size(content, info)

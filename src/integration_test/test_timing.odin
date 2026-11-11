@@ -11,7 +11,10 @@ cached_timeout_scale: int
 timeout_scale :: proc() -> int {
 	if cached_timeout_scale == 0 {
 		cores := max(threads_act.get_cpu_count(), 1)
-		cached_timeout_scale = max(1, (TIMING_REFERENCE_CORES + cores - 1) / cores)
+		cached_timeout_scale = max(
+			1,
+			(TIMING_REFERENCE_CORES + cores - 1) / cores,
+		)
 	}
 	return cached_timeout_scale
 }

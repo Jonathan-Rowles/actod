@@ -114,7 +114,10 @@ Hot_API :: struct {
 		reason: Termination_Reason,
 		loc: runtime.Source_Code_Location,
 	) -> bool,
-	self_rename:              proc(new_name: string, loc: runtime.Source_Code_Location) -> bool,
+	self_rename:              proc(
+		new_name: string,
+		loc: runtime.Source_Code_Location,
+	) -> bool,
 	yield:                    proc(loc: runtime.Source_Code_Location),
 	now:                      proc() -> time.Time,
 	set_timer:                proc(
@@ -125,7 +128,10 @@ Hot_API :: struct {
 		u32,
 		Send_Error,
 	),
-	cancel_timer:             proc(id: u32, loc: runtime.Source_Code_Location) -> Send_Error,
+	cancel_timer:             proc(
+		id: u32,
+		loc: runtime.Source_Code_Location,
+	) -> Send_Error,
 	get_actor_pid:            proc(name: string) -> (PID, bool),
 	get_actor_name:           proc(pid: PID) -> string,
 	is_local_pid:             proc(pid: PID) -> bool,
@@ -168,8 +174,14 @@ Hot_API :: struct {
 		Subscription,
 		bool,
 	),
-	unsubscribe_type:         proc(sub: Subscription, loc: runtime.Source_Code_Location) -> bool,
-	broadcast:                proc(msg: any, loc: runtime.Source_Code_Location),
+	unsubscribe_type:         proc(
+		sub: Subscription,
+		loc: runtime.Source_Code_Location,
+	) -> bool,
+	broadcast:                proc(
+		msg: any,
+		loc: runtime.Source_Code_Location,
+	),
 	get_subscriber_count:     proc(actor_type: Actor_Type) -> u32,
 	subscribe_topic:          proc(
 		topic: ^Topic,
@@ -182,7 +194,11 @@ Hot_API :: struct {
 		sub: Topic_Subscription,
 		loc: runtime.Source_Code_Location,
 	) -> bool,
-	publish:                  proc(topic: ^Topic, msg: any, loc: runtime.Source_Code_Location),
+	publish:                  proc(
+		topic: ^Topic,
+		msg: any,
+		loc: runtime.Source_Code_Location,
+	),
 	get_topic_subscribers:    proc(
 		topic: ^Topic,
 		out: []PID,
@@ -201,7 +217,10 @@ Hot_API :: struct {
 	get_node_info:            proc(node_id: Node_ID) -> (Node_Info, bool),
 	get_node_by_name:         proc(name: string) -> (Node_ID, bool),
 	unregister_node:          proc(node_id: Node_ID),
-	start_listening:          proc(port: int, loc: runtime.Source_Code_Location) -> bool,
+	start_listening:          proc(
+		port: int,
+		loc: runtime.Source_Code_Location,
+	) -> bool,
 	start_observer:           proc(
 		collection_interval: time.Duration,
 		loc: runtime.Source_Code_Location,
@@ -211,7 +230,12 @@ Hot_API :: struct {
 	),
 	stop_observer:            proc(),
 	trigger_stats_collection: proc(loc: runtime.Source_Code_Location) -> bool,
-	subscribe_to_stats:       proc(loc: runtime.Source_Code_Location) -> (Subscription, bool),
+	subscribe_to_stats:       proc(
+		loc: runtime.Source_Code_Location,
+	) -> (
+		Subscription,
+		bool,
+	),
 	set_log_level:            proc(level: log.Level),
 	is_log_level_enabled:     proc(level: log.Level) -> bool,
 	get_current_log_config:   proc() -> Log_Config,

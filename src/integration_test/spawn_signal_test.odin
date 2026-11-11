@@ -86,7 +86,11 @@ hold_while_allocating :: proc(data: ^Held_Supervisor_Data) {
 	}
 }
 
-held_supervisor_handle_message :: proc(data: ^Held_Supervisor_Data, from: actod.PID, msg: any) {
+held_supervisor_handle_message :: proc(
+	data: ^Held_Supervisor_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch m in msg {
 	case string:
 		switch m {
@@ -153,10 +157,21 @@ read_chains :: proc(pid: actod.PID) -> Chain_Probe {
 }
 
 @(private = "file")
-spawn_temporary_crasher :: proc(name: string, parent: actod.PID, crash_in_init := false) -> (actod.PID, bool) {
+spawn_temporary_crasher :: proc(
+	name: string,
+	parent: actod.PID,
+	crash_in_init := false,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return actod.spawn(
 		name,
-		Crash_Test_Data{crash_on_msg = "crash", crash_reason = .ABNORMAL, should_panic = crash_in_init},
+		Crash_Test_Data {
+			crash_on_msg = "crash",
+			crash_reason = .ABNORMAL,
+			should_panic = crash_in_init,
+		},
 		Crash_Test_Behaviour,
 		actod.make_actor_config(restart_policy = .TEMPORARY),
 		parent_pid = parent,
@@ -168,7 +183,10 @@ g_terminated_watch: actod.PID
 
 @(private = "file")
 watched_child_terminated :: proc() -> bool {
-	return sync.atomic_load(&g_terminated_child) == sync.atomic_load(&g_terminated_watch)
+	return(
+		sync.atomic_load(&g_terminated_child) ==
+		sync.atomic_load(&g_terminated_watch) \
+	)
 }
 
 Spawn_Under :: struct {
@@ -186,10 +204,17 @@ g_actor_spawned_child: actod.PID
 Actor_Spawner_Data :: struct {}
 
 Actor_Spawner_Behaviour :: actod.Actor_Behaviour(Actor_Spawner_Data) {
-	handle_message = proc(data: ^Actor_Spawner_Data, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Actor_Spawner_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		request, is_request := msg.(Spawn_Under)
 		if !is_request do return
-		child_pid, _ := spawn_temporary_crasher("actor-spawned-child", request.parent)
+		child_pid, _ := spawn_temporary_crasher(
+			"actor-spawned-child",
+			request.parent,
+		)
 		sync.atomic_store(&g_actor_spawned_child, child_pid)
 	},
 }
@@ -199,13 +224,19 @@ actor_spawned_child_ready :: proc() -> bool {
 	return sync.atomic_load(&g_actor_spawned_child) != 0
 }
 
-test_spawn_from_another_actor_registers_through_the_owner :: proc(t: ^testing.T) {
+test_spawn_from_another_actor_registers_through_the_owner :: proc(
+	t: ^testing.T,
+) {
 	reset_held_supervisor_state()
 	sync.atomic_store(&g_actor_spawned_child, 0)
 
 	supervisor_pid, ok := spawn_held_supervisor("actor-spawn-held-supervisor")
 	if !expect(t, ok, "supervisor spawn failed") do return
-	spawner_pid, spawner_ok := actod.spawn("actor-spawner", Actor_Spawner_Data{}, Actor_Spawner_Behaviour)
+	spawner_pid, spawner_ok := actod.spawn(
+		"actor-spawner",
+		Actor_Spawner_Data{},
+		Actor_Spawner_Behaviour,
+	)
 	if !expect(t, spawner_ok, "spawner spawn failed") do return
 
 	_ = actod.send_message(supervisor_pid, "hold")
@@ -221,11 +252,20 @@ test_spawn_from_another_actor_registers_through_the_owner :: proc(t: ^testing.T)
 		"a spawn made inside another actor must leave a signal for the supervisor, not write its table",
 	)
 	during_hold := actod.get_children(supervisor_pid)
-	expectf(t, len(during_hold) == 0, "the table must not change while its owner is busy, has %d records", len(during_hold))
+	expectf(
+		t,
+		len(during_hold) == 0,
+		"the table must not change while its owner is busy, has %d records",
+		len(during_hold),
+	)
 	delete(during_hold)
 
 	sync.atomic_store(&g_held_release, true)
-	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "the owner must register the child once it drains")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 1, 2000),
+		"the owner must register the child once it drains",
+	)
 	children := actod.get_children(supervisor_pid)
 	if len(children) == 1 do expect(t, children[0] == child_pid, "the registered pid must be the spawned child")
 	delete(children)
@@ -233,8 +273,16 @@ test_spawn_from_another_actor_registers_through_the_owner :: proc(t: ^testing.T)
 	expect(t, actod.terminate_actor(spawner_pid), "terminate spawner")
 	expect(t, wait_for_actor_invalid(spawner_pid, 2000), "spawner should stop")
 	_ = actod.send_message(supervisor_pid, "stop")
-	expect(t, wait_for_actor_invalid(supervisor_pid, 2000), "supervisor should stop")
-	expect(t, wait_for_actor_invalid(child_pid, 2000), "the child should stop with its supervisor")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 2000),
+		"supervisor should stop",
+	)
+	expect(
+		t,
+		wait_for_actor_invalid(child_pid, 2000),
+		"the child should stop with its supervisor",
+	)
 }
 
 @(private = "file")
@@ -255,37 +303,75 @@ spawn_permanent_child_job :: proc(job: ^Foreign_Spawn_Job) {
 	)
 }
 
-spawn_on_a_foreign_thread :: proc(_name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_on_a_foreign_thread :: proc(
+	_name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	job := Foreign_Spawn_Job {
 		parent = parent,
 	}
-	worker := thread.create_and_start_with_poly_data(&job, spawn_permanent_child_job)
+	worker := thread.create_and_start_with_poly_data(
+		&job,
+		spawn_permanent_child_job,
+	)
 	thread.join(worker)
 	thread.destroy(worker)
 	return job.child, job.ok
 }
 
-test_child_spawned_on_a_foreign_thread_restarts_by_its_own_policy :: proc(t: ^testing.T) {
+test_child_spawned_on_a_foreign_thread_restarts_by_its_own_policy :: proc(
+	t: ^testing.T,
+) {
 	reset_held_supervisor_state()
 
-	supervisor_pid, ok := spawn_held_supervisor("foreign-thread-spawn-supervisor")
+	supervisor_pid, ok := spawn_held_supervisor(
+		"foreign-thread-spawn-supervisor",
+	)
 	if !expect(t, ok, "supervisor spawn failed") do return
 
-	expect(t, actod.add_child(supervisor_pid, spawn_on_a_foreign_thread), "add_child should succeed")
-	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "the child spawned off-thread must be recorded")
+	expect(
+		t,
+		actod.add_child(supervisor_pid, spawn_on_a_foreign_thread),
+		"add_child should succeed",
+	)
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 1, 2000),
+		"the child spawned off-thread must be recorded",
+	)
 	first := actod.get_children(supervisor_pid)
 	defer delete(first)
 	if !expectf(t, len(first) == 1, "expected 1 child, got %d", len(first)) do return
 
 	_ = actod.send_message(first[0], "crash")
-	restarted_pid, restarted := wait_for_child_restart(supervisor_pid, first, 0, 3000)
-	expect(t, restarted, "a PERMANENT child spawned on a foreign thread must restart through its spawn function")
+	restarted_pid, restarted := wait_for_child_restart(
+		supervisor_pid,
+		first,
+		0,
+		3000,
+	)
+	expect(
+		t,
+		restarted,
+		"a PERMANENT child spawned on a foreign thread must restart through its spawn function",
+	)
 	if restarted do expect(t, restarted_pid != first[0], "the restart must record a new pid")
 	expect_value(t, sync.atomic_load(&g_restarted_count), 1)
-	expect(t, wait_for_child_count(supervisor_pid, 1, 2000), "the restart must replace the record, not add one")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 1, 2000),
+		"the restart must replace the record, not add one",
+	)
 
 	_ = actod.send_message(supervisor_pid, "stop")
-	expect(t, wait_for_actor_invalid(supervisor_pid, 2000), "supervisor should stop")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 2000),
+		"supervisor should stop",
+	)
 }
 
 @(private = "file")
@@ -297,7 +383,9 @@ both_chains_pending :: proc() -> bool {
 	return chains.spawn_pending && chains.stop_pending
 }
 
-test_foreign_child_dying_before_the_drain_is_registered_first :: proc(t: ^testing.T) {
+test_foreign_child_dying_before_the_drain_is_registered_first :: proc(
+	t: ^testing.T,
+) {
 	reset_held_supervisor_state()
 
 	supervisor_pid, ok := spawn_held_supervisor("die-before-drain-supervisor")
@@ -306,7 +394,11 @@ test_foreign_child_dying_before_the_drain_is_registered_first :: proc(t: ^testin
 	_ = actod.send_message(supervisor_pid, "hold")
 	if !expect(t, wait_for_condition(held_in_handler, 2000), "supervisor never entered its handler") do return
 
-	child_pid, child_ok := spawn_temporary_crasher("die-before-drain-child", supervisor_pid, crash_in_init = true)
+	child_pid, child_ok := spawn_temporary_crasher(
+		"die-before-drain-child",
+		supervisor_pid,
+		crash_in_init = true,
+	)
 	if !expect(t, child_ok, "foreign spawn failed") do return
 
 	sync.atomic_store(&g_chain_probe_pid, supervisor_pid)
@@ -324,11 +416,23 @@ test_foreign_child_dying_before_the_drain_is_registered_first :: proc(t: ^testin
 		"the supervisor must know the child when its death is handled, not log it as unknown",
 	)
 	expect_value(t, sync.atomic_load(&g_terminated_count), 1)
-	expect(t, !sync.atomic_load(&g_terminated_will_restart), "a TEMPORARY child must not be restarted")
-	expect(t, wait_for_child_count(supervisor_pid, 0, 2000), "the dead TEMPORARY child must leave the table")
+	expect(
+		t,
+		!sync.atomic_load(&g_terminated_will_restart),
+		"a TEMPORARY child must not be restarted",
+	)
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 0, 2000),
+		"the dead TEMPORARY child must leave the table",
+	)
 
 	_ = actod.send_message(supervisor_pid, "stop")
-	expect(t, wait_for_actor_invalid(supervisor_pid, 2000), "supervisor should stop")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 2000),
+		"supervisor should stop",
+	)
 }
 
 Spawning_Parent_Data :: struct {
@@ -350,11 +454,18 @@ spawn_quiet_child_job :: proc(data: ^Spawning_Parent_Data) {
 }
 
 Spawning_Parent_Behaviour :: actod.Actor_Behaviour(Spawning_Parent_Data) {
-	handle_message = proc(data: ^Spawning_Parent_Data, from: actod.PID, msg: any) {
+	handle_message = proc(
+		data: ^Spawning_Parent_Data,
+		from: actod.PID,
+		msg: any,
+	) {
 		m, is_string := msg.(string)
 		if !is_string || m != "spawn_from_a_thread_and_return" do return
 		data.job.parent = actod.get_self_pid()
-		data.worker = thread.create_and_start_with_poly_data(data, spawn_quiet_child_job)
+		data.worker = thread.create_and_start_with_poly_data(
+			data,
+			spawn_quiet_child_job,
+		)
 		for !sync.atomic_load(&data.done) do actod.yield()
 		thread.join(data.worker)
 		thread.destroy(data.worker)
@@ -378,13 +489,21 @@ pooled_actor_parked :: proc(state: rawptr) -> bool {
 }
 
 test_spawn_signal_wakes_a_parked_parent :: proc(t: ^testing.T) {
-	parent_pid, ok := actod.spawn("parked-parent", Spawning_Parent_Data{}, Spawning_Parent_Behaviour)
+	parent_pid, ok := actod.spawn(
+		"parked-parent",
+		Spawning_Parent_Data{},
+		Spawning_Parent_Behaviour,
+	)
 	if !expect(t, ok, "parent spawn failed") do return
 
 	probe := Parked_Probe {
 		pid = parent_pid,
 	}
-	expect(t, poll_until(pooled_actor_parked, &probe, 2 * time.Second), "the idle parent never parked")
+	expect(
+		t,
+		poll_until(pooled_actor_parked, &probe, 2 * time.Second),
+		"the idle parent never parked",
+	)
 
 	child_pid, child_ok := actod.spawn(
 		"parked-parent-child",
@@ -394,7 +513,11 @@ test_spawn_signal_wakes_a_parked_parent :: proc(t: ^testing.T) {
 		parent_pid = parent_pid,
 	)
 	expect(t, child_ok, "foreign spawn failed")
-	expect(t, wait_for_child_count(parent_pid, 1, 2000), "a spawn signal must wake a parked parent")
+	expect(
+		t,
+		wait_for_child_count(parent_pid, 1, 2000),
+		"a spawn signal must wake a parked parent",
+	)
 	children := actod.get_children(parent_pid)
 	if len(children) == 1 do expect(t, children[0] == child_pid, "the registered pid must be the spawned child")
 	delete(children)
@@ -403,8 +526,14 @@ test_spawn_signal_wakes_a_parked_parent :: proc(t: ^testing.T) {
 	expect(t, wait_for_actor_invalid(parent_pid, 2000), "parent should stop")
 }
 
-test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded :: proc(t: ^testing.T) {
-	parent_pid, ok := actod.spawn("deciding-to-park-parent", Spawning_Parent_Data{}, Spawning_Parent_Behaviour)
+test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded :: proc(
+	t: ^testing.T,
+) {
+	parent_pid, ok := actod.spawn(
+		"deciding-to-park-parent",
+		Spawning_Parent_Data{},
+		Spawning_Parent_Behaviour,
+	)
 	if !expect(t, ok, "parent spawn failed") do return
 
 	_ = actod.send_message(parent_pid, "spawn_from_a_thread_and_return")
@@ -418,7 +547,9 @@ test_spawn_signal_pushed_while_the_parent_runs_is_not_stranded :: proc(t: ^testi
 	expect(t, wait_for_actor_invalid(parent_pid, 2000), "parent should stop")
 }
 
-test_foreign_spawn_into_a_crashing_parent_is_registered_then_terminated :: proc(t: ^testing.T) {
+test_foreign_spawn_into_a_crashing_parent_is_registered_then_terminated :: proc(
+	t: ^testing.T,
+) {
 	reset_held_supervisor_state()
 
 	supervisor_pid, ok := spawn_held_supervisor("crashing-parent-supervisor")
@@ -427,28 +558,54 @@ test_foreign_spawn_into_a_crashing_parent_is_registered_then_terminated :: proc(
 	_ = actod.send_message(supervisor_pid, "hold_then_panic")
 	if !expect(t, wait_for_condition(held_in_handler, 2000), "supervisor never entered its handler") do return
 
-	child_pid, child_ok := spawn_temporary_crasher("crashing-parent-child", supervisor_pid)
+	child_pid, child_ok := spawn_temporary_crasher(
+		"crashing-parent-child",
+		supervisor_pid,
+	)
 	if !expect(t, child_ok, "foreign spawn failed") do return
-	expect(t, read_chains(supervisor_pid).spawn_pending, "the spawn signal must wait on the busy supervisor")
+	expect(
+		t,
+		read_chains(supervisor_pid).spawn_pending,
+		"the spawn signal must wait on the busy supervisor",
+	)
 
 	sync.atomic_store(&g_held_release, true)
-	expect(t, wait_for_actor_invalid(supervisor_pid, 3000), "supervisor should stop")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 3000),
+		"supervisor should stop",
+	)
 	expect_value(t, sync.atomic_load(&g_terminate_saw_children), 1)
-	expect(t, wait_for_actor_invalid(child_pid, 3000), "a child registered while its parent stops must be terminated with it")
+	expect(
+		t,
+		wait_for_actor_invalid(child_pid, 3000),
+		"a child registered while its parent stops must be terminated with it",
+	)
 }
 
-test_remove_child_right_after_a_foreign_spawn_finds_the_child :: proc(t: ^testing.T) {
+test_remove_child_right_after_a_foreign_spawn_finds_the_child :: proc(
+	t: ^testing.T,
+) {
 	reset_held_supervisor_state()
 
-	supervisor_pid, ok := spawn_held_supervisor("remove-after-spawn-supervisor")
+	supervisor_pid, ok := spawn_held_supervisor(
+		"remove-after-spawn-supervisor",
+	)
 	if !expect(t, ok, "supervisor spawn failed") do return
 
 	_ = actod.send_message(supervisor_pid, "hold")
 	if !expect(t, wait_for_condition(held_in_handler, 2000), "supervisor never entered its handler") do return
 
-	child_pid, child_ok := spawn_temporary_crasher("remove-after-spawn-child", supervisor_pid)
+	child_pid, child_ok := spawn_temporary_crasher(
+		"remove-after-spawn-child",
+		supervisor_pid,
+	)
 	if !expect(t, child_ok, "foreign spawn failed") do return
-	expect(t, actod.remove_child(supervisor_pid, child_pid), "remove_child should be accepted")
+	expect(
+		t,
+		actod.remove_child(supervisor_pid, child_pid),
+		"remove_child should be accepted",
+	)
 
 	sync.atomic_store(&g_held_release, true)
 	expect(
@@ -456,29 +613,56 @@ test_remove_child_right_after_a_foreign_spawn_finds_the_child :: proc(t: ^testin
 		wait_for_actor_invalid(child_pid, 3000),
 		"Remove_Child sent after the spawn returned must find the child and shut it down",
 	)
-	expect(t, wait_for_child_count(supervisor_pid, 0, 2000), "the removed child must leave the table")
+	expect(
+		t,
+		wait_for_child_count(supervisor_pid, 0, 2000),
+		"the removed child must leave the table",
+	)
 
 	_ = actod.send_message(supervisor_pid, "stop")
-	expect(t, wait_for_actor_invalid(supervisor_pid, 2000), "supervisor should stop")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 2000),
+		"supervisor should stop",
+	)
 }
 
-test_foreign_spawn_after_the_parent_terminated_its_children_is_reaped :: proc(t: ^testing.T) {
+test_foreign_spawn_after_the_parent_terminated_its_children_is_reaped :: proc(
+	t: ^testing.T,
+) {
 	reset_held_supervisor_state()
 	sync.atomic_store(&g_block_terminate, true)
 
-	supervisor_pid, ok := spawn_held_supervisor("terminating-parent-supervisor")
+	supervisor_pid, ok := spawn_held_supervisor(
+		"terminating-parent-supervisor",
+	)
 	if !expect(t, ok, "supervisor spawn failed") do return
 
 	_ = actod.send_message(supervisor_pid, "stop")
 	if !expect(t, wait_for_condition(held_in_terminate, 2000), "supervisor never entered terminate") do return
 
-	child_pid, child_ok := spawn_temporary_crasher("terminating-parent-child", supervisor_pid)
+	child_pid, child_ok := spawn_temporary_crasher(
+		"terminating-parent-child",
+		supervisor_pid,
+	)
 	if !expect(t, child_ok, "foreign spawn failed") do return
-	expect(t, read_chains(supervisor_pid).spawn_pending, "the spawn signal must stay on the stopping parent's chain")
+	expect(
+		t,
+		read_chains(supervisor_pid).spawn_pending,
+		"the spawn signal must stay on the stopping parent's chain",
+	)
 
 	sync.atomic_store(&g_held_release, true)
-	expect(t, wait_for_actor_invalid(supervisor_pid, 3000), "supervisor should stop")
-	expect(t, wait_for_actor_invalid(child_pid, 3000), "the reaper must shut down a child its parent never drained")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 3000),
+		"supervisor should stop",
+	)
+	expect(
+		t,
+		wait_for_actor_invalid(child_pid, 3000),
+		"the reaper must shut down a child its parent never drained",
+	)
 }
 
 CONCURRENT_SPAWN_THREADS :: 8
@@ -495,7 +679,11 @@ Concurrent_Spawn_Job :: struct {
 Quiet_Child_Data :: struct {}
 
 Quiet_Child_Behaviour :: actod.Actor_Behaviour(Quiet_Child_Data) {
-	handle_message = proc(data: ^Quiet_Child_Data, from: actod.PID, msg: any) {},
+	handle_message = proc(
+		data: ^Quiet_Child_Data,
+		from: actod.PID,
+		msg: any,
+	) {},
 }
 
 @(private = "file")
@@ -517,7 +705,9 @@ concurrent_spawn_job :: proc(job: ^Concurrent_Spawn_Job) {
 	}
 }
 
-test_concurrent_foreign_spawns_register_each_child_once :: proc(t: ^testing.T) {
+test_concurrent_foreign_spawns_register_each_child_once :: proc(
+	t: ^testing.T,
+) {
 	supervisor_pid, ok := actod.spawn(
 		"concurrent-spawn-supervisor",
 		Quiet_Child_Data{},
@@ -535,7 +725,10 @@ test_concurrent_foreign_spawns_register_each_child_once :: proc(t: ^testing.T) {
 			start  = &start,
 			index  = i,
 		}
-		workers[i] = thread.create_and_start_with_poly_data(&jobs[i], concurrent_spawn_job)
+		workers[i] = thread.create_and_start_with_poly_data(
+			&jobs[i],
+			concurrent_spawn_job,
+		)
 	}
 	sync.atomic_store(&start, true)
 	for worker in workers {
@@ -543,10 +736,20 @@ test_concurrent_foreign_spawns_register_each_child_once :: proc(t: ^testing.T) {
 		thread.destroy(worker)
 	}
 
-	expected := make([dynamic]actod.PID, 0, CONCURRENT_SPAWN_THREADS * CONCURRENT_SPAWNS_PER_THREAD)
+	expected := make(
+		[dynamic]actod.PID,
+		0,
+		CONCURRENT_SPAWN_THREADS * CONCURRENT_SPAWNS_PER_THREAD,
+	)
 	defer delete(expected)
 	for &job in jobs {
-		expectf(t, job.failed == 0, "thread %d failed %d spawns", job.index, job.failed)
+		expectf(
+			t,
+			job.failed == 0,
+			"thread %d failed %d spawns",
+			job.index,
+			job.failed,
+		)
 		for pid in job.pids do if pid != 0 do append(&expected, pid)
 	}
 
@@ -559,17 +762,29 @@ test_concurrent_foreign_spawns_register_each_child_once :: proc(t: ^testing.T) {
 	defer delete(children)
 	slice.sort(expected[:])
 	slice.sort(children)
-	expect(t, slice.equal(expected[:], children), "each spawned child must be recorded exactly once")
+	expect(
+		t,
+		slice.equal(expected[:], children),
+		"each spawned child must be recorded exactly once",
+	)
 
 	expect(t, actod.terminate_actor(supervisor_pid), "terminate supervisor")
-	expect(t, wait_for_actor_invalid(supervisor_pid, 5000), "supervisor should stop")
+	expect(
+		t,
+		wait_for_actor_invalid(supervisor_pid, 5000),
+		"supervisor should stop",
+	)
 	for pid in expected {
 		if !expect(t, wait_for_actor_invalid(pid, 2000), "every registered child must stop with its supervisor") do break
 	}
 }
 
 test_sim_foreign_spawn_registers_on_the_parents_drain :: proc(t: ^testing.T) {
-	supervisor_pid, ok := actod.spawn("sim-foreign-spawn-supervisor", Quiet_Child_Data{}, Quiet_Child_Behaviour)
+	supervisor_pid, ok := actod.spawn(
+		"sim-foreign-spawn-supervisor",
+		Quiet_Child_Data{},
+		Quiet_Child_Behaviour,
+	)
 	if !expect(t, ok, "supervisor spawn failed") do return
 	_ = actod.sim_run_until_idle()
 
@@ -583,7 +798,12 @@ test_sim_foreign_spawn_registers_on_the_parents_drain :: proc(t: ^testing.T) {
 	if !expect(t, child_ok, "foreign spawn failed") do return
 
 	before := actod.get_children(supervisor_pid)
-	expectf(t, len(before) == 0, "a foreign spawn registers when the parent drains, not on return, got %d", len(before))
+	expectf(
+		t,
+		len(before) == 0,
+		"a foreign spawn registers when the parent drains, not on return, got %d",
+		len(before),
+	)
 	delete(before)
 
 	_ = actod.sim_run_until_idle()

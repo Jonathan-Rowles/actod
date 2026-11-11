@@ -156,7 +156,8 @@ handle_observer_message :: proc(data: ^Observer_Data, from: PID, msg: any) {
 			}
 			data.active_stats[stats.pid] = stats
 		}
-		data.total_actors_monitored = len(data.active_stats) + len(data.terminated_stats)
+		data.total_actors_monitored =
+			len(data.active_stats) + len(data.terminated_stats)
 
 	case Set_Collection_Interval:
 		if data.auto_collect do cancel_timer(data.collection_timer_id)
@@ -454,7 +455,10 @@ stop_observer :: proc() {
 }
 
 @(private)
-log_observer_not_started :: proc(proc_name: string, loc: runtime.Source_Code_Location) {
+log_observer_not_started :: proc(
+	proc_name: string,
+	loc: runtime.Source_Code_Location,
+) {
 	context.logger = diagnostic_logger(context.logger)
 	log.errorf(
 		"%s failed: the observer is not running, start it with start_observer",
@@ -480,7 +484,11 @@ log_observer_send_failed :: proc(
 }
 
 @(private)
-observer_request :: proc(msg: $T, proc_name: string, loc: runtime.Source_Code_Location) -> bool {
+observer_request :: proc(
+	msg: $T,
+	proc_name: string,
+	loc: runtime.Source_Code_Location,
+) -> bool {
 	if NODE.observer_pid == {} {
 		log_observer_not_started(proc_name, loc)
 		return false
@@ -491,7 +499,11 @@ observer_request :: proc(msg: $T, proc_name: string, loc: runtime.Source_Code_Lo
 }
 
 trigger_stats_collection :: proc(loc := #caller_location) -> bool {
-	return observer_request(Trigger_Collection{}, "trigger_stats_collection", loc)
+	return observer_request(
+		Trigger_Collection{},
+		"trigger_stats_collection",
+		loc,
+	)
 }
 
 @(require_results)

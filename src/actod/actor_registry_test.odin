@@ -124,7 +124,10 @@ concurrent_slot_test :: proc(t: ^testing.T) {
 			pool     = &pid_pool,
 			mutex    = &pool_mutex,
 		}
-		threads[i] = thread.create_and_start_with_data(&thread_contexts[i], worker)
+		threads[i] = thread.create_and_start_with_data(
+			&thread_contexts[i],
+			worker,
+		)
 	}
 
 	for th in threads {
@@ -279,7 +282,10 @@ unused_list_integrity_test :: proc(t: ^testing.T) {
 	}
 
 	testing.expect(t, !has_cycle)
-	testing.expect(t, count == int(sync.atomic_load(&test_registry.num_unused)))
+	testing.expect(
+		t,
+		count == int(sync.atomic_load(&test_registry.num_unused)),
+	)
 }
 
 @(test)
@@ -348,7 +354,11 @@ capacity_test :: proc(t: ^testing.T) {
 		successful_adds > TEST_REGISTRY_SIZE,
 		"Registry should grow beyond initial capacity",
 	)
-	testing.expect(t, final_capacity > initial_capacity, "Capacity should have increased")
+	testing.expect(
+		t,
+		final_capacity > initial_capacity,
+		"Capacity should have increased",
+	)
 	testing.expect(t, successful_adds == num_used(test_registry))
 }
 
@@ -643,8 +653,16 @@ remove_remote_test :: proc(t: ^testing.T) {
 	testing.expect(t, !found_after)
 
 	add_remote(test_registry, remote_pid, "fallback_remote@node4")
-	removed_by_scan := remove_remote(test_registry, remote_pid, "wrong_name@node4")
-	testing.expect(t, removed_by_scan, "pid scan fallback must still remove on a name miss")
+	removed_by_scan := remove_remote(
+		test_registry,
+		remote_pid,
+		"wrong_name@node4",
+	)
+	testing.expect(
+		t,
+		removed_by_scan,
+		"pid scan fallback must still remove on a name miss",
+	)
 	_, scan_found := get_by_name(test_registry, "fallback_remote@node4")
 	testing.expect(t, !scan_found)
 }
@@ -839,7 +857,12 @@ add_remote_concurrent_test :: proc(t: ^testing.T) {
 				actor_type = 0,
 			}
 			pid := pack_pid(handle, Node_ID(ctx.thread_id + 2))
-			name := fmt.tprintf("concurrent_%d_%d@node%d", ctx.thread_id, i, ctx.thread_id + 2)
+			name := fmt.tprintf(
+				"concurrent_%d_%d@node%d",
+				ctx.thread_id,
+				i,
+				ctx.thread_id + 2,
+			)
 			ok, _ := add_remote(ctx.registry, pid, name)
 			if ok {
 				ctx.successes += 1
@@ -913,7 +936,11 @@ add_remote_updates_stale_pid_test :: proc(t: ^testing.T) {
 
 	found_pid, found := get_by_name(test_registry, "worker@nodeC")
 	testing.expect(t, found, "Should find actor by name")
-	testing.expect(t, found_pid == new_pid, "PID should be updated to new session PID")
+	testing.expect(
+		t,
+		found_pid == new_pid,
+		"PID should be updated to new session PID",
+	)
 	testing.expect(t, found_pid != old_pid, "PID should not be the stale one")
 }
 
@@ -972,7 +999,11 @@ add_remote_concurrent_dedup_test :: proc(t: ^testing.T) {
 			&contexts[i],
 			proc(ctx: ^Concurrent_Dedup_Context) {
 				sync.barrier_wait(ctx.barrier)
-				ok, is_new := add_remote(ctx.registry, ctx.pid, DEDUP_ACTOR_NAME)
+				ok, is_new := add_remote(
+					ctx.registry,
+					ctx.pid,
+					DEDUP_ACTOR_NAME,
+				)
 				ctx.result.ok = ok
 				ctx.result.is_new = is_new
 			},
@@ -991,13 +1022,21 @@ add_remote_concurrent_dedup_test :: proc(t: ^testing.T) {
 			new_count += 1
 		}
 	}
-	testing.expect(t, new_count == 1, "Exactly one thread should see is_new=true")
+	testing.expect(
+		t,
+		new_count == 1,
+		"Exactly one thread should see is_new=true",
+	)
 
 	found_pid, found := get_by_name(test_registry, DEDUP_ACTOR_NAME)
 	testing.expect(t, found, "Should find actor by name")
 	testing.expect(t, found_pid == remote_pid, "PID should match")
 
-	testing.expect(t, num_used(test_registry) == 1, "Should have exactly 1 used slot")
+	testing.expect(
+		t,
+		num_used(test_registry) == 1,
+		"Should have exactly 1 used slot",
+	)
 }
 
 @(test)
@@ -1020,7 +1059,11 @@ add_remote_split_brain_full_scenario_test :: proc(t: ^testing.T) {
 
 	found_pid, found := get_by_name(test_registry, "worker@nodeC")
 	testing.expect(t, found, "Should find re-registered actor")
-	testing.expect(t, found_pid == new_pid, "Should resolve to new session PID")
+	testing.expect(
+		t,
+		found_pid == new_pid,
+		"Should resolve to new session PID",
+	)
 
 	ok3, new3 := add_remote(test_registry, old_pid, "worker@nodeC")
 	testing.expect(t, ok3)
@@ -1028,9 +1071,17 @@ add_remote_split_brain_full_scenario_test :: proc(t: ^testing.T) {
 
 	found_pid2, found2 := get_by_name(test_registry, "worker@nodeC")
 	testing.expect(t, found2, "Should still find actor")
-	testing.expect(t, found_pid2 == old_pid || found_pid2 == new_pid, "Should have a valid PID")
+	testing.expect(
+		t,
+		found_pid2 == old_pid || found_pid2 == new_pid,
+		"Should have a valid PID",
+	)
 
-	testing.expect(t, num_used(test_registry) == 1, "Should have exactly 1 used slot")
+	testing.expect(
+		t,
+		num_used(test_registry) == 1,
+		"Should have exactly 1 used slot",
+	)
 }
 
 @(test)
@@ -1069,8 +1120,16 @@ registry_growth_keeps_entries_stable :: proc(t: ^testing.T) {
 
 	for pid in pids {
 		data, ok := get(reg, pid)
-		testing.expect(t, ok, "entry added before or during growth must stay readable")
-		testing.expect(t, data == sentinel, "entry data must survive growth intact")
+		testing.expect(
+			t,
+			ok,
+			"entry added before or during growth must stay readable",
+		)
+		testing.expect(
+			t,
+			data == sentinel,
+			"entry data must survive growth intact",
+		)
 	}
 }
 
@@ -1096,7 +1155,12 @@ name_bucket_saturation_test :: proc(t: ^testing.T) {
 	for i in 0 ..< total {
 		name := fmt.tprintf("bucket_actor_%d", i)
 		found_pid, found := get_by_name(reg, name)
-		testing.expectf(t, found, "actor %d must stay findable by name past 4096 registrations", i)
+		testing.expectf(
+			t,
+			found,
+			"actor %d must stay findable by name past 4096 registrations",
+			i,
+		)
 		if found do testing.expect_value(t, found_pid, pids[i])
 	}
 }
@@ -1122,7 +1186,12 @@ gossip_window_bounded_after_dropped_seq_test :: proc(t: ^testing.T) {
 		"ahead grew to %d entries past a dropped seq",
 		ahead_len,
 	)
-	testing.expectf(t, next_seq > 3, "frontier stuck at %d behind the hole", next_seq)
+	testing.expectf(
+		t,
+		next_seq > 3,
+		"frontier stuck at %d behind the hole",
+		next_seq,
+	)
 	testing.expect(
 		t,
 		gossip_seq_covered(node, 150),
@@ -1158,11 +1227,17 @@ terminate_actor_during_shutdown_reports_success_test :: proc(t: ^testing.T) {
 	ok := terminate_actor(pid, .NORMAL)
 	sync.atomic_store(&NODE.shutting_down, was_shutting_down)
 
-	testing.expect(t, ok, "terminate_actor during shutdown should succeed, not report a stale PID")
+	testing.expect(
+		t,
+		ok,
+		"terminate_actor during shutdown should succeed, not report a stale PID",
+	)
 }
 
 @(test)
-test_a_local_handle_under_a_peer_node_id_resolves_to_nothing :: proc(t: ^testing.T) {
+test_a_local_handle_under_a_peer_node_id_resolves_to_nothing :: proc(
+	t: ^testing.T,
+) {
 	test_registry := make_test_registry()
 	defer free(test_registry)
 	clear(test_registry)

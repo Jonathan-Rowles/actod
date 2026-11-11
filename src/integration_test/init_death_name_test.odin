@@ -26,7 +26,11 @@ init_death_child_init :: proc(data: ^Init_Death_Child) {
 	if data.incarnation < INIT_DEATH_SURVIVING_INCARNATION do panic("dying in init")
 }
 
-init_death_child_handle :: proc(data: ^Init_Death_Child, from: actod.PID, msg: any) {
+init_death_child_handle :: proc(
+	data: ^Init_Death_Child,
+	from: actod.PID,
+	msg: any,
+) {
 	if _, ok := msg.(Init_Death_Ping); !ok do return
 	sync.atomic_store(&init_death_ping_pid, u64(actod.get_self_pid()))
 	sync.atomic_store(&init_death_ping_incarnation, data.incarnation)
@@ -39,13 +43,23 @@ Init_Death_Child_Behaviour :: actod.Actor_Behaviour(Init_Death_Child) {
 
 Init_Death_Sup :: struct {}
 
-init_death_sup_handle :: proc(data: ^Init_Death_Sup, from: actod.PID, msg: any) {}
+init_death_sup_handle :: proc(
+	data: ^Init_Death_Sup,
+	from: actod.PID,
+	msg: any,
+) {}
 
 Init_Death_Sup_Behaviour :: actod.Actor_Behaviour(Init_Death_Sup) {
 	handle_message = init_death_sup_handle,
 }
 
-spawn_init_death_child :: proc(name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_init_death_child :: proc(
+	name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	actor_name := name if name != "" else INIT_DEATH_CHILD_NAME
 	return actod.spawn(
 		actor_name,
@@ -54,13 +68,21 @@ spawn_init_death_child :: proc(name: string, parent: actod.PID) -> (actod.PID, b
 		actod.make_actor_config(
 			logging = actod.make_log_config(level = test_log_level()),
 			restart_policy = .TRANSIENT,
-			use_dedicated_os_thread = sync.atomic_load(&init_death_dedicated_thread),
+			use_dedicated_os_thread = sync.atomic_load(
+				&init_death_dedicated_thread,
+			),
 		),
 		parent,
 	)
 }
 
-spawn_init_death_sup :: proc(name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_init_death_sup :: proc(
+	name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return actod.spawn(
 		"init-death-sup",
 		Init_Death_Sup{},
@@ -78,10 +100,17 @@ spawn_init_death_sup :: proc(name: string, parent: actod.PID) -> (actod.PID, boo
 
 init_death_named_send_lands :: proc(state: rawptr) -> bool {
 	if actod.send_message_name(INIT_DEATH_CHILD_NAME, Init_Death_Ping{token = 1}) != .OK do return false
-	return sync.atomic_load(&init_death_ping_incarnation) == INIT_DEATH_SURVIVING_INCARNATION
+	return(
+		sync.atomic_load(&init_death_ping_incarnation) ==
+		INIT_DEATH_SURVIVING_INCARNATION \
+	)
 }
 
-run_init_death_name_test :: proc(t: ^testing.T, node_name: string, dedicated_thread: bool) {
+run_init_death_name_test :: proc(
+	t: ^testing.T,
+	node_name: string,
+	dedicated_thread: bool,
+) {
 	reset_test_state()
 	sync.atomic_store(&init_death_incarnations, 0)
 	sync.atomic_store(&init_death_ping_incarnation, 0)
@@ -91,7 +120,12 @@ run_init_death_name_test :: proc(t: ^testing.T, node_name: string, dedicated_thr
 	restart_node_with(node_name, actod.make_children(spawn_init_death_sup), 3)
 	wait_for_node()
 
-	landed := poll_until(init_death_named_send_lands, nil, 3 * time.Second, time.Millisecond)
+	landed := poll_until(
+		init_death_named_send_lands,
+		nil,
+		3 * time.Second,
+		time.Millisecond,
+	)
 	expectf(
 		t,
 		landed,

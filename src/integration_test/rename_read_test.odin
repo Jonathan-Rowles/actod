@@ -30,7 +30,8 @@ rename_read_renamer_behaviour := actod.Actor_Behaviour(Rename_Read_Renamer) {
 			sync.atomic_store(&rename_read_probe.finished, true)
 			return
 		}
-		next_name := RENAME_READ_LONG_NAME if d.renames % 2 == 0 else RENAME_READ_SHORT_NAME
+		next_name :=
+			RENAME_READ_LONG_NAME if d.renames % 2 == 0 else RENAME_READ_SHORT_NAME
 		if actod.self_rename(next_name) do d.renames += 1
 		sync.atomic_store(&rename_read_probe.renames, d.renames)
 		_ = actod.send_self(Rename_Read_Step{})
@@ -58,7 +59,8 @@ test_get_actor_name_never_reads_a_torn_rename :: proc(t: ^testing.T) {
 	first_torn_len := -1
 	start := time.tick_now()
 	budget := scaled_timeout(RENAME_READ_BUDGET)
-	for !sync.atomic_load(&rename_read_probe.finished) && time.tick_since(start) < budget {
+	for !sync.atomic_load(&rename_read_probe.finished) &&
+	    time.tick_since(start) < budget {
 		name := actod.get_actor_name(pid)
 		reads += 1
 		if is_assigned_rename_read_name(name) do continue

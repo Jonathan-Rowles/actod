@@ -25,14 +25,30 @@ test_pool_init :: proc(t: ^testing.T) {
 	pool_init(&pool, context.allocator)
 	defer cleanup_pool(&pool)
 
-	testing.expect(t, pool.pages == nil, "Page pool bookkeeping should not be allocated at init")
+	testing.expect(
+		t,
+		pool.pages == nil,
+		"Page pool bookkeeping should not be allocated at init",
+	)
 
-	testing.expect(t, pool_ensure_ready(&pool), "pool_ensure_ready should succeed")
-	testing.expect(t, pool.pages != nil, "Page pool pages should be allocated after first use")
+	testing.expect(
+		t,
+		pool_ensure_ready(&pool),
+		"pool_ensure_ready should succeed",
+	)
+	testing.expect(
+		t,
+		pool.pages != nil,
+		"Page pool pages should be allocated after first use",
+	)
 	testing.expect(
 		t,
 		len(pool.pages) == pool.max_pages,
-		fmt.tprintf("Expected %d pages, got %d", pool.max_pages, len(pool.pages)),
+		fmt.tprintf(
+			"Expected %d pages, got %d",
+			pool.max_pages,
+			len(pool.pages),
+		),
 	)
 }
 
@@ -54,7 +70,11 @@ test_basic_alloc_free :: proc(t: ^testing.T) {
 	}
 
 	for i in 0 ..< payload_size {
-		testing.expect(t, data[i] == byte(i & 0xFF), fmt.tprintf("Data mismatch at offset %d", i))
+		testing.expect(
+			t,
+			data[i] == byte(i & 0xFF),
+			fmt.tprintf("Data mismatch at offset %d", i),
+		)
 	}
 
 	free_message(&pool, ptr)
@@ -95,8 +115,16 @@ test_large_allocation :: proc(t: ^testing.T) {
 
 	size = pool.page_size + 1
 	ptr, err = message_alloc(&pool, size)
-	testing.expect(t, err == .SIZE_EXCEEDS_PAGE, "Oversized alloc should return SIZE_EXCEEDS_PAGE")
-	testing.expect(t, ptr == nil, "Pointer should be nil for failed allocation")
+	testing.expect(
+		t,
+		err == .SIZE_EXCEEDS_PAGE,
+		"Oversized alloc should return SIZE_EXCEEDS_PAGE",
+	)
+	testing.expect(
+		t,
+		ptr == nil,
+		"Pointer should be nil for failed allocation",
+	)
 }
 
 @(test)
@@ -154,7 +182,10 @@ test_concurrent_allocations :: proc(t: ^testing.T) {
 			wg   = &wg,
 			id   = i,
 		}
-		threads[i] = thread.create_and_start_with_data(&worker_datas[i], worker)
+		threads[i] = thread.create_and_start_with_data(
+			&worker_datas[i],
+			worker,
+		)
 	}
 
 	sync.wait_group_wait(&wg)
@@ -179,13 +210,21 @@ test_batch_free :: proc(t: ^testing.T) {
 	size := 512
 	for i in 0 ..< FREE_BATCH_SIZE - 1 {
 		ptr, _ := message_alloc(&pool, size)
-		testing.expect(t, ptr != nil, fmt.tprintf("Allocation %d should succeed", i))
+		testing.expect(
+			t,
+			ptr != nil,
+			fmt.tprintf("Allocation %d should succeed", i),
+		)
 		if ptr != nil {
 			message_free_deferred(&buffer, ptr)
 		}
 	}
 
-	testing.expect(t, buffer.count == FREE_BATCH_SIZE - 1, "Buffer should not be flushed yet")
+	testing.expect(
+		t,
+		buffer.count == FREE_BATCH_SIZE - 1,
+		"Buffer should not be flushed yet",
+	)
 
 	ptr, _ := message_alloc(&pool, size)
 	testing.expect(t, ptr != nil, "Final allocation should succeed")
@@ -263,7 +302,11 @@ test_message_reuse :: proc(t: ^testing.T) {
 
 	for i in 0 ..< iterations {
 		ptr, _ := message_alloc(&pool, size)
-		testing.expect(t, ptr != nil, fmt.tprintf("Allocation %d should succeed", i))
+		testing.expect(
+			t,
+			ptr != nil,
+			fmt.tprintf("Allocation %d should succeed", i),
+		)
 
 		if ptr != nil {
 			if _, exists := seen_ptrs[ptr]; exists {

@@ -47,7 +47,9 @@ dedicated_init_stop_actor_handle :: proc(
 	msg: any,
 ) {}
 
-Dedicated_Init_Stop_Actor_Behaviour :: actod.Actor_Behaviour(Dedicated_Init_Stop_Actor) {
+Dedicated_Init_Stop_Actor_Behaviour :: actod.Actor_Behaviour(
+	Dedicated_Init_Stop_Actor,
+) {
 	init           = dedicated_init_stop_actor_init,
 	handle_message = dedicated_init_stop_actor_handle,
 }
@@ -74,7 +76,10 @@ find_dedicated_thread_reap :: proc(
 	return {}, false
 }
 
-record_dedicated_thread_start :: proc(pid: actod.PID, stored_thread: ^thread.Thread) {
+record_dedicated_thread_start :: proc(
+	pid: actod.PID,
+	stored_thread: ^thread.Thread,
+) {
 	slot := sync.atomic_add(&dedicated_thread_start_count, 1)
 	if slot >= DEDICATED_REAP_RECORD_CAPACITY do return
 	record := &dedicated_thread_starts[slot]
@@ -97,11 +102,16 @@ find_dedicated_thread_start :: proc(
 }
 
 held_dedicated_actor_reaped :: proc(state: rawptr) -> bool {
-	_, found := find_dedicated_thread_reap((cast(^Held_Dedicated_Spawner)state).pid)
+	_, found := find_dedicated_thread_reap(
+		(cast(^Held_Dedicated_Spawner)state).pid,
+	)
 	return found
 }
 
-hold_spawner_until_dedicated_actor_reaped :: proc(pid: actod.PID, name: string) {
+hold_spawner_until_dedicated_actor_reaped :: proc(
+	pid: actod.PID,
+	name: string,
+) {
 	if name != DEDICATED_REAP_ACTOR_NAME do return
 	held := &held_dedicated_spawner
 	held.pid = pid
@@ -124,7 +134,8 @@ test_dedicated_thread_stopped_in_init_is_joined :: proc(t: ^testing.T) {
 	dedicated_thread_start_count = 0
 	actod.dedicated_thread_starting_hook = record_dedicated_thread_start
 	actod.dedicated_thread_reap_hook = record_dedicated_thread_reap
-	actod.dedicated_thread_started_hook = hold_spawner_until_dedicated_actor_reaped
+	actod.dedicated_thread_started_hook =
+		hold_spawner_until_dedicated_actor_reaped
 	defer {
 		actod.dedicated_thread_started_hook = nil
 		actod.dedicated_thread_reap_hook = nil
@@ -142,7 +153,11 @@ test_dedicated_thread_stopped_in_init_is_joined :: proc(t: ^testing.T) {
 		),
 	)
 
-	expect(t, spawned, "spawn reports success once init has run, even when init stopped the actor")
+	expect(
+		t,
+		spawned,
+		"spawn reports success once init has run, even when init stopped the actor",
+	)
 	expect(
 		t,
 		held_dedicated_spawner.reached,

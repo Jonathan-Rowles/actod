@@ -14,8 +14,11 @@ raise_sigterm_to_self :: proc() {
 }
 
 raise_sigint_to_self_after :: proc(delay: time.Duration) {
-	thread.create_and_start_with_data(rawptr(uintptr(delay)), proc(data: rawptr) {
-		time.sleep(time.Duration(uintptr(data)))
-		posix.kill(posix.getpid(), .SIGINT)
-	})
+	thread.create_and_start_with_data(
+		rawptr(uintptr(delay)),
+		proc(data: rawptr) {
+			time.sleep(time.Duration(uintptr(data)))
+			posix.kill(posix.getpid(), .SIGINT)
+		},
+	)
 }

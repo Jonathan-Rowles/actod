@@ -44,11 +44,14 @@ start_parent_monitor :: proc() {
 		return
 	}
 
-	thread.create_and_start_with_data(rawptr(parent_handle), proc(data: rawptr) {
-		handle := win32.HANDLE(data)
-		win32.WaitForSingleObject(handle, win32.INFINITE)
-		win32.CloseHandle(handle)
-		actod.shutdown_node()
-		os.exit(1)
-	})
+	thread.create_and_start_with_data(
+		rawptr(parent_handle),
+		proc(data: rawptr) {
+			handle := win32.HANDLE(data)
+			win32.WaitForSingleObject(handle, win32.INFINITE)
+			win32.CloseHandle(handle)
+			actod.shutdown_node()
+			os.exit(1)
+		},
+	)
 }

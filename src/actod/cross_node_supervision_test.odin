@@ -17,7 +17,11 @@ test_is_local_pid_local :: proc(t: ^testing.T) {
 	}
 	pid := pack_pid(handle, Node_ID(1))
 
-	testing.expect(t, is_local_pid(pid), "PID with current node_id should be local")
+	testing.expect(
+		t,
+		is_local_pid(pid),
+		"PID with current node_id should be local",
+	)
 	testing.expect_value(t, get_node_id(pid), Node_ID(1))
 }
 
@@ -34,7 +38,11 @@ test_is_local_pid_remote :: proc(t: ^testing.T) {
 	}
 	pid := pack_pid(handle, Node_ID(3))
 
-	testing.expect(t, !is_local_pid(pid), "PID with different node_id should be remote")
+	testing.expect(
+		t,
+		!is_local_pid(pid),
+		"PID with different node_id should be remote",
+	)
 	testing.expect_value(t, get_node_id(pid), Node_ID(3))
 }
 
@@ -63,7 +71,11 @@ test_restart_info_remote_fields :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, info.spawn_func_name_hash, hash)
 	testing.expect_value(t, info.node_id, Node_ID(3))
-	testing.expect(t, info.spawn_func_name_hash != 0, "Hash should be non-zero")
+	testing.expect(
+		t,
+		info.spawn_func_name_hash != 0,
+		"Hash should be non-zero",
+	)
 }
 
 @(test)
@@ -93,7 +105,11 @@ test_remote_spawn_request_wire_format :: proc(t: ^testing.T) {
 
 	header, ok := parse_network_header(buf[4:msg_len])
 	testing.expect(t, ok, "Should parse header successfully")
-	testing.expect(t, .LIFECYCLE_EVENT in header.flags, "LIFECYCLE_EVENT flag should be set")
+	testing.expect(
+		t,
+		.LIFECYCLE_EVENT in header.flags,
+		"LIFECYCLE_EVENT flag should be set",
+	)
 
 	testing.expect(
 		t,
@@ -109,14 +125,24 @@ test_remote_spawn_request_wire_format :: proc(t: ^testing.T) {
 	)
 	testing.expect_value(t, parsed.request_id, u64(42))
 	testing.expect_value(t, parsed.parent_pid, PID(100))
-	testing.expect_value(t, parsed.spawn_func_name_hash, fnv1a_hash("test_spawn"))
+	testing.expect_value(
+		t,
+		parsed.spawn_func_name_hash,
+		fnv1a_hash("test_spawn"),
+	)
 
 	name_len := len(parsed.actor_name)
 	if name_len > 0 {
 		name_start := size_of(Remote_Spawn_Request)
-		parsed.actor_name = string(header.payload[name_start:name_start + name_len])
+		parsed.actor_name = string(
+			header.payload[name_start:name_start + name_len],
+		)
 	}
-	testing.expect(t, parsed.actor_name == "worker-1", "Actor name should round-trip correctly")
+	testing.expect(
+		t,
+		parsed.actor_name == "worker-1",
+		"Actor name should round-trip correctly",
+	)
 }
 
 @(test)
@@ -198,7 +224,9 @@ test_remote_spawn_response_with_error :: proc(t: ^testing.T) {
 	error_len := len(parsed.error_msg)
 	if error_len > 0 {
 		str_start := size_of(Remote_Spawn_Response)
-		parsed.error_msg = string(header.payload[str_start:str_start + error_len])
+		parsed.error_msg = string(
+			header.payload[str_start:str_start + error_len],
+		)
 	}
 	testing.expect(
 		t,
@@ -264,15 +292,30 @@ test_actor_stopped_wire_format :: proc(t: ^testing.T) {
 		idx = 2,
 		gen = 1,
 	}
-	msg_len := build_wire_format_into_buffer(buf[:], msg, to_handle, from_handle, {}, "")
+	msg_len := build_wire_format_into_buffer(
+		buf[:],
+		msg,
+		to_handle,
+		from_handle,
+		{},
+		"",
+	)
 
-	testing.expect(t, msg_len > 0, "Wire format build should succeed for Actor_Stopped")
+	testing.expect(
+		t,
+		msg_len > 0,
+		"Wire format build should succeed for Actor_Stopped",
+	)
 
 	header, ok := parse_network_header(buf[4:msg_len])
 	testing.expect(t, ok, "Should parse header")
 
 	parsed: Actor_Stopped
-	intrinsics.mem_copy_non_overlapping(&parsed, raw_data(header.payload), size_of(Actor_Stopped))
+	intrinsics.mem_copy_non_overlapping(
+		&parsed,
+		raw_data(header.payload),
+		size_of(Actor_Stopped),
+	)
 	testing.expect_value(t, parsed.child_pid, PID(42))
 	testing.expect_value(t, parsed.reason, Termination_Reason.ABNORMAL)
 	testing.expect_value(t, parsed.restart_policy, Restart_Policy.TEMPORARY)
@@ -281,7 +324,13 @@ test_actor_stopped_wire_format :: proc(t: ^testing.T) {
 	name_len := len(parsed.child_name)
 	if name_len > 0 {
 		str_start := size_of(Actor_Stopped)
-		parsed.child_name = string(header.payload[str_start:str_start + name_len])
+		parsed.child_name = string(
+			header.payload[str_start:str_start + name_len],
+		)
 	}
-	testing.expect(t, parsed.child_name == "test-child", "child_name should round-trip")
+	testing.expect(
+		t,
+		parsed.child_name == "test-child",
+		"child_name should round-trip",
+	)
 }

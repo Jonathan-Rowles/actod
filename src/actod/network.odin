@@ -34,7 +34,13 @@ generate_nonzero_nonce :: proc() -> u64 {
 set_tcp_nodelay :: proc(sock: net.TCP_Socket, enabled: bool = true) -> bool {
 	if sim_is_socket(sock) do return true
 	val: i32 = enabled ? 1 : 0
-	result := platform_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, size_of(i32))
+	result := platform_setsockopt(
+		sock,
+		IPPROTO_TCP,
+		TCP_NODELAY,
+		&val,
+		size_of(i32),
+	)
 	return result == 0
 }
 
@@ -46,8 +52,20 @@ set_socket_buffers :: proc(
 	if sim_is_socket(sock) do return true
 	recv_val: i32 = i32(recv_size)
 	send_val: i32 = i32(send_size)
-	r1 := platform_setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &recv_val, size_of(i32))
-	r2 := platform_setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &send_val, size_of(i32))
+	r1 := platform_setsockopt(
+		sock,
+		SOL_SOCKET,
+		SO_RCVBUF,
+		&recv_val,
+		size_of(i32),
+	)
+	r2 := platform_setsockopt(
+		sock,
+		SOL_SOCKET,
+		SO_SNDBUF,
+		&send_val,
+		size_of(i32),
+	)
 	return r1 == 0 && r2 == 0
 }
 
@@ -107,13 +125,18 @@ address_is_loopback :: proc(addr: net.Address) -> bool {
 @(private)
 get_auth_password :: proc() -> string {
 	if NODE.config.network.auth_password != "" do return NODE.config.network.auth_password
-	if env_pass := os.get_env("ACTOD_AUTH_PASSWORD", context.temp_allocator); env_pass != "" {
+	if env_pass := os.get_env("ACTOD_AUTH_PASSWORD", context.temp_allocator);
+	   env_pass != "" {
 		return env_pass
 	}
 	return ""
 }
 
-init_network :: proc(local_node_id: Node_ID, node_name: string, loc := #caller_location) {
+init_network :: proc(
+	local_node_id: Node_ID,
+	node_name: string,
+	loc := #caller_location,
+) {
 	sync.rw_mutex_lock(&NODE.node_registry_lock)
 	local_addr: net.Endpoint
 	if NODE.config.network.port > 0 {
@@ -141,11 +164,18 @@ start_listening :: proc(port: int, loc := #caller_location) -> bool {
 	network.port = port
 	bind_addr, _ := parse_bind_address(network.bind_address)
 	if port <= 0 {
-		log.errorf("start_listening(%d): the port must be above 0", port, location = loc)
+		log.errorf(
+			"start_listening(%d): the port must be above 0",
+			port,
+			location = loc,
+		)
 		return false
 	}
-	if refusal := network_exposure_refusal(network, bind_addr, get_auth_password());
-	   refusal != .None {
+	if refusal := network_exposure_refusal(
+		network,
+		bind_addr,
+		get_auth_password(),
+	); refusal != .None {
 		log.errorf(
 			"start_listening(%d): refusing to listen on %s:%d, %v; set auth_password and enable_encryption or trusted_network in make_network_config(), or keep the default loopback bind_address",
 			port,
@@ -232,7 +262,10 @@ start_network_listener :: proc(loc: runtime.Source_Code_Location) {
 
 		log.infof(
 			"Node discoverable on %s port %d",
-			net.address_to_string(listener_ctx.bind_addr, context.temp_allocator),
+			net.address_to_string(
+				listener_ctx.bind_addr,
+				context.temp_allocator,
+			),
 			listener_ctx.port,
 		)
 		if _, started := sync.atomic_compare_exchange_strong(
@@ -319,11 +352,17 @@ make_connection_actor_data :: proc(
 	}
 }
 
-accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> bool {
+accept_incoming_connection :: proc(
+	sock: net.TCP_Socket,
+	addr: net.Endpoint,
+) -> bool {
 	pending := sync.atomic_add(&g_pending_incoming_handshakes, 1)
 	if pending >= MAX_PENDING_INCOMING_HANDSHAKES {
 		sync.atomic_sub(&g_pending_incoming_handshakes, 1)
-		log.warnf("Rejecting connection from %v: too many pending handshakes", addr)
+		log.warnf(
+			"Rejecting connection from %v: too many pending handshakes",
+			addr,
+		)
 		return false
 	}
 
@@ -331,9 +370,16 @@ accept_incoming_connection :: proc(sock: net.TCP_Socket, addr: net.Endpoint) -> 
 	conn_data.tcp_socket = sock
 	conn_data.is_incoming = true
 
-	actor_name := fmt.tprintf("incoming_%v_%d", addr, time.to_unix_nanoseconds(now()))
+	actor_name := fmt.tprintf(
+		"incoming_%v_%d",
+		addr,
+		time.to_unix_nanoseconds(now()),
+	)
 
-	conn_config := make_actor_config(restart_policy = .TRANSIENT, use_dedicated_os_thread = true)
+	conn_config := make_actor_config(
+		restart_policy = .TRANSIENT,
+		use_dedicated_os_thread = true,
+	)
 
 	conn_pid, ok := spawn(
 		actor_name,
@@ -381,7 +427,10 @@ tcp_send_all :: proc(socket: net.TCP_Socket, data: []byte) -> bool {
 	return true
 }
 
-tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []byte {
+tcp_recv_framed_message :: proc(
+	sock: net.TCP_Socket,
+	deadline: time.Time,
+) -> []byte {
 	size_buf: [4]byte
 	if !tcp_recv_exactly(sock, size_buf[:], deadline) do return nil
 
@@ -396,7 +445,11 @@ tcp_recv_framed_message :: proc(sock: net.TCP_Socket, deadline: time.Time) -> []
 	return msg
 }
 
-tcp_recv_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time) -> bool {
+tcp_recv_exactly :: proc(
+	sock: net.TCP_Socket,
+	buf: []byte,
+	deadline: time.Time,
+) -> bool {
 	if sim_is_socket(sock) do return sim_stream_read_exactly(sock, buf, deadline)
 
 	total := 0
@@ -438,7 +491,15 @@ deliver_to_target :: #force_inline proc(
 	filter := NODE.config.network.inbound_filter
 	if .BROADCAST in flags {
 		if filter != nil &&
-		   inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, 0, "") {
+		   inbound_refused(
+			   filter,
+			   remote_node_id,
+			   flags,
+			   type_hash,
+			   from_handle,
+			   0,
+			   "",
+		   ) {
 			if type_info, known := get_type_info_by_hash(type_hash);
 			   known && type_info.wire_policy != .Any_Actor {
 				log_refused_wire_broadcast(type_info, remote_node_id)
@@ -475,7 +536,15 @@ deliver_to_target :: #force_inline proc(
 	}
 
 	if filter != nil &&
-	   inbound_refused(filter, remote_node_id, flags, type_hash, from_handle, to_pid, to_name) {
+	   inbound_refused(
+		   filter,
+		   remote_node_id,
+		   flags,
+		   type_hash,
+		   from_handle,
+		   to_pid,
+		   to_name,
+	   ) {
 		if type_info.wire_policy != .Any_Actor do log_refused_wire_type(type_info, remote_node_id)
 		return false
 	}
@@ -487,13 +556,28 @@ deliver_to_target :: #force_inline proc(
 	}
 
 	if .SYSTEM in flags {
-		return send_system_from_payload(to_pid, from_pid, payload, type_info) == .OK
+		return(
+			send_system_from_payload(to_pid, from_pid, payload, type_info) ==
+			.OK \
+		)
 	}
 
 	when under_batch_pin {
-		return send_from_payload_under_pin(to_pid, from_pid, payload, type_info, token) == .OK
+		return(
+			send_from_payload_under_pin(
+				to_pid,
+				from_pid,
+				payload,
+				type_info,
+				token,
+			) ==
+			.OK \
+		)
 	} else {
-		return send_from_payload(to_pid, from_pid, payload, type_info, token) == .OK
+		return(
+			send_from_payload(to_pid, from_pid, payload, type_info, token) ==
+			.OK \
+		)
 	}
 }
 
@@ -589,7 +673,8 @@ deliver_broadcast_locally :: proc(
 	block := load_subscriber_block(list)
 	if block == nil do return true
 
-	if n >= FANOUT_SHARD_THRESHOLD && sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) {
+	if n >= FANOUT_SHARD_THRESHOLD &&
+	   sync.atomic_load_explicit(&NODE.fanout_ready, .Acquire) {
 		deliver_broadcast_sharded(from_pid, type_hash, local_type, n, payload)
 		return true
 	}
@@ -608,7 +693,10 @@ deliver_broadcast_locally :: proc(
 }
 
 @(private)
-log_refused_wire_type :: proc(type_info: ^Message_Type_Info, remote_node_id: Node_ID) {
+log_refused_wire_type :: proc(
+	type_info: ^Message_Type_Info,
+	remote_node_id: Node_ID,
+) {
 	node_name, _ := get_node_name(remote_node_id)
 	switch type_info.wire_policy {
 	case .Local_Only:
@@ -630,7 +718,10 @@ log_refused_wire_type :: proc(type_info: ^Message_Type_Info, remote_node_id: Nod
 }
 
 @(private)
-log_refused_wire_broadcast :: proc(type_info: ^Message_Type_Info, remote_node_id: Node_ID) {
+log_refused_wire_broadcast :: proc(
+	type_info: ^Message_Type_Info,
+	remote_node_id: Node_ID,
+) {
 	if type_info.wire_policy == .Local_Only {
 		log_refused_wire_type(type_info, remote_node_id)
 		return
@@ -644,7 +735,11 @@ log_refused_wire_broadcast :: proc(type_info: ^Message_Type_Info, remote_node_id
 	)
 }
 
-send_remote :: #force_inline proc(to: PID, content: $T, loc := #caller_location) -> Send_Error {
+send_remote :: #force_inline proc(
+	to: PID,
+	content: $T,
+	loc := #caller_location,
+) -> Send_Error {
 	v := content
 	return send_remote_impl(to, &v, get_validated_message_info_ptr(T), {}, loc)
 }
@@ -658,7 +753,10 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 	if !info_ok do return 0
 
 	existing_pid := PID(
-		sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[node_id], .Acquire),
+		sync.atomic_load_explicit(
+			cast(^u64)&NODE.connection_actors[node_id],
+			.Acquire,
+		),
 	)
 
 	if existing_pid != 0 {
@@ -666,11 +764,18 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		if actor_exists && actor_ptr != nil {
 			_ = send_message(
 				existing_pid,
-				Connect_Request{node_id = node_id, address = node_info.address},
+				Connect_Request {
+					node_id = node_id,
+					address = node_info.address,
+				},
 			)
 			return existing_pid
 		}
-		sync.atomic_store_explicit(cast(^u64)&NODE.connection_actors[node_id], u64(0), .Release)
+		sync.atomic_store_explicit(
+			cast(^u64)&NODE.connection_actors[node_id],
+			u64(0),
+			.Release,
+		)
 	}
 
 	if get_or_create_node_ring(node_id, NODE.config.network.connection_ring) == nil do return 0
@@ -709,13 +814,19 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 	)
 	if !cas_ok {
 		existing := PID(
-			sync.atomic_load_explicit(cast(^u64)&NODE.connection_actors[node_id], .Acquire),
+			sync.atomic_load_explicit(
+				cast(^u64)&NODE.connection_actors[node_id],
+				.Acquire,
+			),
 		)
 		_ = terminate_actor(conn_pid, .SHUTDOWN)
 		return existing
 	}
 
-	_ = send_message(conn_pid, Connect_Request{node_id = node_id, address = node_info.address})
+	_ = send_message(
+		conn_pid,
+		Connect_Request{node_id = node_id, address = node_info.address},
+	)
 
 	return conn_pid
 }
@@ -728,23 +839,43 @@ ipv4_to_u32 :: proc(addr: net.Address) -> u32 {
 	case net.IP6_Address:
 		return 0
 	}
-	return u32(ip4[0]) << 24 | u32(ip4[1]) << 16 | u32(ip4[2]) << 8 | u32(ip4[3])
+	return(
+		u32(ip4[0]) << 24 |
+		u32(ip4[1]) << 16 |
+		u32(ip4[2]) << 8 |
+		u32(ip4[3]) \
+	)
 }
 
 u32_to_ipv4 :: proc(ip: u32) -> net.IP4_Address {
-	return net.IP4_Address{u8(ip >> 24), u8(ip >> 16 & 0xFF), u8(ip >> 8 & 0xFF), u8(ip & 0xFF)}
+	return net.IP4_Address {
+		u8(ip >> 24),
+		u8(ip >> 16 & 0xFF),
+		u8(ip >> 8 & 0xFF),
+		u8(ip & 0xFF),
+	}
 }
 
-build_endpoint_from_broadcast :: proc(msg: Actor_Spawned_Broadcast) -> net.Endpoint {
+build_endpoint_from_broadcast :: proc(
+	msg: Actor_Spawned_Broadcast,
+) -> net.Endpoint {
 	if msg.source_port == 0 {
 		return {}
 	}
-	return net.Endpoint{address = u32_to_ipv4(msg.source_ip), port = int(msg.source_port)}
+	return net.Endpoint {
+		address = u32_to_ipv4(msg.source_ip),
+		port = int(msg.source_port),
+	}
 }
 
 DEFAULT_BROADCAST_TTL :: 3
 
-broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, parent_pid: PID) {
+broadcast_actor_spawned :: proc(
+	pid: PID,
+	name: string,
+	actor_type: Actor_Type,
+	parent_pid: PID,
+) {
 	if NODE.shutting_down do return
 
 	if pid == NODE.pid || pid == NODE.observer_pid do return
@@ -769,7 +900,11 @@ broadcast_actor_spawned :: proc(pid: PID, name: string, actor_type: Actor_Type, 
 	broadcast_to_others(msg, only_stream_peers = true)
 }
 
-broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_Reason) {
+broadcast_actor_terminated :: proc(
+	pid: PID,
+	name: string,
+	reason: Termination_Reason,
+) {
 	if NODE.shutting_down do return
 
 	if pid == NODE.pid || pid == NODE.observer_pid do return
@@ -789,7 +924,11 @@ broadcast_actor_terminated :: proc(pid: PID, name: string, reason: Termination_R
 	broadcast_to_others(msg, only_stream_peers = true)
 }
 
-broadcast_to_others :: proc(msg: $T, except: Node_ID = 0, only_stream_peers := false) {
+broadcast_to_others :: proc(
+	msg: $T,
+	except: Node_ID = 0,
+	only_stream_peers := false,
+) {
 	stack_buf: [((size_of(T) + WIRE_FORMAT_OVERHEAD + 63) / 64) * 64]byte
 	frame: []byte
 	registered_limit := int(sync.atomic_load(&NODE.next_node_id))
@@ -804,7 +943,10 @@ broadcast_to_others :: proc(msg: $T, except: Node_ID = 0, only_stream_peers := f
 				if !built do return
 			}
 			if !batch_append_message_retry(ring, frame) {
-				log.warnf("Failed to append lifecycle message to ring for node %d", ring.node_id)
+				log.warnf(
+					"Failed to append lifecycle message to ring for node %d",
+					ring.node_id,
+				)
 			}
 		}
 	}
@@ -843,7 +985,11 @@ build_lifecycle_frame :: proc(buf: []byte, msg: $T) -> ([]byte, bool) {
 
 	value := msg
 	info := get_validated_message_info_ptr(T)
-	needed := 4 + NETWORK_HEADER_SIZE + info.size + calculate_variable_data_size(&value, info)
+	needed :=
+		4 +
+		NETWORK_HEADER_SIZE +
+		info.size +
+		calculate_variable_data_size(&value, info)
 	frame := buf
 	if needed > len(frame) do frame = make([]byte, needed, context.temp_allocator)
 
@@ -874,7 +1020,10 @@ send_lifecycle_message :: proc(ring: ^Connection_Ring, msg: $T) {
 	if !built do return
 
 	if !batch_append_message_retry(ring, frame) {
-		log.warnf("Failed to append lifecycle message to ring for node %d", ring.node_id)
+		log.warnf(
+			"Failed to append lifecycle message to ring for node %d",
+			ring.node_id,
+		)
 	}
 }
 
@@ -1002,7 +1151,11 @@ spawn_remote_impl :: proc(
 		)
 		return 0, false
 	}
-	defer sync.atomic_store_explicit(&g_pending_spawn_ids[slot_idx], 0, .Release)
+	defer sync.atomic_store_explicit(
+		&g_pending_spawn_ids[slot_idx],
+		0,
+		.Release,
+	)
 
 	pending := &g_pending_spawns[slot_idx]
 	for sync.atomic_sema_wait_with_timeout(&pending.sema, time.Microsecond) {
@@ -1093,7 +1246,10 @@ spawn_remote_impl :: proc(
 }
 
 @(private)
-spawn_response_wait :: proc(sema: ^sync.Atomic_Sema, timeout: time.Duration) -> bool {
+spawn_response_wait :: proc(
+	sema: ^sync.Atomic_Sema,
+	timeout: time.Duration,
+) -> bool {
 	if !NODE.config.sim_mode do return sync.atomic_sema_wait_with_timeout(sema, timeout)
 	deadline := time.time_add(now(), timeout)
 	co := coro.running()
@@ -1115,10 +1271,17 @@ spawn_response_wait :: proc(sema: ^sync.Atomic_Sema, timeout: time.Duration) -> 
 @(private)
 resolve_spawn_request :: proc(response: Remote_Spawn_Response) {
 	for i in 0 ..< MAX_PENDING_SPAWNS {
-		if sync.atomic_load_explicit(&g_pending_spawn_ids[i], .Acquire) == response.request_id {
+		if sync.atomic_load_explicit(&g_pending_spawn_ids[i], .Acquire) ==
+		   response.request_id {
 			stored := response
-			n := min(len(response.error_msg), len(g_pending_spawns[i].error_buf))
-			copy(g_pending_spawns[i].error_buf[:n], transmute([]u8)response.error_msg[:n])
+			n := min(
+				len(response.error_msg),
+				len(g_pending_spawns[i].error_buf),
+			)
+			copy(
+				g_pending_spawns[i].error_buf[:n],
+				transmute([]u8)response.error_msg[:n],
+			)
 			g_pending_spawns[i].error_len = n
 			stored.error_msg = ""
 			g_pending_spawns[i].response = stored
@@ -1126,5 +1289,8 @@ resolve_spawn_request :: proc(response: Remote_Spawn_Response) {
 			return
 		}
 	}
-	log.warnf("Received Remote_Spawn_Response for unknown request_id %d", response.request_id)
+	log.warnf(
+		"Received Remote_Spawn_Response for unknown request_id %d",
+		response.request_id,
+	)
 }

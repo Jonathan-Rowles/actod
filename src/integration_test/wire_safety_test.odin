@@ -18,7 +18,13 @@ WIRE_SAFETY_PEER_NODE :: "LocalOnlySenderNode"
 refused_add_child_logged: bool
 refused_stats_response_logged: bool
 
-spawn_func_smuggled_over_the_wire :: proc(name: string, parent: actod.PID) -> (actod.PID, bool) {
+spawn_func_smuggled_over_the_wire :: proc(
+	name: string,
+	parent: actod.PID,
+) -> (
+	actod.PID,
+	bool,
+) {
 	return 0, false
 }
 
@@ -49,14 +55,19 @@ wire_victim_behaviour := actod.Actor_Behaviour(Wire_Victim_Data) {
 }
 
 refuse_the_local_only_frames :: proc(message: actod.Inbound_Message) -> bool {
-	return message.type_id != actod.Add_Child && message.type_id != actod.Stats_Response
+	return(
+		message.type_id != actod.Add_Child &&
+		message.type_id != actod.Stats_Response \
+	)
 }
 
 test_peer_cannot_send_local_only_message_types :: proc(t: ^testing.T) {
 	expect_local_only_frames_refused_with_a_warning(t)
 }
 
-test_local_only_frames_refused_by_the_inbound_filter_still_log_a_warning :: proc(t: ^testing.T) {
+test_local_only_frames_refused_by_the_inbound_filter_still_log_a_warning :: proc(
+	t: ^testing.T,
+) {
 	filter_before := actod.NODE.config.network.inbound_filter
 	defer actod.NODE.config.network.inbound_filter = filter_before
 	actod.NODE.config.network.inbound_filter = refuse_the_local_only_frames
@@ -70,7 +81,8 @@ expect_local_only_frames_refused_with_a_warning :: proc(t: ^testing.T) {
 	logging_before := actod.NODE.config.actor_config.logging
 	defer actod.NODE.config.actor_config.logging = logging_before
 	actod.NODE.config.actor_config.logging.level = .Warning
-	actod.NODE.config.actor_config.logging.custom_logger = record_refused_wire_types
+	actod.NODE.config.actor_config.logging.custom_logger =
+		record_refused_wire_types
 
 	probe_arrived: sync.Sema
 	forged_stats_delivered: bool
@@ -102,12 +114,19 @@ expect_local_only_frames_refused_with_a_warning :: proc(t: ^testing.T) {
 	defer stop_node_role(&peer)
 	if !expect(t, wait_for_node_role_ready(&peer), "The sender never reported READY") do return
 
-	probe_ok := sync.sema_wait_with_timeout(&probe_arrived, scaled_timeout(5 * time.Second))
+	probe_ok := sync.sema_wait_with_timeout(
+		&probe_arrived,
+		scaled_timeout(5 * time.Second),
+	)
 	if !expect(t, probe_ok, "The wire-safe probe sent after the refused frames never arrived") do return
 
 	expect(
 		t,
-		poll_until(atomic_flag_raised, &refused_add_child_logged, scaled_timeout(2 * time.Second)),
+		poll_until(
+			atomic_flag_raised,
+			&refused_add_child_logged,
+			scaled_timeout(2 * time.Second),
+		),
 		"The SYSTEM Add_Child frame must be refused with a log line naming Add_Child",
 	)
 	expect(
@@ -130,10 +149,21 @@ expect_local_only_frames_refused_with_a_warning :: proc(t: ^testing.T) {
 }
 
 run_local_only_type_sender :: proc() {
-	node_name := os.lookup_env("NODE_NAME", context.temp_allocator) or_else WIRE_SAFETY_PEER_NODE
+	node_name :=
+		os.lookup_env(
+			"NODE_NAME",
+			context.temp_allocator,
+		) or_else WIRE_SAFETY_PEER_NODE
 	auth_password :=
-		os.lookup_env("AUTH_PASSWORD", context.temp_allocator) or_else "test_dist_password"
-	target_node := os.lookup_env("TARGET_NODE", context.temp_allocator) or_else "TestNode1"
+		os.lookup_env(
+			"AUTH_PASSWORD",
+			context.temp_allocator,
+		) or_else "test_dist_password"
+	target_node :=
+		os.lookup_env(
+			"TARGET_NODE",
+			context.temp_allocator,
+		) or_else "TestNode1"
 	node_port, node_port_ok := strconv.parse_int(
 		os.lookup_env("NODE_PORT", context.temp_allocator) or_else "",
 	)
@@ -186,7 +216,8 @@ run_local_only_type_sender :: proc() {
 		spawn_func   = spawn_func_smuggled_over_the_wire,
 		existing_pid = 0,
 	}
-	if err := actod.send_message(remote_victim, smuggled_add_child); err != .OK {
+	if err := actod.send_message(remote_victim, smuggled_add_child);
+	   err != .OK {
 		fmt.printf("Sending the Add_Child frame failed: %v\n", err)
 		os.exit(1)
 	}
@@ -197,7 +228,8 @@ run_local_only_type_sender :: proc() {
 		fmt.printf("Sending the Stats_Response frame failed: %v\n", err)
 		os.exit(1)
 	}
-	if err := actod.send_message(remote_victim, WIRE_SAFETY_PROBE); err != .OK {
+	if err := actod.send_message(remote_victim, WIRE_SAFETY_PROBE);
+	   err != .OK {
 		fmt.printf("Sending the probe failed: %v\n", err)
 		os.exit(1)
 	}

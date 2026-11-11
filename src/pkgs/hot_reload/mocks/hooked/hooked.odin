@@ -33,7 +33,11 @@ hooked_behaviour := act.Actor_Behaviour(Hooked) {
 }
 
 @(export)
-spawn_hooked :: proc "c" (idle_entered: ^sync.Sema, wake: ^sync.Sema, handled: ^sync.Sema) -> u64 {
+spawn_hooked :: proc "c" (
+	idle_entered: ^sync.Sema,
+	wake: ^sync.Sema,
+	handled: ^sync.Sema,
+) -> u64 {
 	context = runtime.default_context()
 	pid, _ := act.spawn(
 		"hooked",

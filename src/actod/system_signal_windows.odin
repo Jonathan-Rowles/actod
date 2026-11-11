@@ -13,7 +13,9 @@ setup_signal_handler :: proc() {
 
 	handler :: proc "system" (ctrl_type: win32.DWORD) -> win32.BOOL {
 		switch ctrl_type {
-		case win32.CTRL_C_EVENT, win32.CTRL_CLOSE_EVENT, win32.CTRL_SHUTDOWN_EVENT:
+		case win32.CTRL_C_EVENT,
+		     win32.CTRL_CLOSE_EVENT,
+		     win32.CTRL_SHUTDOWN_EVENT:
 			if sync.atomic_exchange(&NODE.stop_requested, true) {
 				win32.SetConsoleCtrlHandler(handler, false)
 				return false
@@ -38,7 +40,14 @@ setup_signal_handler :: proc() {
 		case win32.FILE_TYPE_PIPE:
 			for {
 				avail: u32
-				ok := win32.PeekNamedPipe(stdin_handle, nil, 0, nil, &avail, nil)
+				ok := win32.PeekNamedPipe(
+					stdin_handle,
+					nil,
+					0,
+					nil,
+					&avail,
+					nil,
+				)
 				if !ok {
 					sync.atomic_sema_post(&NODE.signal_wake)
 					return

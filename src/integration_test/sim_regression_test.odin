@@ -5,11 +5,19 @@ import "core:testing"
 import "core:time"
 
 test_sim_regression_stale_gossip_after_restart :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(3, base_port = 29000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		3,
+		base_port = 29000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 2)
-	_, ok := actod.spawn("victim", Mesh_Counter_Data{slot = 3}, Mesh_Counter_Behaviour)
+	_, ok := actod.spawn(
+		"victim",
+		Mesh_Counter_Data{slot = 3},
+		Mesh_Counter_Behaviour,
+	)
 	expect(t, ok, "victim spawn failed")
 
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
@@ -25,30 +33,50 @@ test_sim_regression_stale_gossip_after_restart :: proc(t: ^testing.T) {
 	_ = actod.sim_mesh_restart(mesh, 2)
 	actod.sim_mesh_partition(mesh, 1, 2)
 	_ = actod.sim_mesh_bind(mesh, 2)
-	_, ok2 := actod.spawn("victim", Mesh_Counter_Data{slot = 3}, Mesh_Counter_Behaviour)
+	_, ok2 := actod.spawn(
+		"victim",
+		Mesh_Counter_Data{slot = 3},
+		Mesh_Counter_Behaviour,
+	)
 	expect(t, ok2, "victim respawn failed")
 
 	actod.sim_mesh_advance_clock(mesh, 5 * time.Second)
 	_ = actod.sim_mesh_run_until_idle(mesh)
 	_ = actod.sim_mesh_bind(mesh, 0)
 	_, fresh := actod.get_actor_pid("victim@mesh2")
-	expect(t, fresh, "fresh victim proxy did not re-sync to node 0 after restart")
+	expect(
+		t,
+		fresh,
+		"fresh victim proxy did not re-sync to node 0 after restart",
+	)
 
 	actod.sim_mesh_crash(mesh, 1)
 	_ = actod.sim_mesh_run_until_idle(mesh)
 
 	_ = actod.sim_mesh_bind(mesh, 0)
 	_, still := actod.get_actor_pid("victim@mesh2")
-	expect(t, still, "stale terminate gossip evicted the restarted node's fresh proxy")
+	expect(
+		t,
+		still,
+		"stale terminate gossip evicted the restarted node's fresh proxy",
+	)
 }
 
 test_sim_regression_relay_heals_lost_broadcast :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(3, base_port = 30000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		3,
+		base_port = 30000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 	defer actod.frame_tap_clear()
 
 	_ = actod.sim_mesh_bind(mesh, 2)
-	victim_pid, ok := actod.spawn("heal_target", Mesh_Counter_Data{slot = 3}, Mesh_Counter_Behaviour)
+	victim_pid, ok := actod.spawn(
+		"heal_target",
+		Mesh_Counter_Data{slot = 3},
+		Mesh_Counter_Behaviour,
+	)
 	expect(t, ok, "spawn failed")
 
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
@@ -61,12 +89,14 @@ test_sim_regression_relay_heals_lost_broadcast :: proc(t: ^testing.T) {
 	expect(t, known, "node 0 unknown at node 2")
 	actod.frame_tap_add(
 		actod.Frame_Fault_Rule {
-			dir       = .Out,
-			action    = .Drop,
-			type_hash = actod.frame_tap_type_hash(actod.Actor_Terminated_Broadcast),
-			node      = actod.sim_mesh_node(mesh, 2),
-			peer      = node0_id,
-			count     = 1,
+			dir = .Out,
+			action = .Drop,
+			type_hash = actod.frame_tap_type_hash(
+				actod.Actor_Terminated_Broadcast,
+			),
+			node = actod.sim_mesh_node(mesh, 2),
+			peer = node0_id,
+			count = 1,
 		},
 	)
 
@@ -75,11 +105,19 @@ test_sim_regression_relay_heals_lost_broadcast :: proc(t: ^testing.T) {
 
 	_ = actod.sim_mesh_bind(mesh, 0)
 	_, ghost := actod.get_actor_pid("heal_target@mesh2")
-	expect(t, !ghost, "relay did not heal the dropped terminate broadcast; ghost proxy remains on node 0")
+	expect(
+		t,
+		!ghost,
+		"relay did not heal the dropped terminate broadcast; ghost proxy remains on node 0",
+	)
 }
 
 test_sim_regression_relay_cannot_resurrect :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(3, base_port = 34000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		3,
+		base_port = 34000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 	defer actod.frame_tap_clear()
 
@@ -91,17 +129,23 @@ test_sim_regression_relay_cannot_resurrect :: proc(t: ^testing.T) {
 	expect(t, known, "node 0 unknown at node 1")
 	actod.frame_tap_add(
 		actod.Frame_Fault_Rule {
-			dir       = .Out,
-			action    = .Drop,
-			type_hash = actod.frame_tap_type_hash(actod.Actor_Terminated_Broadcast),
-			node      = actod.sim_mesh_node(mesh, 1),
-			peer      = node0_id,
-			count     = 1,
+			dir = .Out,
+			action = .Drop,
+			type_hash = actod.frame_tap_type_hash(
+				actod.Actor_Terminated_Broadcast,
+			),
+			node = actod.sim_mesh_node(mesh, 1),
+			peer = node0_id,
+			count = 1,
 		},
 	)
 
 	_ = actod.sim_mesh_bind(mesh, 2)
-	victim_pid, ok := actod.spawn("short_lived", Mesh_Counter_Data{slot = 3}, Mesh_Counter_Behaviour)
+	victim_pid, ok := actod.spawn(
+		"short_lived",
+		Mesh_Counter_Data{slot = 3},
+		Mesh_Counter_Behaviour,
+	)
 	expect(t, ok, "spawn failed")
 	_ = actod.sim_mesh_run_until_idle(mesh)
 
@@ -122,11 +166,20 @@ test_sim_regression_relay_cannot_resurrect :: proc(t: ^testing.T) {
 
 	_ = actod.sim_mesh_bind(mesh, 0)
 	_, resurrected := actod.get_actor_pid("short_lived@mesh2")
-	expect(t, !resurrected, "delayed relayed spawn resurrected the terminated actor's proxy")
+	expect(
+		t,
+		!resurrected,
+		"delayed relayed spawn resurrected the terminated actor's proxy",
+	)
 }
 
 @(private = "file")
-scale_up_pool :: proc(t: ^testing.T, mesh: ^actod.Sim_Mesh, i: int, peer_name: string) {
+scale_up_pool :: proc(
+	t: ^testing.T,
+	mesh: ^actod.Sim_Mesh,
+	i: int,
+	peer_name: string,
+) {
 	_ = actod.sim_mesh_bind(mesh, i)
 	peer_id, known := actod.get_node_by_name(peer_name)
 	expect(t, known, "peer not registered")
@@ -136,11 +189,19 @@ scale_up_pool :: proc(t: ^testing.T, mesh: ^actod.Sim_Mesh, i: int, peer_name: s
 	_ = actod.sim_mesh_run_until_idle(mesh)
 	_ = actod.sim_mesh_bind(mesh, i)
 	pool := actod.get_connection_pool(peer_id)
-	expect(t, pool != nil && int(actod.pool_active_count(pool)) == 2, "scale-up did not complete")
+	expect(
+		t,
+		pool != nil && int(actod.pool_active_count(pool)) == 2,
+		"scale-up did not complete",
+	)
 }
 
 test_sim_regression_pool_peer_crash :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(2, base_port = 31000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 31000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
@@ -149,17 +210,33 @@ test_sim_regression_pool_peer_crash :: proc(t: ^testing.T) {
 
 	actod.sim_mesh_crash(mesh, 1)
 	steps := actod.sim_mesh_run_until_idle(mesh, 200_000)
-	expect(t, steps < 200_000, "sim service EOF-looped on the dead-peer pool ring")
+	expect(
+		t,
+		steps < 200_000,
+		"sim service EOF-looped on the dead-peer pool ring",
+	)
 
 	_ = actod.sim_mesh_restart(mesh, 1)
 	actod.sim_mesh_advance_clock(mesh, 5 * time.Second)
 	_ = actod.sim_mesh_run_until_idle(mesh)
-	expect(t, actod.sim_mesh_connect_full(mesh), "mesh did not reconnect after peer restart")
-	expect(t, actod.sim_mesh_settle_pools(mesh), "pools did not settle after peer restart")
+	expect(
+		t,
+		actod.sim_mesh_connect_full(mesh),
+		"mesh did not reconnect after peer restart",
+	)
+	expect(
+		t,
+		actod.sim_mesh_settle_pools(mesh),
+		"pools did not settle after peer restart",
+	)
 }
 
 test_sim_regression_idle_pool_ring_parks :: proc(t: ^testing.T) {
-	mesh := actod.sim_mesh_create(2, base_port = 32000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 32000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
@@ -201,9 +278,15 @@ test_sim_regression_publish_during_scale_down :: proc(t: ^testing.T) {
 	g_reg_pub_type, _ = actod.register_actor_type("reg_publisher")
 	g_reg_pub_behaviour = actod.Actor_Behaviour(Vopr_Pub_Data) {
 		actor_type = g_reg_pub_type,
-		handle_message = proc(data: ^Vopr_Pub_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Vopr_Pub_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			if m, ok := msg.(Vopr_Do_Publish); ok {
-				actod.broadcast(Integration_Test_Message{id = m.pub_id, payload = "pub"})
+				actod.broadcast(
+					Integration_Test_Message{id = m.pub_id, payload = "pub"},
+				)
 			}
 		},
 	}
@@ -214,15 +297,27 @@ test_sim_regression_publish_during_scale_down :: proc(t: ^testing.T) {
 		delete(g_reg_pub_seen[slot])
 	}
 
-	mesh := actod.sim_mesh_create(2, base_port = 33000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 33000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 
 	pub_pids: [2]actod.PID
 	for i in 0 ..< 2 {
 		_ = actod.sim_mesh_bind(mesh, i)
-		_, sub_ok := actod.spawn("reg_sub", Reg_Sub_Data{slot = i}, Reg_Sub_Behaviour)
+		_, sub_ok := actod.spawn(
+			"reg_sub",
+			Reg_Sub_Data{slot = i},
+			Reg_Sub_Behaviour,
+		)
 		expect(t, sub_ok, "subscriber spawn failed")
-		pub_pid, pub_ok := actod.spawn("reg_pub", Vopr_Pub_Data{}, g_reg_pub_behaviour)
+		pub_pid, pub_ok := actod.spawn(
+			"reg_pub",
+			Vopr_Pub_Data{},
+			g_reg_pub_behaviour,
+		)
 		expect(t, pub_ok, "publisher spawn failed")
 		pub_pids[i] = pub_pid
 	}
@@ -238,8 +333,16 @@ test_sim_regression_publish_during_scale_down :: proc(t: ^testing.T) {
 	}
 	_ = actod.sim_mesh_run_until_idle(mesh)
 
-	expect(t, actod.sim_mesh_settle_pools(mesh), "pool scale-down did not settle")
-	expect(t, actod.sim_mesh_connect_full(mesh), "mesh not fully connected after settle")
+	expect(
+		t,
+		actod.sim_mesh_settle_pools(mesh),
+		"pool scale-down did not settle",
+	)
+	expect(
+		t,
+		actod.sim_mesh_connect_full(mesh),
+		"mesh not fully connected after settle",
+	)
 
 	for i in 0 ..< 2 {
 		_ = actod.sim_mesh_bind(mesh, i)

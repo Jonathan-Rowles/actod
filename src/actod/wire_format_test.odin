@@ -35,12 +35,28 @@ test_parse_network_header :: proc(t: ^testing.T) {
 
 	header, ok := parse_network_header(buffer)
 	testing.expect(t, ok, "Should parse header successfully")
-	testing.expect(t, .POD_PAYLOAD in header.flags, "POD_PAYLOAD flag should be set")
-	testing.expect(t, .BY_NAME not_in header.flags, "BY_NAME flag should not be set")
-	testing.expect(t, header.from_handle == from_handle, "From handle mismatch")
+	testing.expect(
+		t,
+		.POD_PAYLOAD in header.flags,
+		"POD_PAYLOAD flag should be set",
+	)
+	testing.expect(
+		t,
+		.BY_NAME not_in header.flags,
+		"BY_NAME flag should not be set",
+	)
+	testing.expect(
+		t,
+		header.from_handle == from_handle,
+		"From handle mismatch",
+	)
 	testing.expect(t, header.to_handle == to_handle, "To handle mismatch")
 	testing.expect(t, header.type_hash == type_hash, "Type hash mismatch")
-	testing.expect(t, len(header.payload) == len(payload), "Payload length mismatch")
+	testing.expect(
+		t,
+		len(header.payload) == len(payload),
+		"Payload length mismatch",
+	)
 	testing.expect(t, header.to_name == "", "To name should be empty")
 }
 
@@ -83,7 +99,11 @@ test_parse_network_header_with_name :: proc(t: ^testing.T) {
 	testing.expect(t, .BY_NAME in header.flags, "BY_NAME flag should be set")
 	testing.expect(t, header.type_hash == type_hash, "Type hash mismatch")
 	testing.expect(t, header.to_name == actor_name, "Actor name mismatch")
-	testing.expect(t, len(header.payload) == len(payload), "Payload length mismatch")
+	testing.expect(
+		t,
+		len(header.payload) == len(payload),
+		"Payload length mismatch",
+	)
 }
 
 @(test)
@@ -106,8 +126,16 @@ test_parse_network_header_control_message :: proc(t: ^testing.T) {
 	header, ok := parse_network_header(buffer)
 	testing.expect(t, ok, "Should parse control message header")
 	testing.expect(t, .CONTROL in header.flags, "CONTROL flag should be set")
-	testing.expect(t, header.type_hash == 0, "Type hash should be 0 for control")
-	testing.expect(t, len(header.payload) == len(ctrl_payload), "Control payload length mismatch")
+	testing.expect(
+		t,
+		header.type_hash == 0,
+		"Type hash should be 0 for control",
+	)
+	testing.expect(
+		t,
+		len(header.payload) == len(ctrl_payload),
+		"Control payload length mismatch",
+	)
 }
 
 @(test)
@@ -137,7 +165,10 @@ test_control_message_handshake_format :: proc(t: ^testing.T) {
 	incarnation: u64 = 0x1122334455667788
 	gossip_seq: u64 = 42
 
-	payload := make([]byte, 1 + 4 + 1 + 2 + 2 + (2 + len(node_name)) + 8 + 8 + 8 + 8)
+	payload := make(
+		[]byte,
+		1 + 4 + 1 + 2 + 2 + (2 + len(node_name)) + 8 + 8 + 8 + 8,
+	)
 	defer delete(payload)
 
 	w := Ctrl_Writer {
@@ -179,7 +210,11 @@ test_control_message_heartbeat_format :: proc(t: ^testing.T) {
 	endian.put_u64(payload[1:], .Little, timestamp)
 	endian.put_u64(payload[9:], .Little, seq_num)
 
-	testing.expect(t, payload[0] == CTRL_MSG_HEARTBEAT, "Message type should be heartbeat")
+	testing.expect(
+		t,
+		payload[0] == CTRL_MSG_HEARTBEAT,
+		"Message type should be heartbeat",
+	)
 
 	parsed_timestamp := endian.unchecked_get_u64le(payload[1:])
 	testing.expect(t, parsed_timestamp == timestamp, "Timestamp mismatch")
@@ -194,7 +229,11 @@ test_network_message_flags :: proc(t: ^testing.T) {
 		flags := Network_Message_Flags{.POD_PAYLOAD}
 		raw := transmute(u16)flags
 		back := transmute(Network_Message_Flags)raw
-		testing.expect(t, .POD_PAYLOAD in back, "POD_PAYLOAD should survive transmute")
+		testing.expect(
+			t,
+			.POD_PAYLOAD in back,
+			"POD_PAYLOAD should survive transmute",
+		)
 		testing.expect(t, .BY_NAME not_in back, "BY_NAME should not be set")
 		testing.expect(t, .CONTROL not_in back, "CONTROL should not be set")
 	}
@@ -212,24 +251,44 @@ test_network_message_flags :: proc(t: ^testing.T) {
 		raw := transmute(u16)flags
 		back := transmute(Network_Message_Flags)raw
 		testing.expect(t, .CONTROL in back, "CONTROL should be set")
-		testing.expect(t, .POD_PAYLOAD not_in back, "POD_PAYLOAD should not be set")
+		testing.expect(
+			t,
+			.POD_PAYLOAD not_in back,
+			"POD_PAYLOAD should not be set",
+		)
 	}
 
 	{
 		flags := Network_Message_Flags{.LIFECYCLE_EVENT}
 		raw := transmute(u16)flags
 		back := transmute(Network_Message_Flags)raw
-		testing.expect(t, .LIFECYCLE_EVENT in back, "LIFECYCLE_EVENT should be set")
+		testing.expect(
+			t,
+			.LIFECYCLE_EVENT in back,
+			"LIFECYCLE_EVENT should be set",
+		)
 		testing.expect(t, .CONTROL not_in back, "CONTROL should not be set")
-		testing.expect(t, .POD_PAYLOAD not_in back, "POD_PAYLOAD should not be set")
+		testing.expect(
+			t,
+			.POD_PAYLOAD not_in back,
+			"POD_PAYLOAD should not be set",
+		)
 	}
 
 	{
 		flags := Network_Message_Flags{.LIFECYCLE_EVENT, .POD_PAYLOAD}
 		raw := transmute(u16)flags
 		back := transmute(Network_Message_Flags)raw
-		testing.expect(t, .LIFECYCLE_EVENT in back, "LIFECYCLE_EVENT should be set with POD")
-		testing.expect(t, .POD_PAYLOAD in back, "POD_PAYLOAD should be set with LIFECYCLE_EVENT")
+		testing.expect(
+			t,
+			.LIFECYCLE_EVENT in back,
+			"LIFECYCLE_EVENT should be set with POD",
+		)
+		testing.expect(
+			t,
+			.POD_PAYLOAD in back,
+			"POD_PAYLOAD should be set with LIFECYCLE_EVENT",
+		)
 	}
 }
 
@@ -246,7 +305,13 @@ test_lifecycle_event_header_roundtrip :: proc(t: ^testing.T) {
 	buffer := make([]byte, NETWORK_HEADER_SIZE + 64)
 	defer delete(buffer)
 
-	write_network_header(buffer, flags, spawned_info.type_hash, from_handle, Handle{})
+	write_network_header(
+		buffer,
+		flags,
+		spawned_info.type_hash,
+		from_handle,
+		Handle{},
+	)
 
 	header, ok := parse_network_header(buffer)
 	testing.expect(t, ok, "Should parse lifecycle event header")
@@ -264,7 +329,10 @@ test_lifecycle_event_header_roundtrip :: proc(t: ^testing.T) {
 
 @(test)
 test_spawned_broadcast_wire_format_roundtrip :: proc(t: ^testing.T) {
-	test_pid := pack_pid(Handle{idx = 10, gen = 2, actor_type = Actor_Type(3)}, 5)
+	test_pid := pack_pid(
+		Handle{idx = 10, gen = 2, actor_type = Actor_Type(3)},
+		5,
+	)
 	parent_pid := pack_pid(Handle{idx = 1, gen = 1}, 5)
 
 	original := Actor_Spawned_Broadcast {
@@ -291,7 +359,11 @@ test_spawned_broadcast_wire_format_roundtrip :: proc(t: ^testing.T) {
 
 	header, ok := parse_network_header(buf[4:msg_len])
 	testing.expect(t, ok, "Should parse header")
-	testing.expect(t, .LIFECYCLE_EVENT in header.flags, "LIFECYCLE_EVENT flag should be set")
+	testing.expect(
+		t,
+		.LIFECYCLE_EVENT in header.flags,
+		"LIFECYCLE_EVENT flag should be set",
+	)
 
 	payload := header.payload
 	testing.expect(
@@ -317,26 +389,47 @@ test_spawned_broadcast_wire_format_roundtrip :: proc(t: ^testing.T) {
 
 	source_name_len := len(deserialized.source_node_name)
 	if source_name_len > 0 {
-		deserialized.source_node_name = string(payload[str_offset:str_offset + source_name_len])
+		deserialized.source_node_name = string(
+			payload[str_offset:str_offset + source_name_len],
+		)
 	}
 
 	testing.expect(t, deserialized.pid == original.pid, "PID should match")
 	testing.expect(t, deserialized.name == original.name, "Name should match")
-	testing.expect(t, deserialized.actor_type == original.actor_type, "Actor type should match")
-	testing.expect(t, deserialized.parent_pid == original.parent_pid, "Parent PID should match")
+	testing.expect(
+		t,
+		deserialized.actor_type == original.actor_type,
+		"Actor type should match",
+	)
+	testing.expect(
+		t,
+		deserialized.parent_pid == original.parent_pid,
+		"Parent PID should match",
+	)
 	testing.expect(t, deserialized.ttl == original.ttl, "TTL should match")
 	testing.expect(
 		t,
 		deserialized.source_node_name == original.source_node_name,
 		"Source node name should match",
 	)
-	testing.expect(t, deserialized.source_port == original.source_port, "Source port should match")
-	testing.expect(t, deserialized.source_ip == original.source_ip, "Source IP should match")
+	testing.expect(
+		t,
+		deserialized.source_port == original.source_port,
+		"Source port should match",
+	)
+	testing.expect(
+		t,
+		deserialized.source_ip == original.source_ip,
+		"Source IP should match",
+	)
 }
 
 @(test)
 test_terminated_broadcast_wire_format_roundtrip :: proc(t: ^testing.T) {
-	test_pid := pack_pid(Handle{idx = 20, gen = 3, actor_type = Actor_Type(1)}, 7)
+	test_pid := pack_pid(
+		Handle{idx = 20, gen = 3, actor_type = Actor_Type(1)},
+		7,
+	)
 
 	original := Actor_Terminated_Broadcast {
 		pid              = test_pid,
@@ -359,7 +452,11 @@ test_terminated_broadcast_wire_format_roundtrip :: proc(t: ^testing.T) {
 
 	header, ok := parse_network_header(buf[4:msg_len])
 	testing.expect(t, ok, "Should parse header")
-	testing.expect(t, .LIFECYCLE_EVENT in header.flags, "LIFECYCLE_EVENT flag should be set")
+	testing.expect(
+		t,
+		.LIFECYCLE_EVENT in header.flags,
+		"LIFECYCLE_EVENT flag should be set",
+	)
 
 	payload := header.payload
 	testing.expect(
@@ -385,12 +482,18 @@ test_terminated_broadcast_wire_format_roundtrip :: proc(t: ^testing.T) {
 
 	source_name_len := len(deserialized.source_node_name)
 	if source_name_len > 0 {
-		deserialized.source_node_name = string(payload[str_offset:str_offset + source_name_len])
+		deserialized.source_node_name = string(
+			payload[str_offset:str_offset + source_name_len],
+		)
 	}
 
 	testing.expect(t, deserialized.pid == original.pid, "PID should match")
 	testing.expect(t, deserialized.name == original.name, "Name should match")
-	testing.expect(t, deserialized.reason == original.reason, "Reason should match")
+	testing.expect(
+		t,
+		deserialized.reason == original.reason,
+		"Reason should match",
+	)
 	testing.expect(t, deserialized.ttl == original.ttl, "TTL should match")
 	testing.expect(
 		t,
@@ -448,7 +551,9 @@ test_spawned_broadcast_empty_name :: proc(t: ^testing.T) {
 
 	source_name_len := len(deserialized.source_node_name)
 	if source_name_len > 0 {
-		deserialized.source_node_name = string(payload[str_offset:str_offset + source_name_len])
+		deserialized.source_node_name = string(
+			payload[str_offset:str_offset + source_name_len],
+		)
 	}
 
 	testing.expect(t, deserialized.pid == original.pid, "PID should match")
@@ -459,16 +564,30 @@ test_spawned_broadcast_empty_name :: proc(t: ^testing.T) {
 		deserialized.source_node_name == "node_X",
 		"Source node name should survive empty name",
 	)
-	testing.expect(t, deserialized.source_port == 8080, "Source port should match")
-	testing.expect(t, deserialized.source_ip == 0xC0A80101, "Source IP should match")
+	testing.expect(
+		t,
+		deserialized.source_port == 8080,
+		"Source port should match",
+	)
+	testing.expect(
+		t,
+		deserialized.source_ip == 0xC0A80101,
+		"Source IP should match",
+	)
 }
 
 @(test)
 test_broadcast_type_hash_lookup :: proc(t: ^testing.T) {
 	spawned_info := get_validated_message_info_ptr(Actor_Spawned_Broadcast)
-	terminated_info := get_validated_message_info_ptr(Actor_Terminated_Broadcast)
+	terminated_info := get_validated_message_info_ptr(
+		Actor_Terminated_Broadcast,
+	)
 
-	testing.expect(t, spawned_info.type_hash != 0, "Spawned broadcast hash should be non-zero")
+	testing.expect(
+		t,
+		spawned_info.type_hash != 0,
+		"Spawned broadcast hash should be non-zero",
+	)
 	testing.expect(
 		t,
 		terminated_info.type_hash != 0,
@@ -533,15 +652,26 @@ test_wire_format_byte_slice_roundtrip :: proc(t: ^testing.T) {
 	info, _ := get_type_info_ptr(typeid_of(Test_Bytes_Message))
 	value := (cast(^Test_Bytes_Message)raw_data(payload))^
 	storage: [256]byte
-	copied := copy_variable_data_from_payload(&storage[0], &value, payload, info, 0)
+	copied := copy_variable_data_from_payload(
+		&storage[0],
+		&value,
+		payload,
+		info,
+		0,
+	)
 	testing.expect(t, copied, "Receive-side copy should succeed")
 
 	testing.expect_value(t, value.id, u64(77))
-	testing.expect(t, len(value.payload) == len(blob), "Byte slice length should match")
+	testing.expect(
+		t,
+		len(value.payload) == len(blob),
+		"Byte slice length should match",
+	)
 	testing.expect(
 		t,
 		uintptr(raw_data(value.payload)) >= uintptr(&storage[0]) &&
-		uintptr(raw_data(value.payload)) < uintptr(&storage[0]) + size_of(storage),
+		uintptr(raw_data(value.payload)) <
+			uintptr(&storage[0]) + size_of(storage),
 		"Byte slice should be re-based into receive storage",
 	)
 	for b, i in blob {
@@ -554,7 +684,9 @@ test_wire_format_union_byte_slice_roundtrip :: proc(t: ^testing.T) {
 	register_test_types()
 
 	blob := []byte{10, 20, 30, 40}
-	original := Test_Mixed_Bytes_Union(Test_Bytes_Variant{data = blob, tag = 5})
+	original := Test_Mixed_Bytes_Union(
+		Test_Bytes_Variant{data = blob, tag = 5},
+	)
 
 	exact_size := wire_format_exact_size(original, 0)
 	buf: [512]byte
@@ -576,13 +708,23 @@ test_wire_format_union_byte_slice_roundtrip :: proc(t: ^testing.T) {
 	info, _ := get_type_info_ptr(typeid_of(Test_Mixed_Bytes_Union))
 	value := (cast(^Test_Mixed_Bytes_Union)raw_data(payload))^
 	storage: [256]byte
-	copied := copy_variable_data_from_payload(&storage[0], &value, payload, info, 0)
+	copied := copy_variable_data_from_payload(
+		&storage[0],
+		&value,
+		payload,
+		info,
+		0,
+	)
 	testing.expect(t, copied, "Receive-side copy should succeed")
 
 	variant, is_bytes := value.(Test_Bytes_Variant)
 	testing.expect(t, is_bytes, "Active variant should survive")
 	testing.expect_value(t, variant.tag, u32(5))
-	testing.expect(t, len(variant.data) == 4, "Variant byte slice length should match")
+	testing.expect(
+		t,
+		len(variant.data) == 4,
+		"Variant byte slice length should match",
+	)
 	for b, i in blob {
 		testing.expect_value(t, variant.data[i], b)
 	}

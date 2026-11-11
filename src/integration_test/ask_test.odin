@@ -39,7 +39,11 @@ Ask_Responder_Data :: struct {
 	misuse_err: ^int,
 }
 
-ask_responder_handle :: proc(d: ^Ask_Responder_Data, from: actod.PID, msg: any) {
+ask_responder_handle :: proc(
+	d: ^Ask_Responder_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch m in msg {
 	case Ask_Question:
 		if d.silent {
@@ -70,7 +74,11 @@ Ask_Requester_Data :: struct {
 	timeout_token: ^u64,
 }
 
-ask_requester_handle :: proc(d: ^Ask_Requester_Data, from: actod.PID, msg: any) {
+ask_requester_handle :: proc(
+	d: ^Ask_Requester_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch m in msg {
 	case Do_Ask:
 		token, err := actod.ask(
@@ -152,22 +160,42 @@ test_ask_reply_roundtrip :: proc(t: ^testing.T) {
 
 	expect(
 		t,
-		actod.send_message(requester, Do_Ask{target = responder, timeout_ms = 300, x = 21}) == .OK,
+		actod.send_message(
+			requester,
+			Do_Ask{target = responder, timeout_ms = 300, x = 21},
+		) ==
+		.OK,
 		"failed to trigger the ask",
 	)
 
 	wait_for_int(&answer_y, 0, 3 * time.Second)
 
-	expect(t, sync.atomic_load(&ask_err) == int(actod.Send_Error.OK), "ask() must return OK")
-	expect(t, sync.atomic_load(&answer_y) == 42, "the reply payload must arrive")
-	expect(t, sync.atomic_load(&replying_ok), "replying_to must identify the reply")
+	expect(
+		t,
+		sync.atomic_load(&ask_err) == int(actod.Send_Error.OK),
+		"ask() must return OK",
+	)
+	expect(
+		t,
+		sync.atomic_load(&answer_y) == 42,
+		"the reply payload must arrive",
+	)
+	expect(
+		t,
+		sync.atomic_load(&replying_ok),
+		"replying_to must identify the reply",
+	)
 	expect(
 		t,
 		sync.atomic_load(&answer_token) != 0 &&
 		sync.atomic_load(&answer_token) == sync.atomic_load(&asked_token),
 		"the reply token must match the ask token",
 	)
-	expect(t, sync.atomic_load(&reply_err) == int(actod.Send_Error.OK), "reply() must return OK")
+	expect(
+		t,
+		sync.atomic_load(&reply_err) == int(actod.Send_Error.OK),
+		"reply() must return OK",
+	)
 
 	time.sleep(600 * time.Millisecond)
 	expect(
@@ -189,7 +217,11 @@ test_ask_reply_roundtrip :: proc(t: ^testing.T) {
 	)
 
 	off_actor_err := actod.reply(Ask_Answer{y = 0})
-	expect(t, off_actor_err == .NOT_ASKED, "reply() outside an actor must return NOT_ASKED")
+	expect(
+		t,
+		off_actor_err == .NOT_ASKED,
+		"reply() outside an actor must return NOT_ASKED",
+	)
 
 	_ = actod.send_message(requester, actod.Terminate{reason = .NORMAL})
 	_ = actod.send_message(responder, actod.Terminate{reason = .NORMAL})
@@ -239,12 +271,17 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 
 	expect(
 		t,
-		actod.send_message(requester, Do_Ask{target = silent, timeout_ms = 100, x = 1}) == .OK,
+		actod.send_message(
+			requester,
+			Do_Ask{target = silent, timeout_ms = 100, x = 1},
+		) ==
+		.OK,
 		"failed to trigger the silent ask",
 	)
 
 	start := time.now()
-	for sync.atomic_load(&timeout_token) == 0 && time.diff(start, time.now()) < 3 * time.Second {
+	for sync.atomic_load(&timeout_token) == 0 &&
+	    time.diff(start, time.now()) < 3 * time.Second {
 		time.sleep(5 * time.Millisecond)
 	}
 	expect(
@@ -257,7 +294,11 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 		sync.atomic_load(&timeout_token) == sync.atomic_load(&asked_token),
 		"the timeout token must match the ask token",
 	)
-	expect(t, sync.atomic_load(&answer_y) == 0, "no reply may arrive from a silent responder")
+	expect(
+		t,
+		sync.atomic_load(&answer_y) == 0,
+		"no reply may arrive from a silent responder",
+	)
 
 	late_reply_err := -1
 	late_misuse_err := -1
@@ -280,7 +321,11 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 
 	expect(
 		t,
-		actod.send_message(requester, Do_Ask{target = late, timeout_ms = 50, x = 5}) == .OK,
+		actod.send_message(
+			requester,
+			Do_Ask{target = late, timeout_ms = 50, x = 5},
+		) ==
+		.OK,
 		"failed to trigger the late ask",
 	)
 
@@ -292,8 +337,16 @@ test_ask_timeout_and_late_reply :: proc(t: ^testing.T) {
 	)
 
 	time.sleep(300 * time.Millisecond)
-	expect(t, sync.atomic_load(&timeout_token) != 0, "Ask_Timeout must fire before the late reply")
-	expect(t, sync.atomic_load(&answer_y) == 0, "a late reply must be dropped, not delivered")
+	expect(
+		t,
+		sync.atomic_load(&timeout_token) != 0,
+		"Ask_Timeout must fire before the late reply",
+	)
+	expect(
+		t,
+		sync.atomic_load(&answer_y) == 0,
+		"a late reply must be dropped, not delivered",
+	)
 
 	_ = actod.send_message(requester, actod.Terminate{reason = .NORMAL})
 	_ = actod.send_message(silent, actod.Terminate{reason = .NORMAL})
@@ -317,7 +370,11 @@ Named_Asker_Behaviour :: actod.Actor_Behaviour(Named_Asker_Data) {
 	handle_message = proc(d: ^Named_Asker_Data, from: actod.PID, msg: any) {
 		switch m in msg {
 		case Do_Ask:
-			token, err := actod.ask_to("named-responder", d.node, Ask_Question{x = m.x})
+			token, err := actod.ask_to(
+				"named-responder",
+				d.node,
+				Ask_Question{x = m.x},
+			)
 			g_named_ask.asked_token, g_named_ask.ask_err = u64(token), err
 		case Ask_Answer:
 			token, _ := actod.replying_to()
@@ -335,7 +392,11 @@ test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_i
 	reply_err := -1
 	misuse_err := -1
 
-	mesh := actod.sim_mesh_create(2, base_port = 36000, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 36000,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
 
@@ -354,7 +415,11 @@ test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_i
 		Named_Asker_Behaviour,
 	)
 	expect(t, asker_ok, "the asker spawned on node 1")
-	expect_value(t, actod.send_message(asker, Do_Ask{x = 21}), actod.Send_Error.OK)
+	expect_value(
+		t,
+		actod.send_message(asker, Do_Ask{x = 21}),
+		actod.Send_Error.OK,
+	)
 	actod.sim_mesh_run_until_idle(mesh)
 
 	expect_value(t, g_named_ask.ask_err, actod.Send_Error.OK)
@@ -365,19 +430,29 @@ test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_i
 	expect(t, !g_named_ask.timed_out, "no Ask_Timeout once the reply arrived")
 }
 
-test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped :: proc(t: ^testing.T) {
+test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped :: proc(
+	t: ^testing.T,
+) {
 	g_named_ask = {}
 	reply_err := -1
 	misuse_err := -1
 
-	mesh := actod.sim_mesh_create(3, base_port = 36100, log_level = test_log_level())
+	mesh := actod.sim_mesh_create(
+		3,
+		base_port = 36100,
+		log_level = test_log_level(),
+	)
 	defer actod.sim_mesh_destroy(mesh)
 	expect(t, actod.sim_mesh_connect_full(mesh), "mesh connect did not settle")
 
 	_ = actod.sim_mesh_bind(mesh, 1)
 	asked, asked_ok := actod.spawn(
 		"named-responder",
-		Ask_Responder_Data{silent = true, reply_err = &reply_err, misuse_err = &misuse_err},
+		Ask_Responder_Data {
+			silent = true,
+			reply_err = &reply_err,
+			misuse_err = &misuse_err,
+		},
 		Ask_Responder_Behaviour,
 	)
 	expect(t, asked_ok, "the silent responder spawned on node 1")
@@ -389,13 +464,19 @@ test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped :: proc(t: 
 		Named_Asker_Behaviour,
 	)
 	expect(t, asker_ok, "the asker spawned on node 0")
-	expect_value(t, actod.send_message(asker, Do_Ask{x = 21}), actod.Send_Error.OK)
+	expect_value(
+		t,
+		actod.send_message(asker, Do_Ask{x = 21}),
+		actod.Send_Error.OK,
+	)
 	actod.sim_mesh_run_until_idle(mesh)
 	expect_value(t, g_named_ask.ask_err, actod.Send_Error.OK)
 	expect(t, g_named_ask.asked_token != 0, "ask_to returned a token")
 
 	_ = actod.sim_mesh_bind(mesh, 2)
-	asking_node, asking_known := actod.get_node_by_name(actod.sim_mesh_name(mesh, 0))
+	asking_node, asking_known := actod.get_node_by_name(
+		actod.sim_mesh_name(mesh, 0),
+	)
 	expect(t, asking_known, "the third node knows the asking node")
 	forged := Ask_Answer {
 		y = -7,
@@ -413,7 +494,11 @@ test_sim_a_reply_to_ask_to_from_a_node_that_was_not_asked_is_dropped :: proc(t: 
 		token = g_named_ask.asked_token | actod.ASK_REPLY_BIT,
 	)
 	ti.test_intercept = nil
-	expect(t, forged_sent == .OK, "the third node sent a reply carrying the ask's token")
+	expect(
+		t,
+		forged_sent == .OK,
+		"the third node sent a reply carrying the ask's token",
+	)
 	_ = actod.sim_mesh_run_until_idle(mesh)
 
 	expect_value(t, g_named_ask.answer_y, 0)

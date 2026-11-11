@@ -28,8 +28,17 @@ Actor_Behaviour :: struct($T: typeid) {
 		reason: Termination_Reason,
 		will_restart: bool,
 	),
-	on_child_restarted:       proc(data: ^T, old_pid: PID, new_pid: PID, restart_count: int),
-	on_max_restarts_exceeded: proc(data: ^T, child_pid: PID, child_name: string),
+	on_child_restarted:       proc(
+		data: ^T,
+		old_pid: PID,
+		new_pid: PID,
+		restart_count: int,
+	),
+	on_max_restarts_exceeded: proc(
+		data: ^T,
+		child_pid: PID,
+		child_name: string,
+	),
 }
 
 Actor_Config :: struct {
@@ -147,7 +156,11 @@ Inbound_Message :: struct {
 	control:   Inbound_Control,
 }
 
-Log_Callback :: proc(level: log.Level, text: string, location: runtime.Source_Code_Location)
+Log_Callback :: proc(
+	level: log.Level,
+	text: string,
+	location: runtime.Source_Code_Location,
+)
 
 Log_Config :: struct {
 	level:         log.Level,

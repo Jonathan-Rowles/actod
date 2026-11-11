@@ -13,8 +13,12 @@ init :: proc(data: ^shared.Counter_State) {
 }
 
 @(export)
-hot_Counter_State_handle_message :: proc "c" () -> rawptr {return rawptr(handle_message)}
+hot_Counter_State_handle_message :: proc "c" () -> rawptr {return rawptr(
+		handle_message,
+	)}
 @(export)
 hot_Counter_State_init :: proc "c" () -> rawptr {return rawptr(init)}
 @(export)
-hot_Counter_State_state_size :: proc "c" () -> int {return size_of(shared.Counter_State)}
+hot_Counter_State_state_size :: proc "c" () -> int {return size_of(
+		shared.Counter_State,
+	)}

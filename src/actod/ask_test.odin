@@ -21,7 +21,13 @@ record_reply :: proc(data: rawptr, from: PID, content: any) {
 }
 
 @(private = "file")
-deliver_reply :: proc(actor: ^Actor, ctx: ^Actor_Context, from: PID, token: u64, value: int) {
+deliver_reply :: proc(
+	actor: ^Actor,
+	ctx: ^Actor_Context,
+	from: PID,
+	token: u64,
+	value: int,
+) {
 	payload := value
 	msg := Message {
 		from    = from,
@@ -71,12 +77,24 @@ test_reply_is_delivered_only_from_the_asked_pid :: proc(t: ^testing.T) {
 
 	deliver_reply(actor, ctx, same_handle_on_other_node, token, 998)
 	testing.expect_value(t, recorder.replies, 0)
-	testing.expect(t, token in ctx.pending_asks, "a forged reply must leave the ask pending")
+	testing.expect(
+		t,
+		token in ctx.pending_asks,
+		"a forged reply must leave the ask pending",
+	)
 
 	deliver_reply(actor, ctx, asked, token, 42)
 	testing.expect_value(t, recorder.replies, 1)
 	testing.expect_value(t, recorder.last_from, asked)
 	testing.expect_value(t, recorder.last_value, 42)
-	testing.expect(t, token not_in ctx.pending_asks, "the real reply must settle the ask")
-	testing.expect(t, timer_id not_in ctx.timer_asks, "the real reply must release the ask timer")
+	testing.expect(
+		t,
+		token not_in ctx.pending_asks,
+		"the real reply must settle the ask",
+	)
+	testing.expect(
+		t,
+		timer_id not_in ctx.timer_asks,
+		"the real reply must release the ask timer",
+	)
 }

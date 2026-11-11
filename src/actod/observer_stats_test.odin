@@ -22,7 +22,10 @@ when ODIN_TEST {
 	one_thread_counted_allocator :: proc(
 		counter: ^One_Thread_Counted_Allocator,
 	) -> runtime.Allocator {
-		return runtime.Allocator{procedure = one_thread_counted_allocator_proc, data = counter}
+		return runtime.Allocator {
+			procedure = one_thread_counted_allocator_proc,
+			data = counter,
+		}
 	}
 
 	@(private)
@@ -68,7 +71,9 @@ when ODIN_TEST {
 	}
 
 	@(test)
-	stats_maps_are_freed_when_the_observer_cannot_take_the_response_test :: proc(t: ^testing.T) {
+	stats_maps_are_freed_when_the_observer_cannot_take_the_response_test :: proc(
+		t: ^testing.T,
+	) {
 		sync.lock(&global_registry_swap_mutex)
 		defer sync.unlock(&global_registry_swap_mutex)
 
@@ -85,13 +90,19 @@ when ODIN_TEST {
 			backing   = runtime.heap_allocator(),
 			thread_id = sync.current_thread_id(),
 		}
-		actor_system_allocator = one_thread_counted_allocator(&stats_test_counter)
+		actor_system_allocator = one_thread_counted_allocator(
+			&stats_test_counter,
+		)
 		defer actor_system_allocator = saved_system_allocator
 
 		observer := new(Actor)
 		defer free(observer)
 		observer.state = .STOPPING
-		observer_pid, added := add(&NODE.actor_registry, rawptr(observer), "stopping_observer")
+		observer_pid, added := add(
+			&NODE.actor_registry,
+			rawptr(observer),
+			"stopping_observer",
+		)
 		if !testing.expect(t, added, "the observer should register") do return
 		defer remove(&NODE.actor_registry, observer_pid)
 

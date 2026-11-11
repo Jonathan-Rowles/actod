@@ -39,7 +39,11 @@ Leak_Supervisor_Behaviour :: actod.Actor_Behaviour(Leak_Supervisor_Data) {
 	on_child_terminated = leak_supervisor_on_child_terminated,
 }
 
-leak_supervisor_handle_message :: proc(data: ^Leak_Supervisor_Data, from: actod.PID, msg: any) {
+leak_supervisor_handle_message :: proc(
+	data: ^Leak_Supervisor_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	if cmd, ok := msg.(Leak_Supervisor_Cmd); ok {
 		sync.atomic_store(&supervisor_blocking, true)
 		switch cmd {
@@ -79,7 +83,10 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 
 	for round in 0 ..< LEAK_TEST_ROUNDS {
 		for _ in 0 ..< LEAK_TEST_BATCH {
-			if added := actod.add_child(supervisor_pid, create_temporary_crash_child()); !added {
+			if added := actod.add_child(
+				supervisor_pid,
+				create_temporary_crash_child(),
+			); !added {
 				fail_hard("failed to add child in round %d", round)
 			}
 		}
@@ -109,7 +116,11 @@ test_supervisor_survives_many_child_terminations :: proc(t: ^testing.T) {
 
 	reaped := sync.atomic_load(&reaped_by_supervisor)
 	if reaped != expected {
-		fail_hard("supervisor processed only %d of %d Actor_Stopped messages", reaped, expected)
+		fail_hard(
+			"supervisor processed only %d of %d Actor_Stopped messages",
+			reaped,
+			expected,
+		)
 	}
 
 	_ = actod.send_message(supervisor_pid, actod.Terminate{reason = .NORMAL})
@@ -124,9 +135,7 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 		"blocked-supervisor",
 		Leak_Supervisor_Data{id = 13},
 		Leak_Supervisor_Behaviour,
-		actod.make_actor_config(
-			supervision_strategy = .ONE_FOR_ONE,
-		),
+		actod.make_actor_config(supervision_strategy = .ONE_FOR_ONE),
 	)
 	expect(t, ok, "Failed to spawn supervisor")
 	if !ok do return
@@ -134,7 +143,10 @@ test_blocked_supervisor_past_old_retry_window :: proc(t: ^testing.T) {
 	for _ in 0 ..< MASS_DEATH_CHILDREN {
 		added := false
 		for _ in 0 ..< 200 {
-			if add_ok := actod.add_child(supervisor_pid, create_temporary_crash_child()); add_ok {
+			if add_ok := actod.add_child(
+				supervisor_pid,
+				create_temporary_crash_child(),
+			); add_ok {
 				added = true
 				break
 			}

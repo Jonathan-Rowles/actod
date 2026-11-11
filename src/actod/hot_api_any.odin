@@ -4,12 +4,24 @@ import "base:intrinsics"
 import "core:log"
 import "core:sync"
 
-send_message_any :: proc(to: PID, content: any, loc := #caller_location) -> Send_Error {
+send_message_any :: proc(
+	to: PID,
+	content: any,
+	loc := #caller_location,
+) -> Send_Error {
 	@(static) sentinel: Message_Type_Info
 	info, ok := get_type_info_ptr(content.id, loc)
 	if !ok do info = &sentinel
 	size := type_info_of(content.id).size
-	return send_message_impl(to, content.data, size, content.id, info, .User, loc)
+	return send_message_impl(
+		to,
+		content.data,
+		size,
+		content.id,
+		info,
+		.User,
+		loc,
+	)
 }
 
 broadcast_any :: proc(content: any, loc := #caller_location) {
@@ -29,7 +41,10 @@ broadcast_any :: proc(content: any, loc := #caller_location) {
 	list := &NODE.type_subscribers[actor_type]
 	block := load_subscriber_block(list)
 	if block == nil do return
-	n := min(sync.atomic_load_explicit(&list.local_count, .Acquire), block.capacity)
+	n := min(
+		sync.atomic_load_explicit(&list.local_count, .Acquire),
+		block.capacity,
+	)
 
 	for i in 0 ..< n {
 		pid := PID(sync.atomic_load_explicit(&block.pids[i], .Acquire))
@@ -39,14 +54,23 @@ broadcast_any :: proc(content: any, loc := #caller_location) {
 
 publish_any :: proc(topic: ^Topic, content: any, loc := #caller_location) {
 	if topic == nil {
-		log.errorf("publish(%v) dropped: topic is nil", content.id, location = loc)
+		log.errorf(
+			"publish(%v) dropped: topic is nil",
+			content.id,
+			location = loc,
+		)
 		return
 	}
 	self_pid := get_self_pid()
 	n := sync.atomic_load_explicit(&topic.count, .Acquire)
 
 	for i in 0 ..< n {
-		pid := PID(sync.atomic_load_explicit(cast(^u64)&topic.subscribers[i], .Acquire))
+		pid := PID(
+			sync.atomic_load_explicit(
+				cast(^u64)&topic.subscribers[i],
+				.Acquire,
+			),
+		)
 		if pid != 0 && pid != self_pid do send_message_any(pid, content, loc)
 	}
 }
@@ -93,7 +117,15 @@ spawn_from_raw :: proc(
 		on_child_restarted       = auto_cast behaviour.on_child_restarted,
 		on_max_restarts_exceeded = auto_cast behaviour.on_max_restarts_exceeded,
 	}
-	return spawn_erased(name, state, erased, DEFAULT_MAIL_BOX_SIZE, opts, parent_pid, loc)
+	return spawn_erased(
+		name,
+		state,
+		erased,
+		DEFAULT_MAIL_BOX_SIZE,
+		opts,
+		parent_pid,
+		loc,
+	)
 }
 
 spawn_child_from_raw :: proc(
@@ -115,5 +147,13 @@ spawn_child_from_raw :: proc(
 			name,
 		)
 	}
-	return spawn_from_raw(name, data_ptr, data_size, behaviour, opts, self_pid, loc)
+	return spawn_from_raw(
+		name,
+		data_ptr,
+		data_size,
+		behaviour,
+		opts,
+		self_pid,
+		loc,
+	)
 }

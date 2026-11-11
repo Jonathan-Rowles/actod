@@ -10,14 +10,17 @@ import "core:time"
 start_parent_monitor :: proc() {
 	original_ppid := posix.getppid()
 
-	thread.create_and_start_with_data(rawptr(uintptr(original_ppid)), proc(data: rawptr) {
-		ppid := posix.pid_t(uintptr(data))
-		for {
-			time.sleep(500 * time.Millisecond)
-			if posix.getppid() != ppid {
-				actod.shutdown_node()
-				os.exit(1)
+	thread.create_and_start_with_data(
+		rawptr(uintptr(original_ppid)),
+		proc(data: rawptr) {
+			ppid := posix.pid_t(uintptr(data))
+			for {
+				time.sleep(500 * time.Millisecond)
+				if posix.getppid() != ppid {
+					actod.shutdown_node()
+					os.exit(1)
+				}
 			}
-		}
-	})
+		},
+	)
 }

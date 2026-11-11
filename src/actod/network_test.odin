@@ -54,7 +54,11 @@ test_node_registry :: proc(t: ^testing.T) {
 	NODE.node_id = 1
 	sync.atomic_store(&NODE.next_node_id, 2)
 
-	node_id, ok := register_node("remote_node", test_addr, .TCP_Custom_Protocol)
+	node_id, ok := register_node(
+		"remote_node",
+		test_addr,
+		.TCP_Custom_Protocol,
+	)
 	testing.expect(t, ok, "Failed to register node")
 	testing.expect(t, node_id > 1, "Invalid node ID")
 
@@ -62,9 +66,17 @@ test_node_registry :: proc(t: ^testing.T) {
 	testing.expect(t, info_ok, "Failed to get node info")
 	testing.expect(t, info.node_name == "remote_node", "Node name mismatch")
 	testing.expect(t, info.address == test_addr, "Address mismatch")
-	testing.expect(t, info.transport == .TCP_Custom_Protocol, "Transport mismatch")
+	testing.expect(
+		t,
+		info.transport == .TCP_Custom_Protocol,
+		"Transport mismatch",
+	)
 
-	node_id2, ok2 := register_node("remote_node", test_addr, .TCP_Custom_Protocol)
+	node_id2, ok2 := register_node(
+		"remote_node",
+		test_addr,
+		.TCP_Custom_Protocol,
+	)
 	testing.expect(t, !ok2, "Should not allow duplicate node registration")
 	testing.expect(t, node_id2 == node_id, "Should return existing node ID")
 
@@ -101,7 +113,11 @@ test_pid_packing_unpacking :: proc(t: ^testing.T) {
 	remote_pid := pack_pid(handle, 999)
 
 	testing.expect(t, is_local_pid(local_pid), "Local PID not recognized")
-	testing.expect(t, !is_local_pid(remote_pid), "Remote PID incorrectly identified as local")
+	testing.expect(
+		t,
+		!is_local_pid(remote_pid),
+		"Remote PID incorrectly identified as local",
+	)
 }
 
 @(test)
@@ -111,7 +127,11 @@ test_pid_actor_type_roundtrip :: proc(t: ^testing.T) {
 		gen = 1,
 	}
 	pid0 := pack_pid(h0)
-	testing.expect(t, get_pid_actor_type(pid0) == ACTOR_TYPE_UNTYPED, "Untyped should be 0")
+	testing.expect(
+		t,
+		get_pid_actor_type(pid0) == ACTOR_TYPE_UNTYPED,
+		"Untyped should be 0",
+	)
 
 	for type_val in 0 ..< u16(MAX_ACTOR_TYPES) {
 		h := Handle {
@@ -122,7 +142,11 @@ test_pid_actor_type_roundtrip :: proc(t: ^testing.T) {
 		pid := pack_pid(h, 5)
 		unpacked, node := unpack_pid(pid)
 
-		testing.expect(t, unpacked.actor_type == Actor_Type(type_val), "Actor type mismatch")
+		testing.expect(
+			t,
+			unpacked.actor_type == Actor_Type(type_val),
+			"Actor type mismatch",
+		)
 		testing.expect(
 			t,
 			get_pid_actor_type(pid) == Actor_Type(type_val),
@@ -145,7 +169,11 @@ test_pid_index_boundary :: proc(t: ^testing.T) {
 	pid := pack_pid(h, 1)
 	unpacked, _ := unpack_pid(pid)
 
-	testing.expect(t, unpacked.idx == max_idx, "24-bit max index failed roundtrip")
+	testing.expect(
+		t,
+		unpacked.idx == max_idx,
+		"24-bit max index failed roundtrip",
+	)
 
 	h_overflow := Handle {
 		idx = 0x1000000,
@@ -153,7 +181,11 @@ test_pid_index_boundary :: proc(t: ^testing.T) {
 	}
 	pid_overflow := pack_pid(h_overflow, 1)
 	unpacked_overflow, _ := unpack_pid(pid_overflow)
-	testing.expect(t, unpacked_overflow.idx == 0, "Index overflow not masked to 24 bits")
+	testing.expect(
+		t,
+		unpacked_overflow.idx == 0,
+		"Index overflow not masked to 24 bits",
+	)
 }
 
 @(test)
@@ -167,7 +199,11 @@ test_pid_generation_boundary :: proc(t: ^testing.T) {
 	pid := pack_pid(h, 1)
 	unpacked, _ := unpack_pid(pid)
 
-	testing.expect(t, unpacked.gen == max_gen, "16-bit max gen failed roundtrip")
+	testing.expect(
+		t,
+		unpacked.gen == max_gen,
+		"16-bit max gen failed roundtrip",
+	)
 }
 
 @(test)
@@ -185,7 +221,11 @@ test_get_node_by_name :: proc(t: ^testing.T) {
 	NODE.node_id = 1
 	sync.atomic_store(&NODE.next_node_id, 2)
 
-	node_id, ok := register_node("test_remote", test_addr, .TCP_Custom_Protocol)
+	node_id, ok := register_node(
+		"test_remote",
+		test_addr,
+		.TCP_Custom_Protocol,
+	)
 	testing.expect(t, ok, "Failed to register node")
 
 	found_id, found := get_node_by_name("test_remote")
@@ -196,11 +236,23 @@ test_get_node_by_name :: proc(t: ^testing.T) {
 	testing.expect(t, !not_found, "Should not find non-existent node")
 
 	node_name, name_ok := get_node_name(node_id)
-	testing.expect(t, name_ok, "get_node_name should succeed for registered node")
-	testing.expect(t, node_name == "test_remote", "get_node_name should return correct name")
+	testing.expect(
+		t,
+		name_ok,
+		"get_node_name should succeed for registered node",
+	)
+	testing.expect(
+		t,
+		node_name == "test_remote",
+		"get_node_name should return correct name",
+	)
 
 	_, bad_name_ok := get_node_name(Node_ID(999))
-	testing.expect(t, !bad_name_ok, "get_node_name should fail for unknown node")
+	testing.expect(
+		t,
+		!bad_name_ok,
+		"get_node_name should fail for unknown node",
+	)
 
 	unregister_node(node_id)
 }
@@ -218,15 +270,31 @@ test_pid_remapping_preserves_handle :: proc(t: ^testing.T) {
 	remapped_pid := pack_pid(h, Node_ID(5))
 
 	remapped_h, remapped_node := unpack_pid(remapped_pid)
-	testing.expect(t, remapped_h.idx == original_handle.idx, "idx should be preserved after remap")
-	testing.expect(t, remapped_h.gen == original_handle.gen, "gen should be preserved after remap")
+	testing.expect(
+		t,
+		remapped_h.idx == original_handle.idx,
+		"idx should be preserved after remap",
+	)
+	testing.expect(
+		t,
+		remapped_h.gen == original_handle.gen,
+		"gen should be preserved after remap",
+	)
 	testing.expect(
 		t,
 		remapped_h.actor_type == original_handle.actor_type,
 		"actor_type should be preserved after remap",
 	)
-	testing.expect(t, remapped_node == Node_ID(5), "node_id should be remapped to 5")
-	testing.expect(t, remapped_node != Node_ID(1), "node_id should no longer be 1")
+	testing.expect(
+		t,
+		remapped_node == Node_ID(5),
+		"node_id should be remapped to 5",
+	)
+	testing.expect(
+		t,
+		remapped_node != Node_ID(1),
+		"node_id should no longer be 1",
+	)
 }
 
 @(test)
@@ -242,7 +310,13 @@ test_ipv4_to_u32_roundtrip :: proc(t: ^testing.T) {
 	for tc in test_cases {
 		ip_u32 := ipv4_to_u32(tc)
 		result := u32_to_ipv4(ip_u32)
-		testing.expectf(t, result == tc, "IPv4 roundtrip failed for %v: got %v", tc, result)
+		testing.expectf(
+			t,
+			result == tc,
+			"IPv4 roundtrip failed for %v: got %v",
+			tc,
+			result,
+		)
 	}
 }
 
@@ -255,7 +329,11 @@ test_ipv4_to_u32_known_values :: proc(t: ^testing.T) {
 	testing.expect(t, any_addr == 0x00000000, "0.0.0.0 should be 0")
 
 	private := ipv4_to_u32(net.IP4_Address{192, 168, 1, 1})
-	testing.expect(t, private == 0xC0A80101, "192.168.1.1 should be 0xC0A80101")
+	testing.expect(
+		t,
+		private == 0xC0A80101,
+		"192.168.1.1 should be 0xC0A80101",
+	)
 
 	ipv6_result := ipv4_to_u32(net.IP6_Address{})
 	testing.expect(t, ipv6_result == 0, "IPv6 address should return 0")
@@ -275,7 +353,11 @@ test_build_endpoint_from_broadcast :: proc(t: ^testing.T) {
 
 	ip4, is_ip4 := endpoint.address.(net.IP4_Address)
 	testing.expect(t, is_ip4, "Address should be IPv4")
-	testing.expect(t, ip4 == net.IP4_Address{192, 168, 1, 1}, "IP should be 192.168.1.1")
+	testing.expect(
+		t,
+		ip4 == net.IP4_Address{192, 168, 1, 1},
+		"IP should be 192.168.1.1",
+	)
 }
 
 @(test)
@@ -288,8 +370,16 @@ test_build_endpoint_zero_port :: proc(t: ^testing.T) {
 	}
 
 	endpoint := build_endpoint_from_broadcast(msg)
-	testing.expect(t, endpoint.port == 0, "Zero port should return empty endpoint")
-	testing.expect(t, endpoint.address == nil, "Zero port should return nil address")
+	testing.expect(
+		t,
+		endpoint.port == 0,
+		"Zero port should return empty endpoint",
+	)
+	testing.expect(
+		t,
+		endpoint.address == nil,
+		"Zero port should return nil address",
+	)
 }
 
 @(test)
@@ -312,11 +402,19 @@ test_register_node_deduplication :: proc(t: ^testing.T) {
 	testing.expect(t, id1 >= 2, "Should get valid node ID")
 
 	id2, ok2 := register_node("dedup_node", addr, .TCP_Custom_Protocol)
-	testing.expect(t, !ok2, "Second registration should return false (not new)")
+	testing.expect(
+		t,
+		!ok2,
+		"Second registration should return false (not new)",
+	)
 	testing.expect(t, id2 == id1, "Should return same ID for duplicate name")
 
 	next := sync.atomic_load(&NODE.next_node_id)
-	testing.expect(t, next == id1 + 1, "Should not have consumed extra node ID")
+	testing.expect(
+		t,
+		next == id1 + 1,
+		"Should not have consumed extra node ID",
+	)
 
 	unregister_node(id1)
 }
@@ -377,12 +475,20 @@ test_node_directory_serialization :: proc(t: ^testing.T) {
 	id1, found1 := get_node_by_name("node_alpha")
 	testing.expect(t, found1, "node_alpha should be registered")
 	info1, _ := get_node_info(id1)
-	testing.expect(t, info1.address.port == 9001, "node_alpha port should be 9001")
+	testing.expect(
+		t,
+		info1.address.port == 9001,
+		"node_alpha port should be 9001",
+	)
 
 	id2, found2 := get_node_by_name("node_beta")
 	testing.expect(t, found2, "node_beta should be registered")
 	info2, _ := get_node_info(id2)
-	testing.expect(t, info2.address.port == 9002, "node_beta port should be 9002")
+	testing.expect(
+		t,
+		info2.address.port == 9002,
+		"node_beta port should be 9002",
+	)
 
 	testing.expect(t, id1 != id2, "Node IDs should be different")
 

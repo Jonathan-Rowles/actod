@@ -49,10 +49,14 @@ Worker :: struct #align (CACHE_LINE_SIZE) {
 	thread:      ^thread.Thread,
 	runnext:     ^Pooled_Actor_Handle,
 	running:     bool,
-	_pad0:       [CACHE_LINE_SIZE - size_of(int) - size_of(rawptr) - size_of(rawptr) - size_of(bool)]byte,
+	_pad0:       [CACHE_LINE_SIZE - size_of(
+		int,
+	) - size_of(rawptr) - size_of(rawptr) - size_of(bool)]byte,
 	wake_sema:   sync.Atomic_Sema,
 	parked:      bool,
-	_pad1:       [CACHE_LINE_SIZE - size_of(sync.Atomic_Sema) - size_of(bool)]byte,
+	_pad1:       [CACHE_LINE_SIZE - size_of(
+		sync.Atomic_Sema,
+	) - size_of(bool)]byte,
 	ready_head:  ^Pooled_Actor_Handle,
 	ready_local: ^Pooled_Actor_Handle,
 }
@@ -97,7 +101,10 @@ ready_pop :: proc(w: ^Worker) -> ^Pooled_Actor_Handle {
 
 @(private)
 ready_is_empty :: #force_inline proc(w: ^Worker) -> bool {
-	return w.ready_local == nil && sync.atomic_load_explicit(&w.ready_head, .Acquire) == nil
+	return(
+		w.ready_local == nil &&
+		sync.atomic_load_explicit(&w.ready_head, .Acquire) == nil \
+	)
 }
 
 Worker_Pool :: struct {
@@ -126,9 +133,13 @@ worker_pool_init :: proc(count: int) {
 		sync.atomic_store(&w.running, true)
 
 		if !NODE.config.sim_mode {
-			w.thread = threads_act.make_thread_with_stack_size(w, proc(data: rawptr) {
+			w.thread = threads_act.make_thread_with_stack_size(
+				w,
+				proc(data: rawptr) {
 					worker_loop(cast(^Worker)data)
-				}, 128 * 1024)
+				},
+				128 * 1024,
+			)
 			if w.thread == nil {
 				panic_at(
 					NODE.config.loc,
@@ -168,7 +179,11 @@ shutdown_worker_pool :: proc() {
 wake_pooled_actor :: proc(handle: ^Pooled_Actor_Handle) {
 	if handle.home_worker != current_worker do sync.atomic_thread_fence(.Seq_Cst)
 	if sync.atomic_load_explicit(&handle.in_ready_queue, .Relaxed) do return
-	_, ok := sync.atomic_compare_exchange_strong(&handle.in_ready_queue, false, true)
+	_, ok := sync.atomic_compare_exchange_strong(
+		&handle.in_ready_queue,
+		false,
+		true,
+	)
 	if ok {
 		w := handle.home_worker
 		if w == current_worker {
@@ -259,7 +274,11 @@ worker_resume_handle :: proc(worker: ^Worker, handle: ^Pooled_Actor_Handle) {
 			reschedule = has_pending_messages(handle)
 		}
 		if reschedule {
-			_, ok := sync.atomic_compare_exchange_strong(&handle.in_ready_queue, false, true)
+			_, ok := sync.atomic_compare_exchange_strong(
+				&handle.in_ready_queue,
+				false,
+				true,
+			)
 			if ok do ready_push(worker, handle)
 		}
 	}
@@ -334,7 +353,9 @@ worker_flush_staging :: #force_inline proc() {
 }
 
 @(private)
-has_pending_messages :: #force_inline proc(handle: ^Pooled_Actor_Handle) -> bool {
+has_pending_messages :: #force_inline proc(
+	handle: ^Pooled_Actor_Handle,
+) -> bool {
 	actor := cast(^Actor)handle.actor_ptr
 	if actor.local_read != actor.local_write do return true
 	if sync.atomic_load_explicit(&actor.stopped_head, .Relaxed) != nil do return true

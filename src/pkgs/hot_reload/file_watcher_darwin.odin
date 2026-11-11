@@ -58,15 +58,7 @@ foreign core_services {
 	CFArrayCreate :: proc(alloc: CFAllocatorRef, values: [^]rawptr, numValues: CFIndex, callbacks: CFArrayCallBacks) -> CFArrayRef ---
 	CFRelease :: proc(cf: rawptr) ---
 
-	FSEventStreamCreate :: proc(
-		alloc: CFAllocatorRef,
-		callback: FSEventStreamCallback,
-		ctx: ^FSEventStreamContext,
-		pathsToWatch: CFArrayRef,
-		sinceWhen: FSEventStreamEventId,
-		latency: CFTimeInterval,
-		flags: u32,
-	) -> FSEventStreamRef ---
+	FSEventStreamCreate :: proc(alloc: CFAllocatorRef, callback: FSEventStreamCallback, ctx: ^FSEventStreamContext, pathsToWatch: CFArrayRef, sinceWhen: FSEventStreamEventId, latency: CFTimeInterval, flags: u32) -> FSEventStreamRef ---
 	FSEventStreamSetDispatchQueue :: proc(stream: FSEventStreamRef, queue: dispatch_queue_t) ---
 	FSEventStreamStart :: proc(stream: FSEventStreamRef) -> bool ---
 	FSEventStreamStop :: proc(stream: FSEventStreamRef) ---
@@ -120,7 +112,11 @@ resolve_symlinks :: proc(path: string) -> string {
 	return strings.clone(string(resolved))
 }
 
-add_watch :: proc(watcher: ^File_Watcher, path: string, actor_name: string) -> bool {
+add_watch :: proc(
+	watcher: ^File_Watcher,
+	path: string,
+	actor_name: string,
+) -> bool {
 	if watcher.watch_count >= MAX_WATCHES do return false
 
 	if is_tmp_watch_path(path) do return true
@@ -165,11 +161,23 @@ make_stream :: proc(watcher: ^File_Watcher) {
 
 	cf_strings: [MAX_WATCHES]rawptr
 	for i in 0 ..< unique_count {
-		cpath := strings.clone_to_cstring(unique_paths[i], context.temp_allocator)
-		cf_strings[i] = CFStringCreateWithCString(kCFAllocatorDefault, cpath, kCFStringEncodingUTF8)
+		cpath := strings.clone_to_cstring(
+			unique_paths[i],
+			context.temp_allocator,
+		)
+		cf_strings[i] = CFStringCreateWithCString(
+			kCFAllocatorDefault,
+			cpath,
+			kCFStringEncodingUTF8,
+		)
 	}
 
-	paths_array := CFArrayCreate(kCFAllocatorDefault, raw_data(&cf_strings), CFIndex(unique_count), nil)
+	paths_array := CFArrayCreate(
+		kCFAllocatorDefault,
+		raw_data(&cf_strings),
+		CFIndex(unique_count),
+		nil,
+	)
 
 	ctx := FSEventStreamContext {
 		version = 0,
@@ -177,7 +185,8 @@ make_stream :: proc(watcher: ^File_Watcher) {
 	}
 
 	latency := CFTimeInterval(watcher.debounce_ms) / 1000.0
-	flags := kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer
+	flags :=
+		kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer
 
 	watcher.stream = FSEventStreamCreate(
 		kCFAllocatorDefault,
@@ -236,19 +245,22 @@ fsevents_callback :: proc "c" (
 		file_path := string(event_paths[i])
 
 		basename := file_path
-		if last_slash := strings.last_index_byte(file_path, '/'); last_slash >= 0 {
+		if last_slash := strings.last_index_byte(file_path, '/');
+		   last_slash >= 0 {
 			basename = file_path[last_slash + 1:]
 		}
 
 		if should_ignore_file(file_path, basename) do continue
 
 		dir_path := file_path
-		if last_slash := strings.last_index_byte(file_path, '/'); last_slash >= 0 {
+		if last_slash := strings.last_index_byte(file_path, '/');
+		   last_slash >= 0 {
 			dir_path = file_path[:last_slash]
 		}
 
 		for j in 0 ..< w.watch_count {
-			if w.watches[j].path == dir_path || strings.has_prefix(dir_path, w.watches[j].path) {
+			if w.watches[j].path == dir_path ||
+			   strings.has_prefix(dir_path, w.watches[j].path) {
 				already := false
 				for k in 0 ..< changed_count {
 					if changed_actors[k] == w.watches[j].actor_name {

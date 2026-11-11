@@ -66,7 +66,10 @@ sim_transport_ensure :: proc() {
 	g_sim_initialized = true
 	g_sim_thread_id = sync.current_thread_id()
 	g_sim_endpoints = make([dynamic]^Sim_Endpoint, get_system_allocator())
-	g_sim_pending_accepts = make([dynamic]Sim_Pending_Accept, get_system_allocator())
+	g_sim_pending_accepts = make(
+		[dynamic]Sim_Pending_Accept,
+		get_system_allocator(),
+	)
 	g_sim_listeners = make(map[int]^Node_State, get_system_allocator())
 	g_sim_blocked_links = make([dynamic][2]^Node_State, get_system_allocator())
 }
@@ -273,7 +276,10 @@ sim_wake_waiter :: proc(ep: ^Sim_Endpoint) {
 sim_listen :: proc(port: int) {
 	sim_transport_ensure()
 	if existing, taken := g_sim_listeners[port]; taken && existing != NODE {
-		log.warnf("sim: virtual port %d already claimed by another node, replacing", port)
+		log.warnf(
+			"sim: virtual port %d already claimed by another node, replacing",
+			port,
+		)
 	}
 	g_sim_listeners[port] = NODE
 	log.infof("Sim node listening on virtual port %d", port)
@@ -285,13 +291,23 @@ sim_stop_listening :: proc(port: int) {
 	sim_purge_pending_accepts(NODE)
 }
 
-runtime_dial_tcp :: proc(endpoint: net.Endpoint) -> (net.TCP_Socket, net.Network_Error) {
+runtime_dial_tcp :: proc(
+	endpoint: net.Endpoint,
+) -> (
+	net.TCP_Socket,
+	net.Network_Error,
+) {
 	if NODE.config.sim_mode do return sim_dial(endpoint)
 	return net.dial_tcp(endpoint)
 }
 
 @(private = "file")
-sim_dial :: proc(endpoint: net.Endpoint) -> (net.TCP_Socket, net.Network_Error) {
+sim_dial :: proc(
+	endpoint: net.Endpoint,
+) -> (
+	net.TCP_Socket,
+	net.Network_Error,
+) {
 	sim_transport_ensure()
 	listener := g_sim_listeners[endpoint.port]
 	if listener == nil do return 0, net.Dial_Error.Refused
@@ -306,7 +322,10 @@ sim_dial :: proc(endpoint: net.Endpoint) -> (net.TCP_Socket, net.Network_Error) 
 		Sim_Pending_Accept {
 			node = listener,
 			sock = server.sock,
-			addr = net.Endpoint{address = net.IP4_Loopback, port = g_sim_next_ephemeral_port},
+			addr = net.Endpoint {
+				address = net.IP4_Loopback,
+				port = g_sim_next_ephemeral_port,
+			},
 		},
 	)
 	return client.sock, nil
@@ -338,7 +357,13 @@ sim_close_socket :: proc(sock: net.TCP_Socket) {
 	sim_free_endpoint(ep)
 }
 
-sim_drain_available :: proc(sock: net.TCP_Socket, dst: []byte) -> (n: int, eof: bool) {
+sim_drain_available :: proc(
+	sock: net.TCP_Socket,
+	dst: []byte,
+) -> (
+	n: int,
+	eof: bool,
+) {
 	ep := sim_endpoint_for(sock)
 	if ep == nil || ep.closed do return 0, true
 	if ep.peer != nil && sim_link_blocked(ep.node, ep.peer.node) do return 0, false
@@ -362,7 +387,11 @@ sim_stream_write :: proc(sock: net.TCP_Socket, data: []byte) -> bool {
 	return true
 }
 
-sim_stream_read_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: time.Time) -> bool {
+sim_stream_read_exactly :: proc(
+	sock: net.TCP_Socket,
+	buf: []byte,
+	deadline: time.Time,
+) -> bool {
 	total := 0
 	for total < len(buf) {
 		ep := sim_endpoint_for(sock)
@@ -381,7 +410,8 @@ sim_stream_read_exactly :: proc(sock: net.TCP_Socket, buf: []byte, deadline: tim
 			ep.recv_waiter = handle
 			coro.yield(co)
 			handle.transport_parked = false
-			if live := sim_endpoint_for(sock); live != nil && live.recv_waiter == handle {
+			if live := sim_endpoint_for(sock);
+			   live != nil && live.recv_waiter == handle {
 				live.recv_waiter = nil
 			}
 		} else if !sim_pump() {
@@ -432,7 +462,11 @@ sim_detach_ring :: proc(ring: ^Connection_Ring) {
 		}
 	}
 	ring.pending_recv = nil
-	sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Buffering, .Release)
+	sync.atomic_store_explicit(
+		&ring.state,
+		Connection_Ring_State.Buffering,
+		.Release,
+	)
 	ring_io_release(ring)
 }
 
@@ -451,7 +485,11 @@ sim_ring_send :: proc(ring: ^Connection_Ring, batch_count: u32) {
 	ep := sim_endpoint_for(ring.tcp_socket)
 	op: nbio.Operation
 	op.type = .Send
-	if ep == nil || ep.closed || ep.write_closed || ep.peer == nil || ep.peer.closed {
+	if ep == nil ||
+	   ep.closed ||
+	   ep.write_closed ||
+	   ep.peer == nil ||
+	   ep.peer.closed {
 		op.send.err = net.TCP_Send_Error.Connection_Closed
 	} else {
 		for buf in ring.send_bufs[:batch_count] {
@@ -463,7 +501,10 @@ sim_ring_send :: proc(ring: ^Connection_Ring, batch_count: u32) {
 	nbio_send_callback(&op, ring, batch_count)
 }
 
-sim_ring_post_recv :: proc(ring: ^Connection_Ring, recv_buf: []byte) -> ^nbio.Operation {
+sim_ring_post_recv :: proc(
+	ring: ^Connection_Ring,
+	recv_buf: []byte,
+) -> ^nbio.Operation {
 	ep := sim_endpoint_for(ring.tcp_socket)
 	if ep == nil do return nil
 	ep.recv_buf = recv_buf
@@ -488,7 +529,11 @@ sim_deliver_recv :: proc(ep: ^Sim_Endpoint) -> bool {
 	ep.recv_op = {}
 	ep.recv_op.type = .Recv
 	ep.recv_op.recv.received = received
-	sim_trace_record(.Wire_Deliver, u64(ep.sock) - SIM_SOCKET_BASE, u64(received))
+	sim_trace_record(
+		.Wire_Deliver,
+		u64(ep.sock) - SIM_SOCKET_BASE,
+		u64(received),
+	)
 	nbio_recv_callback(&ep.recv_op, ring)
 	return true
 }
@@ -527,11 +572,16 @@ sim_service_transport :: proc() -> bool {
 			sync.atomic_load_explicit(&pool.ring_count, .Acquire) > 1 &&
 			atomic_load_ring_ptr(&pool.rings[0]) != ring
 		park := sync.atomic_load(&ring.park_state)
-		if sync.atomic_load_explicit(&ring.state, .Acquire) != .Ready && park == .Active {
+		if sync.atomic_load_explicit(&ring.state, .Acquire) != .Ready &&
+		   park == .Active {
 			if pooled_secondary {
 				if !pool_flip_epoch(pool, ring, .Arm) do continue
 			} else {
-				sync.atomic_store_explicit(&ring.state, Connection_Ring_State.Ready, .Release)
+				sync.atomic_store_explicit(
+					&ring.state,
+					Connection_Ring_State.Ready,
+					.Release,
+				)
 			}
 			progress = true
 		}
@@ -553,7 +603,10 @@ sim_service_transport :: proc() -> bool {
 			if ring.park_half_closed {
 				if sync.atomic_load(&ring.recv_closed) != 0 {
 					sim_detach_ring(ring)
-					sync.atomic_store(&ring.park_state, Ring_Park_State.Park_Acked)
+					sync.atomic_store(
+						&ring.park_state,
+						Ring_Park_State.Park_Acked,
+					)
 					progress = true
 				} else {
 					if ring.pending_recv == nil do submit_nbio_recv(ring)

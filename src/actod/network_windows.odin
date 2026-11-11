@@ -28,11 +28,21 @@ platform_setsockopt :: #force_inline proc(
 	return win32.setsockopt(win32.SOCKET(sock), level, optname, optval, optlen)
 }
 
-platform_poll :: #force_inline proc(fds: ^Poll_Fd, nfds: u32, timeout: i32) -> i32 {
-	return win32.WSAPoll(cast(^win32.WSA_POLLFD)fds, win32.c_ulong(nfds), timeout)
+platform_poll :: #force_inline proc(
+	fds: ^Poll_Fd,
+	nfds: u32,
+	timeout: i32,
+) -> i32 {
+	return win32.WSAPoll(
+		cast(^win32.WSA_POLLFD)fds,
+		win32.c_ulong(nfds),
+		timeout,
+	)
 }
 
-platform_socket_fd :: #force_inline proc(sock: net.TCP_Socket) -> win32.SOCKET {
+platform_socket_fd :: #force_inline proc(
+	sock: net.TCP_Socket,
+) -> win32.SOCKET {
 	return win32.SOCKET(sock)
 }
 
@@ -47,5 +57,14 @@ platform_return_pages :: proc(data: rawptr, size: uint) {
 
 platform_set_recv_timeout :: proc(sock: net.TCP_Socket, seconds: i64) -> bool {
 	timeout_ms: u32 = u32(seconds * 1000)
-	return platform_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout_ms, size_of(u32)) == 0
+	return(
+		platform_setsockopt(
+			sock,
+			SOL_SOCKET,
+			SO_RCVTIMEO,
+			&timeout_ms,
+			size_of(u32),
+		) ==
+		0 \
+	)
 }

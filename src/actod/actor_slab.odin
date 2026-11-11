@@ -29,21 +29,21 @@ slab_release :: proc(data: []byte) {
 }
 
 Slot_Slab :: struct #align (CACHE_LINE_SIZE) {
-	free_head:     u64,
-	_pad_head:     [CACHE_LINE_SIZE - size_of(u64)]byte,
-	cursor:        u64,
-	_pad_cursor:   [CACHE_LINE_SIZE - size_of(u64)]byte,
-	in_use:        i64,
-	_pad_in_use:   [CACHE_LINE_SIZE - size_of(i64)]byte,
-	memory:        []byte,
-	slot_next:     []u32,
-	slot_purged:   []u32,
-	slot_size:     uint,
-	slot_count:    u64,
-	committed:     uint,
-	commit_mutex:  sync.Mutex,
-	enabled:       bool,
-	warned:        bool,
+	free_head:    u64,
+	_pad_head:    [CACHE_LINE_SIZE - size_of(u64)]byte,
+	cursor:       u64,
+	_pad_cursor:  [CACHE_LINE_SIZE - size_of(u64)]byte,
+	in_use:       i64,
+	_pad_in_use:  [CACHE_LINE_SIZE - size_of(i64)]byte,
+	memory:       []byte,
+	slot_next:    []u32,
+	slot_purged:  []u32,
+	slot_size:    uint,
+	slot_count:   u64,
+	committed:    uint,
+	commit_mutex: sync.Mutex,
+	enabled:      bool,
+	warned:       bool,
 }
 
 SLAB_KEEP_WARM :: 64
@@ -55,7 +55,11 @@ slab_spare_slots :: proc(slab: ^Slot_Slab) -> i64 {
 	return taken - sync.atomic_load_explicit(&slab.in_use, .Relaxed)
 }
 
-slot_slab_init :: proc(slab: ^Slot_Slab, slot_size: uint, slot_count: u64) -> bool {
+slot_slab_init :: proc(
+	slab: ^Slot_Slab,
+	slot_size: uint,
+	slot_count: u64,
+) -> bool {
 	if slot_size == 0 || slot_count == 0 do return false
 
 	aligned_slot := mem.align_forward_uint(slot_size, uint(mem.PAGE_SIZE))
@@ -121,7 +125,13 @@ slab_ensure_committed :: proc(slab: ^Slot_Slab, slot_index: u64) -> bool {
 	return true
 }
 
-slot_slab_take :: proc(slab: ^Slot_Slab) -> (index: u32, fresh: bool, ok: bool) {
+slot_slab_take :: proc(
+	slab: ^Slot_Slab,
+) -> (
+	index: u32,
+	fresh: bool,
+	ok: bool,
+) {
 	if !slab.enabled do return 0, false, false
 
 	for {
@@ -129,7 +139,10 @@ slot_slab_take :: proc(slab: ^Slot_Slab) -> (index: u32, fresh: bool, ok: bool) 
 		free_index := u32(head)
 		if free_index == SLAB_SLOT_NONE do break
 
-		next := sync.atomic_load_explicit(&slab.slot_next[free_index], .Acquire)
+		next := sync.atomic_load_explicit(
+			&slab.slot_next[free_index],
+			.Acquire,
+		)
 		new_head := slab_pack_head(next, u32(head >> 32) + 1)
 		if _, swapped := sync.atomic_compare_exchange_weak_explicit(
 			&slab.free_head,
@@ -138,11 +151,19 @@ slot_slab_take :: proc(slab: ^Slot_Slab) -> (index: u32, fresh: bool, ok: bool) 
 			.Acq_Rel,
 			.Acquire,
 		); swapped {
-			purged := sync.atomic_exchange_explicit(&slab.slot_purged[free_index], 0, .Acq_Rel)
+			purged := sync.atomic_exchange_explicit(
+				&slab.slot_purged[free_index],
+				0,
+				.Acq_Rel,
+			)
 			if purged > 0 {
 				slot := slot_slab_slot(slab, free_index)
 				if vmem.commit(raw_data(slot), uint(purged)) != nil {
-					sync.atomic_store_explicit(&slab.slot_purged[free_index], purged, .Release)
+					sync.atomic_store_explicit(
+						&slab.slot_purged[free_index],
+						purged,
+						.Release,
+					)
 					slab_push_free(slab, free_index)
 					return 0, false, false
 				}
@@ -181,9 +202,16 @@ slab_push_free :: proc(slab: ^Slot_Slab, index: u32) {
 slot_slab_give :: proc(slab: ^Slot_Slab, index: u32, touched: uint) {
 	if !slab.enabled || u64(index) >= slab.slot_count do return
 
-	purge := mem.align_forward_uint(min(touched, slab.slot_size), uint(mem.PAGE_SIZE))
+	purge := mem.align_forward_uint(
+		min(touched, slab.slot_size),
+		uint(mem.PAGE_SIZE),
+	)
 	if purge > 0 && slab_spare_slots(slab) >= SLAB_KEEP_WARM {
-		sync.atomic_store_explicit(&slab.slot_purged[index], u32(purge), .Release)
+		sync.atomic_store_explicit(
+			&slab.slot_purged[index],
+			u32(purge),
+			.Release,
+		)
 		vmem.decommit(raw_data(slot_slab_slot(slab, index)), purge)
 	}
 
@@ -222,7 +250,14 @@ Actor_Arena :: struct {
 actor_arena_open_spill :: proc(arena: ^Actor_Arena) -> bool {
 	if arena.overflow.curr_block != nil do return true
 	if arena.spill_reserve == 0 do return false
-	return vmem.arena_init_static(&arena.overflow, arena.spill_reserve, ARENA_COMMIT_SIZE) == nil
+	return(
+		vmem.arena_init_static(
+			&arena.overflow,
+			arena.spill_reserve,
+			ARENA_COMMIT_SIZE,
+		) ==
+		nil \
+	)
 }
 
 @(private = "file")
@@ -275,7 +310,8 @@ actor_arena_proc :: proc(
 		)
 		if err == nil do return data, nil
 		if !actor_arena_open_spill(arena) do return nil, .Out_Of_Memory
-		fresh_mode: mem.Allocator_Mode = mode == .Resize ? .Alloc : .Alloc_Non_Zeroed
+		fresh_mode: mem.Allocator_Mode =
+			mode == .Resize ? .Alloc : .Alloc_Non_Zeroed
 		moved, moved_err := vmem.arena_allocator_proc(
 			&arena.overflow,
 			fresh_mode,
@@ -355,7 +391,9 @@ actor_arena_acquire :: proc(
 		}
 	}
 
-	return true, vmem.arena_init_static(&arena.primary, reserve, ARENA_COMMIT_SIZE) == nil
+	return true,
+		vmem.arena_init_static(&arena.primary, reserve, ARENA_COMMIT_SIZE) ==
+		nil
 }
 
 coro_header_bytes :: proc() -> uint {
@@ -378,9 +416,13 @@ coro_acquire :: proc(
 ) {
 	slot_ref^ = 0
 
-	if NODE.coro_slab.enabled && coro_slot_size(stack_size) <= NODE.coro_slab.slot_size {
+	if NODE.coro_slab.enabled &&
+	   coro_slot_size(stack_size) <= NODE.coro_slab.slot_size {
 		if index, _, took := slot_slab_take(&NODE.coro_slab); took {
-			co, res := coro.create_in(desc, slot_slab_slot(&NODE.coro_slab, index))
+			co, res := coro.create_in(
+				desc,
+				slot_slab_slot(&NODE.coro_slab, index),
+			)
 			if res == .Success {
 				slot_ref^ = index + 1
 				return co, res
@@ -394,7 +436,11 @@ coro_acquire :: proc(
 	return coro.create(desc)
 }
 
-coro_release :: proc(co: ^coro.Coro, slot_ref: ^u32, gone_for_good: bool) -> coro.Result {
+coro_release :: proc(
+	co: ^coro.Coro,
+	slot_ref: ^u32,
+	gone_for_good: bool,
+) -> coro.Result {
 	res := coro.destroy(co)
 	if slot_ref^ != 0 {
 		slot_slab_give(

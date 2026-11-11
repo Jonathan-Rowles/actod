@@ -41,14 +41,22 @@ traffic_leak_caller_init :: proc(data: ^Traffic_Leak_Caller) {
 	_ = actod.self_terminate()
 }
 
-traffic_leak_caller_handle_message :: proc(data: ^Traffic_Leak_Caller, from: actod.PID, msg: any) {
+traffic_leak_caller_handle_message :: proc(
+	data: ^Traffic_Leak_Caller,
+	from: actod.PID,
+	msg: any,
+) {
 }
 
 traffic_leak_rally_behaviour := actod.Actor_Behaviour(Traffic_Leak_Rally) {
 	handle_message = traffic_leak_rally_handle_message,
 }
 
-traffic_leak_rally_handle_message :: proc(data: ^Traffic_Leak_Rally, from: actod.PID, msg: any) {
+traffic_leak_rally_handle_message :: proc(
+	data: ^Traffic_Leak_Rally,
+	from: actod.PID,
+	msg: any,
+) {
 	switch m in msg {
 	case Traffic_Leak_Start:
 		_ = actod.send_message(m.peer, m.rounds)
@@ -65,7 +73,10 @@ traffic_leak_rally_handle_message :: proc(data: ^Traffic_Leak_Rally, from: actod
 
 @(private = "file")
 traffic_leak_rallies_reached :: proc(state: rawptr) -> bool {
-	return sync.atomic_load(&traffic_leak_rallies_finished) >= (cast(^int)state)^
+	return(
+		sync.atomic_load(&traffic_leak_rallies_finished) >=
+		(cast(^int)state)^ \
+	)
 }
 
 @(private = "file")
@@ -75,7 +86,10 @@ traffic_leak_pings_reached :: proc(state: rawptr) -> bool {
 
 @(private = "file")
 arena_bytes_outside_message_pool :: proc(pid: actod.PID) -> int {
-	a, ok := actod.get_actor_from_pointer(actod.get(&actod.NODE.actor_registry, pid), true)
+	a, ok := actod.get_actor_from_pointer(
+		actod.get(&actod.NODE.actor_registry, pid),
+		true,
+	)
 	if !ok do return 0
 	arena_used := int(a.arena.primary.total_used + a.arena.overflow.total_used)
 	pool_pages := sync.atomic_load(&a.pool.allocated_count)
@@ -83,15 +97,28 @@ arena_bytes_outside_message_pool :: proc(pid: actod.PID) -> int {
 }
 
 @(private = "file")
-run_traffic_rally :: proc(t: ^testing.T, server, receiver: actod.PID, rounds: u64) -> bool {
+run_traffic_rally :: proc(
+	t: ^testing.T,
+	server, receiver: actod.PID,
+	rounds: u64,
+) -> bool {
 	target := sync.atomic_load(&traffic_leak_rallies_finished) + 1
-	_ = actod.send_message(server, Traffic_Leak_Start{peer = receiver, rounds = rounds})
-	finished := poll_until(traffic_leak_rallies_reached, &target, TRAFFIC_LEAK_ROUND_BUDGET)
+	_ = actod.send_message(
+		server,
+		Traffic_Leak_Start{peer = receiver, rounds = rounds},
+	)
+	finished := poll_until(
+		traffic_leak_rallies_reached,
+		&target,
+		TRAFFIC_LEAK_ROUND_BUDGET,
+	)
 	expectf(t, finished, "a rally of %d messages never finished", rounds)
 	return finished
 }
 
-test_actor_traffic_memory_flat_while_observer_never_collects :: proc(t: ^testing.T) {
+test_actor_traffic_memory_flat_while_observer_never_collects :: proc(
+	t: ^testing.T,
+) {
 	_, started := actod.start_observer()
 	expect(t, started, "failed to start observer")
 	if !started do return
@@ -106,7 +133,11 @@ test_actor_traffic_memory_flat_while_observer_never_collects :: proc(t: ^testing
 		Traffic_Leak_Rally{},
 		traffic_leak_rally_behaviour,
 	)
-	expect(t, server_spawned && receiver_spawned, "failed to spawn the rally pair")
+	expect(
+		t,
+		server_spawned && receiver_spawned,
+		"failed to spawn the rally pair",
+	)
 	if !server_spawned || !receiver_spawned do return
 
 	if !run_traffic_rally(t, server, receiver, TRAFFIC_LEAK_WARMUP_ROUNDS) do return
@@ -115,7 +146,8 @@ test_actor_traffic_memory_flat_while_observer_never_collects :: proc(t: ^testing
 
 	if !run_traffic_rally(t, server, receiver, TRAFFIC_LEAK_MEASURED_ROUNDS) do return
 	server_growth := arena_bytes_outside_message_pool(server) - server_baseline
-	receiver_growth := arena_bytes_outside_message_pool(receiver) - receiver_baseline
+	receiver_growth :=
+		arena_bytes_outside_message_pool(receiver) - receiver_baseline
 
 	expectf(
 		t,
@@ -134,7 +166,8 @@ test_actor_traffic_memory_flat_while_observer_never_collects :: proc(t: ^testing
 
 	receiver_before_callers := arena_bytes_outside_message_pool(receiver)
 	pings_target :=
-		sync.atomic_load(&traffic_leak_pings_received) + TRAFFIC_LEAK_SHORT_LIVED_CALLERS
+		sync.atomic_load(&traffic_leak_pings_received) +
+		TRAFFIC_LEAK_SHORT_LIVED_CALLERS
 	for _ in 0 ..< TRAFFIC_LEAK_SHORT_LIVED_CALLERS {
 		_, caller_spawned := actod.spawn(
 			"traffic-leak-caller",
@@ -144,7 +177,11 @@ test_actor_traffic_memory_flat_while_observer_never_collects :: proc(t: ^testing
 		expect(t, caller_spawned, "failed to spawn a short-lived caller")
 		if !caller_spawned do return
 	}
-	pinged := poll_until(traffic_leak_pings_reached, &pings_target, TRAFFIC_LEAK_ROUND_BUDGET)
+	pinged := poll_until(
+		traffic_leak_pings_reached,
+		&pings_target,
+		TRAFFIC_LEAK_ROUND_BUDGET,
+	)
 	expectf(
 		t,
 		pinged,
@@ -152,7 +189,8 @@ test_actor_traffic_memory_flat_while_observer_never_collects :: proc(t: ^testing
 		TRAFFIC_LEAK_SHORT_LIVED_CALLERS,
 	)
 	if !pinged do return
-	receiver_caller_growth := arena_bytes_outside_message_pool(receiver) - receiver_before_callers
+	receiver_caller_growth :=
+		arena_bytes_outside_message_pool(receiver) - receiver_before_callers
 
 	expectf(
 		t,

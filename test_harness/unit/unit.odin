@@ -28,7 +28,10 @@ Test_Harness :: struct($T: typeid) {
 	taken_captures:          [dynamic]rawptr,
 }
 
-create :: proc(data: $T, behaviour: actod.Actor_Behaviour(T)) -> Test_Harness(T) {
+create :: proc(
+	data: $T,
+	behaviour: actod.Actor_Behaviour(T),
+) -> Test_Harness(T) {
 	h: Test_Harness(T)
 	h.data = new(T)
 	h.data^ = data
@@ -141,7 +144,10 @@ get_state :: proc(h: ^Test_Harness($T)) -> ^T {
 add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: actod.PID) {
 	for &subscribers in h.topic_subscribers {
 		if subscribers.topic != topic do continue
-		assert(subscribers.count < ti.MAX_TOPIC_SUBSCRIBERS, "unit: too many topic subscribers")
+		assert(
+			subscribers.count < ti.MAX_TOPIC_SUBSCRIBERS,
+			"unit: too many topic subscribers",
+		)
 		subscribers.pids[subscribers.count] = u64(pid)
 		subscribers.count += 1
 		return
@@ -182,7 +188,13 @@ simulate_child_terminated :: proc(
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
-	h.behaviour.on_child_terminated(h.data, child_pid, child_name, reason, will_restart)
+	h.behaviour.on_child_terminated(
+		h.data,
+		child_pid,
+		child_name,
+		reason,
+		will_restart,
+	)
 }
 
 simulate_child_started :: proc(h: ^Test_Harness($T), child_pid: actod.PID) {
@@ -206,7 +218,11 @@ simulate_child_restarted :: proc(
 	h.behaviour.on_child_restarted(h.data, old_pid, new_pid, restart_count)
 }
 
-simulate_max_restarts :: proc(h: ^Test_Harness($T), child_pid: actod.PID, child_name: string) {
+simulate_max_restarts :: proc(
+	h: ^Test_Harness($T),
+	child_pid: actod.PID,
+	child_name: string,
+) {
 	if h.behaviour.on_max_restarts_exceeded == nil do return
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
@@ -332,7 +348,11 @@ expect_sent_where :: proc(
 	return val
 }
 
-expect_no_sends :: proc(h: ^Test_Harness($T), t: ^testing.T, loc := #caller_location) {
+expect_no_sends :: proc(
+	h: ^Test_Harness($T),
+	t: ^testing.T,
+	loc := #caller_location,
+) {
 	if len(h.send_capture) > 0 {
 		testing.expectf(
 			t,
@@ -438,7 +458,11 @@ expect_published_to :: proc(
 	return result
 }
 
-expect_no_publishes :: proc(h: ^Test_Harness($T), t: ^testing.T, loc := #caller_location) {
+expect_no_publishes :: proc(
+	h: ^Test_Harness($T),
+	t: ^testing.T,
+	loc := #caller_location,
+) {
 	if len(h.publish_capture) > 0 {
 		testing.expectf(
 			t,
@@ -456,12 +480,22 @@ expect_timer :: proc(
 	loc := #caller_location,
 ) -> ti.Captured_Timer {
 	if len(h.timer_capture) == 0 {
-		testing.expectf(t, false, "expected active timer, but no timers captured", loc = loc)
+		testing.expectf(
+			t,
+			false,
+			"expected active timer, but no timers captured",
+			loc = loc,
+		)
 		return {}
 	}
 	timer := &h.timer_capture[0]
 	if !timer.active {
-		testing.expectf(t, false, "expected active timer, but next timer is inactive", loc = loc)
+		testing.expectf(
+			t,
+			false,
+			"expected active timer, but next timer is inactive",
+			loc = loc,
+		)
 		return {}
 	}
 	result := timer^
@@ -474,7 +508,11 @@ fire_timer :: proc(h: ^Test_Harness($T), id: u32) {
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
-	h.behaviour.handle_message(h.data, actod.PID(h.intercept.self_pid), actod.Timer_Tick{id = id})
+	h.behaviour.handle_message(
+		h.data,
+		actod.PID(h.intercept.self_pid),
+		actod.Timer_Tick{id = id},
+	)
 }
 
 expect_spawned :: proc(
@@ -516,7 +554,12 @@ expect_terminated :: proc(
 	loc := #caller_location,
 ) -> ti.Captured_Terminate {
 	if len(h.terminate_capture) == 0 {
-		testing.expectf(t, false, "expected termination, but none captured", loc = loc)
+		testing.expectf(
+			t,
+			false,
+			"expected termination, but none captured",
+			loc = loc,
+		)
 		return {}
 	}
 	result := h.terminate_capture[0]
@@ -597,7 +640,12 @@ expect_renamed :: proc(
 	loc := #caller_location,
 ) -> ti.Captured_Rename {
 	if len(h.rename_capture) == 0 {
-		testing.expectf(t, false, "expected rename, but none captured", loc = loc)
+		testing.expectf(
+			t,
+			false,
+			"expected rename, but none captured",
+			loc = loc,
+		)
 		return {}
 	}
 	result := h.rename_capture[0]
@@ -611,7 +659,12 @@ expect_subscribed_type :: proc(
 	loc := #caller_location,
 ) -> ti.Captured_Subscribe {
 	if len(h.subscribe_capture) == 0 {
-		testing.expectf(t, false, "expected type subscription, but none captured", loc = loc)
+		testing.expectf(
+			t,
+			false,
+			"expected type subscription, but none captured",
+			loc = loc,
+		)
 		return {}
 	}
 	result := h.subscribe_capture[0]
@@ -626,7 +679,12 @@ expect_subscribed_topic :: proc(
 	loc := #caller_location,
 ) -> ti.Captured_Topic_Subscribe {
 	if len(h.topic_subscribe_capture) == 0 {
-		testing.expectf(t, false, "expected topic subscription, but none captured", loc = loc)
+		testing.expectf(
+			t,
+			false,
+			"expected topic subscription, but none captured",
+			loc = loc,
+		)
 		return {}
 	}
 	cap := &h.topic_subscribe_capture[0]

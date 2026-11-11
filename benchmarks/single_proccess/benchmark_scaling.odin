@@ -9,7 +9,14 @@ generate_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Config {
 	configs := make([dynamic]shared.Scaling_Config)
 	base_messages := 1_000_000
 
-	test_sizes := []shared.Message_Size{.Empty, .INLINE, .MEDIUM, .LARGE, .XLARGE, .HUGE}
+	test_sizes := []shared.Message_Size {
+		.Empty,
+		.INLINE,
+		.MEDIUM,
+		.LARGE,
+		.XLARGE,
+		.HUGE,
+	}
 
 	// BASELINE: 1 sender → 1 receiver, same worker
 	for size in test_sizes {
@@ -44,7 +51,11 @@ generate_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Config {
 				sender_count = fanin_senders,
 				message_count = base_messages,
 				message_size = size,
-				description = fmt.tprintf("%d:1 %s", fanin_senders, shared.size_name(size)),
+				description = fmt.tprintf(
+					"%d:1 %s",
+					fanin_senders,
+					shared.size_name(size),
+				),
 				category = .FANIN,
 				dedicated = false,
 			},
@@ -62,7 +73,11 @@ generate_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Config {
 						sender_count = n,
 						message_count = n * base_messages,
 						message_size = size,
-						description = fmt.tprintf("%dx %s", n, shared.size_name(size)),
+						description = fmt.tprintf(
+							"%dx %s",
+							n,
+							shared.size_name(size),
+						),
 						category = .PARALLEL,
 						dedicated = true,
 						worker_count = n,
@@ -121,7 +136,11 @@ generate_scaling_configs :: proc(cpu_count: int) -> []shared.Scaling_Config {
 				sender_count = cpu_count,
 				message_count = base_messages * 2,
 				message_size = .MEDIUM,
-				description = fmt.tprintf("Mesh %d:%d", cpu_count, cpu_count / 2),
+				description = fmt.tprintf(
+					"Mesh %d:%d",
+					cpu_count,
+					cpu_count / 2,
+				),
 				category = .STRESS,
 				dedicated = false,
 			},
@@ -291,24 +310,33 @@ run_scaling_benchmark :: proc() {
 		bandwidth := (median_tput * f64(bytes)) / (1024 * 1024)
 
 		error_str: string
-		if result.err_receiver_backlogged > 0 && result.err_message_too_large > 0 {
+		if result.err_receiver_backlogged > 0 &&
+		   result.err_message_too_large > 0 {
 			error_str = fmt.tprintf(
 				"Backlog:%d TooLarge:%d",
 				result.err_receiver_backlogged,
 				result.err_message_too_large,
 			)
 		} else if result.err_receiver_backlogged > 0 {
-			error_str = fmt.tprintf("Backlog:%d", result.err_receiver_backlogged)
+			error_str = fmt.tprintf(
+				"Backlog:%d",
+				result.err_receiver_backlogged,
+			)
 		} else if result.err_message_too_large > 0 {
-			error_str = fmt.tprintf("TooLarge:%d", result.err_message_too_large)
+			error_str = fmt.tprintf(
+				"TooLarge:%d",
+				result.err_message_too_large,
+			)
 		} else {
 			error_str = "-"
 		}
 
-		window_s := f64(config.message_count) / median_tput if median_tput > 0 else 0
+		window_s :=
+			f64(config.message_count) / median_tput if median_tput > 0 else 0
 		if window_s < 0.010 {
 			flag := fmt.tprintf("SHORT %.0fms", window_s * 1000)
-			error_str = flag if error_str == "-" else fmt.tprintf("%s %s", error_str, flag)
+			error_str =
+				flag if error_str == "-" else fmt.tprintf("%s %s", error_str, flag)
 		}
 
 		cat_name: string

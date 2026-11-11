@@ -11,8 +11,14 @@ setup_signal_handler :: proc() {
 
 	signal_handler :: proc "c" (sig: posix.Signal) {
 		if sync.atomic_exchange(&NODE.stop_requested, true) {
-			install_signal_action(.SIGINT, cast(proc "c" (_: posix.Signal))posix.SIG_DFL)
-			install_signal_action(.SIGTERM, cast(proc "c" (_: posix.Signal))posix.SIG_DFL)
+			install_signal_action(
+				.SIGINT,
+				cast(proc "c" (_: posix.Signal))posix.SIG_DFL,
+			)
+			install_signal_action(
+				.SIGTERM,
+				cast(proc "c" (_: posix.Signal))posix.SIG_DFL,
+			)
 			posix.raise(sig)
 			return
 		}

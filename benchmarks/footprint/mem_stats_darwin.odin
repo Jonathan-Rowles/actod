@@ -57,10 +57,10 @@ Vm_Region_Submap_Info_64 :: struct #packed {
 #assert(size_of(Vm_Region_Submap_Info_64) == 76)
 
 Region :: struct {
-	address:         u64,
-	size:            u64,
-	protection:      i32,
-	pages_resident:  u32,
+	address:        u64,
+	size:           u64,
+	protection:     i32,
+	pages_resident: u32,
 }
 
 next_region :: proc(address: u64) -> (Region, bool) {
@@ -110,8 +110,8 @@ walk_regions :: proc(visit: proc(region: Region, user: rawptr), user: rawptr) {
 read_vma_count :: proc() -> int {
 	count := 0
 	walk_regions(proc(region: Region, user: rawptr) {
-		(cast(^int)user)^ += 1
-	}, &count)
+			(cast(^int)user)^ += 1
+		}, &count)
 	return count
 }
 
@@ -142,13 +142,16 @@ Vma_Visit_Ctx :: struct {
 	user:  rawptr,
 }
 
-vma_regions :: proc(visit: proc(size_kb: int, perms: string, user: rawptr), user: rawptr) {
+vma_regions :: proc(
+	visit: proc(size_kb: int, perms: string, user: rawptr),
+	user: rawptr,
+) {
 	ctx := Vma_Visit_Ctx{visit, user}
 	walk_regions(proc(region: Region, user: rawptr) {
-		ctx := cast(^Vma_Visit_Ctx)user
-		size_kb := int(region.size / 1024)
-		ctx.visit(size_kb, protection_string(region.protection), ctx.user)
-	}, &ctx)
+			ctx := cast(^Vma_Visit_Ctx)user
+			size_kb := int(region.size / 1024)
+			ctx.visit(size_kb, protection_string(region.protection), ctx.user)
+		}, &ctx)
 }
 
 protection_string :: proc(protection: i32) -> string {

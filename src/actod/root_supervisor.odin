@@ -15,7 +15,11 @@ Root_Supervisor_Behaviour :: Actor_Behaviour(Root_Supervisor_Data) {
 }
 
 @(private)
-root_supervisor_handle_message :: proc(data: ^Root_Supervisor_Data, from: PID, msg: any) {
+root_supervisor_handle_message :: proc(
+	data: ^Root_Supervisor_Data,
+	from: PID,
+	msg: any,
+) {
 	log.debugf(
 		"the root supervisor received a message of type %T from %s that it does not handle",
 		msg,
@@ -24,7 +28,11 @@ root_supervisor_handle_message :: proc(data: ^Root_Supervisor_Data, from: PID, m
 }
 
 @(private)
-root_supervisor_escalate :: proc(data: ^Root_Supervisor_Data, child_pid: PID, child_name: string) {
+root_supervisor_escalate :: proc(
+	data: ^Root_Supervisor_Data,
+	child_pid: PID,
+	child_name: string,
+) {
 	escalate_node_failure(
 		fmt.tprintf(
 			"node child %s (PID %v) used up its restart budget and the node cannot run without it. Raise max_restarts or restart_window in the node's actor_config, or give it a supervisor of your own to keep the node up",
@@ -35,7 +43,13 @@ root_supervisor_escalate :: proc(data: ^Root_Supervisor_Data, child_pid: PID, ch
 }
 
 @(private)
-spawn_root_supervisor_child :: proc(_name: string, parent_pid: PID) -> (PID, bool) {
+spawn_root_supervisor_child :: proc(
+	_name: string,
+	parent_pid: PID,
+) -> (
+	PID,
+	bool,
+) {
 	config := NODE.config.actor_config
 	config.children = NODE.root_supervisor_children
 	pid, ok := spawn(

@@ -81,7 +81,11 @@ staging_has_pending :: #force_inline proc() -> bool {
 }
 
 @(private = "file")
-staging_entry_reset :: proc(entry: ^Staging_Entry, ring: ^Connection_Ring, epoch: u32) {
+staging_entry_reset :: proc(
+	entry: ^Staging_Entry,
+	ring: ^Connection_Ring,
+	epoch: u32,
+) {
 	entry.ring = ring
 	entry.len = 0
 	entry.cap = staging_entry_cap(ring)
@@ -94,7 +98,10 @@ staging_entry_cap :: proc(ring: ^Connection_Ring) -> u32 {
 }
 
 @(private = "file")
-staging_entry_for :: proc(ring: ^Connection_Ring, epoch: u32) -> ^Staging_Entry {
+staging_entry_for :: proc(
+	ring: ^Connection_Ring,
+	epoch: u32,
+) -> ^Staging_Entry {
 	free_entry: ^Staging_Entry
 	for &entry in net_staging.entries {
 		if entry.ring == ring {
@@ -124,7 +131,10 @@ staging_frame_key :: proc(frame: []byte) -> u64 {
 }
 
 @(private = "file")
-staging_reroute_frames :: proc(entry: ^Staging_Entry, pool: ^Connection_Pool) -> bool {
+staging_reroute_frames :: proc(
+	entry: ^Staging_Entry,
+	pool: ^Connection_Pool,
+) -> bool {
 	blob := entry.buf[:entry.len]
 	offset: u32 = 0
 	for offset + 4 <= entry.len {
@@ -157,7 +167,12 @@ staging_flush_entry :: proc(entry: ^Staging_Entry) -> bool {
 	pool := ring.pool
 	if pool != nil {
 		if sync.atomic_load_explicit(&pool.epoch, .Acquire) == entry.epoch {
-			appended, stale := batch_append_epoch(ring, entry.buf[:entry.len], pool, entry.epoch)
+			appended, stale := batch_append_epoch(
+				ring,
+				entry.buf[:entry.len],
+				pool,
+				entry.epoch,
+			)
 			if appended {
 				entry.len = 0
 				entry.ring = nil

@@ -8,9 +8,18 @@ MAX_SPAWN_FUNCS :: 256
 g_spawn_registry: Name_Registry(SPAWN, MAX_SPAWN_FUNCS)
 
 @(require_results)
-register_spawn_func :: proc(name: string, spawn_func: SPAWN, loc := #caller_location) -> bool {
+register_spawn_func :: proc(
+	name: string,
+	spawn_func: SPAWN,
+	loc := #caller_location,
+) -> bool {
 	context.logger = diagnostic_logger(context.logger)
-	idx, registered := registry_register(&g_spawn_registry, name, spawn_func, loc)
+	idx, registered := registry_register(
+		&g_spawn_registry,
+		name,
+		spawn_func,
+		loc,
+	)
 	if registered do return true
 
 	if idx < 0 {
@@ -34,13 +43,25 @@ register_spawn_func :: proc(name: string, spawn_func: SPAWN, loc := #caller_loca
 	return false
 }
 
-get_spawn_func :: proc(name: string, loc := #caller_location) -> (SPAWN, bool) {
+get_spawn_func :: proc(
+	name: string,
+	loc := #caller_location,
+) -> (
+	SPAWN,
+	bool,
+) {
 	func_ptr, found := registry_get_by_name(&g_spawn_registry, name, loc)
 	if found do return func_ptr^, true
 	return nil, false
 }
 
-get_spawn_func_by_hash :: proc(hash: u64, loc := #caller_location) -> (SPAWN, bool) {
+get_spawn_func_by_hash :: proc(
+	hash: u64,
+	loc := #caller_location,
+) -> (
+	SPAWN,
+	bool,
+) {
 	func_ptr, found := registry_get_by_hash(&g_spawn_registry, hash, loc)
 	if found do return func_ptr^, true
 	return nil, false
@@ -80,7 +101,13 @@ spawn_by_name :: proc(
 	return spawn_func(actor_name, parent_pid)
 }
 
-get_spawn_func_name_by_hash :: proc(hash: u64, loc := #caller_location) -> (string, bool) {
+get_spawn_func_name_by_hash :: proc(
+	hash: u64,
+	loc := #caller_location,
+) -> (
+	string,
+	bool,
+) {
 	return registry_get_name_by_hash(&g_spawn_registry, hash, loc)
 }
 

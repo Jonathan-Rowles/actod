@@ -26,7 +26,11 @@ Mailbox_Order_Behaviour :: actod.Actor_Behaviour(Mailbox_Order_Data) {
 	handle_message = mailbox_order_handle_message,
 }
 
-mailbox_order_handle_message :: proc(data: ^Mailbox_Order_Data, from: actod.PID, msg: any) {
+mailbox_order_handle_message :: proc(
+	data: ^Mailbox_Order_Data,
+	from: actod.PID,
+	msg: any,
+) {
 	switch v in msg {
 	case string:
 		if v == "block" {
@@ -67,7 +71,11 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 		return
 	}
 
-	expect(t, actod.send_message(pid, "block") == .OK, "Failed to send the blocking message")
+	expect(
+		t,
+		actod.send_message(pid, "block") == .OK,
+		"Failed to send the blocking message",
+	)
 	expect(
 		t,
 		poll_until(atomic_flag_raised, &blocking, 2 * time.Second),
@@ -80,7 +88,11 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 			sent += 1
 		}
 	}
-	expect(t, sent >= actod.DEFAULT_MAIL_BOX_SIZE, "the mailbox should accept a full load")
+	expect(
+		t,
+		sent >= actod.DEFAULT_MAIL_BOX_SIZE,
+		"the mailbox should accept a full load",
+	)
 
 	delivery := Delivery_Probe {
 		delivered = &delivered,
@@ -92,9 +104,14 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 		"actor never delivered every accepted send",
 	)
 
-	expect(t, actod.send_message(pid, -1) == .OK, "Failed to send the drain sentinel")
+	expect(
+		t,
+		actod.send_message(pid, -1) == .OK,
+		"Failed to send the drain sentinel",
+	)
 	start := time.now()
-	for !sync.atomic_load(&done) && time.diff(start, time.now()) < 2 * time.Second {
+	for !sync.atomic_load(&done) &&
+	    time.diff(start, time.now()) < 2 * time.Second {
 		time.sleep(10 * time.Millisecond)
 	}
 	expect(t, sync.atomic_load(&done), "actor never drained the flood")
@@ -105,7 +122,11 @@ test_mailbox_overflow_preserves_send_order :: proc(t: ^testing.T) {
 			inversions += 1
 		}
 	}
-	expect(t, inversions == 0, "an overflowed send must never overtake earlier sends from the same producer")
+	expect(
+		t,
+		inversions == 0,
+		"an overflowed send must never overtake earlier sends from the same producer",
+	)
 
 	_ = actod.send_message(pid, actod.Terminate{reason = .NORMAL})
 }

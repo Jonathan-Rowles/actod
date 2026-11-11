@@ -8,7 +8,10 @@ import "core:strings"
 MEM_STATS_AVAILABLE :: true
 
 read_status_kb :: proc(key: string) -> int {
-	data, err := os.read_entire_file_from_path("/proc/self/status", context.allocator)
+	data, err := os.read_entire_file_from_path(
+		"/proc/self/status",
+		context.allocator,
+	)
 	if err != nil do return -1
 	defer delete(data)
 
@@ -31,7 +34,10 @@ read_virtual_kb :: proc() -> int {
 }
 
 read_vma_count :: proc() -> int {
-	data, err := os.read_entire_file_from_path("/proc/self/maps", context.allocator)
+	data, err := os.read_entire_file_from_path(
+		"/proc/self/maps",
+		context.allocator,
+	)
 	if err != nil do return -1
 	defer delete(data)
 
@@ -43,8 +49,14 @@ read_vma_count :: proc() -> int {
 	return count
 }
 
-vma_regions :: proc(visit: proc(size_kb: int, perms: string, user: rawptr), user: rawptr) {
-	data, err := os.read_entire_file_from_path("/proc/self/maps", context.allocator)
+vma_regions :: proc(
+	visit: proc(size_kb: int, perms: string, user: rawptr),
+	user: rawptr,
+) {
+	data, err := os.read_entire_file_from_path(
+		"/proc/self/maps",
+		context.allocator,
+	)
 	if err != nil do return
 	defer delete(data)
 
@@ -66,7 +78,10 @@ vma_regions :: proc(visit: proc(size_kb: int, perms: string, user: rawptr), user
 }
 
 read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
-	data, err := os.read_entire_file_from_path("/proc/self/smaps", context.allocator)
+	data, err := os.read_entire_file_from_path(
+		"/proc/self/smaps",
+		context.allocator,
+	)
 	if err != nil do return -1
 	defer delete(data)
 
@@ -80,9 +95,11 @@ read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 		defer delete(fields)
 		if len(fields) == 0 do continue
 
-		if dash := strings.index_byte(fields[0], '-'); dash > 0 && len(fields) >= 2 {
+		if dash := strings.index_byte(fields[0], '-');
+		   dash > 0 && len(fields) >= 2 {
 			start := strconv.parse_u64_of_base(fields[0][:dash], 16) or_else 0
-			end := strconv.parse_u64_of_base(fields[0][dash + 1:], 16) or_else 0
+			end :=
+				strconv.parse_u64_of_base(fields[0][dash + 1:], 16) or_else 0
 			in_range = start < high && end > low
 			continue
 		}
@@ -96,7 +113,10 @@ read_mapping_rss_kb :: proc(address: uintptr, size: uint) -> int {
 }
 
 read_max_map_count :: proc() -> int {
-	data, err := os.read_entire_file_from_path("/proc/sys/vm/max_map_count", context.allocator)
+	data, err := os.read_entire_file_from_path(
+		"/proc/sys/vm/max_map_count",
+		context.allocator,
+	)
 	if err != nil do return -1
 	defer delete(data)
 	return strconv.parse_int(strings.trim_space(string(data))) or_else -1

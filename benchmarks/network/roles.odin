@@ -62,16 +62,27 @@ create_network_benchmark_behaviour :: proc(
 	$T: typeid,
 ) -> actod.Actor_Behaviour(shared.Benchmark_Actor_Data) {
 	return actod.Actor_Behaviour(shared.Benchmark_Actor_Data) {
-		handle_message = proc(data: ^shared.Benchmark_Actor_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^shared.Benchmark_Actor_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Get_PID_Request:
-				_ = actod.send_message(from, shared.Get_PID_Response{request_id = m.request_id})
+				_ = actod.send_message(
+					from,
+					shared.Get_PID_Response{request_id = m.request_id},
+				)
 			case T:
 				data.message_count += 1
 				when CORRUPTION_DEBUG {
-					total := sync.atomic_add(&global_recv_message_counter, 1) + 1
+					total :=
+						sync.atomic_add(&global_recv_message_counter, 1) + 1
 					if total % 100_000 == 0 {
-						fmt.eprintf("CORRUPTION_DEBUG: total_messages_received=%d\n", total)
+						fmt.eprintf(
+							"CORRUPTION_DEBUG: total_messages_received=%d\n",
+							total,
+						)
 					}
 				}
 
@@ -93,7 +104,10 @@ create_network_benchmark_behaviour :: proc(
 							start_time        = data.start_time,
 							end_time          = data.last_msg_time,
 						}
-						_ = actod.send_message(global_receiver_state.stats_collector, complete_msg)
+						_ = actod.send_message(
+							global_receiver_state.stats_collector,
+							complete_msg,
+						)
 					}
 				}
 			}
@@ -104,9 +118,14 @@ create_network_benchmark_behaviour :: proc(
 	}
 }
 
-create_stats_collector_behaviour :: proc() -> actod.Actor_Behaviour(Stats_Collector_Data) {
+create_stats_collector_behaviour :: proc(
+) -> actod.Actor_Behaviour(Stats_Collector_Data) {
 	return actod.Actor_Behaviour(Stats_Collector_Data) {
-		handle_message = proc(data: ^Stats_Collector_Data, from: actod.PID, msg: any) {
+		handle_message = proc(
+			data: ^Stats_Collector_Data,
+			from: actod.PID,
+			msg: any,
+		) {
 			switch m in msg {
 			case shared.Start_Test_Message:
 				data.test_id = m.test_id
@@ -119,10 +138,12 @@ create_stats_collector_behaviour :: proc() -> actod.Actor_Behaviour(Stats_Collec
 				data.errors = {}
 
 			case Actor_Complete_Message:
-				if data.start_time == {} || time.diff(data.start_time, m.start_time) < 0 {
+				if data.start_time == {} ||
+				   time.diff(data.start_time, m.start_time) < 0 {
 					data.start_time = m.start_time
 				}
-				if data.end_time == {} || time.diff(data.end_time, m.end_time) > 0 {
+				if data.end_time == {} ||
+				   time.diff(data.end_time, m.end_time) > 0 {
 					data.end_time = m.end_time
 				}
 				data.received_messages += m.messages_received
@@ -132,8 +153,12 @@ create_stats_collector_behaviour :: proc() -> actod.Actor_Behaviour(Stats_Collec
 					report := shared.Stats_Report_Message {
 						test_id                  = data.test_id,
 						messages_received        = data.received_messages,
-						start_time_ns            = time.to_unix_nanoseconds(data.start_time),
-						end_time_ns              = time.to_unix_nanoseconds(data.end_time),
+						start_time_ns            = time.to_unix_nanoseconds(
+							data.start_time,
+						),
+						end_time_ns              = time.to_unix_nanoseconds(
+							data.end_time,
+						),
 						err_receiver_backlogged  = sync.atomic_load(
 							&data.errors.err_receiver_backlogged,
 						),
@@ -146,11 +171,19 @@ create_stats_collector_behaviour :: proc() -> actod.Actor_Behaviour(Stats_Collec
 						err_system_shutting_down = sync.atomic_load(
 							&data.errors.err_system_shutting_down,
 						),
-						err_network              = sync.atomic_load(&data.errors.err_network),
-						err_other                = sync.atomic_load(&data.errors.err_other),
+						err_network              = sync.atomic_load(
+							&data.errors.err_network,
+						),
+						err_other                = sync.atomic_load(
+							&data.errors.err_other,
+						),
 					}
 
-					err := actod.send_remote_by_name("BenchmarkSender", "StatsCollector", report)
+					err := actod.send_remote_by_name(
+						"BenchmarkSender",
+						"StatsCollector",
+						report,
+					)
 					if err != .OK do fmt.printf("Failed to send stats report: %v\n", err)
 
 					global_receiver_state.test_complete = true
@@ -224,7 +257,11 @@ handle_start_test :: proc(msg: shared.Start_Test_Message) {
 		actor_count = msg.actor_count,
 	}
 
-	err := actod.send_remote_by_name("BenchmarkSender", "TestCoordinator", ready_msg)
+	err := actod.send_remote_by_name(
+		"BenchmarkSender",
+		"TestCoordinator",
+		ready_msg,
+	)
 	if err != .OK do fmt.printf("Failed to send ready message: %v\n", err)
 }
 
@@ -240,11 +277,16 @@ create_test_coordinator_behaviour :: proc() -> actod.Actor_Behaviour(int) {
 }
 
 run_receiver_node :: proc() {
-	port_str := os.lookup_env("BENCH_PORT", context.temp_allocator) or_else "17200"
+	port_str :=
+		os.lookup_env("BENCH_PORT", context.temp_allocator) or_else "17200"
 	port, port_ok := strconv.parse_int(port_str)
 	if !port_ok do port = 17200
 
-	auth := os.lookup_env("BENCH_AUTH", context.temp_allocator) or_else "bench_password"
+	auth :=
+		os.lookup_env(
+			"BENCH_AUTH",
+			context.temp_allocator,
+		) or_else "bench_password"
 
 	actod.node_init(
 		name = "BenchmarkReceiver",
@@ -276,7 +318,11 @@ run_receiver_node :: proc() {
 
 	coordinator_data := 0
 	coordinator_behaviour := create_test_coordinator_behaviour()
-	_, ok = actod.spawn("TestCoordinator", coordinator_data, coordinator_behaviour)
+	_, ok = actod.spawn(
+		"TestCoordinator",
+		coordinator_data,
+		coordinator_behaviour,
+	)
 	if !ok do panic("Failed to spawn test coordinator")
 
 	fmt.println("[Receiver] Node started, waiting for tests...")

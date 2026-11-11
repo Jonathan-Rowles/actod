@@ -10,7 +10,9 @@ MAX_ALLOC_RETRIES :: 1000
 DEFAULT_PAGE_SIZE :: mem.Kilobyte * 64
 MAX_STATIC_MESSAGE_SIZE :: #config(ACTOD_MAX_MESSAGE_SIZE, DEFAULT_PAGE_SIZE)
 @(private)
-message_owns_page :: #force_inline proc "contextless" (content: rawptr) -> bool {
+message_owns_page :: #force_inline proc "contextless" (
+	content: rawptr,
+) -> bool {
 	return content != nil && content != INLINE_NEEDS_FIXUP
 }
 
@@ -21,19 +23,24 @@ pool_max_pages :: proc(mailbox_capacity: int) -> int {
 
 @(private)
 Message :: struct {
-	from:    PID,
-	content: rawptr,
+	from:          PID,
+	content:       rawptr,
 	using payload: struct #raw_union {
 		inline_data: [INLINE_MESSAGE_SIZE]byte,
 		ask_token:   u64,
 	},
-	inline_type: typeid,
+	inline_type:   typeid,
 }
 
 ASK_REPLY_BIT :: u64(1) << 63
 
 @(private)
-message_ask_token :: #force_inline proc "contextless" (msg: ^Message) -> (token: u64, is_reply: bool) {
+message_ask_token :: #force_inline proc "contextless" (
+	msg: ^Message,
+) -> (
+	token: u64,
+	is_reply: bool,
+) {
 	if !message_owns_page(msg.content) do return 0, false
 	raw := msg.ask_token
 	return raw &~ ASK_REPLY_BIT, raw & ASK_REPLY_BIT != 0
@@ -47,16 +54,23 @@ Type_Header :: struct {
 }
 
 TYPE_HEADER_SIZE :: size_of(Type_Header)
-#assert(TYPE_HEADER_SIZE == 16, "Type_Header must stay 16 bytes, the inline message path packs around it")
+#assert(
+	TYPE_HEADER_SIZE == 16,
+	"Type_Header must stay 16 bytes, the inline message path packs around it",
+)
 
 @(private)
 message_page_bytes :: #force_inline proc "contextless" (size: int) -> int {
-	return ((TYPE_HEADER_SIZE + size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE
+	return(
+		((TYPE_HEADER_SIZE + size + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) *
+		CACHE_LINE_SIZE \
+	)
 }
 
 assert_message_fits_page :: #force_inline proc "contextless" ($T: typeid) {
 	#assert(
-		((TYPE_HEADER_SIZE + size_of(T) + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) *
+		((TYPE_HEADER_SIZE + size_of(T) + CACHE_LINE_SIZE - 1) /
+				CACHE_LINE_SIZE) *
 			CACHE_LINE_SIZE <=
 		MAX_STATIC_MESSAGE_SIZE,
 		"message type is larger than ACTOD_MAX_MESSAGE_SIZE, the absolute ceiling on a message pool page. Shrink the type, or raise -define:ACTOD_MAX_MESSAGE_SIZE and actor_config.page_size together. node_init separately refuses to start when the node default page_size cannot hold every registered type",
@@ -98,7 +112,9 @@ pool_init :: proc(
 	pool: ^Pool,
 	allocator: mem.Allocator,
 	page_size: int = NODE.config.actor_config.page_size,
-	max_pages: int = DEFAULT_MAIL_BOX_SIZE + SYSTEM_MAILBOX_SIZE + LOCAL_MAILBOX_SIZE,
+	max_pages: int = DEFAULT_MAIL_BOX_SIZE +
+	SYSTEM_MAILBOX_SIZE +
+	LOCAL_MAILBOX_SIZE,
 ) {
 	pool.page_size = page_size
 	pool.max_pages = max_pages
@@ -131,7 +147,11 @@ pool_ensure_ready :: proc(pool: ^Pool) -> bool {
 			pool.ring[i].page_index = -1
 		}
 
-		sync.atomic_store_explicit(&pool.init_state, Pool_Init_State.READY, .Release)
+		sync.atomic_store_explicit(
+			&pool.init_state,
+			Pool_Init_State.READY,
+			.Release,
+		)
 		return true
 	}
 
@@ -173,14 +193,21 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 				.Relaxed,
 			); ok {
 				page_index := entry.page_index
-				sync.atomic_store_explicit(&entry.sequence, pos + page_pool.ring_mask + 1, .Release)
+				sync.atomic_store_explicit(
+					&entry.sequence,
+					pos + page_pool.ring_mask + 1,
+					.Release,
+				)
 
 				ptr := page_pool.pages[page_index]
 				(cast(^Type_Header)ptr).page_index = i32(page_index)
 				return ptr, .OK
 			}
 		} else if diff < 0 {
-			slot := sync.atomic_load_explicit(&page_pool.allocated_count, .Relaxed)
+			slot := sync.atomic_load_explicit(
+				&page_pool.allocated_count,
+				.Relaxed,
+			)
 			if slot >= page_pool.max_pages do return nil, .POOL_EXHAUSTED
 
 			if _, ok := sync.atomic_compare_exchange_strong_explicit(
@@ -190,7 +217,11 @@ message_alloc :: proc(page_pool: ^Pool, size: int) -> (rawptr, Alloc_Error) {
 				.Release,
 				.Relaxed,
 			); ok {
-				ptr, _ := mem.alloc(page_pool.page_size, CACHE_LINE_SIZE, page_pool.allocator)
+				ptr, _ := mem.alloc(
+					page_pool.page_size,
+					CACHE_LINE_SIZE,
+					page_pool.allocator,
+				)
 				if ptr == nil {
 					sync.atomic_compare_exchange_strong_explicit(
 						&page_pool.allocated_count,
@@ -260,7 +291,10 @@ free_message :: proc(page_pool: ^Pool, ptr: rawptr, loc := #caller_location) {
 }
 
 @(private)
-message_free_deferred :: #force_inline proc(buffer: ^Batch_Free_Buffer, ptr: rawptr) {
+message_free_deferred :: #force_inline proc(
+	buffer: ^Batch_Free_Buffer,
+	ptr: rawptr,
+) {
 	if ptr == nil do return
 
 	buffer.entries[buffer.count] = ptr
@@ -270,7 +304,10 @@ message_free_deferred :: #force_inline proc(buffer: ^Batch_Free_Buffer, ptr: raw
 }
 
 @(private)
-flush_batch_free :: #force_inline proc(buffer: ^Batch_Free_Buffer, loc := #caller_location) {
+flush_batch_free :: #force_inline proc(
+	buffer: ^Batch_Free_Buffer,
+	loc := #caller_location,
+) {
 	if buffer.count == 0 do return
 
 	pool := buffer.pool

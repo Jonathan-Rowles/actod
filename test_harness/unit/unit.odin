@@ -26,6 +26,7 @@ Test_Harness :: struct($T: typeid) {
 	children_pids:           [dynamic]u64,
 	dead_pids:               map[u64]bool,
 	taken_captures:          [dynamic]rawptr,
+	missed_send_names:       [dynamic]string,
 }
 
 create :: proc(
@@ -39,6 +40,7 @@ create :: proc(
 	h.intercept.self_pid = 1
 	h.intercept.self_name = "test-actor"
 	h.intercept.next_spawn_pid = 100
+	h.missed_send_names = make([dynamic]string)
 	return h
 }
 
@@ -69,6 +71,10 @@ destroy :: proc(h: ^Test_Harness($T)) {
 	delete(h.children_pids)
 	delete(h.dead_pids)
 	delete(h.taken_captures)
+	for name in h.missed_send_names {
+		delete(name, h.missed_send_names.allocator)
+	}
+	delete(h.missed_send_names)
 	free(h.data)
 }
 
@@ -87,6 +93,7 @@ wire_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.fail_undeclared_topic = true
 	h.intercept.children_pids = &h.children_pids
 	h.intercept.dead_pids = &h.dead_pids
+	h.intercept.missed_send_names = &h.missed_send_names
 }
 
 install_intercept :: proc(h: ^Test_Harness($T)) {
@@ -230,6 +237,13 @@ simulate_max_restarts :: proc(
 	h.behaviour.on_max_restarts_exceeded(h.data, child_pid, child_name)
 }
 
+
+missed_send :: proc(h: ^Test_Harness($T), name: string) -> bool {
+	for missed in h.missed_send_names {
+		if missed == name do return true
+	}
+	return false
+}
 
 expect_sent :: proc(
 	h: ^Test_Harness($T),

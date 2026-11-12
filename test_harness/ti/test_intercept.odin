@@ -1,6 +1,7 @@
 package ti
 
 import "base:runtime"
+import "core:strings"
 import "core:time"
 
 Send_Error :: enum {
@@ -61,6 +62,7 @@ Test_Intercept :: struct {
 	current_ask_token:       u64,
 	current_ask_from:        u64,
 	current_reply_token:     u64,
+	missed_send_names:       ^[dynamic]string,
 }
 
 Captured_Send :: struct {
@@ -212,12 +214,22 @@ intercept_send_message_name :: proc(
 ) {
 	if test_intercept == nil do return {}, false
 	for c in to {
-		if c == '@' do return .NODE_NOT_FOUND, true
+		if c == '@' {
+			record_missed_send(to)
+			return .NODE_NOT_FOUND, true
+		}
 	}
 	if pid, ok := test_intercept.pid_registry[to]; ok {
 		return intercept_send_message(pid, content)
 	}
+	record_missed_send(to)
 	return .ACTOR_NOT_FOUND, true
+}
+
+record_missed_send :: proc(to: string) {
+	names := test_intercept.missed_send_names
+	if names == nil do return
+	append(names, strings.clone(to, names.allocator))
 }
 
 intercept_send_message_to_children :: proc(content: $T) -> (Send_Error, bool) {

@@ -152,6 +152,10 @@ expect_sent :: proc(
 	return unit.expect_sent(h, t, M, loc)
 }
 
+missed_send :: proc(h: ^Test_Harness($T), name: string) -> bool {
+	return unit.missed_send(h, name)
+}
+
 // Assert next send matches type and target PID, consume and return.
 expect_sent_to :: proc(
 	h: ^Test_Harness($T),

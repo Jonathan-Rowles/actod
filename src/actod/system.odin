@@ -911,10 +911,10 @@ shutdown_node :: proc(loc := #caller_location) {
 
 	sync.atomic_store(&NODE.shutting_down, true)
 
+	stop_network_listener()
 	cleanup_remote_proxy_entries()
 	send_terminate_to_active_actors_and_wait()
 
-	stop_network_listener()
 	broadcast_graceful_disconnect("shutdown")
 	terminate_connection_actors_and_wait()
 	staging_drop_node_rings()

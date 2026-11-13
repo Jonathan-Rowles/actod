@@ -822,6 +822,12 @@ ALL_TESTS :: []Test_Entry {
 		name = "test_a_listener_stopped_right_after_start_listening_ends",
 		test_proc = test_a_listener_stopped_right_after_start_listening_ends,
 	},
+	{
+		name = "test_shutdown_stops_the_listener_before_user_actors",
+		test_proc = test_shutdown_stops_the_listener_before_user_actors,
+		port = SHUTDOWN_LISTENER_PORT,
+		is_networked = true,
+	},
 
 	// Hot reload tests (Phase 1a)
 	{name = "test_hot_reload_basic", test_proc = test_hot_reload_basic},

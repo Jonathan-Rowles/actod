@@ -40,6 +40,11 @@ Test_Text :: struct {
 	bytes: []u8,
 }
 Test_Set_Timer_Cmd :: struct {}
+Test_Spawn_Named_Cmd :: struct {
+	name:          string,
+	as_child:      bool,
+	sized_mailbox: bool,
+}
 
 @(init)
 init_harness_test_types :: proc "contextless" () {
@@ -59,6 +64,7 @@ init_harness_test_types :: proc "contextless" () {
 	actod.register_message_type(Test_Send_Temp_Text_Cmd)
 	actod.register_message_type(Test_Text)
 	actod.register_message_type(Test_Set_Timer_Cmd)
+	actod.register_message_type(Test_Spawn_Named_Cmd)
 }
 
 test_topic: actod.Topic
@@ -73,6 +79,8 @@ test_state :: struct {
 	topic_subscribers_listed: int,
 	timer_id:                 u32,
 	timer_err:                actod.Send_Error,
+	spawned_pid:              actod.PID,
+	spawned:                  bool,
 }
 
 test_behaviour := actod.Actor_Behaviour(test_state) {
@@ -122,7 +130,34 @@ handle_test_msg :: proc(s: ^test_state, from: actod.PID, msg: any) {
 		send_temp_text(from)
 	case Test_Set_Timer_Cmd:
 		s.timer_id, s.timer_err = actod.set_timer(time.Second, false)
+	case Test_Spawn_Named_Cmd:
+		spawn_named(s, v)
 	}
+}
+
+spawn_named :: proc(s: ^test_state, cmd: Test_Spawn_Named_Cmd) {
+	if cmd.as_child && cmd.sized_mailbox {
+		s.spawned_pid, s.spawned = actod.spawn_child(
+			cmd.name,
+			test_state{},
+			test_behaviour,
+			64,
+		)
+		return
+	}
+	if cmd.as_child {
+		s.spawned_pid, s.spawned = actod.spawn_child(
+			cmd.name,
+			test_state{},
+			test_behaviour,
+		)
+		return
+	}
+	s.spawned_pid, s.spawned = actod.spawn(
+		cmd.name,
+		test_state{},
+		test_behaviour,
+	)
 }
 
 send_temp_text :: proc(to: actod.PID) {
@@ -434,6 +469,60 @@ test_a_failed_set_timer_returns_an_error_and_arms_nothing_until_cleared :: proc(
 	timer := expect_timer(&h, t)
 	testing.expect_value(t, timer.id, s.timer_id)
 	testing.expect_value(t, timer.interval, time.Second)
+}
+
+@(test)
+test_a_failed_spawn_returns_false_and_spawns_nothing_for_names_with_the_prefix_until_cleared :: proc(
+	t: ^testing.T,
+) {
+	h := create(test_state{}, test_behaviour)
+	defer destroy(&h)
+	s := get_state(&h)
+
+	fail_spawn(&h, "order-")
+	send(&h, Test_Spawn_Named_Cmd{name = "order-1", as_child = true})
+	testing.expect(t, !s.spawned, "spawn_child of a failing name succeeded")
+	testing.expect_value(t, s.spawned_pid, actod.PID(0))
+	send(&h, Test_Spawn_Named_Cmd{name = "order-2"})
+	testing.expect(t, !s.spawned, "spawn of a failing name succeeded")
+	send(
+		&h,
+		Test_Spawn_Named_Cmd {
+			name = "order-4",
+			as_child = true,
+			sized_mailbox = true,
+		},
+	)
+	testing.expect(
+		t,
+		!s.spawned,
+		"spawn_child with a sized mailbox of a failing name succeeded",
+	)
+	testing.expect_value(t, len(h.spawn_capture), 0)
+	testing.expect_value(t, len(h.children_pids), 0)
+
+	send(&h, Test_Spawn_Named_Cmd{name = "worker", as_child = true})
+	testing.expect(t, s.spawned, "a name without the prefix failed to spawn")
+	testing.expect_value(t, expect_spawned(&h, t, test_state).name, "worker")
+
+	fail_spawn(&h, "")
+	send(&h, Test_Spawn_Named_Cmd{name = "order-3", as_child = true})
+	testing.expect(t, s.spawned, "a spawn failed after the switch was cleared")
+	testing.expect_value(t, expect_spawned(&h, t, test_state).name, "order-3")
+	send(
+		&h,
+		Test_Spawn_Named_Cmd {
+			name = "order-5",
+			as_child = true,
+			sized_mailbox = true,
+		},
+	)
+	testing.expect(
+		t,
+		s.spawned,
+		"a spawn_child with a sized mailbox failed after the switch was cleared",
+	)
+	testing.expect_value(t, expect_spawned(&h, t, test_state).name, "order-5")
 }
 
 @(test)

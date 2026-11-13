@@ -56,6 +56,7 @@ send :: proc(h: ^Test_Harness($T), msg: $M, from: PID = EXTERNAL_PID)
 register_pid :: proc(h: ^Test_Harness($T), name: string, pid: PID)
 kill_pid :: proc(h: ^Test_Harness($T), pid: PID)      // make a registered PID dead, so sends to it fail
 fail_set_timer :: proc(h: ^Test_Harness($T), fail := true)  // make act.set_timer return .ACTOR_NOT_FOUND and arm nothing until called with false
+fail_spawn :: proc(h: ^Test_Harness($T), name_prefix: string)  // make act.spawn and act.spawn_child fail for any name starting with name_prefix, capturing nothing, until called with ""
 add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: PID)  // declare a subscriber act.get_topic_subscribers lists
 add_child :: proc(h: ^Test_Harness($T), pid: PID)
 set_parent :: proc(h: ^Test_Harness($T), pid: PID)

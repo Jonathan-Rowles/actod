@@ -144,6 +144,10 @@ fail_set_timer :: proc(h: ^Test_Harness($T), fail := true) {
 	h.intercept.fail_set_timer = fail
 }
 
+fail_spawn :: proc(h: ^Test_Harness($T), name_prefix: string) {
+	h.intercept.fail_spawn_prefix = name_prefix
+}
+
 get_state :: proc(h: ^Test_Harness($T)) -> ^T {
 	return h.data
 }

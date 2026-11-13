@@ -71,6 +71,10 @@ fail_set_timer :: proc(h: ^Test_Harness($T), fail := true) {
 	unit.fail_set_timer(h, fail)
 }
 
+fail_spawn :: proc(h: ^Test_Harness($T), name_prefix: string) {
+	unit.fail_spawn(h, name_prefix)
+}
+
 add_topic_sub :: proc(h: ^Test_Harness($T), topic: rawptr, pid: actod.PID) {
 	unit.add_topic_sub(h, topic, pid)
 }

@@ -46,6 +46,7 @@ Test_Intercept :: struct {
 	timer_cancel_capture:    ^[dynamic]u32,
 	next_timer_id:           u32,
 	fail_set_timer:          bool,
+	fail_spawn_prefix:       string,
 	spawn_capture:           ^[dynamic]Captured_Spawn,
 	terminate_capture:       ^[dynamic]Captured_Terminate,
 	broadcast_capture:       ^[dynamic]Captured_Broadcast,
@@ -260,21 +261,42 @@ intercept_send_to :: proc(
 	return .NODE_NOT_FOUND, true
 }
 
-intercept_spawn :: proc(name: string, $T: typeid) -> (u64, bool) {
-	if test_intercept == nil do return 0, false
+intercept_spawn :: proc(
+	name: string,
+	$T: typeid,
+) -> (
+	pid: u64,
+	spawned: bool,
+	intercepted: bool,
+) {
+	if test_intercept == nil do return 0, false, false
+	if spawn_set_to_fail(name) do return 0, false, true
 	test_intercept.next_spawn_pid += 1
-	pid := test_intercept.next_spawn_pid
+	pid = test_intercept.next_spawn_pid
 	append(
 		test_intercept.spawn_capture,
 		Captured_Spawn{name = name, type_id = T},
 	)
-	return pid, true
+	return pid, true, true
 }
 
-intercept_spawn_child :: proc(name: string, $T: typeid) -> (u64, bool) {
-	if test_intercept == nil do return 0, false
+spawn_set_to_fail :: proc(name: string) -> bool {
+	prefix := test_intercept.fail_spawn_prefix
+	return prefix != "" && strings.has_prefix(name, prefix)
+}
+
+intercept_spawn_child :: proc(
+	name: string,
+	$T: typeid,
+) -> (
+	pid: u64,
+	spawned: bool,
+	intercepted: bool,
+) {
+	if test_intercept == nil do return 0, false, false
+	if spawn_set_to_fail(name) do return 0, false, true
 	test_intercept.next_spawn_pid += 1
-	pid := test_intercept.next_spawn_pid
+	pid = test_intercept.next_spawn_pid
 	append(
 		test_intercept.spawn_capture,
 		Captured_Spawn{name = name, type_id = T},
@@ -282,7 +304,7 @@ intercept_spawn_child :: proc(name: string, $T: typeid) -> (u64, bool) {
 	if test_intercept.children_pids != nil {
 		append(test_intercept.children_pids, pid)
 	}
-	return pid, true
+	return pid, true, true
 }
 
 intercept_self_terminate :: proc(reason: Termination_Reason) -> bool {

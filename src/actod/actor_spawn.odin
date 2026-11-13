@@ -284,7 +284,7 @@ spawn_impl :: proc(
 	bool,
 ) {
 	when ODIN_TEST {
-		if pid, ok := ti.intercept_spawn(name, T); ok do return PID(pid), true
+		if pid, spawned, intercepted := ti.intercept_spawn(name, T); intercepted do return PID(pid), spawned
 	}
 	data_ptr: rawptr
 	when T == any {
@@ -619,7 +619,7 @@ spawn_child_default :: proc(
 	bool,
 ) {
 	when ODIN_TEST {
-		if pid, ok := ti.intercept_spawn_child(name, T); ok do return PID(pid), true
+		if pid, spawned, intercepted := ti.intercept_spawn_child(name, T); intercepted do return PID(pid), spawned
 	}
 
 	if current_actor_context == nil {
@@ -657,7 +657,7 @@ spawn_child_sized :: proc(
 	(MAILBOX_SIZE & (MAILBOX_SIZE - 1)) ==
 	0 {
 	when ODIN_TEST {
-		if pid, ok := ti.intercept_spawn_child(name, T); ok do return PID(pid), true
+		if pid, spawned, intercepted := ti.intercept_spawn_child(name, T); intercepted do return PID(pid), spawned
 	}
 
 	if current_actor_context == nil {

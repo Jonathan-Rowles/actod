@@ -1145,6 +1145,7 @@ reset_node_state :: proc() {
 		delete(NODE.name, get_system_allocator())
 		NODE.name = ""
 	}
+	node_own_config_strings(NODE, DEFAULT_SYSTEM_CONFIG)
 	// NOTE: shutting_down stays true until node_init to prevent
 	// concurrent senders from accessing freed actor memory.
 	NODE.pid = 0

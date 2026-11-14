@@ -382,6 +382,10 @@ ALL_TESTS :: []Test_Entry {
 		test_proc = test_blocking_child_is_live_at_its_last_touch,
 	},
 	{
+		name = "test_next_node_does_not_inherit_blocking_child",
+		test_proc = test_next_node_does_not_inherit_blocking_child,
+	},
+	{
 		name = "test_blocking_child_stops_on_escalation",
 		test_proc = test_blocking_child_stops_on_escalation,
 		expects_error_logs = true,

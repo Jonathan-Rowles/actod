@@ -96,6 +96,7 @@ Node_Info :: struct {
 	origin:      Node_Origin,
 	incarnation: u64,
 	gossip:      Gossip_Window,
+	gone:        bool,
 }
 
 Gossip_Window :: struct {

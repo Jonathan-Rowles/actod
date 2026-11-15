@@ -946,17 +946,29 @@ register_node_entry :: proc(
 	}
 
 	if existing_id, exists := NODE.node_name_to_id[name]; exists {
-		log.warnf(
-			"register_node('%s'): already registered as node %d, updating its address to %v and keeping the existing id",
-			name,
-			existing_id,
-			address,
-			location = loc,
-		)
+		was_gone := NODE.node_registry[existing_id].gone
+		if was_gone {
+			log.infof(
+				"register_node('%s'): node %d was gone and is back under its old id at %v",
+				name,
+				existing_id,
+				address,
+				location = loc,
+			)
+			NODE.node_registry[existing_id].gone = false
+		} else {
+			log.warnf(
+				"register_node('%s'): already registered as node %d, updating its address to %v and keeping the existing id",
+				name,
+				existing_id,
+				address,
+				location = loc,
+			)
+		}
 		NODE.node_registry[existing_id].address = address
 		NODE.node_registry[existing_id].transport = transport
 		if origin == .Registered do NODE.node_registry[existing_id].origin = .Registered
-		return existing_id, false
+		return existing_id, was_gone
 	}
 
 	node_id := sync.atomic_load(&NODE.next_node_id)
@@ -991,7 +1003,7 @@ get_node_info :: proc(node_id: Node_ID) -> (Node_Info, bool) {
 	}
 
 	info := NODE.node_registry[node_id]
-	if info.node_name == "" {
+	if info.node_name == "" || info.gone {
 		return {}, false
 	}
 
@@ -1081,8 +1093,29 @@ gossip_seq_reset :: proc(node_id: Node_ID, frontier: u64) {
 get_node_by_name :: proc(name: string) -> (Node_ID, bool) {
 	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
 	defer sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
-	if id, exists := NODE.node_name_to_id[name]; exists do return id, true
+	if id, exists := NODE.node_name_to_id[name];
+	   exists && !NODE.node_registry[id].gone {
+		return id, true
+	}
 	return 0, false
+}
+
+@(private)
+node_is_gone :: proc(node_id: Node_ID) -> bool {
+	if node_id == 0 || node_id >= MAX_NODES do return false
+	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
+	return NODE.node_registry[node_id].gone
+}
+
+@(private)
+set_node_gone :: proc(node_id: Node_ID, gone: bool) {
+	if node_id == 0 || node_id >= MAX_NODES do return
+	sync.rw_mutex_lock(&NODE.node_registry_lock)
+	defer sync.rw_mutex_unlock(&NODE.node_registry_lock)
+	if NODE.node_registry[node_id].node_name != "" {
+		NODE.node_registry[node_id].gone = gone
+	}
 }
 
 unregister_node :: proc(node_id: Node_ID) {
@@ -1096,8 +1129,34 @@ unregister_node :: proc(node_id: Node_ID) {
 	)
 
 	if conn_pid != 0 {
-		_ = send_message(conn_pid, Terminate{})
-
-		runtime_sleep(10 * time.Millisecond)
+		if send_message(conn_pid, Node_Gone{}) == .OK {
+			runtime_sleep(10 * time.Millisecond)
+			return
+		}
+		set_node_gone(node_id, true)
+		_ = terminate_actor(conn_pid, .SHUTDOWN)
+		if !wait_for_actor_exit(conn_pid, DUPLICATE_TAKEOVER_TIMEOUT) {
+			set_node_gone(node_id, false)
+			log.errorf(
+				"unregister_node(%d): its connection actor %v refused the close and did not stop within %v, so the node is left as it was",
+				node_id,
+				conn_pid,
+				DUPLICATE_TAKEOVER_TIMEOUT,
+			)
+			return
+		}
 	}
+
+	sync.atomic_store(&NODE.lifecycle_stream_peers[node_id], false)
+	broadcast_disconnect_terminations(node_id)
+	handle_node_disconnect(node_id)
+	clear_subscriptions_for_node(node_id)
+	if dropped := ring_reset(get_connection_ring(node_id)); dropped > 0 {
+		log.warnf(
+			"Dropped %d buffered send slots for unregistered node %d",
+			dropped,
+			node_id,
+		)
+	}
+	set_node_gone(node_id, true)
 }

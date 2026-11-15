@@ -45,6 +45,8 @@ Close_Connection :: struct {
 
 Start_Receiving :: struct {}
 
+Node_Gone :: struct {}
+
 Reconnect :: struct {
 	delay: time.Duration,
 }
@@ -151,7 +153,8 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 				}
 			}
 			if survivor == data.ring &&
-			   !sync.atomic_load(&NODE.shutting_down) {
+			   !sync.atomic_load(&NODE.shutting_down) &&
+			   !node_is_gone(data.node_id) {
 				log.infof(
 					"Connection actor for node %s (id=%d) terminating while its ring is still registered, leaving buffered slots for the replacement to migrate",
 					data.node_name,
@@ -214,6 +217,15 @@ connection_handle_message :: proc(
 		if data.state == .Disconnected || data.state == .Failed do return
 		log.infof("Closing connection to node %d: %s", data.node_id, m.reason)
 		close_connection(data)
+
+	case Node_Gone:
+		log.infof(
+			"Closing connection to node %s (id=%d): the node was unregistered",
+			data.node_name,
+			data.node_id,
+		)
+		cancel_timer(data.reconnect_timer_id)
+		close_connection(data, gone = true)
 
 	case Start_Receiving:
 		if !data.is_incoming || data.tcp_socket == 0 || data.state != .Disconnected do return
@@ -1260,6 +1272,7 @@ resolve_incoming_peer :: proc(
 		u64(get_self_pid()),
 		.Release,
 	)
+	set_node_gone(local_node_id, false)
 	return true
 }
 
@@ -1350,7 +1363,7 @@ is_active_connection :: proc(data: ^Connection_Actor_Data) -> bool {
 	return current_conn == get_self_pid()
 }
 
-close_connection :: proc(data: ^Connection_Actor_Data) {
+close_connection :: proc(data: ^Connection_Actor_Data, gone := false) {
 	is_active := is_active_connection(data)
 
 	if data.node_id != 0 && is_active {
@@ -1377,10 +1390,12 @@ close_connection :: proc(data: ^Connection_Actor_Data) {
 		}
 	}
 
+	if gone && is_active_connection(data) do set_node_gone(data.node_id, true)
+
 	data.state = .Disconnected
 	cancel_timer(data.heartbeat_timer_id)
 
-	if data.is_incoming {
+	if data.is_incoming || gone {
 		_ = terminate_actor(get_self_pid(), .SHUTDOWN)
 		return
 	}
@@ -1467,7 +1482,7 @@ handle_control_message :: proc(
 			reason,
 		)
 		data.peer_initiated_disconnect = true
-		close_connection(data)
+		close_connection(data, gone = true)
 
 	case CTRL_MSG_LIFECYCLE_STREAM:
 		if control_refused(data.node_id, .Lifecycle_Stream) do return
@@ -1523,7 +1538,7 @@ check_heartbeat_timeout :: proc(data: ^Connection_Actor_Data) {
 		time_since := wall_since(data.last_heartbeat)
 		if time_since > data.heartbeat_timeout {
 			log.warnf("Connection to node %d timed out", data.node_id)
-			close_connection(data)
+			close_connection(data, gone = true)
 		}
 	}
 }

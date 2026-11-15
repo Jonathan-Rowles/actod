@@ -1,5 +1,6 @@
 package actod
 
+import "../../test_harness/ti"
 import "../pkgs/coro"
 import "../pkgs/threads_act"
 import "base:intrinsics"
@@ -13,6 +14,8 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
+
+_ :: ti
 
 WIRE_PROTOCOL_VERSION :: 9
 HANDSHAKE_TIMEOUT_SECS :: 5
@@ -333,18 +336,34 @@ Hello_Info :: struct {
 }
 
 @(private)
+make_ctrl_buffer :: proc(
+	name: string,
+	size: int,
+) -> (
+	[]byte,
+	mem.Allocator_Error,
+) {
+	when ODIN_TEST {if ti.make_set_to_fail(name) do return nil, .Out_Of_Memory}
+	return make([]byte, size)
+}
+
+@(private)
 build_hello_body :: proc(
 	data: ^Connection_Actor_Data,
 	nonce: u64,
 	join_token: u64,
 	pool_join: bool,
-) -> []byte {
+) -> (
+	[]byte,
+	bool,
+) {
 	flags: u8 = 0
 	if data.encrypted do flags |= HELLO_FLAG_ENCRYPTED
 	if pool_join do flags |= HELLO_FLAG_POOL_JOIN
 
 	total := 1 + 4 + 1 + 2 + 2 + (2 + len(NODE.name)) + 8 + 8 + 8 + 8
-	body := make([]byte, total)
+	body, alloc_err := make_ctrl_buffer("hello", total)
+	if alloc_err != nil do return nil, false
 	w := Ctrl_Writer {
 		buf = body,
 	}
@@ -357,7 +376,7 @@ build_hello_body :: proc(
 	ctrl_put_u64(&w, join_token)
 	ctrl_put_u64(&w, NODE.incarnation)
 	ctrl_put_u64(&w, sync.atomic_load(&NODE.gossip_seq))
-	return body
+	return body, true
 }
 
 @(private)
@@ -403,7 +422,14 @@ perform_plaintext_auth :: proc(
 	if data.encrypted || data.auth_password == "" do return true
 
 	proof := compute_auth_proof(data.auth_password, NODE.name, info.nonce)
-	body := make([]byte, 1 + 2 + len(proof))
+	body, alloc_err := make_ctrl_buffer("auth proof", 1 + 2 + len(proof))
+	if alloc_err != nil {
+		log.errorf(
+			"Cannot send the auth proof to node %s: its buffer could not be allocated, the connection is refused",
+			info.node_name,
+		)
+		return false
+	}
 	defer delete(body)
 	w := Ctrl_Writer {
 		buf = body,
@@ -447,7 +473,16 @@ perform_plaintext_auth :: proc(
 }
 
 handshake_send_ctrl :: proc(sock: net.TCP_Socket, ctrl_body: []byte) -> bool {
-	frame := make([]byte, 4 + NETWORK_HEADER_SIZE + len(ctrl_body))
+	frame, alloc_err := make_ctrl_buffer(
+		"handshake frame",
+		4 + NETWORK_HEADER_SIZE + len(ctrl_body),
+	)
+	if alloc_err != nil {
+		log.error(
+			"Cannot send a handshake frame: its buffer could not be allocated, the connection is refused",
+		)
+		return false
+	}
 	defer delete(frame)
 	n := frame_control_message(ctrl_body, frame)
 	when ODIN_TEST {
@@ -497,7 +532,19 @@ establish_connection :: proc(
 
 	data.my_join_token = generate_nonzero_nonce()
 	my_nonce := generate_nonce()
-	my_hello := build_hello_body(data, my_nonce, data.my_join_token, false)
+	my_hello, hello_built := build_hello_body(
+		data,
+		my_nonce,
+		data.my_join_token,
+		false,
+	)
+	if !hello_built {
+		log.errorf(
+			"Cannot build the HELLO for node %d: its buffer could not be allocated, the connection is refused",
+			data.node_id,
+		)
+		return .Failed
+	}
 	defer delete(my_hello)
 
 	peer_raw: []byte
@@ -769,7 +816,19 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 	defer if !ok do close_tcp(sock)
 
 	my_nonce := generate_nonce()
-	my_hello := build_hello_body(data, my_nonce, data.peer_join_token, true)
+	my_hello, hello_built := build_hello_body(
+		data,
+		my_nonce,
+		data.peer_join_token,
+		true,
+	)
+	if !hello_built {
+		log.warnf(
+			"Pool scale-up: cannot build the HELLO for node %d, its buffer could not be allocated",
+			data.node_id,
+		)
+		return false
+	}
 	defer delete(my_hello)
 
 	if !handshake_send_ctrl(sock, my_hello) do return false
@@ -1801,7 +1860,16 @@ send_registry_snapshot :: proc(data: ^Connection_Actor_Data) {
 
 send_node_directory :: proc(data: ^Connection_Actor_Data) {
 	sync.atomic_thread_fence(.Seq_Cst)
-	ctrl_data, entry_count := snapshot_node_directory(data.node_name)
+	ctrl_data, entry_count, allocated := snapshot_node_directory(
+		data.node_name,
+	)
+	if !allocated {
+		log.warnf(
+			"Cannot send the node directory to node %s: its buffer could not be allocated",
+			data.node_name,
+		)
+		return
+	}
 	if entry_count == 0 do return
 	defer delete(ctrl_data)
 
@@ -1816,11 +1884,16 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 	}
 }
 
-snapshot_node_directory :: proc(peer_name: string) -> ([]byte, u16) {
+snapshot_node_directory :: proc(
+	peer_name: string,
+) -> (
+	ctrl_data: []byte,
+	entry_count: u16,
+	allocated: bool,
+) {
 	sync.rw_mutex_shared_lock(&NODE.node_registry_lock)
 	defer sync.rw_mutex_shared_unlock(&NODE.node_registry_lock)
 
-	entry_count: u16 = 0
 	total_size := 1 + 2
 	for i in 2 ..< MAX_NODES {
 		info := NODE.node_registry[i]
@@ -1830,9 +1903,11 @@ snapshot_node_directory :: proc(peer_name: string) -> ([]byte, u16) {
 		total_size += 2 + len(info.node_name) + 4 + 2
 	}
 
-	if entry_count == 0 do return nil, 0
+	if entry_count == 0 do return nil, 0, true
 
-	ctrl_data := make([]byte, total_size)
+	alloc_err: mem.Allocator_Error
+	ctrl_data, alloc_err = make_ctrl_buffer("node directory", total_size)
+	if alloc_err != nil do return nil, 0, false
 	w := Ctrl_Writer {
 		buf = ctrl_data,
 	}
@@ -1849,7 +1924,7 @@ snapshot_node_directory :: proc(peer_name: string) -> ([]byte, u16) {
 		ctrl_put_u16(&w, u16(info.address.port))
 	}
 
-	return ctrl_data, entry_count
+	return ctrl_data, entry_count, true
 }
 
 announce_node_to_peers :: proc(

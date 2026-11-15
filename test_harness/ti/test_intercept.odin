@@ -47,6 +47,7 @@ Test_Intercept :: struct {
 	next_timer_id:           u32,
 	fail_set_timer:          bool,
 	fail_spawn_prefix:       string,
+	fail_make:               string,
 	spawn_capture:           ^[dynamic]Captured_Spawn,
 	terminate_capture:       ^[dynamic]Captured_Terminate,
 	broadcast_capture:       ^[dynamic]Captured_Broadcast,
@@ -283,6 +284,11 @@ intercept_spawn :: proc(
 spawn_set_to_fail :: proc(name: string) -> bool {
 	prefix := test_intercept.fail_spawn_prefix
 	return prefix != "" && strings.has_prefix(name, prefix)
+}
+
+make_set_to_fail :: proc(name: string) -> bool {
+	if test_intercept == nil do return false
+	return test_intercept.fail_make != "" && test_intercept.fail_make == name
 }
 
 intercept_spawn_child :: proc(

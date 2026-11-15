@@ -344,7 +344,7 @@ make_ctrl_buffer :: proc(
 	mem.Allocator_Error,
 ) {
 	when ODIN_TEST {if ti.make_set_to_fail(name) do return nil, .Out_Of_Memory}
-	return make([]byte, size)
+	return make([]byte, size, get_system_allocator())
 }
 
 @(private)
@@ -405,9 +405,9 @@ compute_auth_proof :: proc(
 	challenge: u64,
 ) -> string {
 	auth_input := fmt.tprintf("%s:%s:%d", password, node_name, challenge)
-	digest := hash.hash_string(.SHA256, auth_input)
+	digest := hash.hash_string(.SHA256, auth_input, get_system_allocator())
 	proof := fmt.tprintf("%x", digest)
-	delete(digest)
+	delete(digest, get_system_allocator())
 	return proof
 }
 
@@ -430,7 +430,7 @@ perform_plaintext_auth :: proc(
 		)
 		return false
 	}
-	defer delete(body)
+	defer delete(body, get_system_allocator())
 	w := Ctrl_Writer {
 		buf = body,
 	}
@@ -483,7 +483,7 @@ handshake_send_ctrl :: proc(sock: net.TCP_Socket, ctrl_body: []byte) -> bool {
 		)
 		return false
 	}
-	defer delete(frame)
+	defer delete(frame, get_system_allocator())
 	n := frame_control_message(ctrl_body, frame)
 	when ODIN_TEST {
 		drop, dup, _ := frame_tap(.Out, FRAME_TAP_HANDSHAKE, frame[:n])
@@ -545,7 +545,7 @@ establish_connection :: proc(
 		)
 		return .Failed
 	}
-	defer delete(my_hello)
+	defer delete(my_hello, get_system_allocator())
 
 	peer_raw: []byte
 	peer_payload: []byte
@@ -696,7 +696,8 @@ establish_connection :: proc(
 		sync.atomic_store(&pool.join_token, data.my_join_token)
 	}
 
-	self_rename(fmt.tprintf("%s_connection", data.node_name))
+	connection_name := fmt.tprintf("%s_connection", data.node_name)
+	if get_self_name() != connection_name do self_rename(connection_name)
 
 	log.infof(
 		"Handshake successful with node %s (id=%d, v%d, encrypted=%v)",
@@ -829,7 +830,7 @@ establish_pool_ring :: proc(data: ^Connection_Actor_Data) -> bool {
 		)
 		return false
 	}
-	defer delete(my_hello)
+	defer delete(my_hello, get_system_allocator())
 
 	if !handshake_send_ctrl(sock, my_hello) do return false
 	peer_raw, peer_payload := handshake_recv_ctrl(
@@ -1281,7 +1282,7 @@ start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 	if !set_tcp_nodelay(data.tcp_socket, ring.tcp_nodelay) do log.warn("Failed to set TCP_NODELAY")
 	if !set_socket_buffers(data.tcp_socket) do log.warn("Failed to set socket buffers")
 
-	ctx := new(IO_Context)
+	ctx := new(IO_Context, get_system_allocator())
 	ctx.ring = ring
 	ctx.conn_pid = get_self_pid()
 	ctx.allocator = context.allocator
@@ -1298,7 +1299,7 @@ start_connection_io :: proc(data: ^Connection_Actor_Data) -> bool {
 	)
 	context.allocator = prev_allocator
 	if t == nil {
-		free(ctx)
+		free(ctx, get_system_allocator())
 		log.error("Failed to create connection IO thread")
 		return false
 	}
@@ -1320,7 +1321,7 @@ stop_connection_io :: proc(data: ^Connection_Actor_Data) {
 	}
 	sync.atomic_store(&ring.io_stop, 0)
 	if data.io_ctx != nil {
-		free(data.io_ctx)
+		free(data.io_ctx, get_system_allocator())
 		data.io_ctx = nil
 	}
 }
@@ -1871,7 +1872,7 @@ send_node_directory :: proc(data: ^Connection_Actor_Data) {
 		return
 	}
 	if entry_count == 0 do return
-	defer delete(ctrl_data)
+	defer delete(ctrl_data, get_system_allocator())
 
 	if ring_append_ctrl_retry(data.ring, ctrl_data) {
 		log.infof(

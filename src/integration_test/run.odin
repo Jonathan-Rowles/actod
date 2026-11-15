@@ -166,6 +166,18 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_connection_reconnects_with_its_arena_exhausted",
+		test_proc = test_sim_connection_reconnects_with_its_arena_exhausted,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_reconnects_leave_the_connection_arena_where_it_was",
+		test_proc = test_sim_reconnects_leave_the_connection_arena_where_it_was,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_its_token",
 		test_proc = test_sim_ask_to_reaches_an_actor_by_name_on_another_node_and_the_reply_carries_its_token,
 		sim_mode = true,

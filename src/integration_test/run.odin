@@ -172,6 +172,12 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_a_node_that_dials_itself_stops_redialing",
+		test_proc = test_sim_a_node_that_dials_itself_stops_redialing,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_reconnects_leave_the_connection_arena_where_it_was",
 		test_proc = test_sim_reconnects_leave_the_connection_arena_where_it_was,
 		sim_mode = true,

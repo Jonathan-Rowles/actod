@@ -58,6 +58,7 @@ Establish_Result :: enum {
 	Established,
 	Failed,
 	Transferred,
+	Reached_Itself,
 }
 
 Connection_State :: enum {
@@ -199,12 +200,14 @@ connection_handle_message :: proc(
 		data.address = m.address
 		if data.node_id == 0 do data.node_id = m.node_id
 		data.state = .Connecting
-		if !initiate_connection(data) {
+		if result := initiate_connection(data); result != .Established {
 			data.state = .Failed
-			data.reconnect_timer_id, _ = set_timer(
-				data.reconnect_retry_delay,
-				false,
-			)
+			if result != .Reached_Itself {
+				data.reconnect_timer_id, _ = set_timer(
+					data.reconnect_retry_delay,
+					false,
+				)
+			}
 		}
 
 	case Close_Connection:
@@ -287,7 +290,7 @@ connection_handle_message :: proc(
 	}
 }
 
-initiate_connection :: proc(data: ^Connection_Actor_Data) -> bool {
+initiate_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 	sock, err := runtime_dial_tcp(data.address)
 	if err != nil {
 		log.warnf(
@@ -295,22 +298,23 @@ initiate_connection :: proc(data: ^Connection_Actor_Data) -> bool {
 			data.node_id,
 			err,
 		)
-		return false
+		return .Failed
 	}
 
 	data.tcp_socket = sock
-	if establish_connection(data) != .Established {
-		close_conn_socket(data)
-		return false
-	}
-	return true
+	result := establish_connection(data)
+	if result != .Established do close_conn_socket(data)
+	return result
 }
 
 attempt_reconnect :: proc(data: ^Connection_Actor_Data) {
 	log.infof("Attempting to reconnect to node %d", data.node_id)
 	data.state = .Connecting
 
-	if !initiate_connection(data) {
+	result := initiate_connection(data)
+	if result == .Reached_Itself {
+		data.state = .Failed
+	} else if result != .Established {
 		data.state = .Failed
 		data.reconnect_timer_id, _ = set_timer(
 			data.reconnect_retry_delay,
@@ -594,6 +598,23 @@ establish_connection :: proc(
 	if !parsed {
 		log.warn("Malformed HELLO from peer")
 		return .Failed
+	}
+	if info.node_name == NODE.name {
+		if data.is_incoming {
+			log.warnf(
+				"Refused a connection from %v that names itself %s, this node's own name",
+				data.address,
+				info.node_name,
+			)
+			return .Failed
+		}
+		log.warnf(
+			"Node %d at %v answered with this node's own name %s, so its address is this node's own listener: the connection is refused and not retried until a send asks for it again",
+			data.node_id,
+			data.address,
+			info.node_name,
+		)
+		return .Reached_Itself
 	}
 	if info.version != WIRE_PROTOCOL_VERSION {
 		log.warnf(
@@ -1177,14 +1198,6 @@ resolve_incoming_peer :: proc(
 	data: ^Connection_Actor_Data,
 	info: Hello_Info,
 ) -> bool {
-	if info.node_name == NODE.name {
-		log.warnf(
-			"Refused a connection from %v that names itself %s, this node's own name",
-			data.address,
-			info.node_name,
-		)
-		return false
-	}
 	peer_endpoint := net.Endpoint {
 		address = data.address.address,
 		port    = int(info.listen_port),

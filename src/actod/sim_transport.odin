@@ -441,6 +441,7 @@ sim_bind_ring :: proc(ep: ^Sim_Endpoint, ring: ^Connection_Ring) {
 	ring.send_in_flight = false
 	ring.recv_write_pos = 0
 	ring.recv_read_pos = 0
+	ring.recv_ended = false
 }
 
 sim_attach_pool_ring :: proc(ring: ^Connection_Ring, owner: PID) -> bool {

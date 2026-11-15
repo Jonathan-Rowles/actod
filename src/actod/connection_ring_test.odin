@@ -3,6 +3,8 @@ package actod
 import "../pkgs/threads_act"
 import "base:intrinsics"
 import "core:encoding/endian"
+import "core:nbio"
+import "core:net"
 import "core:sync"
 import "core:testing"
 import "core:thread"
@@ -2350,5 +2352,52 @@ test_ring_reset_keeps_outstanding_writer_count :: proc(t: ^testing.T) {
 		t,
 		sync.atomic_load(&ring.send_slots[sid].state) == .FREE,
 		"the last writer on a discarded slot should release it for reuse",
+	)
+}
+
+@(test)
+test_ring_posts_no_recv_after_a_recv_error :: proc(t: ^testing.T) {
+	expect_no_recv_after_recv_end(t, net.TCP_Recv_Error.Connection_Closed)
+}
+
+@(test)
+test_ring_posts_no_recv_after_the_peer_closes :: proc(t: ^testing.T) {
+	expect_no_recv_after_recv_end(t, nil)
+}
+
+expect_no_recv_after_recv_end :: proc(t: ^testing.T, err: net.Recv_Error) {
+	loop_err := nbio.acquire_thread_event_loop()
+	if !testing.expectf(t, loop_err == nil, "No event loop: %v", loop_err) do return
+	defer nbio.release_thread_event_loop()
+
+	listener, listen_err := net.listen_tcp(
+		{address = net.IP4_Loopback, port = 0},
+	)
+	if !testing.expectf(t, listen_err == nil, "Listen failed: %v", listen_err) do return
+	defer net.close(listener)
+	endpoint, _ := net.bound_endpoint(listener)
+	client, dial_err := net.dial_tcp(endpoint)
+	if !testing.expectf(t, dial_err == nil, "Dial failed: %v", dial_err) do return
+	defer net.close(client)
+	associate_err := nbio.associate_socket(client)
+	if !testing.expectf(t, associate_err == nil, "Associate failed: %v", associate_err) do return
+
+	ring := make_test_ring(4, 4096)
+	defer destroy_connection_ring(ring)
+	ring.tcp_socket = client
+	sync.atomic_store(&ring.io_stop, 1)
+
+	ended: nbio.Operation
+	ended.type = .Recv
+	ended.recv.err = err
+	nbio_recv_callback(&ended, ring)
+	submit_nbio_recv(ring)
+
+	posted := ring.pending_recv
+	if posted != nil do nbio.remove(posted)
+	testing.expect(
+		t,
+		posted == nil,
+		"A ring whose recv ended should post no further recv",
 	)
 }

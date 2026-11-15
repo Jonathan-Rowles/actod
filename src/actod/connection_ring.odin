@@ -183,6 +183,7 @@ Connection_Ring :: struct {
 	buffer_reservation:    []byte,
 	buffers_decommitted:   bool,
 	send_trim_size:        u32,
+	recv_ended:            bool,
 }
 
 IO_Context :: struct {
@@ -426,6 +427,7 @@ ring_reset :: proc(ring: ^Connection_Ring) -> int {
 	sync.atomic_store(&ring.recv_seen, u32(0))
 	ring.park_fenced = false
 	ring.park_half_closed = false
+	ring.recv_ended = false
 	mem.zero_explicit(&ring.transport_keys, size_of(Noise_Transport))
 	sync.atomic_store_explicit(
 		&ring.state,
@@ -1441,7 +1443,7 @@ nbio_send_callback :: proc(
 }
 
 submit_nbio_recv :: proc(ring: ^Connection_Ring) {
-	if ring.pending_recv != nil do return
+	if ring.pending_recv != nil || ring.recv_ended do return
 
 	write_pos := ring.recv_write_pos
 	available := ring.recv_buffer_size - write_pos
@@ -1473,6 +1475,7 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 	ring.pending_recv = nil
 
 	if op.recv.err != nil {
+		ring.recv_ended = true
 		if sync.atomic_load(&ring.io_stop) == 0 {
 			tcp_err, is_tcp := op.recv.err.(net.TCP_Recv_Error)
 			peer_lost := is_tcp && tcp_err == .Connection_Closed
@@ -1488,6 +1491,7 @@ nbio_recv_callback :: proc(op: ^nbio.Operation, ring: ^Connection_Ring) {
 
 	bytes_recvd := u32(op.recv.received)
 	if bytes_recvd == 0 {
+		ring.recv_ended = true
 		if sync.atomic_load(&ring.io_stop) == 0 {
 			log.info("Connection closed by peer")
 			notify_ring_error(ring, "peer closed")
@@ -1604,6 +1608,7 @@ nbio_io_loop :: proc(data: rawptr) {
 	ring.pending_recv = nil
 	ring.send_in_flight = false
 	ring.recv_write_pos = 0
+	ring.recv_ended = false
 	sync.atomic_store_explicit(
 		&ring.state,
 		Connection_Ring_State.Ready,
@@ -1705,6 +1710,7 @@ io_service_pool_rings :: proc(
 			pr.send_in_flight = false
 			pr.recv_write_pos = 0
 			pr.recv_read_pos = 0
+			pr.recv_ended = false
 		}
 
 		if sync.atomic_load_explicit(&pr.state, .Acquire) != .Ready {

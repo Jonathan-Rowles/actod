@@ -655,6 +655,13 @@ ALL_TESTS :: []Test_Entry {
 		enable_encryption = true,
 	},
 	{
+		name = "test_pool_peer_ring_reports_its_close_once",
+		test_proc = test_pool_peer_ring_reports_its_close_once,
+		port = 17550,
+		node_name = "TestNode1",
+		is_networked = true,
+	},
+	{
 		name = "test_encryption_mismatch_rejected",
 		test_proc = test_encryption_mismatch_rejected,
 		port = 17210,

@@ -43,6 +43,8 @@ run_node_role :: proc(command: string) {
 		run_local_only_type_sender()
 	case "system_control_sender":
 		run_system_control_sender()
+	case "pool_peer":
+		run_pool_peer()
 	case:
 		fmt.eprintf("Unknown node role: %s\n", command)
 		os.exit(1)

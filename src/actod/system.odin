@@ -200,6 +200,7 @@ Node_State :: struct {
 	started:                  bool,
 	shutting_down:            bool,
 	config:                   System_Config,
+	auth_password_from_env:   string,
 	actor_registry:           PID_Map(rawptr, PID),
 	worker_pool:              Worker_Pool,
 	type_subscribers:         [MAX_ACTOR_TYPES]Type_Subscriber_List,
@@ -269,6 +270,12 @@ node_own_config_strings :: proc(node: ^Node_State, opts: System_Config) {
 	node.config.network.bind_address = cloned_bind
 	delete(old_auth, sys_allocator)
 	delete(old_bind, sys_allocator)
+
+	delete(node.auth_password_from_env, sys_allocator)
+	node.auth_password_from_env = os.get_env(
+		"ACTOD_AUTH_PASSWORD",
+		sys_allocator,
+	)
 }
 
 get_local_node_name :: proc() -> string {

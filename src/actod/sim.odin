@@ -150,6 +150,7 @@ sim_bind_node :: proc(node: ^Node_State) -> ^Node_State {
 sim_destroy_node :: proc(node: ^Node_State) {
 	delete(node.name, get_system_allocator())
 	delete(node.config.network.auth_password, get_system_allocator())
+	delete(node.auth_password_from_env, get_system_allocator())
 	delete(node.config.network.bind_address, get_system_allocator())
 	free(node, get_system_allocator())
 }

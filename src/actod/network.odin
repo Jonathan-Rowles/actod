@@ -8,7 +8,6 @@ import "core:encoding/endian"
 import "core:fmt"
 import "core:log"
 import "core:net"
-import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -126,11 +125,7 @@ address_is_loopback :: proc(addr: net.Address) -> bool {
 @(private)
 get_auth_password :: proc() -> string {
 	if NODE.config.network.auth_password != "" do return NODE.config.network.auth_password
-	if env_pass := os.get_env("ACTOD_AUTH_PASSWORD", context.temp_allocator);
-	   env_pass != "" {
-		return env_pass
-	}
-	return ""
+	return NODE.auth_password_from_env
 }
 
 init_network :: proc(

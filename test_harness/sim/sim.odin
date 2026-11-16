@@ -48,6 +48,7 @@ Sim :: struct {
 	intercept:       ti.Test_Intercept,
 	det:             ti.Det_State,
 	all_spawns:      [dynamic]ti.Captured_Spawn,
+	kept_names:      [dynamic]string,
 	faults:          [MAX_SIM_FAULTS]Fault_Rule,
 	fault_count:     int,
 	delayed:         [dynamic]Delayed_Message,
@@ -129,6 +130,7 @@ create :: proc() -> Sim {
 		_nsec = 1_000_000_000_000,
 	} // 1000s, avoids zero-time edge cases
 	s.next_pid = 1
+	s.kept_names = make([dynamic]string)
 	return s
 }
 
@@ -167,6 +169,8 @@ destroy :: proc(s: ^Sim) {
 	delete(s.subscribe_cap)
 	delete(s.children_pids)
 	delete(s.all_spawns)
+	for name in s.kept_names do delete(name, s.kept_names.allocator)
+	delete(s.kept_names)
 	delete(s.pid_registry)
 	for &d in s.delayed {
 		if d.msg.data != nil do free(d.msg.data)
@@ -249,6 +253,7 @@ wire_intercept :: proc(s: ^Sim, actor: ^Sim_Actor) {
 	s.intercept.topic_subscribe_capture = &s.topic_sub_cap
 	s.intercept.topic_subscribers = s.topic_subs[:s.topic_sub_count]
 	s.intercept.children_pids = &s.children_pids
+	s.intercept.kept_names = &s.kept_names
 	s.intercept.self_pid = actor.pid
 	s.intercept.self_name = actor.name
 	s.intercept.parent_pid = actor.parent_pid

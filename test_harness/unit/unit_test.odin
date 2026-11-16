@@ -827,3 +827,30 @@ test_taken_captures_stay_valid_until_destroy :: proc(t: ^testing.T) {
 		testing.expect_value(t, string(text.bytes), "bytes from temp memory")
 	}
 }
+
+temp_namer_behaviour := actod.Actor_Behaviour(test_state) {
+	handle_message = proc(s: ^test_state, from: actod.PID, msg: any) {
+		_, _ = actod.spawn_child(
+			strings.concatenate({"worker-", "7"}, context.temp_allocator),
+			test_state{},
+			test_behaviour,
+		)
+		actod.self_rename(
+			strings.concatenate({"renamed-", "7"}, context.temp_allocator),
+		)
+	},
+}
+
+@(test)
+test_captured_names_outlive_the_temp_memory_they_were_made_in :: proc(
+	t: ^testing.T,
+) {
+	h := create(test_state{}, temp_namer_behaviour)
+	defer destroy(&h)
+
+	send(&h, Test_Ping{value = 1})
+	free_all(context.temp_allocator)
+
+	testing.expect_value(t, expect_spawned(&h, t, test_state).name, "worker-7")
+	testing.expect_value(t, expect_renamed(&h, t).new_name, "renamed-7")
+}

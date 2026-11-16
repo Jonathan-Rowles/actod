@@ -27,6 +27,7 @@ Test_Harness :: struct($T: typeid) {
 	dead_pids:               map[u64]bool,
 	taken_captures:          [dynamic]rawptr,
 	missed_send_names:       [dynamic]string,
+	kept_names:              [dynamic]string,
 }
 
 create :: proc(
@@ -41,6 +42,7 @@ create :: proc(
 	h.intercept.self_name = "test-actor"
 	h.intercept.next_spawn_pid = 100
 	h.missed_send_names = make([dynamic]string)
+	h.kept_names = make([dynamic]string)
 	return h
 }
 
@@ -75,6 +77,8 @@ destroy :: proc(h: ^Test_Harness($T)) {
 		delete(name, h.missed_send_names.allocator)
 	}
 	delete(h.missed_send_names)
+	for name in h.kept_names do delete(name, h.kept_names.allocator)
+	delete(h.kept_names)
 	free(h.data)
 }
 
@@ -94,6 +98,7 @@ wire_intercept :: proc(h: ^Test_Harness($T)) {
 	h.intercept.children_pids = &h.children_pids
 	h.intercept.dead_pids = &h.dead_pids
 	h.intercept.missed_send_names = &h.missed_send_names
+	h.intercept.kept_names = &h.kept_names
 }
 
 install_intercept :: proc(h: ^Test_Harness($T)) {

@@ -65,6 +65,7 @@ Test_Intercept :: struct {
 	current_ask_from:        u64,
 	current_reply_token:     u64,
 	missed_send_names:       ^[dynamic]string,
+	kept_names:              ^[dynamic]string,
 }
 
 Captured_Send :: struct {
@@ -234,6 +235,14 @@ record_missed_send :: proc(to: string) {
 	append(names, strings.clone(to, names.allocator))
 }
 
+keep_name :: proc(name: string) -> string {
+	names := test_intercept.kept_names
+	if names == nil do return name
+	kept := strings.clone(name, names.allocator)
+	append(names, kept)
+	return kept
+}
+
 intercept_send_message_to_children :: proc(content: $T) -> (Send_Error, bool) {
 	if test_intercept == nil do return {}, false
 	if test_intercept.children_pids == nil do return .OK, true
@@ -276,7 +285,7 @@ intercept_spawn :: proc(
 	pid = test_intercept.next_spawn_pid
 	append(
 		test_intercept.spawn_capture,
-		Captured_Spawn{name = name, type_id = T},
+		Captured_Spawn{name = keep_name(name), type_id = T},
 	)
 	return pid, true, true
 }
@@ -305,7 +314,7 @@ intercept_spawn_child :: proc(
 	pid = test_intercept.next_spawn_pid
 	append(
 		test_intercept.spawn_capture,
-		Captured_Spawn{name = name, type_id = T},
+		Captured_Spawn{name = keep_name(name), type_id = T},
 	)
 	if test_intercept.children_pids != nil {
 		append(test_intercept.children_pids, pid)
@@ -382,7 +391,7 @@ intercept_rename_actor :: proc(pid: u64, new_name: string) -> bool {
 	if test_intercept == nil do return false
 	append(
 		test_intercept.rename_capture,
-		Captured_Rename{pid = pid, new_name = new_name},
+		Captured_Rename{pid = pid, new_name = keep_name(new_name)},
 	)
 	return true
 }

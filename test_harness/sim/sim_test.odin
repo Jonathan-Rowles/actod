@@ -1412,3 +1412,39 @@ test_forged_reply_leaves_the_asked_actors_reply_to_arrive :: proc(
 	)
 	testing.expect_value(t, tr.timed_out, 0)
 }
+
+temp_namer_behaviour := actod.Actor_Behaviour(echo_state) {
+	handle_message = proc(s: ^echo_state, from: actod.PID, msg: any) {
+		_, _ = actod.spawn_child(
+			strings.concatenate({"worker-", "7"}, context.temp_allocator),
+			echo_state{},
+			echo_behaviour,
+		)
+		actod.self_rename(
+			strings.concatenate({"renamed-", "7"}, context.temp_allocator),
+		)
+	},
+}
+
+@(test)
+test_sim_names_outlive_the_temp_memory_they_were_made_in :: proc(
+	t: ^testing.T,
+) {
+	s := create()
+	defer destroy(&s)
+	spawn(&s, "namer", echo_state{}, temp_namer_behaviour)
+	init_all(&s)
+
+	send(&s, "namer", Ping{value = 1})
+	run_until_idle(&s)
+	free_all(context.temp_allocator)
+
+	testing.expect(
+		t,
+		get_state(&s, "renamed-7", echo_state) != nil,
+		"the renamed actor is not found by its new name",
+	)
+	captured, found := find_spawn(&s, echo_state)
+	testing.expect(t, found, "expected the spawn to be captured")
+	testing.expect_value(t, captured.name, "worker-7")
+}

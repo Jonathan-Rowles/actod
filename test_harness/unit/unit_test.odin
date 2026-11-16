@@ -854,3 +854,91 @@ test_captured_names_outlive_the_temp_memory_they_were_made_in :: proc(
 	testing.expect_value(t, expect_spawned(&h, t, test_state).name, "worker-7")
 	testing.expect_value(t, expect_renamed(&h, t).new_name, "renamed-7")
 }
+
+Temp_Keeper :: struct {
+	kept: string,
+}
+
+temp_keeper_behaviour := actod.Actor_Behaviour(Temp_Keeper) {
+	init = proc(s: ^Temp_Keeper) {
+		s.kept = strings.clone("kept in init", context.temp_allocator)
+	},
+	handle_message = proc(s: ^Temp_Keeper, from: actod.PID, msg: any) {
+		s.kept = strings.clone("kept in a message", context.temp_allocator)
+	},
+	terminate = proc(s: ^Temp_Keeper) {
+		s.kept = strings.clone("kept in terminate", context.temp_allocator)
+	},
+	on_child_started = proc(s: ^Temp_Keeper, child: actod.PID) {
+		s.kept = strings.clone(
+			"kept in on_child_started",
+			context.temp_allocator,
+		)
+	},
+	on_child_terminated = proc(
+		s: ^Temp_Keeper,
+		child: actod.PID,
+		child_name: string,
+		reason: actod.Termination_Reason,
+		will_restart: bool,
+	) {
+		s.kept = strings.clone(
+			"kept in on_child_terminated",
+			context.temp_allocator,
+		)
+	},
+	on_child_restarted = proc(
+		s: ^Temp_Keeper,
+		old_pid: actod.PID,
+		new_pid: actod.PID,
+		restart_count: int,
+	) {
+		s.kept = strings.clone(
+			"kept in on_child_restarted",
+			context.temp_allocator,
+		)
+	},
+	on_max_restarts_exceeded = proc(
+		s: ^Temp_Keeper,
+		child: actod.PID,
+		child_name: string,
+	) {
+		s.kept = strings.clone(
+			"kept in on_max_restarts_exceeded",
+			context.temp_allocator,
+		)
+	},
+}
+
+@(test)
+test_harness_frees_a_handlers_temp_memory_when_it_returns :: proc(
+	t: ^testing.T,
+) {
+	h := create(Temp_Keeper{}, temp_keeper_behaviour)
+	defer destroy(&h)
+	temp := &runtime.global_default_temp_allocator_data.arena
+	_ = strings.clone("gives the temp arena a block", context.temp_allocator)
+	before := temp.total_used
+
+	init(&h)
+	testing.expect_value(t, temp.total_used, before)
+	send(&h, Test_Ping{value = 1})
+	testing.expect_value(t, temp.total_used, before)
+	fire_timer(&h, 1)
+	testing.expect_value(t, temp.total_used, before)
+	simulate_child_started(&h, 7)
+	testing.expect_value(t, temp.total_used, before)
+	simulate_child_terminated(&h, 7, "child", .ABNORMAL, true)
+	testing.expect_value(t, temp.total_used, before)
+	simulate_child_restarted(&h, 7, 8, 1)
+	testing.expect_value(t, temp.total_used, before)
+	simulate_max_restarts(&h, 8, "child")
+	testing.expect_value(t, temp.total_used, before)
+	terminate(&h)
+	testing.expect_value(t, temp.total_used, before)
+	testing.expect(
+		t,
+		get_state(&h).kept != "kept in terminate",
+		"temp memory a handler kept past its return was still readable",
+	)
+}

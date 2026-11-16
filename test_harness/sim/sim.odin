@@ -2,6 +2,7 @@ package sim
 
 import "../../src/actod"
 import "../ti"
+import "base:runtime"
 import "core:mem"
 import "core:testing"
 import "core:time"
@@ -228,6 +229,7 @@ init_all :: proc(s: ^Sim) {
 
 		wire_intercept(s, actor)
 		ti.test_intercept, ti.det = &s.intercept, &s.det
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 		actor.init_fn(actor.data)
 		ti.test_intercept, ti.det = nil, nil
 
@@ -417,6 +419,7 @@ step :: proc(s: ^Sim) -> bool {
 		data = msg.data,
 		id   = msg.type_id,
 	}
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	actor.handle_message(actor.data, msg.from, content)
 	ti.test_intercept, ti.det = nil, nil
 

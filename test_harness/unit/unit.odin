@@ -2,6 +2,7 @@ package unit
 
 import "../../src/actod"
 import "../ti"
+import "base:runtime"
 import "core:testing"
 import "core:time"
 
@@ -118,6 +119,7 @@ init :: proc(h: ^Test_Harness($T)) {
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.init(h.data)
 }
 
@@ -126,6 +128,7 @@ send :: proc(h: ^Test_Harness($T), msg: $M, from: actod.PID = EXTERNAL_PID) {
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.handle_message(h.data, actod.PID(from), msg)
 }
 
@@ -134,6 +137,7 @@ terminate :: proc(h: ^Test_Harness($T)) {
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.terminate(h.data)
 }
 
@@ -204,6 +208,7 @@ simulate_child_terminated :: proc(
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.on_child_terminated(
 		h.data,
 		child_pid,
@@ -218,6 +223,7 @@ simulate_child_started :: proc(h: ^Test_Harness($T), child_pid: actod.PID) {
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.on_child_started(h.data, child_pid)
 }
 
@@ -231,6 +237,7 @@ simulate_child_restarted :: proc(
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.on_child_restarted(h.data, old_pid, new_pid, restart_count)
 }
 
@@ -243,6 +250,7 @@ simulate_max_restarts :: proc(
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.on_max_restarts_exceeded(h.data, child_pid, child_name)
 }
 
@@ -531,6 +539,7 @@ fire_timer :: proc(h: ^Test_Harness($T), id: u32) {
 	wire_intercept(h)
 	ti.test_intercept, ti.det = &h.intercept, &h.det
 	defer ti.test_intercept, ti.det = nil, nil
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	h.behaviour.handle_message(
 		h.data,
 		actod.PID(h.intercept.self_pid),

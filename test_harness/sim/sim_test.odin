@@ -1448,3 +1448,37 @@ test_sim_names_outlive_the_temp_memory_they_were_made_in :: proc(
 	testing.expect(t, found, "expected the spawn to be captured")
 	testing.expect_value(t, captured.name, "worker-7")
 }
+
+temp_keeper_state :: struct {
+	kept: string,
+}
+
+temp_keeper_behaviour := actod.Actor_Behaviour(temp_keeper_state) {
+	init = proc(s: ^temp_keeper_state) {
+		s.kept = strings.clone("kept in init", context.temp_allocator)
+	},
+	handle_message = proc(s: ^temp_keeper_state, from: actod.PID, msg: any) {
+		s.kept = strings.clone("kept in a message", context.temp_allocator)
+	},
+}
+
+@(test)
+test_sim_frees_a_handlers_temp_memory_when_it_returns :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+	spawn(&s, "keeper", temp_keeper_state{}, temp_keeper_behaviour)
+	temp := &runtime.global_default_temp_allocator_data.arena
+	_ = strings.clone("gives the temp arena a block", context.temp_allocator)
+	before := temp.total_used
+
+	init_all(&s)
+	testing.expect_value(t, temp.total_used, before)
+	send(&s, "keeper", Ping{value = 1})
+	run_until_idle(&s)
+	testing.expect_value(t, temp.total_used, before)
+	testing.expect(
+		t,
+		get_state(&s, "keeper", temp_keeper_state).kept != "kept in a message",
+		"temp memory a handler kept past its return was still readable",
+	)
+}

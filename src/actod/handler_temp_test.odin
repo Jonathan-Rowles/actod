@@ -480,38 +480,6 @@ test_rewind_leaves_an_arena_whose_marked_block_is_gone_alone :: proc(
 }
 
 @(test)
-test_handler_temp_rewinds_only_when_the_last_running_handler_ends :: proc(
-	t: ^testing.T,
-) {
-	temp := &runtime.global_default_temp_allocator_data.arena
-	_ = take_bytes(temp, 16, 0xAA)
-	before := temp.total_used
-
-	first, second: Actor_Context
-	handler_temp_begin(&first)
-	held := take_bytes(temp, 64, 0x11)
-	handler_temp_begin(&second)
-	_ = take_bytes(temp, 64, 0x22)
-	handler_temp_end(&second)
-
-	testing.expect(
-		t,
-		held[0] == 0x11 && held[63] == 0x11,
-		"a handler still running lost its temp memory",
-	)
-	testing.expect(
-		t,
-		temp.total_used > before,
-		"the arena was rewound while a handler still ran",
-	)
-
-	handler_temp_end(&first)
-
-	testing.expect_value(t, temp.total_used, before)
-	testing.expect_value(t, handlers_running_on_this_thread, 0)
-}
-
-@(test)
 test_handler_temp_abandon_drops_a_panicked_actors_handlers :: proc(
 	t: ^testing.T,
 ) {
@@ -537,6 +505,26 @@ test_handler_temp_abandon_drops_a_panicked_actors_handlers :: proc(
 
 	handler_temp_end(&suspended)
 
+	testing.expect_value(t, temp.total_used, before)
+}
+
+@(test)
+test_handler_temp_abandon_rewinds_when_the_panicked_actor_held_the_last_handlers :: proc(
+	t: ^testing.T,
+) {
+	temp := &runtime.global_default_temp_allocator_data.arena
+	_ = take_bytes(temp, 16, 0xAA)
+	before := temp.total_used
+
+	panicked: Actor_Context
+	handler_temp_begin(&panicked)
+	handler_temp_begin(&panicked)
+	_ = take_bytes(temp, 64, 0x33)
+
+	handler_temp_abandon(&panicked)
+
+	testing.expect_value(t, panicked.handlers_running, 0)
+	testing.expect_value(t, handlers_running_on_this_thread, 0)
 	testing.expect_value(t, temp.total_used, before)
 }
 

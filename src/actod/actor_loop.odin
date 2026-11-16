@@ -76,8 +76,6 @@ actor_loop :: proc(actor: ^Actor) {
 		return
 	}
 
-	spawn_initial_children(actor)
-
 	ctx := actor.msg_ctx
 	if ctx == nil {
 		ctx = new(Message_Processing_Context, actor.allocator)
@@ -85,7 +83,7 @@ actor_loop :: proc(actor: ^Actor) {
 	}
 	ctx^ = message_processing_context_init(actor, actor.allocator)
 
-	call_init_handler(actor)
+	run_init_handlers(actor, actor_ctx)
 	sync.atomic_store(&actor.state, .RUNNING)
 	release_waiting_spawner(actor)
 
@@ -120,8 +118,7 @@ actor_run_phase :: proc(
 	if actor.pool_handle != nil && actor.pool_handle.lifecycle == .Parked_Cold do return
 
 	actor_ctx.panic_teardown_started = true
-	terminate_children(actor)
-	call_terminate_handler(actor)
+	run_terminate_handlers(actor, actor_ctx)
 
 	flush_batch_free(&ctx.free_buffer)
 
@@ -149,6 +146,7 @@ actor_run_phase :: proc(
 
 @(private)
 actor_panic_teardown :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
+	handler_temp_abandon(actor_ctx)
 	panic_msg := string(actor_ctx.panic_message[:actor_ctx.panic_message_len])
 	loc := actor_ctx.panic_location
 	log.errorf(
@@ -174,8 +172,7 @@ actor_panic_teardown :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
 
 	if !actor_ctx.panic_teardown_started {
 		actor_ctx.panic_teardown_started = true
-		terminate_children(actor)
-		call_terminate_handler(actor)
+		run_terminate_handlers(actor, actor_ctx)
 	}
 
 	sync.atomic_store(&actor.state, .THREAD_STOPPED)
@@ -188,6 +185,22 @@ actor_panic_teardown :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
 	sync.atomic_store_explicit(&actor.pool.read_index, wi, .Release)
 
 	cleanup_actor_context(actor_ctx)
+}
+
+@(private)
+run_init_handlers :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
+	handler_temp_begin(actor_ctx)
+	spawn_initial_children(actor)
+	call_init_handler(actor)
+	handler_temp_end(actor_ctx)
+}
+
+@(private)
+run_terminate_handlers :: proc(actor: ^Actor, actor_ctx: ^Actor_Context) {
+	handler_temp_begin(actor_ctx)
+	terminate_children(actor)
+	call_terminate_handler(actor)
+	handler_temp_end(actor_ctx)
 }
 
 @(private)
@@ -383,6 +396,8 @@ process_system_mailbox :: #force_no_inline proc(
 	for i in 0 ..< batch_count {
 		msg := &ctx.message_batch[i]
 		reconstruct_msg(msg, &ctx.data, &ctx.header)
+		handler_temp_begin(actor.actor_ctx)
+		defer handler_temp_end(actor.actor_ctx)
 
 		if actor.pid == NODE.pid {
 			actor.handle_message(actor.data, msg.from, ctx.data)
@@ -445,7 +460,9 @@ process_user_mailboxes :: #force_inline proc(
 			msg := &ctx.message_batch[i]
 			reconstruct_msg(msg, &ctx.data, &ctx.header)
 			if !ctx.is_node || is_running {
+				handler_temp_begin(actor.actor_ctx)
 				deliver_user_message(actor, msg, ctx.data)
+				handler_temp_end(actor.actor_ctx)
 				track_message_received(msg.from)
 			}
 			if message_owns_page(msg.content) do message_free_deferred(&ctx.free_buffer, msg.content)
@@ -471,7 +488,9 @@ process_user_mailboxes :: #force_inline proc(
 		reconstruct_msg(msg, &ctx.data, &ctx.header)
 
 		if !ctx.is_node || is_running {
+			handler_temp_begin(actor.actor_ctx)
 			deliver_user_message(actor, msg, ctx.data)
+			handler_temp_end(actor.actor_ctx)
 			track_message_received(msg.from)
 		}
 		if message_owns_page(msg.content) do message_free_deferred(&ctx.free_buffer, msg.content)
@@ -496,7 +515,9 @@ wait_for_messages_if_idle :: #force_inline proc(
 	   sync.atomic_load(&actor.stopped_head) == nil &&
 	   sync.atomic_load(&actor.spawned_head) == nil {
 		if actor.behaviour.on_idle != nil {
+			handler_temp_begin(actor.actor_ctx)
 			actor.behaviour.on_idle(actor.data)
+			handler_temp_end(actor.actor_ctx)
 		} else {
 			sync.atomic_sema_wait(&actor.wake_sema)
 		}
@@ -681,6 +702,8 @@ handle_stop_signals :: proc(actor: ^Actor) {
 	for child := pop_stop_signal(actor);
 	    child != nil;
 	    child = pop_stop_signal(actor) {
+		handler_temp_begin(actor.actor_ctx)
+		defer handler_temp_end(actor.actor_ctx)
 		process_spawn_signals(actor)
 
 		name_buf: [STOP_SIGNAL_NAME_CAP]u8

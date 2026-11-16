@@ -266,6 +266,7 @@ Actor_Context :: struct {
 	current_reply_token:    u64,
 	ask_dirty:              bool,
 	used_timers:            bool,
+	handlers_running:       int,
 	stats:                  struct {
 		received:          Traffic_Recorder,
 		sent:              Traffic_Recorder,

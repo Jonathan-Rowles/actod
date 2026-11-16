@@ -757,6 +757,7 @@ supervisor_panicking_after_a_group_wait_hands_every_put_aside_signal_to_the_node
 	saved_actor_context := current_actor_context
 	actor_ctx: Actor_Context
 	current_actor_context = &actor_ctx
+	f.supervisor.actor_ctx = &actor_ctx
 	die(f, 1)
 	{
 		context.assertion_failure_proc = actor_panic_handler
@@ -770,6 +771,9 @@ supervisor_panicking_after_a_group_wait_hands_every_put_aside_signal_to_the_node
 	}
 	free_all(context.temp_allocator)
 	current_actor_context = saved_actor_context
+	f.supervisor.actor_ctx = nil
+	testing.expect_value(t, actor_ctx.handlers_running, 0)
+	testing.expect_value(t, handlers_running_on_this_thread, 0)
 
 	testing.expect(
 		t,

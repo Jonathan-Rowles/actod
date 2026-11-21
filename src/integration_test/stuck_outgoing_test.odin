@@ -220,3 +220,57 @@ test_sim_a_peer_with_no_listen_port_is_not_dialled_and_is_answered_when_it_dials
 	ask(mesh, 1, asker, 3)
 	expect_value(t, g_answers, 2)
 }
+
+test_sim_an_outgoing_holding_no_socket_is_replaced_by_the_peer_dialling_in_from_a_lower_port :: proc(
+	t: ^testing.T,
+) {
+	g_answers = 0
+	g_last_asker = 0
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 39900,
+		log_level = test_log_level(),
+		register_peers = false,
+	)
+	defer actod.sim_mesh_destroy(mesh)
+
+	_, answerer_spawned := spawn_answerer(t, mesh, 1)
+	if !answerer_spawned do return
+	asker, asker_spawned := spawn_asker(t, mesh, 0, 1)
+	if !asker_spawned do return
+
+	lower, stale_registered := register_at(mesh, 1, 0, mesh.ports[1] + 50)
+	if !expect(t, stale_registered, "the higher node registered the lower at a dead address") do return
+	_ = actod.sim_mesh_bind(mesh, 1)
+	if !expect(t, actod.get_or_create_connection(lower) != 0, "the higher node started an outgoing") do return
+	_ = actod.sim_mesh_run_until_idle(mesh)
+	_ = actod.sim_mesh_bind(mesh, 1)
+	ring := actod.get_connection_ring(lower)
+	if !expect(t, ring == nil || sync.atomic_load(&ring.state) != .Ready, "the outgoing to the dead address is not up") do return
+	stuck := connection_actor_of(lower)
+	if !expect(t, stuck != nil, "the outgoing to the dead address stays to redial") do return
+	if !expect_value(t, published_outgoing_without_socket(lower), stuck.pid) do return
+
+	_, registered := register_at(mesh, 0, 1, mesh.ports[1])
+	if !expect(t, registered, "the lower node registered the higher") do return
+	ask(mesh, 0, asker, 1)
+	expect_value(t, g_answers, 1)
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	expect_value(t, published_outgoing_without_socket(lower), 0)
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	higher, known := actod.get_node_by_name(actod.sim_mesh_name(mesh, 1))
+	if !expect(t, known, "the lower node knows the higher") do return
+	up := actod.get_connection_ring(higher)
+	if !expect(t, up != nil && sync.atomic_load(&up.state) == .Ready, "the lower node's outgoing is up") do return
+	if !expect(t, connection_actor_of(higher) != nil, "the lower node's outgoing has its connection actor") do return
+	expect_value(t, published_outgoing_without_socket(higher), 0)
+}
+
+@(private = "file")
+published_outgoing_without_socket :: proc(node: actod.Node_ID) -> actod.PID {
+	return actod.PID(
+		sync.atomic_load(cast(^u64)&actod.NODE.outgoing_without_socket[node]),
+	)
+}

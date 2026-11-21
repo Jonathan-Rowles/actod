@@ -180,7 +180,38 @@ connection_actor_terminate :: proc(data: ^Connection_Actor_Data) {
 		)
 	}
 
+	if !data.is_incoming do clear_outgoing_without_socket(data)
 	release_pending_incoming(data)
+}
+
+@(private)
+set_connection_state :: proc(
+	data: ^Connection_Actor_Data,
+	state: Connection_State,
+) {
+	data.state = state
+	if data.is_incoming || data.node_id == 0 || data.node_id >= MAX_NODES do return
+	if state == .Disconnected || state == .Failed {
+		sync.atomic_store_explicit(
+			cast(^u64)&NODE.outgoing_without_socket[data.node_id],
+			u64(get_self_pid()),
+			.Release,
+		)
+	} else {
+		clear_outgoing_without_socket(data)
+	}
+}
+
+@(private)
+clear_outgoing_without_socket :: proc(data: ^Connection_Actor_Data) {
+	if data.node_id == 0 || data.node_id >= MAX_NODES do return
+	_, _ = sync.atomic_compare_exchange_strong_explicit(
+		cast(^u64)&NODE.outgoing_without_socket[data.node_id],
+		u64(get_self_pid()),
+		u64(0),
+		.Acq_Rel,
+		.Acquire,
+	)
 }
 
 @(private)
@@ -202,9 +233,9 @@ connection_handle_message :: proc(
 		cancel_timer(data.reconnect_timer_id)
 		data.address = m.address
 		if data.node_id == 0 do data.node_id = m.node_id
-		data.state = .Connecting
+		set_connection_state(data, .Connecting)
 		if result := initiate_connection(data); result != .Established {
-			data.state = .Failed
+			set_connection_state(data, .Failed)
 			if result != .Reached_Itself {
 				data.reconnect_timer_id, _ = set_timer(
 					data.reconnect_retry_delay,
@@ -229,12 +260,12 @@ connection_handle_message :: proc(
 
 	case Start_Receiving:
 		if !data.is_incoming || data.tcp_socket == 0 || data.state != .Disconnected do return
-		data.state = .Connecting
+		set_connection_state(data, .Connecting)
 		result := establish_connection(data)
 		release_pending_incoming(data)
 		if result != .Established {
 			close_conn_socket(data)
-			data.state = .Disconnected
+			set_connection_state(data, .Disconnected)
 			_ = terminate_actor(get_self_pid(), .SHUTDOWN)
 		}
 
@@ -321,13 +352,13 @@ initiate_connection :: proc(data: ^Connection_Actor_Data) -> Establish_Result {
 
 attempt_reconnect :: proc(data: ^Connection_Actor_Data) {
 	log.infof("Attempting to reconnect to node %d", data.node_id)
-	data.state = .Connecting
+	set_connection_state(data, .Connecting)
 
 	result := initiate_connection(data)
 	if result == .Reached_Itself {
-		data.state = .Failed
+		set_connection_state(data, .Failed)
 	} else if result != .Established {
-		data.state = .Failed
+		set_connection_state(data, .Failed)
 		data.reconnect_timer_id, _ = set_timer(
 			data.reconnect_retry_delay,
 			false,
@@ -718,7 +749,7 @@ establish_connection :: proc(
 	gossip_seq_reset(data.node_id, info.gossip_seq)
 	data.last_heartbeat = now()
 	data.peer_initiated_disconnect = false
-	data.state = .Connected
+	set_connection_state(data, .Connected)
 
 	if pool := ring.pool; pool != nil {
 		sync.atomic_store_explicit(
@@ -1238,9 +1269,18 @@ resolve_incoming_peer :: proc(
 	if existing_conn != 0 && existing_conn != get_self_pid() {
 		our_port := NODE.config.network.port
 		their_port := int(info.listen_port)
+		outgoing_holds_no_socket :=
+			PID(
+				sync.atomic_load_explicit(
+					cast(^u64)&NODE.outgoing_without_socket[local_node_id],
+					.Acquire,
+				),
+			) ==
+			existing_conn
 		we_keep_outgoing :=
-			our_port > their_port ||
-			(our_port == their_port && NODE.name < info.node_name)
+			!outgoing_holds_no_socket &&
+			(our_port > their_port ||
+					(our_port == their_port && NODE.name < info.node_name))
 
 		if we_keep_outgoing {
 			log.infof(
@@ -1252,12 +1292,19 @@ resolve_incoming_peer :: proc(
 			return false
 		}
 
-		log.infof(
-			"Replacing outgoing with incoming from %s (port %d <= %d)",
-			info.node_name,
-			our_port,
-			their_port,
-		)
+		if outgoing_holds_no_socket {
+			log.infof(
+				"Replacing outgoing with incoming from %s (the outgoing holds no socket)",
+				info.node_name,
+			)
+		} else {
+			log.infof(
+				"Replacing outgoing with incoming from %s (port %d <= %d)",
+				info.node_name,
+				our_port,
+				their_port,
+			)
+		}
 		_ = terminate_actor(existing_conn, .SHUTDOWN)
 		if !wait_for_actor_exit(existing_conn, DUPLICATE_TAKEOVER_TIMEOUT) {
 			log.errorf(
@@ -1392,7 +1439,7 @@ close_connection :: proc(data: ^Connection_Actor_Data, gone := false) {
 
 	if gone && is_active_connection(data) do set_node_gone(data.node_id, true)
 
-	data.state = .Disconnected
+	set_connection_state(data, .Disconnected)
 	cancel_timer(data.heartbeat_timer_id)
 
 	if data.is_incoming || gone {

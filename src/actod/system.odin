@@ -183,6 +183,7 @@ terminate_system :: proc(data: ^Node_Actor_Data) {
 		NODE.node_name_to_id = nil
 	}
 	NODE.connection_actors = {}
+	NODE.outgoing_without_socket = {}
 	NODE.lifecycle_stream_peers = {}
 	if NODE.fanout_pids != nil {
 		delete(NODE.fanout_pids, get_system_allocator())
@@ -235,6 +236,7 @@ Node_State :: struct {
 	node_name_to_id:          map[string]Node_ID,
 	node_registry_lock:       sync.RW_Mutex,
 	connection_actors:        [MAX_NODES]PID,
+	outgoing_without_socket:  [MAX_NODES]PID,
 	lifecycle_stream_peers:   [MAX_NODES]bool,
 	fanout_pids:              []PID,
 	fanout_claim:             u32,
@@ -412,6 +414,7 @@ node_init :: proc(name: string, opts := NODE.config, loc := #caller_location) {
 	}
 
 	NODE.connection_actors = {}
+	NODE.outgoing_without_socket = {}
 	NODE.lifecycle_stream_peers = {}
 
 	registry_size := opts.actor_registry_size
@@ -1174,6 +1177,7 @@ reset_node_state :: proc() {
 		NODE.node_name_to_id = nil
 	}
 	NODE.connection_actors = {}
+	NODE.outgoing_without_socket = {}
 	NODE.lifecycle_stream_peers = {}
 	NODE.network_listener_thread = nil
 	sync.atomic_store(&NODE.network_listener_running, 0)

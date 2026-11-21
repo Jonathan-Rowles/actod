@@ -184,6 +184,12 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_an_outgoing_holding_no_socket_is_replaced_by_the_peer_dialling_in_from_a_lower_port",
+		test_proc = test_sim_an_outgoing_holding_no_socket_is_replaced_by_the_peer_dialling_in_from_a_lower_port,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_reconnects_leave_the_connection_arena_where_it_was",
 		test_proc = test_sim_reconnects_leave_the_connection_arena_where_it_was,
 		sim_mode = true,

@@ -190,6 +190,12 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_an_outgoing_to_a_node_registered_again_with_no_listen_port_keeps_its_last_address",
+		test_proc = test_sim_an_outgoing_to_a_node_registered_again_with_no_listen_port_keeps_its_last_address,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_reconnects_leave_the_connection_arena_where_it_was",
 		test_proc = test_sim_reconnects_leave_the_connection_arena_where_it_was,
 		sim_mode = true,

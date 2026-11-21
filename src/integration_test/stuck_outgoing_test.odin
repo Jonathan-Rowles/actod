@@ -268,6 +268,47 @@ test_sim_an_outgoing_holding_no_socket_is_replaced_by_the_peer_dialling_in_from_
 	expect_value(t, published_outgoing_without_socket(higher), 0)
 }
 
+test_sim_an_outgoing_to_a_node_registered_again_with_no_listen_port_keeps_its_last_address :: proc(
+	t: ^testing.T,
+) {
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 40000,
+		log_level = test_log_level(),
+		register_peers = false,
+	)
+	defer actod.sim_mesh_destroy(mesh)
+
+	dead_port := mesh.ports[0] + 50
+	peer, registered := register_at(mesh, 1, 0, dead_port)
+	if !expect(t, registered, "the node registered its peer at a dead address") do return
+	_ = actod.sim_mesh_bind(mesh, 1)
+	if !expect(t, actod.get_or_create_connection(peer) != 0, "the node started an outgoing") do return
+	_ = actod.sim_mesh_run_until_idle(mesh)
+	_ = actod.sim_mesh_bind(mesh, 1)
+	stuck := connection_actor_of(peer)
+	if !expect(t, stuck != nil, "the outgoing to the dead address stays to redial") do return
+	stuck_pid := stuck.pid
+
+	_, _ = register_at(mesh, 1, 0, 0)
+	_ = actod.sim_mesh_bind(mesh, 1)
+	expect_value(t, actod.get_or_create_connection(peer), stuck_pid)
+	for _ in 0 ..< STUCK_OUTGOING_REDIAL_ROUNDS {
+		_ = actod.sim_mesh_run_until_idle(mesh)
+		actod.sim_mesh_advance_clock(mesh, STUCK_OUTGOING_REDIAL_STEP)
+	}
+	_ = actod.sim_mesh_run_until_idle(mesh)
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	outgoing := connection_actor_of(peer)
+	if !expect(t, outgoing != nil && outgoing.pid == stuck_pid, "the outgoing still redials") do return
+	expect_value(
+		t,
+		(cast(^actod.Connection_Actor_Data)outgoing.data).address.port,
+		dead_port,
+	)
+}
+
 @(private = "file")
 published_outgoing_without_socket :: proc(node: actod.Node_ID) -> actod.PID {
 	return actod.PID(

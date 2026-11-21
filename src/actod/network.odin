@@ -758,6 +758,7 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 	if existing_pid != 0 {
 		actor_ptr, actor_exists := get(&NODE.actor_registry, existing_pid)
 		if actor_exists && actor_ptr != nil {
+			if node_info.address.port == 0 do return existing_pid
 			_ = send_message(
 				existing_pid,
 				Connect_Request {

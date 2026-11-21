@@ -774,6 +774,8 @@ get_or_create_connection :: proc(node_id: Node_ID) -> PID {
 		)
 	}
 
+	if node_info.address.port == 0 do return 0
+
 	if get_or_create_node_ring(node_id, NODE.config.network.connection_ring) == nil do return 0
 
 	conn_data := make_connection_actor_data(node_id, node_info.address)

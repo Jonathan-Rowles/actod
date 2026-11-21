@@ -10,10 +10,7 @@ import "core:slice"
 import "core:sync"
 
 @(private)
-actor_panic_handler :: proc(
-	prefix, message: string,
-	loc: runtime.Source_Code_Location,
-) -> ! {
+actor_panic_handler :: proc(prefix, message: string, loc: runtime.Source_Code_Location) -> ! {
 	ctx := current_actor_context
 	if ctx == nil do runtime.default_assertion_failure_proc(prefix, message, loc)
 
@@ -35,11 +32,7 @@ actor_panic_handler :: proc(
 	if len(message) > 0 {
 		remaining := PANIC_MESSAGE_BUF_SIZE - ctx.panic_message_len
 		n := min(len(message), remaining)
-		mem.copy(
-			&ctx.panic_message[ctx.panic_message_len],
-			raw_data(message),
-			n,
-		)
+		mem.copy(&ctx.panic_message[ctx.panic_message_len], raw_data(message), n)
 		ctx.panic_message_len += n
 	}
 
@@ -50,11 +43,7 @@ actor_panic_handler :: proc(
 @(private)
 actor_loop :: proc(actor: ^Actor) {
 	if actor.state != .INIT {
-		panic_at(
-			actor.spawn_loc,
-			"Actor '%v' already started or terminated\n",
-			actor.name,
-		)
+		panic_at(actor.spawn_loc, "Actor '%v' already started or terminated\n", actor.name)
 	}
 
 	if actor.blocking do log.warn("blocking caller thread")
@@ -125,11 +114,7 @@ actor_run_phase :: proc(
 	for {
 		current := sync.atomic_load(&actor.state)
 		if current != .STOPPING {
-			log.errorf(
-				"Actor %v in unexpected state %v when thread stopping",
-				actor.pid,
-				current,
-			)
+			log.errorf("Actor %v in unexpected state %v when thread stopping", actor.pid, current)
 			break
 		}
 		if try_transition_state(&actor.state, .STOPPING, .THREAD_STOPPED) do break
@@ -271,10 +256,7 @@ message_processing_context_init :: proc(
 }
 
 @(private)
-ensure_message_batch :: #force_inline proc(
-	actor: ^Actor,
-	ctx: ^Message_Processing_Context,
-) {
+ensure_message_batch :: #force_inline proc(actor: ^Actor, ctx: ^Message_Processing_Context) {
 	if ctx.message_batch != nil do return
 	batch_raw, batch_err := mem.alloc_bytes_non_zeroed(
 		ctx.batch_size * size_of(Message),
@@ -303,21 +285,14 @@ call_init_handler :: proc(actor: ^Actor) {
 				break
 			}
 		}
-		log.infof(
-			"Started on worker %d/%d",
-			worker_idx,
-			NODE.worker_pool.worker_count,
-		)
+		log.infof("Started on worker %d/%d", worker_idx, NODE.worker_pool.worker_count)
 	} else {
 		log.infof("Started on dedicated thread")
 	}
 }
 
 @(private)
-run_message_loop :: #force_inline proc(
-	actor: ^Actor,
-	ctx: ^Message_Processing_Context,
-) {
+run_message_loop :: #force_inline proc(actor: ^Actor, ctx: ^Message_Processing_Context) {
 	co := coro.running()
 	rounds: u8 = 0
 	for {
@@ -360,10 +335,7 @@ run_message_loop :: #force_inline proc(
 }
 
 @(private)
-mark_stopping :: #force_inline proc(
-	actor: ^Actor,
-	reason: Termination_Reason,
-) {
+mark_stopping :: #force_inline proc(actor: ^Actor, reason: Termination_Reason) {
 	actor.termination_reason = reason
 	for {
 		current := sync.atomic_load(&actor.state)
@@ -387,10 +359,7 @@ process_system_mailbox :: #force_no_inline proc(
 ) -> bool {
 	if mpsc_is_empty_relaxed(&actor.system_mailbox) do return true
 	ensure_message_batch(actor, ctx)
-	batch_count := mpsc_pop_batch(
-		&actor.system_mailbox,
-		ctx.message_batch[0:ctx.batch_size],
-	)
+	batch_count := mpsc_pop_batch(&actor.system_mailbox, ctx.message_batch[0:ctx.batch_size])
 	process_spawn_signals(actor)
 
 	for i in 0 ..< batch_count {
@@ -447,8 +416,7 @@ process_user_mailboxes :: #force_inline proc(
 	if actor.local_read != actor.local_write {
 		ensure_message_batch(actor, ctx)
 		batch_count := 0
-		for batch_count < ctx.batch_size &&
-		    actor.local_read != actor.local_write {
+		for batch_count < ctx.batch_size && actor.local_read != actor.local_write {
 			ctx.message_batch[batch_count] =
 				actor.local_buf[actor.local_read & (LOCAL_MAILBOX_SIZE - 1)]
 			actor.local_read += 1
@@ -456,17 +424,18 @@ process_user_mailboxes :: #force_inline proc(
 		}
 
 		is_running := sync.atomic_load(&actor.state) == .RUNNING
+		handler_temp_begin(actor.actor_ctx)
 		for i in 0 ..< batch_count {
 			msg := &ctx.message_batch[i]
 			reconstruct_msg(msg, &ctx.data, &ctx.header)
 			if !ctx.is_node || is_running {
-				handler_temp_begin(actor.actor_ctx)
 				deliver_user_message(actor, msg, ctx.data)
-				handler_temp_end(actor.actor_ctx)
+				handler_temp_between_messages()
 				track_message_received(msg.from)
 			}
 			if message_owns_page(msg.content) do message_free_deferred(&ctx.free_buffer, msg.content)
 		}
+		handler_temp_end(actor.actor_ctx)
 		flush_batch_free(&ctx.free_buffer)
 		if sync.atomic_load(&actor.state) != .RUNNING do return false
 	}
@@ -474,27 +443,25 @@ process_user_mailboxes :: #force_inline proc(
 	// thread safe
 	if !mpsc_has_ready_acquire(&actor.mailbox) do return true
 	ensure_message_batch(actor, ctx)
-	batch_count := mpsc_pop_batch(
-		&actor.mailbox,
-		ctx.message_batch[0:ctx.batch_size],
-	)
+	batch_count := mpsc_pop_batch(&actor.mailbox, ctx.message_batch[0:ctx.batch_size])
 	if batch_count == 0 do return true
 
 	is_running := sync.atomic_load(&actor.state) == .RUNNING
 
+	handler_temp_begin(actor.actor_ctx)
 	for i in 0 ..< batch_count {
 		msg := &ctx.message_batch[i]
 
 		reconstruct_msg(msg, &ctx.data, &ctx.header)
 
 		if !ctx.is_node || is_running {
-			handler_temp_begin(actor.actor_ctx)
 			deliver_user_message(actor, msg, ctx.data)
-			handler_temp_end(actor.actor_ctx)
+			handler_temp_between_messages()
 			track_message_received(msg.from)
 		}
 		if message_owns_page(msg.content) do message_free_deferred(&ctx.free_buffer, msg.content)
 	}
+	handler_temp_end(actor.actor_ctx)
 
 	flush_batch_free(&ctx.free_buffer)
 
@@ -506,10 +473,7 @@ process_user_mailboxes :: #force_inline proc(
 }
 
 @(private)
-wait_for_messages_if_idle :: #force_inline proc(
-	actor: ^Actor,
-	ctx: ^Message_Processing_Context,
-) {
+wait_for_messages_if_idle :: #force_inline proc(actor: ^Actor, ctx: ^Message_Processing_Context) {
 	if mpsc_size(&actor.mailbox) == 0 &&
 	   mpsc_size(&actor.system_mailbox) == 0 &&
 	   sync.atomic_load(&actor.stopped_head) == nil &&
@@ -574,18 +538,13 @@ notify_termination :: proc(actor: ^Actor) {
 		if NODE.timer_pid != 0 &&
 		   actor.pid != NODE.timer_pid &&
 		   current_actor_context.used_timers {
-			if _, timer_active := get(&NODE.actor_registry, NODE.timer_pid);
-			   timer_active {
+			if _, timer_active := get(&NODE.actor_registry, NODE.timer_pid); timer_active {
 				timer_actor, timer_ok := get_actor_from_pointer(
 					get(&NODE.actor_registry, NODE.timer_pid),
 					true,
 				)
 				if timer_ok {
-					send(
-						NODE.timer_pid,
-						Cancel_All_Timers{owner = actor.pid},
-						timer_actor,
-					)
+					send(NODE.timer_pid, Cancel_All_Timers{owner = actor.pid}, timer_actor)
 				}
 			}
 		}
@@ -609,9 +568,7 @@ notify_termination :: proc(actor: ^Actor) {
 		messages_received  = current_actor_context.stats.messages_received,
 		messages_sent      = current_actor_context.stats.messages_sent,
 		start_time         = current_actor_context.stats.start_time,
-		uptime             = wall_since(
-			current_actor_context.stats.start_time,
-		),
+		uptime             = wall_since(current_actor_context.stats.start_time),
 		last_update        = now(),
 		max_mailbox_size   = current_actor_context.stats.max_mailbox_size,
 		state              = sync.atomic_load(&actor.state),
@@ -627,12 +584,8 @@ notify_termination :: proc(actor: ^Actor) {
 	context.allocator = actor_system_allocator
 	defer context.allocator = saved_allocator
 
-	final_stats.received_from = take_traffic_histogram(
-		&current_actor_context.stats.received,
-	)
-	final_stats.sent_to = take_traffic_histogram(
-		&current_actor_context.stats.sent,
-	)
+	final_stats.received_from = take_traffic_histogram(&current_actor_context.stats.received)
+	final_stats.sent_to = take_traffic_histogram(&current_actor_context.stats.sent)
 
 	response := Stats_Response {
 		stats = final_stats,
@@ -654,11 +607,7 @@ push_stop_signal :: proc(target: ^Actor, child: ^Actor) {
 	for {
 		old := sync.atomic_load(&target.stopped_head)
 		child.stop_signal.next = old
-		_, swapped := sync.atomic_compare_exchange_weak(
-			&target.stopped_head,
-			old,
-			rawptr(child),
-		)
+		_, swapped := sync.atomic_compare_exchange_weak(&target.stopped_head, old, rawptr(child))
 		if swapped do return
 	}
 }
@@ -699,18 +648,13 @@ process_stop_signals :: proc(actor: ^Actor) {
 
 @(private)
 handle_stop_signals :: proc(actor: ^Actor) {
-	for child := pop_stop_signal(actor);
-	    child != nil;
-	    child = pop_stop_signal(actor) {
+	for child := pop_stop_signal(actor); child != nil; child = pop_stop_signal(actor) {
 		handler_temp_begin(actor.actor_ctx)
 		defer handler_temp_end(actor.actor_ctx)
 		process_spawn_signals(actor)
 
 		name_buf: [STOP_SIGNAL_NAME_CAP]u8
-		name_len := copy(
-			name_buf[:],
-			child.stop_signal.name_buf[:child.stop_signal.name_len],
-		)
+		name_len := copy(name_buf[:], child.stop_signal.name_buf[:child.stop_signal.name_len])
 		stopped := Actor_Stopped {
 			child_pid      = child.stop_signal.pid,
 			reason         = child.stop_signal.reason,
@@ -767,11 +711,7 @@ hand_waited_stop_signals_to_node :: proc(supervisor: ^Actor, waited: []PID) {
 }
 
 @(private)
-reap_stop_signals_at_node :: proc(
-	node: ^Actor,
-	taken: ^Actor,
-	node_owns_this_thread: bool,
-) {
+reap_stop_signals_at_node :: proc(node: ^Actor, taken: ^Actor, node_owns_this_thread: bool) {
 	if node_owns_this_thread do process_spawn_signals(node)
 	child := taken
 	for child != nil {
@@ -806,10 +746,7 @@ stop_signal_ready :: proc(child: ^Actor) -> bool {
 @(private)
 forward_stop_signal_to_node :: proc(child: ^Actor) {
 	if NODE.pid == 0 || NODE.pid == child.stop_signal.pid do return
-	node_actor, ok := get_actor_from_pointer(
-		get(&NODE.actor_registry, NODE.pid),
-		true,
-	)
+	node_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, NODE.pid), true)
 	if !ok || node_actor == nil {
 		log.debugf(
 			"no node actor to receive the stop signal of %d (%v)",
@@ -881,14 +818,10 @@ push_termination_signal :: proc(actor: ^Actor) {
 		return
 	}
 
-	deliver_to_parent :=
-		actor.parent != 0 && actor.termination_reason != .KILLED
+	deliver_to_parent := actor.parent != 0 && actor.termination_reason != .KILLED
 
 	if deliver_to_parent {
-		parent_actor, ok := get_actor_from_pointer(
-			get(&NODE.actor_registry, actor.parent),
-			true,
-		)
+		parent_actor, ok := get_actor_from_pointer(get(&NODE.actor_registry, actor.parent), true)
 		if ok && parent_actor != nil {
 			parent_state := sync.atomic_load(&parent_actor.state)
 			if parent_state != .STOPPING &&
@@ -913,11 +846,7 @@ push_spawn_signal :: proc(parent: ^Actor, signal: ^Spawn_Signal) {
 	for {
 		old := sync.atomic_load(&parent.spawned_head)
 		signal.next = old
-		_, swapped := sync.atomic_compare_exchange_weak(
-			&parent.spawned_head,
-			old,
-			signal,
-		)
+		_, swapped := sync.atomic_compare_exchange_weak(&parent.spawned_head, old, signal)
 		if swapped do return
 	}
 }

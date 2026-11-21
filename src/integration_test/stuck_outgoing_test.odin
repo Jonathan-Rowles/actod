@@ -30,12 +30,24 @@ g_last_asker: actod.PID
 g_told: actod.Send_Error
 
 @(private = "file")
+g_duplicates_closed: int
+
+@(private = "file")
 count_dropped_sends :: proc(
 	level: log.Level,
 	text: string,
 	location: runtime.Source_Code_Location,
 ) {
 	if strings.contains(text, "no connection to node") do sync.atomic_add(&g_dropped_sends, 1)
+}
+
+@(private = "file")
+count_duplicates_closed :: proc(
+	level: log.Level,
+	text: string,
+	location: runtime.Source_Code_Location,
+) {
+	if strings.contains(text, "Closing duplicate incoming") do sync.atomic_add(&g_duplicates_closed, 1)
 }
 
 Stuck_Outgoing_Answerer_Data :: struct {}
@@ -307,6 +319,127 @@ test_sim_an_outgoing_to_a_node_registered_again_with_no_listen_port_keeps_its_la
 		(cast(^actod.Connection_Actor_Data)outgoing.data).address.port,
 		dead_port,
 	)
+}
+
+test_sim_a_two_way_dial_keeps_the_higher_port_node_outgoing_and_closes_its_incoming :: proc(
+	t: ^testing.T,
+) {
+	g_answers = 0
+	g_last_asker = 0
+	sync.atomic_store(&g_duplicates_closed, 0)
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 40100,
+		log_level = test_log_level(),
+	)
+	defer actod.sim_mesh_destroy(mesh)
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	actod.NODE.config.actor_config.logging.level = .Info
+	actod.NODE.config.actor_config.logging.custom_logger =
+		count_duplicates_closed
+	_, answerer_spawned := spawn_answerer(t, mesh, 1)
+	if !answerer_spawned do return
+	asker, asker_spawned := spawn_asker(t, mesh, 0, 1)
+	if !asker_spawned do return
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	higher, higher_known := actod.get_node_by_name(
+		actod.sim_mesh_name(mesh, 1),
+	)
+	if !expect(t, higher_known, "the lower node knows the higher") do return
+	_ = actod.sim_mesh_bind(mesh, 1)
+	lower, lower_known := actod.get_node_by_name(actod.sim_mesh_name(mesh, 0))
+	if !expect(t, lower_known, "the higher node knows the lower") do return
+	_ = actod.sim_mesh_bind(mesh, 0)
+	if !expect(t, actod.get_or_create_connection(higher) != 0, "the lower node started an outgoing") do return
+	_ = actod.sim_mesh_bind(mesh, 1)
+	if !expect(t, actod.get_or_create_connection(lower) != 0, "the higher node started an outgoing") do return
+	_ = actod.sim_mesh_run_until_idle(mesh)
+
+	expect_value(t, sync.atomic_load(&g_duplicates_closed), 1)
+	_ = actod.sim_mesh_bind(mesh, 1)
+	kept := connection_actor_of(lower)
+	if !expect(t, kept != nil, "the higher node has a connection actor") do return
+	expect(
+		t,
+		!(cast(^actod.Connection_Actor_Data)kept.data).is_incoming,
+		"the higher node keeps its outgoing",
+	)
+	_ = actod.sim_mesh_bind(mesh, 0)
+	accepted := connection_actor_of(higher)
+	if !expect(t, accepted != nil, "the lower node has a connection actor") do return
+	expect(
+		t,
+		(cast(^actod.Connection_Actor_Data)accepted.data).is_incoming,
+		"the lower node keeps its incoming",
+	)
+
+	ask(mesh, 0, asker, 1)
+	expect_value(t, g_answers, 1)
+}
+
+test_sim_a_send_to_a_peer_with_no_listen_port_waits_while_its_new_session_comes_up :: proc(
+	t: ^testing.T,
+) {
+	g_answers = 0
+	g_last_asker = 0
+	mesh := actod.sim_mesh_create(
+		2,
+		base_port = 40200,
+		log_level = test_log_level(),
+		register_peers = false,
+	)
+	defer actod.sim_mesh_destroy(mesh)
+
+	_, answerer_spawned := spawn_answerer(t, mesh, 0)
+	if !answerer_spawned do return
+	_ = actod.sim_mesh_bind(mesh, 1)
+	actod.NODE.config.network.port = 0
+	asker, asker_spawned := spawn_asker(t, mesh, 1, 0)
+	if !asker_spawned do return
+	_, registered := register_at(mesh, 1, 0, mesh.ports[0])
+	if !expect(t, registered, "the client registered the listener") do return
+
+	ask(mesh, 1, asker, 1)
+	if !expect_value(t, g_answers, 1) do return
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	client, known := actod.get_node_by_name(actod.sim_mesh_name(mesh, 1))
+	if !expect(t, known, "the listener knows the client") do return
+	actod.sim_mesh_sever(mesh, 0, 1, deliver_error = true)
+	_ = actod.sim_mesh_run_until_idle(mesh)
+	_ = actod.sim_mesh_bind(mesh, 0)
+	if !expect(t, connection_actor_of(client) == nil, "the cut session's connection actor is gone") do return
+
+	_ = actod.sim_mesh_bind(mesh, 1)
+	_ = actod.send_message(
+		asker,
+		Integration_Test_Message{id = 2, payload = "ask"},
+	)
+	coming_up := false
+	for !coming_up && actod.sim_mesh_pump(mesh) {
+		_ = actod.sim_mesh_bind(mesh, 0)
+		ring := actod.get_connection_ring(client)
+		coming_up =
+			connection_actor_of(client) != nil &&
+			ring != nil &&
+			sync.atomic_load(&ring.state) != .Ready
+	}
+	if !expect(t, coming_up, "the listener holds the client's new session before its ring is ready") do return
+
+	_ = actod.sim_mesh_bind(mesh, 0)
+	told := actod.send_message(
+		g_last_asker,
+		Integration_Test_Message{id = 3, payload = "answer"},
+	)
+	expect_value(t, told, actod.Send_Error.OK)
+	for _ in 0 ..< STUCK_OUTGOING_REDIAL_ROUNDS {
+		_ = actod.sim_mesh_run_until_idle(mesh)
+		actod.sim_mesh_advance_clock(mesh, STUCK_OUTGOING_REDIAL_STEP)
+	}
+	_ = actod.sim_mesh_run_until_idle(mesh)
+	expect_value(t, g_answers, 3)
 }
 
 @(private = "file")

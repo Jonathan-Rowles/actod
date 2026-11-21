@@ -196,6 +196,18 @@ ALL_TESTS :: []Test_Entry {
 		worker_count = 2,
 	},
 	{
+		name = "test_sim_a_two_way_dial_keeps_the_higher_port_node_outgoing_and_closes_its_incoming",
+		test_proc = test_sim_a_two_way_dial_keeps_the_higher_port_node_outgoing_and_closes_its_incoming,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
+		name = "test_sim_a_send_to_a_peer_with_no_listen_port_waits_while_its_new_session_comes_up",
+		test_proc = test_sim_a_send_to_a_peer_with_no_listen_port_waits_while_its_new_session_comes_up,
+		sim_mode = true,
+		worker_count = 2,
+	},
+	{
 		name = "test_sim_reconnects_leave_the_connection_arena_where_it_was",
 		test_proc = test_sim_reconnects_leave_the_connection_arena_where_it_was,
 		sim_mode = true,

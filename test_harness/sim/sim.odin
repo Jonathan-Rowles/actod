@@ -67,14 +67,27 @@ Sim_Pending_Ask :: struct {
 }
 
 Sim_Actor :: struct {
-	name:           string,
-	pid:            u64,
-	data:           rawptr,
-	handle_message: proc(data: rawptr, from: u64, content: any),
-	init_fn:        proc(data: rawptr),
-	terminate_fn:   proc(data: rawptr),
-	parent_pid:     u64,
-	alive:          bool,
+	name:                string,
+	pid:                 u64,
+	data:                rawptr,
+	handle_message:      proc(data: rawptr, from: u64, content: any),
+	init_fn:             proc(data: rawptr),
+	terminate_fn:        proc(data: rawptr),
+	on_child_terminated: proc(
+		data: rawptr,
+		child_pid: actod.PID,
+		child_name: string,
+		reason: actod.Termination_Reason,
+		will_restart: bool,
+	),
+	parent_pid:          u64,
+	alive:               bool,
+}
+
+Sim_Child_Terminated :: struct {
+	child_pid:  u64,
+	child_name: string,
+	reason:     actod.Termination_Reason,
 }
 
 Sim_Message :: struct {
@@ -215,6 +228,13 @@ spawn :: proc(
 	))behaviour.handle_message
 	actor.init_fn = transmute(proc(_: rawptr))behaviour.init
 	actor.terminate_fn = transmute(proc(_: rawptr))behaviour.terminate
+	actor.on_child_terminated = transmute(proc(
+		_: rawptr,
+		_: actod.PID,
+		_: string,
+		_: actod.Termination_Reason,
+		_: bool,
+	))behaviour.on_child_terminated
 	actor.alive = true
 
 	s.pid_registry[name] = pid
@@ -393,6 +413,11 @@ step :: proc(s: ^Sim) -> bool {
 		}
 	}
 
+	if msg.type_id == Sim_Child_Terminated {
+		deliver_child_terminated(s, msg)
+		return true
+	}
+
 	actor := find_actor_by_pid(s, msg.to)
 	if actor == nil || !actor.alive {
 		if msg.data != nil do free(msg.data)
@@ -491,7 +516,7 @@ process_captures :: proc(s: ^Sim, sender_pid: u64) {
 
 	for &cap in s.term_capture {
 		a := find_actor_by_pid(s, cap.pid)
-		if a != nil do a.alive = false
+		if a != nil do end_actor(s, a, actod.Termination_Reason(cap.reason))
 	}
 	clear(&s.term_capture)
 
@@ -527,6 +552,53 @@ process_captures :: proc(s: ^Sim, sender_pid: u64) {
 
 	clear(&s.subscribe_cap)
 	clear(&s.children_pids)
+}
+
+terminate :: proc(s: ^Sim, pid: actod.PID, reason: actod.Termination_Reason) {
+	a := find_actor_by_pid(s, u64(pid))
+	if a != nil do end_actor(s, a, reason)
+}
+
+end_actor :: proc(s: ^Sim, a: ^Sim_Actor, reason: actod.Termination_Reason) {
+	if !a.alive do return
+	a.alive = false
+	if a.parent_pid == 0 do return
+	enqueue_clone(
+		s,
+		a.parent_pid,
+		a.pid,
+		Sim_Child_Terminated {
+			child_pid = a.pid,
+			child_name = a.name,
+			reason = reason,
+		},
+	)
+}
+
+deliver_child_terminated :: proc(s: ^Sim, msg: Sim_Message) {
+	ended := (^Sim_Child_Terminated)(msg.data)^
+	free(msg.data)
+	parent := find_actor_by_pid(s, msg.to)
+	if parent == nil || !parent.alive do return
+	if parent.on_child_terminated == nil do return
+
+	wire_intercept(s, parent)
+	ti.test_intercept, ti.det = &s.intercept, &s.det
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	parent.on_child_terminated(
+		parent.data,
+		actod.PID(ended.child_pid),
+		ended.child_name,
+		ended.reason,
+		false,
+	)
+	ti.test_intercept, ti.det = nil, nil
+
+	s.next_timer_id = s.intercept.next_timer_id
+	s.next_pid = s.intercept.next_spawn_pid
+	s.next_ask_token = s.intercept.next_ask_token
+
+	process_captures(s, parent.pid)
 }
 
 add_topic_sub :: proc(s: ^Sim, topic: rawptr, pid: u64) {

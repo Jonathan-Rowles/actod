@@ -1482,3 +1482,204 @@ test_sim_frees_a_handlers_temp_memory_when_it_returns :: proc(t: ^testing.T) {
 		"temp memory a handler kept past its return was still readable",
 	)
 }
+
+Stop :: struct {}
+
+stopper_state :: struct {}
+
+stopper_behaviour := actod.Actor_Behaviour(stopper_state) {
+	handle_message = proc(s: ^stopper_state, from: actod.PID, msg: any) {
+		if _, ok := msg.(Stop); ok do actod.self_terminate(.ABNORMAL)
+	},
+}
+
+watcher_state :: struct {
+	ended:        int,
+	child_pid:    actod.PID,
+	child_name:   string,
+	reason:       actod.Termination_Reason,
+	sent_on_end:  actod.Send_Error,
+	heard:        int,
+	heard_at_end: int,
+}
+
+watcher_behaviour := actod.Actor_Behaviour(watcher_state) {
+	handle_message = proc(s: ^watcher_state, from: actod.PID, msg: any) {
+		if _, ok := msg.(Ping); ok do s.heard += 1
+	},
+	on_child_terminated = proc(
+		s: ^watcher_state,
+		child_pid: actod.PID,
+		child_name: string,
+		reason: actod.Termination_Reason,
+		will_restart: bool,
+	) {
+		s.ended += 1
+		s.child_pid = child_pid
+		s.child_name = child_name
+		s.reason = reason
+		s.heard_at_end = s.heard
+		s.sent_on_end = actod.send_message_name("echo", Ping{value = 7})
+	},
+}
+
+teller_state :: struct {}
+
+teller_behaviour := actod.Actor_Behaviour(teller_state) {
+	handle_message = proc(s: ^teller_state, from: actod.PID, msg: any) {
+		if _, ok := msg.(Stop); ok {
+			_ = actod.send_message_name("watcher", Ping{value = 1})
+			actod.broadcast(Ping{value = 2})
+			actod.self_terminate(.NORMAL)
+		}
+	},
+}
+
+Kill :: struct {
+	pid: actod.PID,
+}
+
+killer_state :: struct {
+	killed: bool,
+}
+
+killer_behaviour := actod.Actor_Behaviour(killer_state) {
+	handle_message = proc(s: ^killer_state, from: actod.PID, msg: any) {
+		if kill, ok := msg.(Kill); ok {
+			s.killed = actod.terminate_actor(kill.pid, .ABNORMAL)
+		}
+	},
+}
+
+@(test)
+test_sim_delivers_the_end_of_a_child_to_the_on_child_terminated_of_its_parent :: proc(
+	t: ^testing.T,
+) {
+	s := create()
+	defer destroy(&s)
+	parent := spawn(&s, "watcher", watcher_state{}, watcher_behaviour)
+	child := spawn(&s, "stopper", stopper_state{}, stopper_behaviour)
+	spawn(&s, "echo", echo_state{}, echo_behaviour)
+	find_actor_by_pid(&s, u64(child)).parent_pid = u64(parent)
+	init_all(&s)
+
+	send(&s, "stopper", Stop{})
+	run_until_idle(&s)
+	watcher := get_state(&s, "watcher", watcher_state)
+	testing.expect_value(t, watcher.ended, 1)
+	testing.expect_value(t, watcher.child_pid, child)
+	testing.expect_value(t, watcher.child_name, "stopper")
+	testing.expect_value(t, watcher.reason, actod.Termination_Reason.ABNORMAL)
+	testing.expect_value(t, watcher.sent_on_end, actod.Send_Error.OK)
+	testing.expect_value(t, get_state(&s, "echo", echo_state).pings, 1)
+
+	terminate(&s, child, .SHUTDOWN)
+	run_until_idle(&s)
+	testing.expect_value(t, watcher.ended, 1)
+
+	other := spawn(&s, "other", stopper_state{}, stopper_behaviour)
+	find_actor_by_pid(&s, u64(other)).parent_pid = u64(parent)
+	terminate(&s, other, .SHUTDOWN)
+	run_until_idle(&s)
+	testing.expect_value(t, watcher.ended, 2)
+	testing.expect_value(t, watcher.reason, actod.Termination_Reason.SHUTDOWN)
+}
+
+@(test)
+test_sim_drops_the_end_of_a_child_whose_parent_has_ended :: proc(
+	t: ^testing.T,
+) {
+	s := create()
+	defer destroy(&s)
+	parent := spawn(&s, "watcher", watcher_state{}, watcher_behaviour)
+	child := spawn(&s, "stopper", stopper_state{}, stopper_behaviour)
+	spawn(&s, "echo", echo_state{}, echo_behaviour)
+	find_actor_by_pid(&s, u64(child)).parent_pid = u64(parent)
+	init_all(&s)
+
+	terminate(&s, parent, .SHUTDOWN)
+	send(&s, "stopper", Stop{})
+	run_until_idle(&s)
+	expect_dead(&s, t, "stopper")
+	testing.expect_value(t, get_state(&s, "watcher", watcher_state).ended, 0)
+	testing.expect_value(t, get_state(&s, "echo", echo_state).pings, 0)
+}
+
+@(test)
+test_sim_delivers_the_end_of_a_child_after_its_sends_and_ahead_of_its_broadcasts :: proc(
+	t: ^testing.T,
+) {
+	s := create()
+	defer destroy(&s)
+	parent := spawn(&s, "watcher", watcher_state{}, watcher_behaviour)
+	child := spawn(&s, "teller", teller_state{}, teller_behaviour)
+	spawn(&s, "echo", echo_state{}, echo_behaviour)
+	find_actor_by_pid(&s, u64(child)).parent_pid = u64(parent)
+	init_all(&s)
+
+	send(&s, "teller", Stop{})
+	run_until_idle(&s)
+	watcher := get_state(&s, "watcher", watcher_state)
+	testing.expect_value(t, watcher.ended, 1)
+	testing.expect_value(t, watcher.reason, actod.Termination_Reason.NORMAL)
+	testing.expect_value(t, watcher.heard_at_end, 1)
+	testing.expect_value(t, watcher.heard, 2)
+}
+
+@(test)
+test_sim_delivers_the_end_of_a_child_terminated_by_another_actor :: proc(
+	t: ^testing.T,
+) {
+	s := create()
+	defer destroy(&s)
+	parent := spawn(&s, "watcher", watcher_state{}, watcher_behaviour)
+	child := spawn(&s, "stopper", stopper_state{}, stopper_behaviour)
+	spawn(&s, "killer", killer_state{}, killer_behaviour)
+	spawn(&s, "echo", echo_state{}, echo_behaviour)
+	find_actor_by_pid(&s, u64(child)).parent_pid = u64(parent)
+	init_all(&s)
+
+	send(&s, "killer", Kill{pid = child})
+	run_until_idle(&s)
+	testing.expect(t, get_state(&s, "killer", killer_state).killed)
+	expect_dead(&s, t, "stopper")
+	watcher := get_state(&s, "watcher", watcher_state)
+	testing.expect_value(t, watcher.ended, 1)
+	testing.expect_value(t, watcher.child_pid, child)
+	testing.expect_value(t, watcher.reason, actod.Termination_Reason.ABNORMAL)
+}
+
+@(test)
+test_sim_fault_rules_match_the_end_of_a_child :: proc(t: ^testing.T) {
+	s := create()
+	defer destroy(&s)
+	parent := spawn(&s, "watcher", watcher_state{}, watcher_behaviour)
+	first := spawn(&s, "stopper", stopper_state{}, stopper_behaviour)
+	second := spawn(&s, "other", stopper_state{}, stopper_behaviour)
+	spawn(&s, "echo", echo_state{}, echo_behaviour)
+	find_actor_by_pid(&s, u64(first)).parent_pid = u64(parent)
+	find_actor_by_pid(&s, u64(second)).parent_pid = u64(parent)
+	init_all(&s)
+	add_fault(
+		&s,
+		Fault_Rule {
+			match = Fault_Match {
+				to_name = "watcher",
+				msg_type = typeid_of(Sim_Child_Terminated),
+			},
+			action = .Drop,
+			count = 1,
+		},
+	)
+
+	send(&s, "stopper", Stop{})
+	run_until_idle(&s)
+	watcher := get_state(&s, "watcher", watcher_state)
+	testing.expect_value(t, s.faults[0].fired, 1)
+	testing.expect_value(t, watcher.ended, 0)
+
+	send(&s, "other", Stop{})
+	run_until_idle(&s)
+	testing.expect_value(t, watcher.ended, 1)
+	testing.expect_value(t, watcher.child_pid, second)
+}

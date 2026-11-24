@@ -138,12 +138,21 @@ Two things to know before writing a sim test:
   Assert on the receiver's state through `sim.get_state(&s, name, T)`, which is what the
   sim's own tests do.
 
-There is also no external kill, so `sim.expect_dead` is only reachable after an actor
-terminates itself or you clear the flag by hand, which is what the sim's own tests do:
+An actor ends when it terminates itself, when another actor terminates it, or when the test
+calls `sim.terminate(&s, pid, reason)`, the way the runtime ends one that crashed. Its end then
+reaches its parent's `on_child_terminated` as a queued message, after the messages the child
+sent before it ended but ahead of anything it broadcast in the handler that ended it, with
+`will_restart` false because the sim never restarts a child. An end whose parent has already
+ended is dropped. The parent is the actor whose pid the test sets as the child's `parent_pid`:
 
 ```odin
-sim.find_actor_by_pid(&s, u64(pid)).alive = false
+sim.find_actor_by_pid(&s, u64(child)).parent_pid = u64(parent)
+sim.terminate(&s, child, .ABNORMAL)
+sim.run_until_idle(&s)
 ```
+
+That message is matched by fault rules like any other, so a rule on
+`typeid_of(sim.Sim_Child_Terminated)` delays or drops a child's end.
 
 The sim models ask and reply in full, including timeout expiry on `sim.advance_time` and
 the dropping of a late reply and of a reply from an actor that was not asked, so a handler built on `act.ask` / `act.reply` /
@@ -166,6 +175,7 @@ destroy :: proc(s: ^Sim)
 // Actors
 spawn :: proc(s: ^Sim, name: string, data: $T, behaviour: Actor_Behaviour(T)) -> PID
 init_all :: proc(s: ^Sim)
+terminate :: proc(s: ^Sim, pid: PID, reason: Termination_Reason)  // end an actor; its parent hears of it
 
 // Message delivery
 send :: proc(s: ^Sim, actor_name: string, content: $T)              // external -> actor by name
